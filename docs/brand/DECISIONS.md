@@ -48,3 +48,14 @@ which read as a backslash and a dot.
 Feedback: still not right. Two rounds of variations in one style haven't found it, so the next step is to settle a
 direction before drawing more: a mark that shows the product (connected step cards, like the builder canvas, which
 was liked), a break from the family's geometric style, a letterform, or the wordmark alone for now.
+
+Direction picked: **lean into waves and flow**, as M11 did. That means curves, an exception to the family's angle
+rule, as smaltql's Star is one.
+
+## Round 3: waves
+
+Seven curved marks in cobalt teal ([round-3/](round-3/)): M12 Swell, M13 Twin, M14 Current and M15 Wave arrow keep a
+small teal chip (the arrowhead for M15); M16 Undercurrent, M17 Twin in teal and M18 Current in teal give teal a whole
+wave, a second exception. Dropped while drawing: a River (read as a hook) and a Crest (read as the letter a).
+
+Feedback: pending.

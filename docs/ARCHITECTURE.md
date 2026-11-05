@@ -172,6 +172,11 @@ shared and what a server serves, and the in-app checks make sure every flow is b
 - **Edits are inputs.** A flow can read an action's edits like any dataset: the scenario's *Exclude trips* edits feed
   `trips_clean`.
 - **Where they live:** the types in the flow document; the edits, refusals and audit log in the database.
+- **In the app** (concepts A4 and A5 on "smaltfl app concepts"): the ontology map shows the object types, each with
+  the dataset behind it; named links, each pointing from the many side to the one; and actions attached to the types
+  they edit. A selected type shows its key, title, properties, links, actions and policy. Browsing a type's objects
+  goes through the same policies, so "View as" shows exactly what a recipient would see. An action's form shows its
+  permission check before anything is submitted.
 
 ## 9. Toward a server
 
