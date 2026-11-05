@@ -48,21 +48,25 @@ What makes this data a good test:
 | Tier | Data | Rows | Used for |
 | --- | --- | --- | --- |
 | XS | A deterministic sample: 10,000 trips from January 2024, the zone table, one week of weather | ~10k | Fixtures in this repository; unit tests |
-| S | The first week of January 2024 | 609,698 | CI browser tests; the app, as seven daily loads (below) |
-| M | January 2024 | ~3M *(to verify)* | The default demo and the main benchmark |
+| S | The first week of January 2024 | 609,698 | CI browser tests |
+| M | January 2024 | 2,964,624 | The main benchmark; the app, as 31 daily loads (below) |
 | L | January to March 2024 | ~9.5M *(to verify)* | The limit test: smaltdb's design point is about 10M rows and 1 GB |
 | XL | All of 2024 | ~40M *(to verify)* | The future server runner: run there, bring aggregates back to the browser (ADR 0001 §3) |
 
 ### Daily loads
 
-The app runs on the first week a day at a time, as a feed would bring it: the data branch's `loads/` has one file a
+The app runs on January 2024 a day at a time, as a feed would bring it: the data branch's `loads/` has one file a
 day, every trip picked up that day (local time, as the records give it), from 67,543 trips on Sunday the 7th to
-103,178 on Friday the 5th. Each load is the `trips` source for one run, and is compared with the one before. The
-week shows the differences a daily feed has: New Year's Day drops 8.6% of its trips at the checks (the rest of the
-week 3.9 to 5.0%), with 13% of its trips Flex Fare trips and so no passenger count, and its pickups earlier in the
-day, the small hours after midnight busy (a median time of day of 11:59 against 14:58 the day after); a Saturday has
-no rush-hour surcharge in its extras;
-and the storm of the 6th and 7th brings the week's only wet and snowy hours in number.
+110,515 on Saturday the 27th. Each load is the `trips` source for one run, and is compared with the same day a week
+before: a day against the day before would take a week's own rhythm, a Saturday's missing rush hour or a Sunday's
+lighter traffic, for a change. The month shows the differences a daily feed has: New Year's Day drops 8.6% of its
+trips at the checks (every other day 3.6 to 5.3%), with 13% of its trips Flex Fare trips and so no passenger count,
+and its pickups earlier in the day, the small hours after midnight busy; Monday the 8th, measured against it, shifts
+back (a median pickup time of day of 15:21 against 11:59, its passenger counts, rate codes and payment types shifted
+or moved too), while Saturday the 13th, against Saturday the 6th, is steady in every column, where against the Friday
+before it its extras would have shifted; the storm of the 6th and 7th brings the first week's only wet and snowy hours
+in number; and Martin Luther King Jr. Day, Monday the 15th, has fewer trips than the Monday before it. The first week
+has nothing a week before it.
 
 ## 3. The flows
 
@@ -78,8 +82,8 @@ range). Steps, in the order a person would build them:
 4. `trips_valid`: expectations with actions on failure. Drop: pickup outside the month, duration under 1 minute or
    over 3 hours, distance at or below 0 or over 100 miles, negative fare, unknown zones. Warn: missing passenger
    count. Fail the run: more than 10% of rows dropped (calibrated on the real data: the drop rules remove 4.5% of a
-   100,000-trip sample of January 2024, 3.9 to 5.0% of a day's trips in the first week, and 8.6% on New Year's Day,
-   which an 8% limit would stop). The run report lists counts per rule.
+   100,000-trip sample of January 2024, 3.6 to 5.3% of a day's trips, and 8.6% on New Year's Day, which an 8% limit
+   would stop). The run report lists counts per rule.
 5. `trips_dedup`: exact duplicates removed; each trip gets a stable `trip_id` (a hash of its fields plus an occurrence
    number, so true duplicates stay distinguishable).
 6. `trips_clean`: minus the trips stewards excluded (the *Exclude trips* action's edits).

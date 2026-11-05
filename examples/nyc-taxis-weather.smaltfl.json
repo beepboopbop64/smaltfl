@@ -1119,7 +1119,7 @@
     {
       "id": "trips_profile",
       "of": "trips",
-      "description": "What each load of trips holds: its columns, the rows an isolation forest finds odd, how it moved from the day before, and checks worth adding. It only looks: no data changes here."
+      "description": "What each load of trips holds: its columns, the rows an isolation forest finds odd, how it moved from the same day a week before, and checks worth adding. It only looks: no data changes here."
     }
   ],
   "layout": {}

@@ -345,7 +345,7 @@ button.run:disabled { opacity: 0.5; }
 .btn.danger { color: var(--bad); }
 .btn.danger:hover { border-color: var(--bad); }
 th.hit, td.hit { background: var(--warn-wash); }
-/* Daily loads: a chip a day, the one run last pressed; a dot for how far it moved from the day before. */
+/* Daily loads: a chip a day, a week at a time, the one run last pressed; a dot for how far it moved from the same day a week before. */
 .loads { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 4px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .loads-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
 .loads-act { display: flex; gap: 6px; }
@@ -365,6 +365,11 @@ th.hit, td.hit { background: var(--warn-wash); }
 .ld-dot.moved { background: var(--warn); }
 .ld-dot.shifted { background: var(--bad); }
 .loads-now { margin: 0; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.loads-key { margin: 0; }
+.week-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.week-nav .btn { min-width: 44px; font-size: 18px; line-height: 1; }
+.week-at { font-size: 13px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; text-align: center; }
+.xl-week { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .load-pill { background: var(--smalt-wash); color: var(--smalt); }
 .load-lead { margin: 0; font-size: 14px; }
 /* The isolation forest at play. */
@@ -385,7 +390,7 @@ th.hit, td.hit { background: var(--warn-wash); }
 .pick b { font-family: var(--mono); color: var(--warn); }
 .pick-n { margin-left: auto; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .isomap .dot { transition: none; } }
-/* Across loads: each column, each day against the day before. */
+/* Across loads: each column, each day against the same day a week before. */
 .xl-scroll { overflow-x: auto; }
 .xl-grid { border-collapse: separate; border-spacing: 3px; font-size: 12px; }
 .xl-grid th, .xl-grid td { padding: 0; background: none; border: 0; position: static; box-shadow: none; }
@@ -516,7 +521,7 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
 
 <main>
   <section class="view" id="view-flow" aria-label="Flow">
-    <p class="lede" id="lede">A week of NYC yellow-taxi trips from the TLC's records, January 1 to 7, 2024, one load a day as a feed would bring them: each load checked, joined to its zones and to each borough's hourly weather, all run in this browser. Step through the loads; each card says what its step did to the rows, and the profile box beside the input shows what each load holds and how it moved from the day before.</p>
+    <p class="lede" id="lede">January 2024's NYC yellow-taxi trips from the TLC's records, one load a day as a feed would bring them: each load checked, joined to its zones and to each borough's hourly weather, all run in this browser. Step through the loads; each card says what its step did to the rows, and the profile box beside the input shows what each load holds and how it moved from the same day a week before.</p>
     <ul class="legend" aria-label="Legend">
       <li><span class="port-key in" aria-hidden="true"></span>input: data the flow reads</li>
       <li><span class="port-key out" aria-hidden="true"></span>output: a dataset it publishes</li>

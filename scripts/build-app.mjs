@@ -40,8 +40,14 @@ try {
   // No data branch here: the fixtures.
 }
 const days = manifest?.loads?.days ?? [];
-// A few days a week's trips are known to differ on.
+// A few days the trips are known to differ on: holidays.
 const NOTES = { '01-01': "New Year's Day", '07-04': 'Independence Day', '12-25': 'Christmas Day' };
+const noteOf = (day) => {
+  const d = new Date(`${day}T12:00:00Z`);
+  // Martin Luther King Jr. Day: January's third Monday.
+  if (d.getUTCMonth() === 0 && d.getUTCDay() === 1 && d.getUTCDate() >= 15 && d.getUTCDate() <= 21) return 'Martin Luther King Jr. Day';
+  return NOTES[day.slice(5)];
+};
 if (days.length) {
   put('zones.csv', fromData('tlc/taxi_zone_lookup.csv'));
   put('weather.csv', fromData(`weather/open-meteo_${manifest.month}.csv`));
@@ -51,7 +57,7 @@ if (days.length) {
     const entry = manifest.files.find((f) => f.path === path);
     const bytes = fromData(path);
     put(path, bytes);
-    const note = NOTES[day.slice(5)];
+    const note = noteOf(day);
     return { day, file: path, rows: entry.rows, sha256: entry.sha256, ...(note ? { note } : {}) };
   });
   writeFileSync(`${out}/data/loads.json`, JSON.stringify({ month: manifest.month, built: manifest.built, loads: list }, null, 2) + '\n');

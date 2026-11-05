@@ -1571,10 +1571,11 @@ async function profilePanel(of: string, who: string, current: () => boolean): Pr
   if (!q.rows) return h('div', { class: 'quality' }, h('p', { class: 'eyebrow' }, 'Columns'), h('p', { class: 'foot' }, 'No rows to describe.'));
   const daily = run.load !== undefined && loads.list.length > 1;
   // Against the run before on this same load when the flow changed since (other rows here, the same day), else
-  // against the day before.
+  // against the same day a week before.
   const changed = earlierVersion(of);
   const sameDay = changed && changed.load === run.load ? changed : undefined;
-  const earlier = sameDay ?? (daily ? (run.load! > 0 ? runOfLoad(run.load! - 1) : undefined) : changed);
+  const weekAgo = daily ? weekBefore(run.load!) : undefined;
+  const earlier = sameDay ?? (daily ? (weekAgo === undefined ? undefined : runOfLoad(weekAgo)) : changed);
   const byDay = !!earlier && !sameDay && daily;
   const since = earlier ? (byDay ? dayLabel(loads.list[earlier.load!]!.day) : `run ${earlier.result.run}`) : undefined;
   const drifts = (earlier && (await driftsBetween(of, run, earlier, who, byDay))) || new Map<string, Drift>();
@@ -1584,7 +1585,7 @@ async function profilePanel(of: string, who: string, current: () => boolean): Pr
   const flags = (column: string) => q.suggestions.filter((x) => x.column === column && x.failing > 0).map((x) => `${x.check} flags ${plural(x.failing, 'row')}`);
   const gappy = q.profiles.filter((p) => p.facts.present < p.facts.rows).length;
   const movedNames = [...drifts.entries()].filter(([, d]) => d.level !== 'steady').map(([c]) => meanings(c)?.title ?? c);
-  const summary = [gappy ? `${gappy} with empty values` : 'none empty', since !== undefined ? (movedNames.length ? `${movedNames.length} moved since ${since}` : `all steady since ${since}`) : daily ? 'the first load: nothing before it to compare with' : 'no earlier run with other rows here to measure drift against'];
+  const summary = [gappy ? `${gappy} with empty values` : 'none empty', since !== undefined ? (movedNames.length ? `${movedNames.length} moved since ${since}` : `all steady since ${since}`) : daily ? (weekAgo === undefined ? 'the first of its weekday here: nothing a week before to compare with' : 'its week-before load not run yet') : 'no earlier run with other rows here to measure drift against'];
   const odd = oddRows(q, meanings);
   // A row the map picks out opens its card among the odd rows.
   const openOdd = (k: number) => {
@@ -1598,8 +1599,8 @@ async function profilePanel(of: string, who: string, current: () => boolean): Pr
   const rowsNow = q.rows;
   const before = earlier ? (await rowsAs(await inspect(earlier), (await inspect(earlier)).index.get(of)!, who)) : null;
   const lead = since !== undefined && before !== null
-    ? `${fmtInt(rowsNow)} rows, ${rowsNow === before ? 'as many as' : `${pct(Math.abs(rowsNow - before) / Math.max(1, before))} ${rowsNow > before ? 'more than' : 'fewer than'}`} ${since}${movedNames.length ? `; moved since then: ${movedNames.slice(0, 4).join(', ')}${movedNames.length > 4 ? ` and ${movedNames.length - 4} more` : ''}` : '; every column steady since then'}.`
-    : `${fmtInt(rowsNow)} rows.`;
+    ? `${fmtInt(rowsNow)} rows, ${rowsNow === before ? 'as many as' : `${pct(Math.abs(rowsNow - before) / Math.max(1, before))} ${rowsNow > before ? 'more than' : 'fewer than'}`} ${since}${byDay ? ', a week before' : ''}${movedNames.length ? `; moved since then: ${movedNames.slice(0, 4).join(', ')}${movedNames.length > 4 ? ` and ${movedNames.length - 4} more` : ''}` : '; every column steady since then'}.`
+    : daily && weekAgo === undefined ? `${fmtInt(rowsNow)} rows. The first ${weekday(loads.list[run.load!]!.day)} here: nothing a week before to compare with.` : `${fmtInt(rowsNow)} rows.`;
   return h('div', { class: 'quality' },
     h('div', { class: 'quality-part' }, h('p', { class: 'eyebrow' }, daily ? `This load · ${dayLabel(loads.list[run.load!]!.day)}` : 'These rows'), h('p', { class: 'load-lead' }, lead)),
     isoMap(q, meanings, openOdd),
@@ -1759,45 +1760,72 @@ function isoMap(q: Quality, meanings: Meanings, openOdd: (k: number) => void): H
 
 // ------------------------------------------------------------------ drift across loads
 
-/** How each column moved from one load to the next, a cell a day: steady, moved or shifted, from the loads' samples. */
+/**
+ * How each column moved, a cell a day, each day against the same day a week before: steady, moved or shifted, from
+ * the loads' samples. A week at a time, the week of the load run last first.
+ */
+let acrossWeek = '';
 function acrossLoads(of: string, who: string, columns: readonly string[], meanings: Meanings): HTMLElement {
-  const note = h('p', { class: 'foot xl-note', 'aria-live': 'polite' }, 'Tap a cell to see what moved.');
-  const cells = new Map<string, HTMLElement>();
-  const head = h('tr', {}, h('th', { scope: 'col' }, ''), ...loads.list.map((l) => h('th', { scope: 'col' }, h('span', {}, weekday(l.day)), h('span', { class: 'xl-date' }, String(dateOf(l.day).getUTCDate())))));
-  const body = columns.map((c) =>
-    h('tr', {},
-      h('th', { scope: 'row' }, meanings(c)?.title ?? c),
-      ...loads.list.map((l, k) => {
-        const cell = h('td', {}, h('button', { type: 'button', class: `xl ${k === 0 ? 'first' : 'wait'}`, 'aria-label': `${meanings(c)?.title ?? c}, ${dayLabel(l.day)}: ${k === 0 ? 'the first load' : 'not compared yet'}` }));
-        cells.set(`${c}|${k}`, cell.firstElementChild as HTMLElement);
-        return cell;
-      })));
-  const grid = h('div', { class: 'xl-scroll' }, h('table', { class: 'xl-grid' }, h('thead', {}, head), h('tbody', {}, ...body)));
+  const weeks = weeksOf();
+  const now = loads.list[loads.at]?.day;
+  if (!weeks.some((w) => w.monday === acrossWeek) || (now && acrossWeek !== mondayOf(now) && !acrossTurned)) acrossWeek = now ? mondayOf(now) : weeks[0]!.monday;
   const ran = loads.list.map((_, k) => runOfLoad(k));
-  const compared = ran.filter((r, k) => r && k > 0 && ran[k - 1]).length;
-  const box = fold('across', [h('span', { class: 'eyebrow' }, 'Across loads'), h('span', { class: 'fold-sum' }, compared ? `${plural(compared, 'day')} compared with the day before` : 'run more loads to compare')],
-    h('p', { class: 'foot' }, 'Each column, each day against the day before (a time by its time of day): steady under a PSI of 0.1, moved to 0.25, shifted above. Days not run yet are blank.'),
-    grid,
-    note);
-  void (async () => {
-    for (let k = 1; k < loads.list.length; k++) {
-      const [now, before] = [ran[k], ran[k - 1]];
-      if (!now || !before) continue;
-      const d = await driftsBetween(of, now, before, who, true);
-      if (!box.isConnected && k > 1) return;
-      for (const c of columns) {
-        const cell = cells.get(`${c}|${k}`)!;
-        const x = d?.get(c);
-        if (!x) continue;
-        const label = `${meanings(c)?.title ?? c}, ${weekday(loads.list[k - 1]!.day)} to ${dayLabel(loads.list[k]!.day)}: ${x.level}, PSI ${x.psi.toFixed(2)}${x.note ? `: ${x.note}` : ''}`;
-        cell.className = `xl ${x.level}`;
-        cell.setAttribute('aria-label', label);
-        cell.onclick = () => (note.textContent = label);
+  const compared = loads.list.filter((_, k) => ran[k] && weekBefore(k) !== undefined && ran[weekBefore(k)!]).length;
+  const holder = h('div', { class: 'xl-week' });
+  const draw = () => {
+    const wi = weeks.findIndex((w) => w.monday === acrossWeek);
+    const shown = weeks[wi]!;
+    const note = h('p', { class: 'foot xl-note', 'aria-live': 'polite' }, 'Tap a cell to see what moved.');
+    const cells = new Map<string, HTMLElement>();
+    const head = h('tr', {}, h('th', { scope: 'col' }, ''), ...shown.days.map((k) => h('th', { scope: 'col' }, h('span', {}, weekday(loads.list[k]!.day)), h('span', { class: 'xl-date' }, String(dateOf(loads.list[k]!.day).getUTCDate())))));
+    const body = columns.map((c) =>
+      h('tr', {},
+        h('th', { scope: 'row' }, meanings(c)?.title ?? c),
+        ...shown.days.map((k) => {
+          const first = weekBefore(k) === undefined;
+          const cell = h('td', {}, h('button', { type: 'button', class: `xl ${first ? 'first' : 'wait'}`, 'aria-label': `${meanings(c)?.title ?? c}, ${dayLabel(loads.list[k]!.day)}: ${first ? 'nothing a week before' : 'not compared yet'}` }));
+          cells.set(`${c}|${k}`, cell.firstElementChild as HTMLElement);
+          return cell;
+        })));
+    const turn = (d: number) => {
+      acrossWeek = weeks[wi + d]!.monday;
+      acrossTurned = true;
+      draw();
+    };
+    holder.replaceChildren(
+      h('div', { class: 'week-nav' },
+        h('button', { type: 'button', class: 'btn small', 'aria-label': 'The week before', disabled: wi === 0, onclick: () => turn(-1) }, '‹'),
+        h('span', { class: 'week-at' }, `Week ${wi + 1} of ${weeks.length} · ${weekSpan(shown.days)}`),
+        h('button', { type: 'button', class: 'btn small', 'aria-label': 'The week after', disabled: wi === weeks.length - 1, onclick: () => turn(1) }, '›')),
+      h('div', { class: 'xl-scroll' }, h('table', { class: 'xl-grid' }, h('thead', {}, head), h('tbody', {}, ...body))),
+      note);
+    void (async () => {
+      for (const k of shown.days) {
+        const j = weekBefore(k);
+        const [now, before] = [ran[k], j === undefined ? undefined : ran[j]];
+        if (!now || !before) continue;
+        const d = await driftsBetween(of, now, before, who, true);
+        if (!holder.isConnected || acrossWeek !== shown.monday) return;
+        for (const c of columns) {
+          const cell = cells.get(`${c}|${k}`)!;
+          const x = d?.get(c);
+          if (!x) continue;
+          const label = `${meanings(c)?.title ?? c}, ${dayLabel(loads.list[k]!.day)} against ${dayLabel(loads.list[j!]!.day)}: ${x.level}, PSI ${x.psi.toFixed(2)}${x.note ? `: ${x.note}` : ''}`;
+          cell.className = `xl ${x.level}`;
+          cell.setAttribute('aria-label', label);
+          cell.onclick = () => (note.textContent = label);
+        }
       }
-    }
-  })();
+    })();
+  };
+  draw();
+  const box = fold('across', [h('span', { class: 'eyebrow' }, 'Across loads'), h('span', { class: 'fold-sum' }, compared ? `${plural(compared, 'day')} compared with the same day a week before` : 'run a later week to compare')],
+    h('p', { class: 'foot' }, 'Each column, each day against the same day a week before (a time by its time of day): steady under a PSI of 0.1, moved to 0.25, shifted above. The first week has nothing a week before; days not run yet are blank.'),
+    holder);
   return h('div', { class: 'quality-part' }, box);
 }
+/** Whether the grid was turned to another week than the load's, by hand: it then stays there. */
+let acrossTurned = false;
 
 /**
  * Suggested checks as a filter box: an expectations step whose rules drop the rows they flag, each keeping the reason
@@ -3154,9 +3182,10 @@ async function submitAction(action: string, params: Record<string, string | numb
 
 // The trips come a day at a time, as a feed would bring them: each load is one day's file (the data branch's
 // loads/), put in the engine as the trips source, and the flow runs on it. A load run before reruns at no cost: the
-// same rows give the same keys, so every step is reused. Each load is compared with the one before: its rows, the
-// share its checks dropped (an unusual share is marked once four loads have run), and, in the profile box, how each
-// column moved.
+// same rows give the same keys, so every step is reused. Each load is compared with the same day a week before, so a
+// weekend or a weekday's own rhythm isn't taken for a change: its rows, the share its checks dropped (an unusual
+// share is marked once four loads have run), and, in the profile box, how each column moved. A day whose week-before
+// load hasn't run runs that one first.
 
 interface Load {
   day: string;
@@ -3171,7 +3200,9 @@ const loads = {
   at: -1,
   bytes: new Map<number, Uint8Array>(),
   playing: false,
-  /** How far the loads' source moved from the load before, as each person reads it: its most moved column. */
+  /** The week the strip of days shows, by its Monday. */
+  week: '',
+  /** How far the loads' source moved from the same day a week before, as each person reads it: its most moved column. */
   drift: new Map<string, Drift['level']>(),
   measuring: new Map<string, Promise<void>>(),
 };
@@ -3186,6 +3217,31 @@ const weekday = (day: string) => WEEKDAYS[dateOf(day).getUTCDay()]!;
 const dayLabel = (day: string) => `${weekday(day)} ${dateOf(day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`;
 /** The latest run on a load. */
 const runOfLoad = (k: number) => state.runs.find((r) => r.load === k);
+const dayPlus = (day: string, n: number) => new Date(dateOf(day).getTime() + n * 864e5).toISOString().slice(0, 10);
+/** The load on the same weekday a week before: what a load is measured against. */
+const weekBefore = (k: number): number | undefined => {
+  const l = loads.list[k];
+  const j = l ? loads.list.findIndex((x) => x.day === dayPlus(l.day, -7)) : -1;
+  return j >= 0 ? j : undefined;
+};
+/** A day's week, by its Monday. */
+const mondayOf = (day: string) => dayPlus(day, -((dateOf(day).getUTCDay() + 6) % 7));
+/** The loads' weeks, each its Monday and its loads, in order. */
+const weeksOf = (): { monday: string; days: number[] }[] => {
+  const out: { monday: string; days: number[] }[] = [];
+  loads.list.forEach((l, k) => {
+    const m = mondayOf(l.day);
+    if (out.at(-1)?.monday !== m) out.push({ monday: m, days: [] });
+    out.at(-1)!.days.push(k);
+  });
+  return out;
+};
+/** "Jan 8 to 14": a week's span, said. */
+const weekSpan = (days: readonly number[]) => {
+  const [a, b] = [loads.list[days[0]!]!.day, loads.list[days.at(-1)!]!.day];
+  const month = (d: string) => dateOf(d).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+  return `${month(a)} ${dateOf(a).getUTCDate()}${a === b ? '' : ` to ${month(b) === month(a) ? '' : `${month(b)} `}${dateOf(b).getUTCDate()}`}`;
+};
 const driftKey = (k: number, who = state.viewer) => `${k}|${who}`;
 
 /** What a load's run says of it: its trips, and the share of them its first checks dropped. */
@@ -3214,21 +3270,23 @@ function unusualLoads(): Set<number> {
   return out;
 }
 
-/** The load now, in a sentence: its day, its trips against the day before, what its checks dropped. */
+/** The load now, in a sentence: its day, its trips against the same day a week before, what its checks dropped. */
 function loadSummary(): string {
   const k = loads.at;
   const l = loads.list[k];
   if (!l) return '';
   const r = runOfLoad(k);
   const st = r ? loadStats(r) : null;
-  const prev = k > 0 ? runOfLoad(k - 1) : undefined;
+  const j = weekBefore(k);
+  const prev = j === undefined ? undefined : runOfLoad(j);
   const before = prev ? loadStats(prev) : null;
-  const yesterday = k > 0 ? weekday(loads.list[k - 1]!.day) : '';
+  const then = j === undefined ? '' : dayLabel(loads.list[j]!.day);
   const parts = [`Load ${k + 1} of ${loads.list.length}: ${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}, ${fmtInt(l.rows)} trips`];
-  if (st && before) parts.push(`${pct(Math.abs(st.rows - before.rows) / Math.max(1, before.rows))} ${st.rows >= before.rows ? 'more' : 'fewer'} than ${yesterday}`);
-  if (st?.dropped != null) parts.push(`its checks dropped ${pct(st.dropped)}${before?.dropped != null ? ` (${yesterday} ${pct(before.dropped)})` : ''}${unusualLoads().has(k) ? ', an unusual share this week' : ''}`);
+  if (j === undefined) parts.push('the first of its weekday here: nothing a week before to compare with');
+  if (st && before) parts.push(`${pct(Math.abs(st.rows - before.rows) / Math.max(1, before.rows))} ${st.rows >= before.rows ? 'more' : 'fewer'} than ${then}, a week before`);
+  if (st?.dropped != null) parts.push(`its checks dropped ${pct(st.dropped)}${before?.dropped != null ? ` (${then}: ${pct(before.dropped)})` : ''}${unusualLoads().has(k) ? ', an unusual share' : ''}`);
   const level = loads.drift.get(driftKey(k));
-  if (level) parts.push(level === 'steady' ? 'every column steady since the day before' : `columns ${level} since the day before: the profile box says which`);
+  if (level) parts.push(level === 'steady' ? `every column steady since ${then}` : `columns ${level} since ${then}: the profile box says which`);
   return `${parts.join(' · ')}.`;
 }
 
@@ -3241,11 +3299,23 @@ function renderLoads(): void {
   box.hidden = false;
   const odd = unusualLoads();
   const busy = state.running || !state.engine;
-  const chips = loads.list.map((l, k) => {
+  // A week at a time: the week of the load run last, unless another was turned to.
+  const weeks = weeksOf();
+  const now = loads.list[loads.at]?.day;
+  if (!weeks.some((w) => w.monday === loads.week)) loads.week = now ? mondayOf(now) : weeks[0]!.monday;
+  const wi = weeks.findIndex((w) => w.monday === loads.week);
+  const shown = weeks[wi]!;
+  const turn = (d: number) => {
+    loads.week = weeks[wi + d]!.monday;
+    renderLoads();
+  };
+  const chips = shown.days.map((k) => {
+    const l = loads.list[k]!;
     const r = runOfLoad(k);
     const st = r ? loadStats(r) : null;
     const level = loads.drift.get(driftKey(k));
-    const label = `${dayLabel(l.day)}: ${fmtInt(l.rows)} trips${st?.dropped != null ? `, its checks dropped ${pct(st.dropped)}` : r ? '' : ', not run yet'}${odd.has(k) ? ', an unusual share' : ''}${level ? `, ${level} since the day before` : ''}`;
+    const j = weekBefore(k);
+    const label = `${dayLabel(l.day)}: ${fmtInt(l.rows)} trips${st?.dropped != null ? `, its checks dropped ${pct(st.dropped)}` : r ? '' : ', not run yet'}${odd.has(k) ? ', an unusual share' : ''}${level && j !== undefined ? `, ${level} since ${dayLabel(loads.list[j]!.day)}` : ''}`;
     return h('button', { type: 'button', class: ['load', k === loads.at ? 'at' : '', r ? 'ran' : '', odd.has(k) ? 'unusual' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
@@ -3257,15 +3327,37 @@ function renderLoads(): void {
   const next = h('button', { type: 'button', class: 'btn small', disabled: busy || loads.playing || last, onclick: () => void useLoad(loads.at + 1) }, 'Next load ›');
   const first = loads.list[0]!.day;
   const end = loads.list.at(-1)!.day;
+  const weekNav = h('div', { class: 'week-nav' },
+    h('button', { type: 'button', class: 'btn small', 'aria-label': 'The week before', disabled: wi === 0, onclick: () => turn(-1) }, '‹'),
+    h('span', { class: 'week-at', 'aria-live': 'polite' }, `Week ${wi + 1} of ${weeks.length} · ${weekSpan(shown.days)}`),
+    h('button', { type: 'button', class: 'btn small', 'aria-label': 'The week after', disabled: wi === weeks.length - 1, onclick: () => turn(1) }, '›'));
   box.replaceChildren(
     h('div', { class: 'loads-head' }, h('p', { class: 'eyebrow' }, `Daily loads · ${dayLabel(first).slice(4)} to ${dayLabel(end).slice(4)}, ${first.slice(0, 4)}`), h('div', { class: 'loads-act' }, play, next)),
-    h('div', { class: 'loads-row', role: 'group', 'aria-label': 'Daily loads: tap one to run the flow on it' }, ...chips),
+    weekNav,
+    h('div', { class: 'loads-row', role: 'group', 'aria-label': `Daily loads, ${weekSpan(shown.days)}: tap one to run the flow on it` }, ...chips),
     h('p', { class: 'loads-now', 'aria-live': 'polite' }, loadSummary()),
+    h('p', { class: 'foot loads-key' }, 'Each day against the same day a week before. The dot: steady, moved or shifted since then; the share: what its checks dropped.'),
   );
 }
 
-/** Run the flow on a load: its day's file in the engine as the trips source, then a run. */
+/**
+ * Run the flow on a load: its day's file in the engine as the trips source, then a run. A day whose week-before
+ * load hasn't run runs that one first, so it has something to be measured against.
+ */
 async function useLoad(k: number): Promise<void> {
+  const j = weekBefore(k);
+  if (j !== undefined && !runOfLoad(j)) {
+    const l = loads.list[k]!;
+    setStatus(`${dayLabel(loads.list[j]!.day)} first, the same day a week before ${dayLabel(l.day)}, to compare it with…`);
+    await runLoad(j);
+    if (state.failed) return;
+  }
+  await runLoad(k);
+  if (!loads.playing) void measureLoad(k);
+}
+
+/** Put a load in the engine as the trips source and run the flow on it. Only the last few loads' bytes are kept. */
+async function runLoad(k: number): Promise<void> {
   const engine = state.engine;
   const l = loads.list[k];
   if (!engine || !l || state.running) return;
@@ -3274,21 +3366,24 @@ async function useLoad(k: number): Promise<void> {
     setStatus(`Fetching ${dayLabel(l.day)}: ${fmtInt(l.rows)} trips…`);
     bytes = await loadFile(l.file);
     loads.bytes.set(k, bytes);
+    for (const old of [...loads.bytes.keys()].slice(0, Math.max(0, loads.bytes.size - 3))) loads.bytes.delete(old);
   }
   await registerFile(engine, 'trips.parquet', bytes);
   loads.at = k;
+  loads.week = mondayOf(l.day);
+  acrossTurned = false;
   renderLoads();
   await run();
   renderLoads();
-  if (!loads.playing) void measureLoad(k);
 }
 
-/** How far a load's source moved from the load before, for its chip and its profile card: its most moved column. */
+/** How far a load's source moved from the same day a week before, for its chip and its profile card: its most moved column. */
 function measureLoad(k: number): Promise<void> {
   const key = driftKey(k);
   const src = loadSource();
   const now = runOfLoad(k);
-  const before = k > 0 ? runOfLoad(k - 1) : undefined;
+  const j = weekBefore(k);
+  const before = j === undefined ? undefined : runOfLoad(j);
   if (!src || !now || !before || loads.drift.has(key) || !visible(src)) return Promise.resolve();
   let p = loads.measuring.get(key);
   if (!p) {
@@ -3306,7 +3401,7 @@ function measureLoad(k: number): Promise<void> {
   return p;
 }
 
-/** Play the loads one after another, each measured against the one before as it lands; tap again to pause. */
+/** Play the loads one after another, each measured against the same day a week before as it lands; tap again to pause. */
 async function playLoads(): Promise<void> {
   if (loads.playing) {
     loads.playing = false;
@@ -3325,12 +3420,13 @@ async function playLoads(): Promise<void> {
   renderLoads();
 }
 
-/** A profile box's card: what it found in the load, against the load before. */
+/** A profile box's card: what it found in the load, against the same day a week before. */
 function profileLine(p: ProfileDef): CardLine {
   if (!nodeOf(p.of)) return { text: state.running ? 'running…' : 'columns, odd rows, drift', tone: 'same' };
+  const j = weekBefore(loads.at);
   const level = p.of === loadSource() ? loads.drift.get(driftKey(loads.at)) : undefined;
-  if (!level) return { text: loads.list.length > 1 && loads.at === 0 ? 'the first load: open it' : 'columns, odd rows, drift', tone: 'same' };
-  const since = weekday(loads.list[loads.at - 1]!.day);
+  if (!level || j === undefined) return { text: loads.list.length > 1 && j === undefined ? 'no week before yet: open it' : 'columns, odd rows, drift', tone: 'same' };
+  const since = `last ${weekday(loads.list[j]!.day)}`;
   return level === 'steady' ? { text: `steady since ${since}`, tone: 'same' } : { text: `${level} since ${since}`, tone: 'drop', badge: level };
 }
 
