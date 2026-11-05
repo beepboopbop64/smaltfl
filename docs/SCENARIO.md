@@ -59,7 +59,9 @@ The app runs on January 2024 a day at a time, as a feed would bring it: the data
 day, every trip picked up that day (local time, as the records give it), from 67,543 trips on Sunday the 7th to
 110,515 on Saturday the 27th. Each load is the `trips` source for one run, and is compared with the same day a week
 before: a day against the day before would take a week's own rhythm, a Saturday's missing rush hour or a Sunday's
-lighter traffic, for a change. The month shows the differences a daily feed has: New Year's Day drops 8.6% of its
+lighter traffic, for a change. A holiday is compared with the same holiday last year, and so is a day a week after
+one, against its own weekday last year: `loads/` also has January 2023, a day a file, cast to 2024's columns (the
+TLC's 2023 files name `airport_fee` in lower case and keep a count as a double). The month shows the differences a daily feed has: New Year's Day drops 8.6% of its
 trips at the checks (every other day 3.6 to 5.3%), with 13% of its trips Flex Fare trips and so no passenger count,
 and its pickups earlier in the day, the small hours after midnight busy; Monday the 8th, measured against it, shifts
 back (a median pickup time of day of 15:21 against 11:59, its passenger counts, rate codes and payment types shifted

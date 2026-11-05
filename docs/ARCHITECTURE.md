@@ -357,10 +357,15 @@ Builder and drawn in the family's look. The first concepts are on the design can
   with the one before, the isolation forest at play, the odd rows, the columns, drift across loads, and the checks
   worth adding.
 - **Daily loads.** The trips come a day at a time: a strip of day chips above the canvas, a week at a time with the
-  weeks to turn through, each with what its checks dropped and a dot for how far it moved from the same day a week
-  before (its most moved column). A day is measured against the same weekday a week earlier, not the day before, so a
-  weekend's or a weekday's own rhythm isn't taken for a change; the first week has nothing a week before it. Next and
-  Play step through them, and a day whose week-before load hasn't run runs that one first. A load is that day's file
+  weeks to turn through, each with what its checks dropped and a dot for how far it moved from the load it is
+  compared with (its most moved column). A day is measured against the same weekday a week earlier, not the day
+  before, so a weekend's or a weekday's own rhythm isn't taken for a change; but a holiday, a day a week after one,
+  and a day with no week before here are measured against their day last year: the same holiday (New Year's Day
+  against New Year's Day, Martin Luther King Jr. Day against last year's, on its own date), else the same weekday 52
+  weeks back. A switch compares every day with last year. Last year's loads are the same month a year before, cast to
+  this month's columns by the data script; they run to be compared with, each with its own month as the flow's
+  `month` parameter, and are not stepped through. Next and Play step through the month's own, and a day whose
+  baseline hasn't run runs that one first. A load is that day's file
   put in the engine as the trips source, and a run: a load run before runs again at no cost, its rows giving the
   same keys. A load whose checks dropped an unusual share (beyond 3.5 robust deviations from the loads' median, once
   four have run) is marked. Each run records its load, and the Runs view
@@ -397,12 +402,12 @@ Builder and drawn in the family's look. The first concepts are on the design can
   description on hover. A column card says what the column is, decodes its common values, and adds the note. The
   Ontology view lists every column the viewer can read somewhere, grouped by the source it comes from or the steps
   that make it, with its codes, where it is, how a step makes it, and links to its sources.
-- **Drift between runs and across loads.** Each column is compared with the same day a week before, or, when the
-  flow changed on this load, with its run before (a different key), by the population stability index over the
-  earlier rows' deciles, or its values, with missing values a bin of their own: steady under 0.1, moved to 0.25,
-  shifted above, with what moved (a median, a share). Between days a time is compared by its time of day
-  (`minuteOfDay`): each day's dates are its own. Across loads, a grid has a cell per column and day, a week at a
-  time, each day against the same day a week before.
+- **Drift between runs and across loads.** Each column is compared with the load the day is measured against (a
+  week before, or last year), or, when the flow changed on this load, with its run before (a different key), by the
+  population stability index over the earlier rows' deciles, or its values, with missing values a bin of their own:
+  steady under 0.1, moved to 0.25, shifted above, with what moved (a median, a share). Between days a time is
+  compared by its time of day (`minuteOfDay`): each day's dates are its own. Across loads, a grid has a cell per
+  column and day, a week at a time, each day against its baseline.
 - **Suggested checks, added as a filter box.** For the columns a step makes itself (an input's, an aggregate's or a SQL
   step's, the ones a formula, join or select adds), and that no check before or after it already judges: an upper
   bound for a far tail, `>= 0` for stray negatives or as a guard, `IS NOT NULL` for a few missing values (columns

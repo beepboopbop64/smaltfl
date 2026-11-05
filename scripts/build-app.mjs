@@ -52,16 +52,19 @@ if (days.length) {
   put('zones.csv', fromData('tlc/taxi_zone_lookup.csv'));
   put('weather.csv', fromData(`weather/open-meteo_${manifest.month}.csv`));
   mkdirSync(`${out}/data/loads`, { recursive: true });
-  const list = days.map((day) => {
+  const entryOf = (day, earlier) => {
     const path = `loads/yellow_tripdata_${day}.parquet`;
     const entry = manifest.files.find((f) => f.path === path);
-    const bytes = fromData(path);
-    put(path, bytes);
+    put(path, fromData(path));
     const note = noteOf(day);
-    return { day, file: path, rows: entry.rows, sha256: entry.sha256, ...(note ? { note } : {}) };
-  });
-  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ month: manifest.month, built: manifest.built, loads: list }, null, 2) + '\n');
-  console.log(`built ${out} with ${list.length} daily loads from origin/data (${list.reduce((n, l) => n + l.rows, 0).toLocaleString('en-US')} trips)`);
+    return { day, file: path, rows: entry.rows, sha256: entry.sha256, ...(note ? { note } : {}), ...(earlier ? { earlier: true } : {}) };
+  };
+  const list = days.map((day) => entryOf(day, false));
+  // The same month a year before: loads to compare with, not to step through.
+  const earlier = (manifest.loads.earlier ?? []).map((day) => entryOf(day, true));
+  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ month: manifest.month, built: manifest.built, loads: list, earlier }, null, 2) + '\n');
+  const trips = (ls) => ls.reduce((n, l) => n + l.rows, 0).toLocaleString('en-US');
+  console.log(`built ${out} with ${list.length} daily loads from origin/data (${trips(list)} trips), and ${earlier.length} from a year before (${trips(earlier)})`);
 } else {
   for (const name of ['trips.parquet', 'zones.csv', 'weather.csv']) put(name, readFileSync(`fixtures/xs/${name}`));
   console.log(`built ${out} with data from fixtures/xs (10,000 trips)`);
