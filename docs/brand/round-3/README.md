@@ -1,5 +1,7 @@
 # smaltfl brand, round 3
 
+**Status:** on hold until stenhoor has seen it ([../DECISIONS.md](../DECISIONS.md)).
+
 Round 2's feedback: lean into waves and flow, as its one curved mark (M11) did. Every mark here is curved, so each
 needs the exception to the 0/45/90° rule that smaltql's Star already has for its angles. The boards are on the design
 canvas "smaltfl brand", in the round 3 board below round 2's.

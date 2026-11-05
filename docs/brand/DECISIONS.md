@@ -58,4 +58,5 @@ Seven curved marks in cobalt teal ([round-3/](round-3/)): M12 Swell, M13 Twin, M
 small teal chip (the arrowhead for M15); M16 Undercurrent, M17 Twin in teal and M18 Current in teal give teal a whole
 wave, a second exception. Dropped while drawing: a River (read as a hook) and a Crest (read as the letter a).
 
-Feedback: pending.
+Feedback: on hold. Round 3 goes to stenhoor before a mark is picked (ADR 0003 §3); cobalt teal stays, and nothing
+goes to the `smalt-brand` fork until then.

@@ -137,18 +137,26 @@ step. Previews run a segment up to the chosen step, with a `LIMIT`.
   (canonical order when hashing), floating-point summation order under parallel execution **[Q-34]**, and the current
   time (`now` is a parameter, not a call).
 - **Retention:** snapshots and dataset versions are kept within a budget; shared or pinned runs keep theirs **[Q-33]**.
+- **In the app** (concept A6 on "smaltfl app concepts"): the Runs view lists the runs with their status, their
+  verification, and whether they were shared or pinned. A run shows what ran and why (each step reused, with the same
+  key or the same bytes, or rebuilt, with the reason), its expectation results, its verification, and its manifest,
+  which can be downloaded, verified again, re-run from its snapshots, or compared with another run **[Q-40]**.
 
 ## 7. Enforcement: policies, actions and shares
 
 **The model.**
 - *Principals:* people and groups, each with attributes (for example `districts: ['Manhattan']`). Who a person is
   depends on **[Q-31]**.
-- *Rules:* a row rule is a predicate over a dataset's columns and the principal's attributes (`borough IN
-  :districts`); a column rule allows, removes or masks columns; an action rule says who may run an action, and on
-  which rows.
+- *Rules:* a row rule is a predicate over a dataset's columns and the principal's attributes (`pu_borough IN
+  :districts`), and can reach its columns through the ontology's links (the District rule is set on `trips`, through
+  Zone to District); a column rule allows, removes or masks columns, and removes every column made from them too,
+  found through column lineage; an action rule says who may run an action, and on which rows.
 - *Resources:* flows, datasets, columns, object types and action types. Rules attach to datasets and are inherited
   downstream through lineage, so a dataset derived from a restricted one is restricted too unless a rule says
   otherwise.
+- *Through aggregates:* an aggregated row is visible only when every row behind it is **[Q-41]**. Grouping by a
+  rule's column keeps a dataset open (`zone_hour`, by pickup zone, under the District rule); a dataset whose rows mix
+  districts is closed to the district leads (`airport_times`), and the app says why and how to open it.
 
 **Where rules are enforced.**
 
@@ -161,6 +169,11 @@ step. Previews run a segment up to the chosen step, with a `LIMIT`.
 
 **The limit, stated plainly.** Whoever holds data in their own browser can read it. Enforcement protects what is
 shared and what a server serves, and the in-app checks make sure every flow is built to respect it.
+
+**In the app** (concept A7): the Policies view lists the people, each with their identity card, and the groups; the
+row, column and action rules, each showing who it applies to, where it is set and what it reaches; who sees what, by
+district; and a preview as one person, with what their share would hold (the partitions and column groups whose
+keys are wrapped for them) and the last run's policy checks **[Q-40]**.
 
 ## 8. Ontology and actions
 
@@ -243,6 +256,6 @@ Builder and drawn in the family's look. The first concepts are on the design can
 - **Opening a step** shows its sub-steps in order, the settings of the selected one, the SQL it runs ("Edit as SQL"
   turns it into a SQL step), the data after it, and the output schema with where each column came from.
 - **The top bar:** parameters, "View as" (the flow as one principal's policies allow them to see it), Share, Run, and
-  whether every dataset is fresh. Its views: Flow, Ontology, Runs, Policies.
+  whether every dataset is fresh. Its views: Flow, Ontology (section 8), Runs (section 6) and Policies (section 7).
 - **How it is built:** DOM, CSS and SVG. The graph generalises smaltbi's model view: cards placed on a board, with one
   SVG layer for the connectors.

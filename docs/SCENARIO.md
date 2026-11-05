@@ -1,7 +1,7 @@
 # The reference scenario: NYC taxis, weather and districts
 
-- **Status:** draft (open points: [Q-36](OPEN_QUESTIONS.md), [Q-37](OPEN_QUESTIONS.md); districts are boroughs,
-  [ADR 0002](adr/0002-second-round-decisions.md) §2)
+- **Status:** draft (open point: [Q-37](OPEN_QUESTIONS.md); districts are boroughs,
+  [ADR 0002](adr/0002-second-round-decisions.md) §2; the actions, [ADR 0003](adr/0003-third-round-decisions.md) §2)
 - **Date:** 2026-11-05
 
 One realistic example that smaltfl is built, tested and optimized against (ADR 0001 §15). Every feature is checked
@@ -115,14 +115,15 @@ The flow's owner shares results with four people:
 
 | Recipient | Sees | Can run |
 | --- | --- | --- |
-| Ana, Manhattan lead | Rows for Manhattan only | Set zone service target (Manhattan zones) |
-| Ben, Brooklyn and Queens planner | Rows for Brooklyn and Queens | Set zone service target (Brooklyn and Queens zones) |
-| Cara, airport operations | Rows for the airport zones only (JFK, LaGuardia, Newark), in any district | — |
+| Ana, Manhattan lead | Rows for Manhattan only | Set zone service target (Manhattan zones), Annotate weather event |
+| Ben, Brooklyn and Queens planner | Rows for Brooklyn and Queens | Set zone service target (Brooklyn and Queens zones), Annotate weather event |
+| Cara, airport operations | Rows for the airport zones only (JFK, LaGuardia, Newark), in any district | Annotate weather event |
 | Dev, city analyst | Every district, without fare, tip and toll columns | Annotate weather event |
 
-Each person gets one package (Q-35). Rows are partitioned by district, each partition is encrypted with its own key,
-and each key is wrapped only for the people allowed to read it (ADR 0001 §7). Columns a recipient may not see are
-removed before encryption. The package carries the flow, the run manifest and its signature, so a recipient can
+Each person gets one package (Q-35). Rows are partitioned by the columns the rules use (the district, and the airport
+zones for Cara's rule), each partition is encrypted with its own key, and each key is wrapped only for the people
+allowed to read it (ADR 0001 §7): the JFK and LaGuardia zones' partition has one key, wrapped for Ben and for Cara.
+Columns a recipient may not see are removed before encryption. The package carries the flow, the run manifest and its signature, so a recipient can
 check where every number came from.
 
 ## 6. Checks that must pass
@@ -132,9 +133,11 @@ check where every number came from.
 - The visual and the SQL versions of the flow give identical gold hashes.
 
 **Enforcement.**
-- Ana's package holds no row outside Manhattan: the other partitions' keys aren't in it, and decrypting with her key
-  fails for them. Dev's package holds no fare, tip or toll column.
-- "View as Ana" in the app shows exactly what her package shows.
+- Ana's package holds no row outside Manhattan: the other partitions' keys aren't in it, and decrypting with Ana's
+  key fails for them. Dev's package holds no fare, tip or toll column, nor any column made from one.
+- "View as Ana" in the app shows exactly what Ana's package shows.
+- `airport_times` mixes districts in each row, so it is closed to the district leads, and the app says why
+  ([Q-41](OPEN_QUESTIONS.md)).
 - *Set zone service target* is refused for a zone outside the lead's district, and the refusal is recorded.
 
 **Reproducibility.**

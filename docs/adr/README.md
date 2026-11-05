@@ -7,3 +7,4 @@ records start from the answers to the questions in [../OPEN_QUESTIONS.md](../OPE
 | --- | --- | --- |
 | [0001](0001-initial-decisions.md) | Initial decisions | accepted |
 | [0002](0002-second-round-decisions.md) | Identity, districts, snapshots, the builder, the colour | accepted |
+| [0003](0003-third-round-decisions.md) | The ontology screens, the scenario's actions, the mark on hold | accepted |
