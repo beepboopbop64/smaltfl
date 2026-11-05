@@ -111,6 +111,14 @@ section.view { display: grid; gap: 14px; }
 .swatch.reused { border-color: var(--muted); }
 .swatch.folded { border-style: dashed; border-color: var(--muted); }
 .swatch.drop { border-color: var(--warn); background: var(--warn-wash); border-radius: 999px; }
+.port-key { position: relative; width: 22px; height: 10px; }
+.port-key::before { content: ""; position: absolute; top: 4px; height: 2px; background: var(--smalt); }
+.port-key::after { content: ""; position: absolute; top: 0; width: 10px; height: 10px; border-radius: 999px; }
+.port-key.in::before { left: 0; width: 12px; }
+.port-key.in::after { right: 0; background: var(--smalt); }
+.port-key.out::before { right: 0; width: 12px; background: var(--teal-fill); }
+.port-key.out::after { left: 0; background: var(--teal-fill); }
+.shield-key { width: 11px; height: 13px; fill: none; stroke: var(--ink-2); stroke-width: 1.4; }
 
 #canvas {
   position: relative; height: max(380px, calc(100vh - var(--head, 170px) - 170px)); border: 1px solid var(--line); border-radius: 12px;
@@ -142,6 +150,17 @@ section.view { display: grid; gap: 14px; }
 .card.tone-add .what { fill: var(--teal); }
 .card.tone-drop .what { fill: var(--warn); font-weight: 600; }
 .card.failed .what { fill: var(--bad); }
+.card .port.in { fill: var(--smalt); }
+.card .port.out { fill: var(--teal-fill); }
+.card .port-arrow { fill: var(--surface); }
+.card .stub { stroke-width: 2; stroke-linecap: round; fill: none; }
+.card .stub.in { stroke: var(--smalt); }
+.card .stub.out { stroke: var(--teal-fill); }
+.card .shield path { fill: none; stroke: var(--muted); stroke-width: 1.3; stroke-linejoin: round; }
+.card .shield.muted path { opacity: 0.75; }
+.card .shield.on path { fill: var(--smalt); stroke: var(--smalt); }
+.card .shield.closed path { fill: var(--muted); stroke: var(--muted); }
+.card .shield-hit { fill: transparent; }
 .card .badge { fill: var(--warn-wash); stroke: var(--warn); stroke-width: 1; }
 .card .badge-text { fill: var(--warn); font-family: var(--mono); font-size: 10.5px; font-weight: 600; }
 .card.lifted { opacity: 0.94; }
@@ -264,6 +283,21 @@ th.new, td.new { background: var(--teal-wash); }
 .swatch-btn { width: 38px; height: 38px; border-radius: 10px; border: 2px solid var(--s); background: var(--f); padding: 0; }
 .swatch-btn[aria-checked="true"] { outline: 2.5px solid var(--ink); outline-offset: 2px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.io { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); border-left: 4px solid var(--smalt); background: var(--surface); }
+.io.out { border-left-color: var(--teal-fill); }
+.io .io-line { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.io .foot { margin: 0; }
+.access { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.people { display: grid; gap: 6px; }
+.person { display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; gap: 2px 10px; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); width: 100%; box-sizing: border-box; }
+button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: inset 0 0 0 1px var(--smalt); background: var(--smalt-wash); }
+.person .who { font-weight: 600; }
+.person .count { justify-self: end; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.person .how { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.level { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; background: var(--sunk); color: var(--ink-2); }
+.level.to-all { background: var(--teal-wash); color: var(--teal); }
+.level.to-rows, .level.to-columns { background: var(--smalt-wash); color: var(--smalt); }
+.level.to-closed { background: var(--sunk); color: var(--muted); }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 11px; font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
 @media (prefers-reduced-motion: no-preference) { .card rect.box { transition: fill 0.25s, stroke 0.25s; } }
 </style>
@@ -291,10 +325,13 @@ th.new, td.new { background: var(--teal-wash); }
   <section class="view" id="view-flow" aria-label="Flow">
     <p class="lede" id="lede">100,000 yellow-taxi trips sampled from the NYC TLC's records for January 2024, checked, joined to their zones and to each borough's hourly weather, all run in this browser. Each card says what its step did to the rows; open one to see them.</p>
     <ul class="legend" aria-label="Legend">
+      <li><span class="port-key in" aria-hidden="true"></span>input: data the flow reads</li>
+      <li><span class="port-key out" aria-hidden="true"></span>output: a dataset it publishes</li>
       <li><span class="swatch built"></span>built this run</li>
       <li><span class="swatch reused"></span>reused, same key</li>
       <li><span class="swatch folded"></span>folded into a later step</li>
       <li><span class="swatch drop"></span>rows a step left out</li>
+      <li><svg class="shield-key" viewBox="0 0 12 14" aria-hidden="true"><path d="M6 0 L12 2.5 V7 C12 10.5 9.5 13 6 14 C2.5 13 0 10.5 0 7 V2.5 Z"/></svg>a rule limits who sees it: tap for who</li>
     </ul>
     <div id="canvas" tabindex="0" aria-label="The flow canvas. Arrow keys move around, plus and minus zoom."></div>
   </section>
@@ -323,7 +360,7 @@ th.new, td.new { background: var(--teal-wash); }
     </div>
     <div class="grid2">
       <div class="panel"><h2>Busiest pickup zones</h2><p class="sub">From zone_hour, the sample's trips per zone.</p><div class="scroll" id="zones-table"></div></div>
-      <div class="panel"><h2>Datasets</h2><p class="sub">What the flow stores. Tap one to look inside.</p><div id="datasets"></div></div>
+      <div class="panel"><h2>Outputs</h2><p class="sub">The datasets the flow publishes. Tap one to look inside.</p><div id="datasets"></div></div>
     </div>
   </section>
 

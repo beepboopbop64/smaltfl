@@ -15,7 +15,7 @@ import { GROUP_COLORS, validateDocument } from '../core/document.js';
 import { emitExcept, emitRead, emitRuleFailures, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Edit } from '../core/ontology.js';
-import { readView, wrapRead, type ReadView } from '../core/policy.js';
+import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
 import type { FlowPlan, PlanNode } from '../core/plan.js';
@@ -23,7 +23,7 @@ import type { RunResult, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
 import { runFlow, verifyRun } from '../index.js';
 import { connect, type Engine } from './engine.js';
-import { frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout, type GridLayout } from './layout.js';
+import { edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout, type GridLayout } from './layout.js';
 
 declare const __SMALTDB_VERSION__: string;
 const SMALTDB = typeof __SMALTDB_VERSION__ === 'string' ? __SMALTDB_VERSION__ : '0.9.0';
@@ -57,6 +57,10 @@ const state = {
   section: null as string | null,
   /** What each step changed, for the latest run, as the viewer reads it. */
   changes: new Map<string, Change>(),
+  /** Whom a step's sheet shows that step as, when not the viewer: View as, for one step. */
+  previewAs: null as string | null,
+  /** Where a sheet opens: at its start, or at who can see the step (from a card's shield). */
+  sheetFocus: null as 'access' | null,
   /** Each node's output columns, from the latest run's typed plan. */
   columns: new Map<string, string[]>(),
   ontologyType: null as string | null,
@@ -69,9 +73,9 @@ const state = {
 const policies = () => state.doc.policies;
 const personName = (id: string) => policies()?.principals.find((x) => x.id === id)?.name ?? id;
 /** What the current viewer may read of a node, or null before the node has run. */
-const access = (id: string): ReadView | null => {
+const access = (id: string, who = state.viewer): ReadView | null => {
   const cols = state.columns.get(id);
-  return cols ? readView(policies(), state.viewer, cols) : null;
+  return cols ? readView(policies(), who, cols) : null;
 };
 /** A stored dataset's rows as the viewer may read them, as a subquery, or null when closed. */
 const readDataset = (name: string): string | null => {
@@ -139,10 +143,72 @@ const nodeOf = (id: string): ManifestNode | undefined => latest()?.result.manife
 
 const KIND: Record<string, string> = { sql: 'SQL', filter: 'FILTER', formula: 'FORMULAS', select: 'SELECT', join: 'JOIN', aggregate: 'AGGREGATE', expectations: 'CHECKS' };
 
+/** The file an input reads, where the app knows it (the example's sources). */
+const inputFile = (id: string) => {
+  const src = state.doc.sources.find((x) => x.id === id);
+  return src ? EXAMPLE_SOURCES.find((e) => e.table === src.table) : undefined;
+};
+const FORMATS: Record<string, string> = { parquet: 'Parquet', csv: 'CSV', json: 'JSON', ndjson: 'NDJSON', arrow: 'Arrow' };
+/** A file's format, by its extension: Parquet, CSV… */
+const formatOf = (file: string) => {
+  const ext = file.slice(file.lastIndexOf('.') + 1).toLowerCase();
+  return FORMATS[ext] ?? ext.toUpperCase();
+};
+/** A step that publishes a dataset: an output of the flow. */
+const isOutput = (id: string) => !!steps().get(id)?.dataset;
+/** What reads a source or step: steps, and the ontology's object types. */
+const readersOf = (id: string) => state.doc.steps.filter((st) => st.inputs.includes(id)).map((st) => st.id);
+
 function kindLabel(id: string): string {
-  if (sourceIds().has(id)) return 'SOURCE';
+  if (sourceIds().has(id)) {
+    const f = inputFile(id);
+    return f ? `INPUT · ${formatOf(f.file).toUpperCase()}` : 'INPUT';
+  }
   const st = steps().get(id)!;
-  return `${KIND[st.kind] ?? st.kind.toUpperCase()}${st.dataset ? ' · DATASET' : ''}`;
+  return `${KIND[st.kind] ?? st.kind.toUpperCase()}${st.dataset ? ' · OUTPUT' : ''}`;
+}
+
+// ------------------------------------------------------------------ who can see what, per step
+
+type Access = 'all' | 'rows' | 'columns' | 'closed';
+
+/** How much of a step a person sees: all of it, some rows, some columns, or none of it. */
+const accessOf = (view: ReadView): Access => (!view.open ? 'closed' : view.filters.length ? 'rows' : view.removed.length ? 'columns' : 'all');
+const ACCESS_LABEL: Record<Access, string> = { all: 'all of it', rows: 'some rows', columns: 'some columns', closed: 'closed' };
+
+/** A person's access to a step, in a few words: which rows, which columns, or why it is closed to them. */
+function accessText(p: Principal, view: ReadView, columns: readonly string[]): string {
+  if (p.owner) return 'everything: they own the flow';
+  const rules = policies()?.rules ?? [];
+  if (!view.open) {
+    const missing = rules.find((r): r is RowRule => r.kind === 'row' && covers(policies()!, r.for, p.id) && !columns.some((c) => r.columns.some((n) => n.toLowerCase() === c.toLowerCase())));
+    return missing ? `no ${missing.columns.join(' or ')} here to filter on (${missing.name})` : (view.reason ?? 'closed');
+  }
+  const parts: string[] = [];
+  for (const name of view.filters) {
+    const rule = rules.find((r): r is RowRule => r.kind === 'row' && r.name === name);
+    const values = rule ? (p.attributes?.[rule.attribute] ?? []) : [];
+    parts.push(`only ${values.length ? values.join(', ') : 'nothing'} (${name})`);
+  }
+  if (view.removed.length) {
+    const cols = view.removed.map((r) => r.column);
+    parts.push(`without ${cols.length > 3 ? `${cols.slice(0, 3).join(', ')} and ${cols.length - 3} more` : cols.join(', ')} (${[...new Set(view.removed.map((r) => r.rule))].join(', ')})`);
+  }
+  return parts.join('; ') || 'everything';
+}
+
+/**
+ * A card's shield, small and quiet: for the owner, on any step a rule limits for someone; viewing as someone, on the
+ * steps their rules limit (closed ones are already greyed). Tapping it opens who can see the step.
+ */
+function shieldOf(id: string): 'muted' | 'on' | 'closed' | null {
+  const p = policies();
+  const cols = state.columns.get(id);
+  if (!p || !cols) return null;
+  const me = p.principals.find((x) => x.id === state.viewer);
+  if (!me || me.owner) return p.principals.some((x) => !x.owner && accessOf(readView(p, x.id, cols)) !== 'all') ? 'muted' : null;
+  const mine = accessOf(readView(p, state.viewer, cols));
+  return mine === 'all' ? null : mine === 'closed' ? 'closed' : 'on';
 }
 
 // ------------------------------------------------------------------ what each step changed
@@ -220,15 +286,15 @@ function countOnce(key: string, sql: string): Promise<number> {
   return found;
 }
 
-/** What the viewer may read of a node of this run. */
-const viewIn = (insp: Inspection, i: number): ReadView => readView(policies(), state.viewer, insp.ctx.columns(i));
+/** What a person (the viewer, unless another is named) may read of a node of this run. */
+const viewIn = (insp: Inspection, i: number, who = state.viewer): ReadView => readView(policies(), who, insp.ctx.columns(i));
 
-/** A node's rows as the viewer reads them, as a statement; null when closed to them. */
-const readIn = (insp: Inspection, i: number, sql = emitRead(insp.plan, i, insp.ctx)): string | null => wrapRead(viewIn(insp, i), sql);
+/** A node's rows as a person reads them, as a statement (its own, or `sql` over its columns); null when closed to them. */
+const readIn = (insp: Inspection, i: number, who = state.viewer, sql = emitRead(insp.plan, i, insp.ctx)): string | null => wrapRead(viewIn(insp, i, who), sql);
 
-/** How many rows of a node the viewer reads, or null when it is closed to them. */
-async function rowsAs(insp: Inspection, i: number): Promise<number | null> {
-  const view = viewIn(insp, i);
+/** How many rows of a node a person reads, or null when it is closed to them. */
+async function rowsAs(insp: Inspection, i: number, who = state.viewer): Promise<number | null> {
+  const view = viewIn(insp, i, who);
   const m = insp.manifest.get(i);
   if (!view.open || !m) return null;
   const n = insp.plan.nodes[i]!;
@@ -236,19 +302,19 @@ async function rowsAs(insp: Inspection, i: number): Promise<number | null> {
     // No row rule applies to the viewer: the run's own numbers, where it has them.
     if (m.rows !== undefined) return m.rows;
     if (n.op === 'expect' && m.expectations) return m.expectations.rows - m.expectations.dropped;
-    if (n.op === 'formula' || n.op === 'select') return rowsAs(insp, n.inputs[0]!);
+    if (n.op === 'formula' || n.op === 'select') return rowsAs(insp, n.inputs[0]!, who);
   }
-  return countOnce(`${m.key}|rows|${view.where ?? ''}`, readIn(insp, i)!);
+  return countOnce(`${m.key}|rows|${view.where ?? ''}`, readIn(insp, i, who)!);
 }
 
-/** The rows of node `a` that node `b` doesn't have, as the viewer reads both (they have the same columns). */
-function exceptIn(insp: Inspection, a: number, b: number): string | null {
-  const ra = readIn(insp, a);
-  const rb = readIn(insp, b);
-  return ra && rb ? emitExcept(ra, rb, viewIn(insp, a).columns) : null;
+/** The rows of node `a` that node `b` doesn't have, as a person reads both (they have the same columns). */
+function exceptIn(insp: Inspection, a: number, b: number, who = state.viewer): string | null {
+  const ra = readIn(insp, a, who);
+  const rb = readIn(insp, b, who);
+  return ra && rb ? emitExcept(ra, rb, viewIn(insp, a, who).columns) : null;
 }
 
-async function changeOf(insp: Inspection, i: number): Promise<Change> {
+async function changeOf(insp: Inspection, i: number, who = state.viewer): Promise<Change> {
   const n = insp.plan.nodes[i]!;
   const input = n.op === 'table' ? undefined : n.inputs[0];
   const out = insp.ctx.columns(i);
@@ -264,8 +330,8 @@ async function changeOf(insp: Inspection, i: number): Promise<Change> {
   const reshapes = n.op === 'aggregate' || n.op === 'table';
   const change: Change = {
     op: n.op,
-    rowsIn: input === undefined ? undefined : await rowsAs(insp, input),
-    rowsOut: await rowsAs(insp, i),
+    rowsIn: input === undefined ? undefined : await rowsAs(insp, input, who),
+    rowsOut: await rowsAs(insp, i, who),
     columnsIn: inn.length,
     columnsOut: out.length,
     added: reshapes ? [] : out.filter((c) => !had.has(lc(c))),
@@ -274,7 +340,7 @@ async function changeOf(insp: Inspection, i: number): Promise<Change> {
     same: input !== undefined && sameColumns(inn, out),
   };
   if (n.op === 'join') {
-    const view = viewIn(insp, n.inputs[0]!);
+    const view = viewIn(insp, n.inputs[0]!, who);
     change.inner = n.how !== 'left';
     change.unmatched = view.open ? await countOnce(`${insp.manifest.get(i)!.key}|unmatched|${view.where ?? ''}`, wrapRead(view, emitUnmatched(insp.plan, i, insp.ctx)!)!) : null;
   }
@@ -425,16 +491,6 @@ function zoomAt(factor: number, cx: number, cy: number): void {
   applyView();
 }
 
-function edgePath(from: { x: number; y: number }, to: { x: number; y: number }): { d: string; cx: number; cy: number } {
-  const { cardW, cardH } = GRID;
-  const x1 = from.x + cardW;
-  const y1 = from.y + cardH / 2;
-  const x2 = to.x;
-  const y2 = to.y + cardH / 2;
-  const bend = Math.max(36, Math.abs(x2 - x1) / 2);
-  return { d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2 - 5} ${y2}`, cx: x2 - 3, cy: y2 };
-}
-
 const HINT = {
   look: 'Drag to move around · pinch to zoom · hold a card to move it',
   arrange: 'Drag steps and sections · drop a step on a section to move it in · tap a section’s name to edit it',
@@ -487,7 +543,17 @@ function tidy(): void {
   state.doc = { ...state.doc, layout: {} };
   saveArrangement();
   renderCanvas();
-  fitView();
+  startView(gridLayout(state.doc, state.collapsed));
+}
+
+/** The beginning of the flow, at a size where its cards are easy to read: on a phone, two columns and a bit. */
+function startView(layout: GridLayout): void {
+  const host = $('canvas');
+  view.k = Math.max(0.55, Math.min(1, (host.clientHeight - 40) / layout.height, (host.clientWidth - 16) / (2.2 * (GRID.cardW + GRID.gapX))));
+  view.x = 16 - layout.left * view.k;
+  view.y = Math.max(16, (host.clientHeight - layout.height * view.k) / 2) - layout.top * view.k;
+  view.ready = true;
+  applyView();
 }
 
 function setUpCanvas(host: HTMLElement): SVGSVGElement {
@@ -504,7 +570,7 @@ function setUpCanvas(host: HTMLElement): SVGSVGElement {
   let gesture: 'none' | 'press' | 'pan' | 'drag' | 'pinch' = 'none';
   let lead = -1;
   let start = { x: 0, y: 0, vx: 0, vy: 0, k: 1, dist: 0, cx: 0, cy: 0 };
-  let press: { card?: string; head?: string } = {};
+  let press: { card?: string; head?: string; shield?: boolean } = {};
   let hold = 0;
   const local = (e: PointerEvent) => {
     const r = svg.getBoundingClientRect();
@@ -524,7 +590,7 @@ function setUpCanvas(host: HTMLElement): SVGSVGElement {
       const p = local(e);
       lead = e.pointerId;
       start = { ...start, x: p.x, y: p.y, vx: view.x, vy: view.y, k: view.k };
-      press = { card: el.closest('[data-card]')?.getAttribute('data-card') ?? undefined, head: el.closest('[data-head]')?.getAttribute('data-head') ?? undefined };
+      press = { card: el.closest('[data-card]')?.getAttribute('data-card') ?? undefined, head: el.closest('[data-head]')?.getAttribute('data-head') ?? undefined, shield: !!el.closest('[data-shield]') };
       gesture = press.card || press.head ? 'press' : 'pan';
       // Outside Arrange a finger on a card pans, as on the background; holding it still picks the card up.
       if (gesture === 'press' && !state.arranging) hold = window.setTimeout(() => gesture === 'press' && beginMove(press) && (gesture = 'drag'), HOLD_MS);
@@ -612,11 +678,17 @@ function setUpCanvas(host: HTMLElement): SVGSVGElement {
   return svg;
 }
 
-/** A tap: a card opens its sheet (a folded section's card opens the section); a section's name folds it, or in Arrange edits it. */
-function tap(press: { card?: string; head?: string }): void {
+/**
+ * A tap: a card opens its sheet (its shield, at who can see it; a folded section's card opens the section); a section's
+ * name folds it, or in Arrange edits it.
+ */
+function tap(press: { card?: string; head?: string; shield?: boolean }): void {
   if (press.card) {
     if (state.doc.groups?.some((g) => g.id === press.card)) setFolded(press.card, false);
-    else select(press.card);
+    else {
+      state.sheetFocus = press.shield ? 'access' : null;
+      select(press.card);
+    }
   } else if (press.head) {
     if (state.arranging) openSection(press.head);
     else setFolded(press.head, !state.collapsed.has(press.head));
@@ -824,9 +896,15 @@ function placeInSection(id: string, target: string): void {
 const arrangementKey = () => `smaltfl:arrangement:${state.doc.id}`;
 
 /** Sections and places are display only, so they are kept per browser, never in the run's record. */
+/**
+ * The arrangement's version. 2: the automatic layout gives each card a column and each section a lane; places kept
+ * under version 1's layout of blocks are dropped (the sections themselves are kept), so the new layout shows.
+ */
+const ARRANGEMENT = 2;
+
 function saveArrangement(): void {
   try {
-    localStorage.setItem(arrangementKey(), JSON.stringify({ v: 1, groups: state.doc.groups ?? [], layout: state.doc.layout ?? {} }));
+    localStorage.setItem(arrangementKey(), JSON.stringify({ v: ARRANGEMENT, groups: state.doc.groups ?? [], layout: state.doc.layout ?? {} }));
   } catch {
     // Storage can be off (a private window, a blocked frame); the arrangement then lasts as long as the page.
   }
@@ -835,8 +913,8 @@ function saveArrangement(): void {
 function loadArrangement(): void {
   try {
     const saved = JSON.parse(localStorage.getItem(arrangementKey()) ?? 'null') as { v?: number; groups?: unknown; layout?: unknown } | null;
-    if (!saved || saved.v !== 1) return;
-    const next = { ...state.doc, groups: saved.groups, layout: saved.layout } as FlowDocument;
+    if (!saved || (saved.v !== 1 && saved.v !== ARRANGEMENT)) return;
+    const next = { ...state.doc, groups: saved.groups, layout: saved.v === ARRANGEMENT ? saved.layout : {} } as FlowDocument;
     if (validateDocument(next).length) return;
     state.doc = next;
   } catch {
@@ -918,14 +996,34 @@ function renderCanvas(): void {
     }
   }
   const chars = Math.floor((cardW - 24) / 7.2);
-  const card = (key: string, kind: string, name: string, line: CardLine, classes: string[]) => {
+  const card = (key: string, kind: string, name: string, line: CardLine, classes: string[], extra: { port?: 'in' | 'out'; end?: boolean; shield?: ReturnType<typeof shieldOf> } = {}) => {
     const { x, y } = drawn.at.get(key)!;
     if (line.tone !== 'same') classes.push(`tone-${line.tone}`);
-    const g = s('g', { class: ['card', ...classes].join(' '), 'data-card': key, tabindex: 0, role: 'button', 'aria-label': `${name}: ${kind}. ${line.text}` });
+    const guard = extra.shield ? ` ${extra.shield === 'muted' ? 'Rules limit who sees it' : extra.shield === 'closed' ? `Closed to ${personName(state.viewer)}` : `${personName(state.viewer)} sees part of it`}.` : '';
+    const g = s('g', { class: ['card', ...classes].join(' '), 'data-card': key, tabindex: 0, role: 'button', 'aria-label': `${name}: ${kind}. ${line.text}.${guard}` });
     g.append(s('rect', { class: 'box', x, y, width: cardW, height: cardH, rx: 9 }));
     g.append(s('text', { class: 'kind', x: x + 12, y: y + 18 }, fit(kind, Math.floor(chars * 1.15))));
     g.append(s('text', { class: 'name', x: x + 12, y: y + 36 }, fit(name, chars)));
-    g.append(s('text', { class: 'what', x: x + 12, y: y + 53 }, fit(line.text, Math.floor(chars * 1.12))));
+    g.append(s('text', { class: 'what', x: x + 12, y: y + 53 }, fit(line.text, Math.floor(chars * 1.12) - (extra.shield ? 1 : 0))));
+    // Ports: data comes into an input from outside the flow, and leaves an output as a published dataset.
+    const cy = y + cardH / 2;
+    if (extra.port === 'in') {
+      g.append(s('path', { class: 'stub in', d: `M ${x - 22} ${cy} H ${x - 6}` }));
+      g.append(s('circle', { class: 'port in', cx: x, cy, r: 7 }));
+      g.append(s('path', { class: 'port-arrow', d: `M ${x - 2.5} ${cy - 3.5} L ${x + 3} ${cy} L ${x - 2.5} ${cy + 3.5} Z` }));
+    } else if (extra.port === 'out') {
+      if (extra.end) g.append(s('path', { class: 'stub out', d: `M ${x + cardW + 6} ${cy} H ${x + cardW + 22}` }));
+      g.append(s('circle', { class: 'port out', cx: x + cardW, cy, r: 7 }));
+      g.append(s('path', { class: 'port-arrow', d: `M ${x + cardW - 2.5} ${cy - 3.5} L ${x + cardW + 3} ${cy} L ${x + cardW - 2.5} ${cy + 3.5} Z` }));
+    }
+    if (extra.shield) {
+      const sx = x + cardW - 22;
+      const sy = y + cardH - 23;
+      const shield = s('g', { class: `shield ${extra.shield}`, 'data-shield': key });
+      shield.append(s('rect', { class: 'shield-hit', x: sx - 9, y: sy - 8, width: 30, height: 30 }));
+      shield.append(s('path', { d: `M ${sx + 6} ${sy} L ${sx + 12} ${sy + 2.5} V ${sy + 7} C ${sx + 12} ${sy + 10.5} ${sx + 9.5} ${sy + 13} ${sx + 6} ${sy + 14} C ${sx + 2.5} ${sy + 13} ${sx} ${sy + 10.5} ${sx} ${sy + 7} V ${sy + 2.5} Z` }));
+      g.append(shield);
+    }
     if (line.badge) {
       // A badge on the corner says, at any zoom, that this step changed the rows: how many it left out.
       const w = Math.round(line.badge.length * 6.4 + 14);
@@ -957,22 +1055,17 @@ function renderCanvas(): void {
     else if (readable && !readable.open) classes.push('closed');
     else if (n) classes.push(n.status);
     if (state.selected === id) classes.push('selected');
-    card(id, kindLabel(id), id, cardLine(id), classes);
+    card(id, kindLabel(id), id, cardLine(id), classes, { port: sourceIds().has(id) ? 'in' : isOutput(id) ? 'out' : undefined, end: readersOf(id).length === 0, shield: shieldOf(id) });
   }
   world.replaceChildren(...parts);
   const refocus = focused?.card ? drawn.cards.get(focused.card) : focused?.head ? drawn.heads.get(focused.head) : undefined;
   (refocus as SVGElement | undefined)?.focus({ preventScroll: true });
-  if (!view.ready && host.clientWidth > 0) {
-    // Start at the beginning of the flow, at a size where the cards are easy to read.
-    view.k = Math.max(0.55, Math.min(1, (host.clientHeight - 40) / layout.height));
-    view.x = 16 - layout.left * view.k;
-    view.y = Math.max(16, (host.clientHeight - layout.height * view.k) / 2) - layout.top * view.k;
-    view.ready = true;
-  }
+  if (!view.ready && host.clientWidth > 0) startView(layout);
   applyView();
 }
 
 function select(id: string | null): void {
+  if (id !== state.selected) state.previewAs = null;
   state.selected = id;
   state.section = null;
   state.issues = [];
@@ -1001,6 +1094,8 @@ async function renderSheet(): Promise<void> {
   const st = steps().get(id);
   const source = state.doc.sources.find((src) => src.id === id);
   const n = nodeOf(id);
+  // Whom this sheet shows the step as: the viewer, or the person chosen under Who can see this.
+  const who = state.previewAs ?? state.viewer;
   const body = h('div', { class: 'sheet-body' });
   sheet.setAttribute('aria-label', 'Step details');
   sheet.replaceChildren(
@@ -1015,6 +1110,14 @@ async function renderSheet(): Promise<void> {
   // What it changed comes first: it is what a person opening a step most often wants to know.
   const changed = h('div', { class: 'change' }, h('p', { class: 'eyebrow' }, 'What changed'), h('p', { class: 'foot' }, n ? 'Working it out…' : 'Run the flow to see what this step changes.'));
   body.append(changed);
+  const io = inOut(id);
+  if (io) body.append(io);
+  const accessBox = accessPanel(id);
+  if (accessBox) {
+    body.append(accessBox);
+    if (state.sheetFocus === 'access') requestAnimationFrame(() => accessBox.scrollIntoView({ block: 'start' }));
+  }
+  state.sheetFocus = null;
 
   const facts = h('dl', { class: 'facts' });
   const fact = (k: string, v: Child) => facts.append(h('dt', {}, k), h('dd', {}, v));
@@ -1023,8 +1126,9 @@ async function renderSheet(): Promise<void> {
     fact('Key', h('span', { class: 'hash' }, short(n.key)));
     if (n.content) fact('Content', h('span', { class: 'hash' }, short(n.content)));
   } else fact('This run', 'not run yet');
-  if (source) fact('Reads', h('span', { class: 'mono' }, source.table));
   if (st) fact('Reads', h('span', { class: 'mono' }, st.inputs.join(', ')));
+  const next = readersOf(id);
+  if (next.length) fact('Read by', h('span', { class: 'mono' }, next.join(', ')));
   const section = h('select', { id: 'section-of', 'aria-label': 'Section' });
   section.append(...(state.doc.groups ?? []).map((g) => h('option', { value: g.id }, g.name)), h('option', { value: '' }, 'No section'), h('option', { value: '+' }, 'A new section, around it'));
   section.value = sectionOf(id) ?? '';
@@ -1040,7 +1144,7 @@ async function renderSheet(): Promise<void> {
   if (!n || !state.engine) return;
   let fresh: string[] = [];
   try {
-    const panel = await changePanel(id);
+    const panel = await changePanel(id, who);
     if (state.selected !== id) return;
     if (panel) {
       changed.replaceWith(panel.box);
@@ -1052,21 +1156,90 @@ async function renderSheet(): Promise<void> {
   try {
     const sql = await statementFor(id);
     if (state.selected !== id || !sql) return;
-    const view = access(id);
+    const view = access(id, who);
     const read = view ? wrapRead(view, sql) : sql;
-    explain.lastElementChild!.textContent = read && read !== sql ? `-- read as ${personName(state.viewer)}: ${view!.filters.join(', ') || 'no row rules'}${view!.removed.length ? `; removes ${view!.removed.map((r) => r.column).join(', ')}` : ''}\n${read}` : sql;
+    explain.lastElementChild!.textContent = read && read !== sql ? `-- read as ${personName(who)}: ${view!.filters.join(', ') || 'no row rules'}${view!.removed.length ? `; removes ${view!.removed.map((r) => r.column).join(', ')}` : ''}\n${read}` : sql;
     if (!read) {
-      preview.lastElementChild!.replaceWith(h('p', { class: 'status bad' }, `Closed to ${personName(state.viewer)}: ${view!.reason}.`));
+      preview.lastElementChild!.replaceWith(h('p', { class: 'status bad' }, `Closed to ${personName(who)}: ${view!.reason}.`));
       return;
     }
     const r = await state.engine.query(`SELECT * FROM (\n${read}\n) LIMIT 20`);
     if (state.selected !== id) return;
-    const note = view && (view.filters.length || view.removed.length) ? h('p', { class: 'foot' }, `As ${personName(state.viewer)}: ${[view.filters.length ? `filtered by the ${view.filters.join(' and the ')}` : '', view.removed.length ? `without ${view.removed.map((x) => x.column).join(', ')}` : ''].filter(Boolean).join(', ')}.`) : null;
+    const note = view && (view.filters.length || view.removed.length) ? h('p', { class: 'foot' }, `As ${personName(who)}: ${[view.filters.length ? `filtered by the ${view.filters.join(' and the ')}` : '', view.removed.length ? `without ${view.removed.map((x) => x.column).join(', ')}` : ''].filter(Boolean).join(', ')}.`) : null;
     const isNew = new Set(fresh.map((c) => c.toLowerCase()));
     preview.lastElementChild!.replaceWith(h('div', {}, table(r.columns, r.rows, (c) => (isNew.has(c.toLowerCase()) ? 'new' : undefined)), isNew.size ? h('p', { class: 'foot' }, 'Tinted: the columns this step adds.') : null, note));
   } catch (e) {
     preview.lastElementChild!.textContent = message(e);
   }
+}
+
+/** Where an input's rows come from, or where an output's go: the flow's two ends, said plainly. */
+function inOut(id: string): HTMLElement | null {
+  const n = nodeOf(id);
+  const readers = readersOf(id);
+  const box = (kind: 'in' | 'out', label: string, ...kids: Child[]) => h('div', { class: `io ${kind}` }, h('p', { class: 'eyebrow' }, label), ...kids);
+  const src = state.doc.sources.find((x) => x.id === id);
+  if (src) {
+    const f = inputFile(id);
+    return box('in', 'Input · data the flow reads',
+      h('p', { class: 'io-line' }, f ? `From ${f.file}, a ${formatOf(f.file)} file, through the table ${src.table}.` : `From the table ${src.table}.`),
+      h('p', { class: 'foot' }, n?.content ? `This run read a snapshot of it, content ${short(n.content)}: the run can be checked against exactly these rows.` : 'Each run reads a snapshot of it and records its hash.'),
+      readers.length ? h('p', { class: 'foot' }, `Read next by ${readers.join(', ')}.`) : null);
+  }
+  const st = steps().get(id);
+  if (!st?.dataset) return null;
+  const objects = state.doc.ontology?.objectTypes.filter((t) => t.dataset === id).map((t) => t.name) ?? [];
+  return box('out', 'Output · a dataset the flow publishes',
+    h('p', { class: 'io-line' }, `Published as ${id}${st.dataset.description ? `: ${st.dataset.description}` : ''}.`),
+    h('p', { class: 'foot' }, n?.content ? `Stored by this run, content ${short(n.content)}, under the policies below.` : 'Stored, named and hashed when the flow runs, under the policies below.'),
+    objects.length ? h('p', { class: 'foot' }, `The ontology’s ${objects.join(', ')} ${objects.length === 1 ? 'is' : 'are'} built on it.`) : null,
+    readers.length ? h('p', { class: 'foot' }, `Read next by ${readers.join(', ')}.`) : null);
+}
+
+/**
+ * Who can see a step. The owner sees everyone's access, as their rules give it, with the rows each would read, and
+ * taps a person to see the step as they do, here only, or the whole flow a tap further. Anyone else sees their own.
+ */
+function accessPanel(id: string): HTMLElement | null {
+  const p = policies();
+  if (!p) return null;
+  const box = h('div', { class: 'access', id: 'access' }, h('p', { class: 'eyebrow' }, 'Who can see this'));
+  const cols = state.columns.get(id);
+  if (!cols) {
+    box.append(h('p', { class: 'foot' }, 'Run the flow to see who can see it.'));
+    return box;
+  }
+  const owner = !!p.principals.find((x) => x.id === state.viewer)?.owner;
+  const shown = state.previewAs ?? state.viewer;
+  const people = owner ? p.principals : p.principals.filter((x) => x.id === state.viewer);
+  const list = h('div', { class: 'people', role: owner ? 'radiogroup' : 'list', 'aria-label': owner ? 'Show this step as' : 'Your access' });
+  const run = latest();
+  for (const x of people) {
+    const view = readView(p, x.id, cols);
+    const a = accessOf(view);
+    const rows = h('span', { class: 'count' }, '');
+    const parts = [h('span', { class: 'who' }, x.name), h('span', { class: `level to-${a}` }, ACCESS_LABEL[a]), rows, h('span', { class: 'how' }, accessText(x, view, cols))];
+    list.append(owner ? h('button', { type: 'button', class: `person to-${a}`, role: 'radio', 'aria-checked': String(x.id === shown), onclick: () => showAs(x.id) }, ...parts) : h('div', { class: `person to-${a}`, role: 'listitem' }, ...parts));
+    if (run && a !== 'closed') {
+      void inspect(run)
+        .then((insp) => (insp.index.has(id) ? rowsAs(insp, insp.index.get(id)!, x.id) : null))
+        .then((count) => (rows.textContent = count === null ? '' : plural(count, 'row')))
+        .catch(() => (rows.textContent = ''));
+    }
+  }
+  box.append(list);
+  if (!owner) box.append(h('p', { class: 'foot' }, 'Only the flow’s owner sees everyone’s access.'));
+  else if (state.previewAs && state.previewAs !== state.viewer) {
+    box.append(h('div', { class: 'row' }, h('span', { class: 'foot', style: 'flex:1;margin:0' }, `This step shows as ${personName(state.previewAs)} sees it; the rest of the flow, as ${personName(state.viewer)}.`), h('button', { class: 'btn', type: 'button', onclick: () => setViewer(state.previewAs!) }, `View all as ${personName(state.previewAs)}`)));
+  } else box.append(h('p', { class: 'foot' }, 'Tap someone to see this step as they do.'));
+  return box;
+}
+
+/** Show the open step as someone, in its sheet only. */
+function showAs(id: string): void {
+  state.previewAs = id === state.viewer ? null : id;
+  state.sheetFocus = 'access';
+  void renderSheet();
 }
 
 /** A bar of what was kept against what was left out, with both counts under it. */
@@ -1101,15 +1274,15 @@ async function showRows(into: HTMLElement, title: string, sql: string, first: Re
 }
 
 /** The sheet's account of what a step changed, as the viewer reads it, and the columns it adds (for the preview's tint). */
-async function changePanel(id: string): Promise<{ box: HTMLElement; fresh: string[] } | null> {
+async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLElement; fresh: string[] } | null> {
   const run = latest();
   if (!run || !state.engine) return null;
   const insp = await inspect(run);
   const i = insp.index.get(id);
   if (i === undefined || !insp.manifest.has(i)) return null;
-  const c = state.changes.get(id) ?? (await changeOf(insp, i));
+  const c = (who === state.viewer ? state.changes.get(id) : undefined) ?? (await changeOf(insp, i, who));
   const n = insp.plan.nodes[i]!;
-  const who = personName(state.viewer);
+  const name = personName(who);
   const rows = h('div', { class: 'rows-box', hidden: true });
   const box = h('div', { class: 'change' }, h('p', { class: 'eyebrow' }, 'What changed'));
   const headline = (text: string, tone: CardLine['tone'] = 'same') => box.append(h('p', { class: `headline ${tone}` }, text));
@@ -1118,16 +1291,16 @@ async function changePanel(id: string): Promise<{ box: HTMLElement; fresh: strin
     sql ? h('button', { class: 'btn show', type: 'button', onclick: () => void showRows(rows, title, sql, first) }, label) : null;
   const list = (names: readonly string[]) => names.join(', ');
   const done = () => {
-    const view = access(id);
-    if (state.viewer !== 'owner' && view?.open && (view.filters.length || view.removed.length)) {
-      say(`As ${who} reads it: ${[view.filters.length ? `only the rows the ${view.filters.join(' and the ')} lets them read` : '', view.removed.length ? `without ${list(view.removed.map((r) => r.column))}` : ''].filter(Boolean).join(', ')}.`);
+    const view = access(id, who);
+    if (view?.open && (view.filters.length || view.removed.length)) {
+      say(`As ${name} reads it: ${[view.filters.length ? `only the rows the ${view.filters.join(' and the ')} lets them read` : '', view.removed.length ? `without ${list(view.removed.map((r) => r.column))}` : ''].filter(Boolean).join(', ')}.`);
     }
     box.append(rows);
     return { box, fresh: c.added };
   };
   if (c.rowsOut === null) {
-    headline(`Closed to ${who}`);
-    say(`${access(id)?.reason ?? 'Their rules don’t open it'}.`);
+    headline(`Closed to ${name}`);
+    say(`${access(id, who)?.reason ?? 'Their rules don’t open it'}.`);
     return done();
   }
   const out = c.rowsOut;
@@ -1135,22 +1308,21 @@ async function changePanel(id: string): Promise<{ box: HTMLElement; fresh: strin
   const inputName = input === undefined ? '' : insp.plan.nodes[input]!.origin;
   if (input !== undefined && c.rowsIn === null) {
     headline(plural(out, 'row'));
-    say(`What it reads, ${inputName}, is closed to ${who}, so what it changed is closed to them too.`);
+    say(`What it reads, ${inputName}, is closed to ${name}, so what it changed is closed to them too.`);
     return done();
   }
   const inn = c.rowsIn ?? 0;
   switch (n.op) {
     case 'table': {
-      headline(`${plural(out, 'row')} from ${state.doc.sources.find((x) => x.id === id)?.table ?? 'its table'}`);
-      say('A source is copied into a snapshot when the flow runs, and its hash goes into the run’s record, so the run can be checked against exactly these rows.');
+      headline(`Brings ${plural(out, 'row')} into the flow`);
       break;
     }
     case 'expect': {
       const lost = inn - out;
       headline(lost ? `Dropped ${fmtInt(lost)} of ${plural(inn, 'row')} (${pct(lost / Math.max(1, inn))})` : `Kept all ${plural(inn, 'row')}`, lost ? 'drop' : 'same');
       box.append(split(out, lost, 'kept', 'dropped'));
-      box.append(await rulesTable(insp, i, rows));
-      if (lost) box.append(h('div', { class: 'row' }, button(`Show the ${plural(lost, 'row')} it dropped`, `Dropped by ${id}`, exceptIn(insp, input!, i))));
+      box.append(await rulesTable(insp, i, rows, who));
+      if (lost) box.append(h('div', { class: 'row' }, button(`Show the ${plural(lost, 'row')} it dropped`, `Dropped by ${id}`, exceptIn(insp, input!, i, who))));
       break;
     }
     case 'filter':
@@ -1166,11 +1338,11 @@ async function changePanel(id: string): Promise<{ box: HTMLElement; fresh: strin
       const kept = Math.min(inn, out);
       headline(lost ? `Removed ${fmtInt(lost)} of ${plural(inn, 'row')} (${pct(lost / Math.max(1, inn))})` : out > inn ? `Added ${plural(out - inn, 'row')}` : `Kept all ${plural(inn, 'row')}`, lost ? 'drop' : 'same');
       box.append(split(kept, lost, 'kept', 'removed'));
-      const removed = exceptIn(insp, input!, i);
+      const removed = exceptIn(insp, input!, i, who);
       const key = insp.manifest.get(i)!.key;
-      const where = viewIn(insp, i).where ?? '';
+      const where = viewIn(insp, i, who).where ?? '';
       // Rows it returns that it didn't read: a SQL step can rewrite values as well as drop rows.
-      const changedSql = n.op === 'sql' ? exceptIn(insp, i, input!) : null;
+      const changedSql = n.op === 'sql' ? exceptIn(insp, i, input!, who) : null;
       const [gone, fresh] = await Promise.all([removed ? countOnce(`${key}|removed|${where}`, removed) : 0, changedSql ? countOnce(`${key}|new|${where}`, changedSql) : 0]);
       if (gone) box.append(h('div', { class: 'row' }, button(`Show the ${plural(gone, 'row')} it removed`, `Removed by ${id}`, removed)));
       if (fresh) {
@@ -1186,13 +1358,13 @@ async function changePanel(id: string): Promise<{ box: HTMLElement; fresh: strin
       const u = c.unmatched;
       const keys = new Set(n.on.map(([l]) => l.toLowerCase()));
       const on = list(n.on.map(([l]) => l));
-      if (u === null || u === undefined) say(`Which rows found a match is closed to ${who}: ${inputName} is closed to them.`);
+      if (u === null || u === undefined) say(`Which rows found a match is closed to ${name}: ${inputName} is closed to them.`);
       else {
         box.append(split(inn - u, u, 'matched', n.how === 'left' ? 'no match, kept with empty columns' : 'no match, left out'));
         if (u === 0) say(`Every row of ${inputName} found its ${on} in ${right}.`);
         else {
           say(n.how === 'left' ? `${plural(u, 'row')} found no ${on} in ${right}: they are kept, with ${list(c.added)} empty.` : `${plural(u, 'row')} found no ${on} in ${right}, so the join leaves them out.`);
-          box.append(h('div', { class: 'row' }, button(`Show the ${plural(u, 'row')} with no match`, `No match in ${right}`, readIn(insp, input!, emitUnmatched(insp.plan, i, insp.ctx)!), keys)));
+          box.append(h('div', { class: 'row' }, button(`Show the ${plural(u, 'row')} with no match`, `No match in ${right}`, readIn(insp, input!, who, emitUnmatched(insp.plan, i, insp.ctx)!), keys)));
         }
         const extra = out - (inn - (n.how === 'left' ? 0 : u));
         if (extra > 0) say(`${right} has more than one row for some ${on}, so ${plural(extra, 'row')} came out more than once: ${fmtInt(inn)} in, ${fmtInt(out)} out.`);
@@ -1226,12 +1398,12 @@ async function changePanel(id: string): Promise<{ box: HTMLElement; fresh: strin
  * An expectation's rules: how many rows fail each, as the viewer reads them, and the rows themselves. A rule that
  * reads a column the viewer's policy removes stays closed, since its failures would tell them about that column.
  */
-async function rulesTable(insp: Inspection, i: number, rows: HTMLElement): Promise<HTMLElement> {
+async function rulesTable(insp: Inspection, i: number, rows: HTMLElement, who = state.viewer): Promise<HTMLElement> {
   const n = insp.plan.nodes[i] as Extract<PlanNode, { op: 'expect' }>;
   const m = insp.manifest.get(i)!;
-  const view = viewIn(insp, n.inputs[0]!);
+  const view = viewIn(insp, n.inputs[0]!, who);
   const hidden = new Set(view.removed.map((r) => r.column.toLowerCase()));
-  const who = personName(state.viewer);
+  const name = personName(who);
   const list = (names: readonly string[]) => names.join(', ');
   const rules = await Promise.all(
     n.rules.map(async ([name, check, onFail], k) => {
@@ -1241,7 +1413,7 @@ async function rulesTable(insp: Inspection, i: number, rows: HTMLElement): Promi
       return { name, onFail, reads, secret, failed, sql: secret.length ? null : wrapRead(view, emitRuleFailures(insp.plan, i, k, insp.ctx)) };
     }),
   );
-  const inn = (await rowsAs(insp, n.inputs[0]!)) ?? 0;
+  const inn = (await rowsAs(insp, n.inputs[0]!, who)) ?? 0;
   const body = rules.map((r) =>
     h('tr', {},
       h('td', {}, r.name, r.onFail === 'warn' ? h('span', { class: 'warns' }, 'warns') : null),
@@ -1254,7 +1426,7 @@ async function rulesTable(insp: Inspection, i: number, rows: HTMLElement): Promi
   return h('div', {},
     h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Rule'), h('th', { class: 'n' }, 'Fails'), h('th', { class: 'n' }, 'Share'), h('th', {}, ''))), h('tbody', {}, ...body))),
     h('p', { class: 'foot' }, 'A row can fail more than one rule, so the rules can add up to more than the rows dropped. A rule that warns keeps its rows.'),
-    closed.length ? h('p', { class: 'foot' }, `Closed to ${who}: ${closed.map((r) => `${r.name} reads ${list(r.secret)}`).join('; ')}, which their rules remove.`) : null,
+    closed.length ? h('p', { class: 'foot' }, `Closed to ${name}: ${closed.map((r) => `${r.name} reads ${list(r.secret)}`).join('; ')}, which their rules remove.`) : null,
   );
 }
 
@@ -1487,6 +1659,7 @@ const actionName = (id: string) => state.doc.ontology?.actionTypes.find((a) => a
 
 function setViewer(id: string): void {
   state.viewer = id;
+  state.previewAs = null;
   $<HTMLSelectElement>('viewer').value = id;
   state.object = null;
   state.verdict = null;

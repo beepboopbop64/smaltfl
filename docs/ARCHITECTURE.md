@@ -315,11 +315,23 @@ Builder and drawn in the family's look. The first concepts are on the design can
 - **How it is built:** DOM, CSS and SVG. The graph generalises smaltbi's model view: cards placed on a board, with one
   SVG layer for the connectors.
 - **The first version** (`src/app/`) runs the weather example on real data in the browser, with the engine and the
-  runtime plugin in a worker. Its canvas is an open grid you pan, pinch-zoom, fit and tidy: the flow runs left to
-  right, sections are laid out as blocks one column after the sections they read from, so reference data and other
-  sources sit just before the steps they feed. A card opens a sheet with the step's settings (text fields can be
-  edited and run, which rebuilds only what depends on them), a preview of its rows (a folded step's statement runs
-  over the stored versions) and the statement the engine runs. Runs can be verified and signed.
+  runtime plugin in a worker. Its canvas is an open grid you pan, pinch-zoom, fit and tidy, and the flow runs left to
+  right. Each card has a column: an input sits just before the step that first reads it, a side branch follows what
+  it reads, so most edges join neighbouring columns. Sections take horizontal lanes (a chain of sections along one,
+  a section beside them in the flow in the next), and inside a section no card sits on an edge that crosses its
+  border; tests check that no edge in the example passes behind a card, folded or not. A card opens a sheet with the
+  step's settings (text fields can be edited and run, which rebuilds only what depends on them), a preview of its rows
+  (a folded step's statement runs over the stored versions) and the statement the engine runs. Runs can be verified
+  and signed.
+- **Inputs and outputs.** An input's card says so and what it reads (INPUT · PARQUET), with a port where data comes in;
+  an output's card (a step that publishes a dataset) says OUTPUT, with a port where it leaves. Their sheets say where
+  the rows come from (the file, its format, the table, the snapshot's hash) and where they go (the dataset, its hash,
+  the ontology types built on it, the steps that read it next).
+- **Who can see each step.** A small shield marks a card a rule limits: quiet for the owner, wherever a rule limits
+  someone; marked, viewing as someone, wherever their rules limit them (a closed step is also greyed). Tapping it opens
+  the step's sheet at Who can see this: the owner sees each person's access (all of it, some rows, some columns,
+  closed) with the rules behind it and the rows they would read, and taps a person to see that step as they do, while
+  the rest of the flow stays as it was; View all as switches the whole app. Anyone else sees only their own access.
 - **What each step changed.** After a run, each card says what its step did to the data: rows it left out (with a
   badge on the card), columns it added, rows in and out of an aggregate, rows a join found no match for. Its sheet
   leads with the same in full: a bar of rows kept against rows dropped, each expectation rule's failures, and the

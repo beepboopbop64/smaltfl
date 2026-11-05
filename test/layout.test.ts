@@ -2,10 +2,13 @@
  * The canvas layout an arrangement builds on: pinning every card's place moves nothing, a folded section's steps keep
  * their arrangement, an empty section sits where it was left, and a step moved into a section lands in a free slot.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { FlowDocument } from '../src/core/document.js';
-import { frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout } from '../src/app/layout.js';
+import { edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout } from '../src/app/layout.js';
 import { visualFlow } from './fixtures/taxi.js';
+
+const example = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
 
 /** The reference flow in three sections, laid out automatically (the fixture places two cards by hand). */
 const sectioned = (): FlowDocument => ({
@@ -77,5 +80,45 @@ describe('the canvas layout', () => {
     const moved: FlowDocument = { ...doc, groups: doc.groups!.map((g) => ({ ...g, steps: g.id === 'demand' ? [...g.steps, 'trips_dedup'] : g.steps.filter((s) => s !== 'trips_dedup') })), layout: { ...pinLayout(doc, new Set()), trips_dedup: [slot.x, slot.y] } };
     const after = gridLayout(moved, new Set()).frames.find((f) => f.id === 'demand')!;
     expect(after.x <= slot.x && after.x + after.w >= slot.x + GRID.cardW && after.y <= slot.y && after.y + after.h >= slot.y + GRID.cardH).toBe(true);
+  });
+});
+
+describe('the automatic placement of the example', () => {
+  const { cardW, cardH } = GRID;
+  for (const folded of [[], ['clean'], ['places'], ['enrich'], ['weather_group']]) {
+    it(`keeps every edge in sight, with ${folded.length ? `${folded[0]} folded` : 'every section open'}`, () => {
+      const l = gridLayout(example, new Set(folded));
+      // What is drawn: each card, a folded section's members as its one card.
+      const shown = new Map<string, string>();
+      for (const f of l.frames) for (const m of f.members) shown.set(m, f.collapsed ? f.id : m);
+      const at = new Map<string, { x: number; y: number }>();
+      for (const [id, p] of l.cards) at.set(shown.get(id) ?? id, p);
+      const boxes = [...at.entries()];
+      const overlap = (a: { x: number; y: number; w: number; h: number }, b: typeof a) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+      const box = (p: { x: number; y: number }) => ({ x: p.x, y: p.y, w: cardW, h: cardH });
+      for (const [i, [a, p]] of boxes.entries()) for (const [b, q] of boxes.slice(i + 1)) expect(overlap(box(p), box(q)), `${a} and ${b}`).toBe(false);
+      for (const [i, f] of l.frames.entries()) for (const g of l.frames.slice(i + 1)) expect(overlap(f, g), `${f.id} and ${g.id}`).toBe(false);
+      for (const st of example.steps) {
+        for (const input of st.inputs) {
+          const [from, to] = [shown.get(input) ?? input, shown.get(st.id) ?? st.id];
+          if (from === to) continue;
+          const [p, q] = [at.get(from)!, at.get(to)!];
+          expect(q.x, `${input} → ${st.id} runs forward`).toBeGreaterThan(p.x);
+          // Nothing drawn on the way: no point along the edge falls inside a card other than its two ends.
+          for (const [x, y] of edgePath(p, q).points) {
+            for (const [id, r] of boxes) if (id !== from && id !== to) expect(x > r.x + 1 && x < r.x + cardW - 1 && y > r.y + 1 && y < r.y + cardH - 1, `${input} → ${st.id} passes over ${id}`).toBe(false);
+          }
+        }
+      }
+    });
+  }
+
+  it('puts each input just before the step that first reads it', () => {
+    const l = gridLayout(example, new Set());
+    const xs = [...new Set([...l.cards.values()].map((p) => p.x))].sort((a, b) => a - b);
+    for (const src of example.sources) {
+      const first = Math.min(...example.steps.filter((st) => st.inputs.includes(src.id)).map((st) => l.cards.get(st.id)!.x));
+      expect(xs.indexOf(first) - xs.indexOf(l.cards.get(src.id)!.x), src.id).toBe(1);
+    }
   });
 });
