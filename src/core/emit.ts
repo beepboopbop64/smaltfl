@@ -159,9 +159,14 @@ export function createTable(name: string, schema: readonly Column[], options: { 
 
 /** The rows an expectation rule fails on: where its check is not true, NULL included, as the counts count them. */
 export function emitRuleFailures(plan: FlowPlan, node: number, rule: number, ctx: EmitContext): string {
+  return emitFailures(plan, node, [rule], ctx);
+}
+
+/** The rows that fail any of an expectation's rules (by index), each row once. */
+export function emitFailures(plan: FlowPlan, node: number, rules: readonly number[], ctx: EmitContext): string {
   const n = plan.nodes[node] as ExpectNode;
-  const check = n.rules[rule]![1];
-  return `SELECT * FROM (\n${emitRead(plan, n.inputs[0]!, ctx)}\n) WHERE CASE WHEN (\n${check}\n) THEN 0 ELSE 1 END = 1`;
+  const all = rules.map((k) => `(\n${n.rules[k]![1]}\n)`).join(' AND ');
+  return `SELECT * FROM (\n${emitRead(plan, n.inputs[0]!, ctx)}\n) WHERE CASE WHEN ${all} THEN 0 ELSE 1 END = 1`;
 }
 
 /**
@@ -200,4 +205,45 @@ export function emitUnmatched(plan: FlowPlan, node: number, ctx: EmitContext): s
   const on = n.on.map(([l, r]) => `"_l".${q(l)} = "_r".${q(r)}`).join(' AND ');
   const right = `SELECT DISTINCT ${keys} FROM (\n${emitRead(plan, n.inputs[1]!, ctx)}\n)`;
   return `SELECT "_l".* FROM (\n${emitRead(plan, n.inputs[0]!, ctx)}\n) AS "_l" LEFT JOIN (${right}) AS "_r" ON ${on} WHERE "_r".${q(n.on[0]![1])} IS NULL`;
+}
+
+// ------------------------------------------------------------------ data quality: what a step's columns hold
+
+/**
+ * Exact facts about each column of a relation, in one row: the rows, then for each column the values present, the
+ * distinct values, the smallest, the largest, and the mean of a numeric one (NULL otherwise).
+ */
+export function emitColumnFacts(sql: string, columns: readonly { name: string; numeric: boolean }[]): string {
+  const parts = ['count(*)'];
+  for (const c of columns) {
+    const x = q(c.name);
+    parts.push(`count(${x})`, `count(DISTINCT ${x})`, `min(${x})`, `max(${x})`, c.numeric ? `avg(${x})` : 'NULL');
+  }
+  return `SELECT ${parts.join(', ')} FROM (\n${sql}\n)`;
+}
+
+/** An even sample of a relation: its first row and every `every`-th one after, in the order it gives them. */
+export function emitSample(sql: string, columns: readonly string[], every: number): string {
+  const list = columns.map(q).join(', ');
+  return `SELECT ${list} FROM (SELECT ${list}, row_number() OVER () AS "_smaltfl_n" FROM (\n${sql}\n)) WHERE ("_smaltfl_n" - 1) % ${Math.max(1, Math.floor(every))} = 0`;
+}
+
+/** Up to `limit` distinct values of one column of a relation. */
+export function emitDistinct(sql: string, column: string, limit: number): string {
+  return `SELECT DISTINCT ${q(column)} FROM (\n${sql}\n) LIMIT ${Math.max(1, Math.floor(limit))}`;
+}
+
+/** How many rows of a relation fail each check, counted as an expectation counts: a row fails when its check isn't true. */
+export function emitCheckCounts(sql: string, checks: readonly string[]): string {
+  return `SELECT ${checks.map((c) => `coalesce(sum(CASE WHEN (\n${c}\n) THEN 0 ELSE 1 END), 0)`).join(', ')} FROM (\n${sql}\n)`;
+}
+
+/** Copy a relation's rows into a table made for them (createTable): the rows a long look at a step reads. */
+export function emitCopy(table: string, columns: readonly string[], sql: string): string {
+  const list = columns.map(q).join(', ');
+  return `INSERT INTO ${q(table)} (${list}) SELECT ${list} FROM (\n${sql}\n)`;
+}
+
+export function emitDrop(table: string): string {
+  return `DROP TABLE ${q(table)}`;
 }

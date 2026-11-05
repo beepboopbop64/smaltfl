@@ -12,18 +12,19 @@ import { EXAMPLE_SOURCES } from '../../examples/sources.js';
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, validateDocument } from '../core/document.js';
-import { emitExcept, emitRead, emitRuleFailures, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
+import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitExcept, emitFailures, emitRead, emitRuleFailures, emitSample, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Edit } from '../core/ontology.js';
 import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
-import type { FlowPlan, PlanNode } from '../core/plan.js';
+import type { Column, FlowPlan, PlanNode } from '../core/plan.js';
+import { drift, fillGaps, isolationForest, madsOf, profileColumn, suggestChecks, unusual, type Drift, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
 import type { RunResult, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
 import { runFlow, verifyRun } from '../index.js';
 import { connect, type Engine } from './engine.js';
-import { edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout, type GridLayout } from './layout.js';
+import { besideSlot, edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout, type GridLayout } from './layout.js';
 
 declare const __SMALTDB_VERSION__: string;
 const SMALTDB = typeof __SMALTDB_VERSION__ === 'string' ? __SMALTDB_VERSION__ : '0.9.0';
@@ -254,6 +255,8 @@ interface Change {
   /** A join: its left-hand rows that found no match (null when closed to the viewer), and whether it leaves them out. */
   unmatched?: number | null;
   inner?: boolean;
+  /** A check: the rows its warning rules flag (and keep), each row once. */
+  flagged?: number;
 }
 
 interface CardLine {
@@ -364,6 +367,16 @@ async function changeOf(insp: Inspection, i: number, who = state.viewer): Promis
     change.inner = n.how !== 'left';
     change.unmatched = view.open ? await countOnce(`${insp.manifest.get(i)!.key}|unmatched|${view.where ?? ''}`, wrapRead(view, emitUnmatched(insp.plan, i, insp.ctx)!)!) : null;
   }
+  if (n.op === 'expect') {
+    // The rows its warnings flag, as the viewer reads them; not when a warning reads a column their rules remove.
+    const view = viewIn(insp, n.inputs[0]!, who);
+    const hidden = new Set(view.removed.map((r) => r.column.toLowerCase()));
+    const warns = n.rules.map((r, k) => (r[2] === 'warn' ? k : -1)).filter((k) => k >= 0);
+    const m = insp.manifest.get(i)!;
+    if (view.open && warns.length && !warns.some((k) => [...identifiers(n.rules[k]![1])].some((x) => hidden.has(x)))) {
+      change.flagged = warns.length === 1 && !view.where && m.expectations ? m.expectations.rules[warns[0]!]!.failed : await countOnce(`${m.key}|flagged|${view.where ?? ''}`, wrapRead(view, emitFailures(insp.plan, i, warns, insp.ctx))!);
+    }
+  }
   return change;
 }
 
@@ -430,6 +443,9 @@ function summarize(c: Change): CardLine | null {
       if (c.op === 'sql' && !c.same && c.columnsIn !== c.columnsOut) return { text: `${fmtCompact(inn)} → ${fmtCompact(out)} rows`, tone: 'same' };
       if (lost) return { text: `−${fmtInt(lost)} rows · ${pct(lost / Math.max(1, inn))}`, tone: 'drop', badge: `−${fmtCompact(lost)} rows` };
       if (out > inn) return { text: `+${fmtInt(out - inn)} rows`, tone: 'add' };
+      // A check that only warns keeps every row, and says how many it flags.
+      if (c.op === 'expect' && c.flagged) return { text: `${plural(c.flagged, 'row')} flagged`, tone: 'drop', badge: `⚑ ${fmtCompact(c.flagged)}` };
+      if (c.op === 'expect' && c.flagged === 0) return { text: 'every row passes', tone: 'same' };
       return { text: 'no rows removed', tone: 'same' };
   }
 }
@@ -934,7 +950,10 @@ function loadArrangement(): void {
   try {
     const saved = JSON.parse(localStorage.getItem(arrangementKey()) ?? 'null') as { v?: number; groups?: unknown; layout?: unknown } | null;
     if (!saved || (saved.v !== 1 && saved.v !== ARRANGEMENT)) return;
-    const next = { ...state.doc, groups: saved.groups, layout: saved.v === ARRANGEMENT ? saved.layout : {} } as FlowDocument;
+    // A step the flow no longer has (a check box taken out, edits forgotten) just leaves its section.
+    const known = new Set([...state.doc.sources, ...state.doc.steps].map((x) => x.id));
+    const groups = Array.isArray(saved.groups) ? (saved.groups as GroupDef[]).map((g) => (g && Array.isArray(g.steps) ? { ...g, steps: g.steps.filter((x) => known.has(x)) } : g)) : saved.groups;
+    const next = { ...state.doc, groups, layout: saved.v === ARRANGEMENT ? saved.layout : {} } as FlowDocument;
     if (validateDocument(next).length) return;
     state.doc = next;
   } catch {
@@ -943,15 +962,18 @@ function loadArrangement(): void {
 }
 
 function resetArrangement(): void {
-  state.doc = { ...state.doc, groups: structuredClone(exampleDoc.groups) as FlowDocument['groups'], layout: {} };
+  const edited = canonicalJSON(state.doc.steps as unknown as Parameters<typeof canonicalJSON>[0]) !== canonicalJSON(exampleDoc.steps as unknown as Parameters<typeof canonicalJSON>[0]);
+  state.doc = { ...state.doc, steps: structuredClone(exampleDoc.steps) as StepDef[], groups: structuredClone(exampleDoc.groups) as FlowDocument['groups'], layout: {} };
   state.collapsed = new Set();
   try {
     localStorage.removeItem(arrangementKey());
+    localStorage.removeItem(flowKey());
   } catch {
     // Nothing kept to forget.
   }
   select(null);
-  fitView();
+  startView(gridLayout(viewDoc(), state.collapsed));
+  if (edited) void run();
 }
 
 // ------------------------------------------------------------------ drawing the canvas
@@ -1101,6 +1123,386 @@ function openSection(id: string, focusName = false): void {
   renderSectionSheet(focusName);
 }
 
+// ------------------------------------------------------------------ data quality: columns, odd rows, drift, checks
+
+// A step's sheet says what its columns hold (exact counts from the engine, shapes from an even sample), which rows an
+// isolation forest finds odd, how each column moved since the last run with other rows there, and the checks worth
+// adding; one tap adds them as a box beside the step. All of it as the viewer reads it, through their policy.
+
+interface Quality {
+  /** Rows the person reads. */
+  rows: number;
+  columns: string[];
+  sample: unknown[][];
+  profiles: Profile[];
+  /** The measures the isolation forest scored the sample on, and its oddest rows (by place in the sample). */
+  measures: string[];
+  odd: { at: number; score: number; why: Unusual[] }[];
+  suggestions: (Suggestion & { failing: number })[];
+}
+
+/** The sample's size: enough for a column's shape, small enough to read in a moment on a phone. */
+const SAMPLE = 2000;
+const qualities = new Map<string, Promise<Quality | null>>();
+
+/** A step's quality as a person reads it, kept under its key and their view: a key names exact content. */
+function qualityOf(insp: Inspection, i: number, who = state.viewer): Promise<Quality | null> {
+  const view = viewIn(insp, i, who);
+  const m = insp.manifest.get(i);
+  if (!view.open || !m) return Promise.resolve(null);
+  const key = `${m.key}|${view.where ?? ''}|${view.columns.join(',')}`;
+  let found = qualities.get(key);
+  if (!found) {
+    found = measureQuality(insp, i, who);
+    found.catch(() => qualities.delete(key));
+    qualities.set(key, found);
+    // The last dozen looks are kept: each holds a sample of rows.
+    for (const old of [...qualities.keys()].slice(0, Math.max(0, qualities.size - 12))) qualities.delete(old);
+  } else {
+    qualities.delete(key);
+    qualities.set(key, found);
+  }
+  return found;
+}
+
+/**
+ * The columns a step makes itself, lowercased, where its checks belong: all of an input's, an aggregate's or a SQL
+ * step's; the ones a formula sets, a join adds or a select computes. A filter or a check makes none of its own.
+ */
+function ownColumns(insp: Inspection, i: number): Set<string> | undefined {
+  const n = insp.plan.nodes[i]!;
+  const lc = (c: string) => c.toLowerCase();
+  switch (n.op) {
+    case 'table':
+    case 'aggregate':
+    case 'sql':
+      return new Set(insp.ctx.columns(i).map(lc));
+    case 'formula':
+      return new Set(n.set.map(([c]) => lc(c)));
+    case 'join':
+      return new Set(n.take.map(([c]) => lc(c)));
+    case 'select': {
+      const had = new Set(insp.ctx.columns(n.inputs[0]!).map(lc));
+      return new Set(n.project.filter(([name, e]) => !had.has(lc(name)) || e.trim().replace(/^"(.*)"$/s, '$1').toLowerCase() !== lc(name)).map(([c]) => lc(c)));
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** Columns an expectation already checks: one upstream of the step, the step itself, or a check box that reads it. */
+function coveredColumns(insp: Inspection, i: number): Set<string> {
+  const out = new Set<string>();
+  const seen = new Set<number>();
+  const visit = (j: number) => {
+    if (seen.has(j)) return;
+    seen.add(j);
+    const n = insp.plan.nodes[j]!;
+    if (n.op === 'expect') for (const [, check] of n.rules) for (const x of identifiers(check)) out.add(x);
+    for (const k of n.inputs) visit(k);
+  };
+  visit(i);
+  insp.plan.nodes.forEach((n, j) => n.op === 'expect' && n.inputs[0] === i && visit(j));
+  return out;
+}
+
+let qualityTables = 0;
+
+async function measureQuality(insp: Inspection, i: number, who: string): Promise<Quality | null> {
+  const engine = state.engine!;
+  const rowsOf = readIn(insp, i, who);
+  if (!rowsOf) return null;
+  const columns = viewIn(insp, i, who).columns;
+  const types = new Map(insp.plan.nodes[i]!.schema!.map(([c, t]) => [c.toLowerCase(), t]));
+  const typeOf = (c: string) => types.get(c.toLowerCase()) ?? 'any';
+  // A stored step's table is quick to read again and again. A folded step's rows, as the person reads them, are copied
+  // once into a table of their own, so they are computed once for all the questions asked of them, not once a question.
+  if (insp.ctx.table(i) !== undefined) return lookInto(insp, i, rowsOf, columns, typeOf);
+  const tmp = `_smaltfl_look_${++qualityTables}`;
+  await engine.exec(createTable(tmp, columns.map((c) => [c, typeOf(c)] as Column), { temp: true }));
+  try {
+    await engine.exec(emitCopy(tmp, columns, rowsOf));
+    return await lookInto(insp, i, `SELECT * FROM ${quoteIdent(tmp)}`, columns, typeOf);
+  } finally {
+    await engine.exec(emitDrop(tmp)).catch(() => undefined);
+  }
+}
+
+async function lookInto(insp: Inspection, i: number, read: string, columns: string[], typeOf: (c: string) => string): Promise<Quality> {
+  const engine = state.engine!;
+  const f = (await engine.query(emitColumnFacts(read, columns.map((name) => ({ name, numeric: ['int', 'real', 'num'].includes(typeOf(name)) }))))).rows[0]!;
+  const rows = Number(f[0]);
+  const sample = rows ? (await engine.query(emitSample(read, columns, Math.ceil(rows / SAMPLE)))).rows : [];
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  const profiles = columns.map((name, k) => profileColumn(name, typeOf(name), { rows, present: Number(f[1 + 5 * k]), distinct: Number(f[2 + 5 * k]), min: f[3 + 5 * k], max: f[4 + 5 * k], mean: num(f[5 + 5 * k]) }, sample.map((r) => r[k])));
+  const covered = coveredColumns(insp, i);
+  const only = ownColumns(insp, i);
+  // A small category's values, exactly, for the ones a check could be suggested on.
+  const values = new Map<string, string[]>();
+  for (const p of profiles) {
+    const mine = !covered.has(p.name.toLowerCase()) && (!only || only.has(p.name.toLowerCase()));
+    if (mine && (p.kind === 'category' || p.kind === 'code') && p.facts.distinct <= 12) {
+      values.set(p.name, (await engine.query(emitDistinct(read, p.name, 13))).rows.map((r) => r[0]).filter((v) => v !== null && v !== undefined).map(String));
+    }
+  }
+  const suggestions = suggestChecks(profiles, { covered, only, values });
+  const counts = suggestions.length ? (await engine.query(emitCheckCounts(read, suggestions.map((x) => x.check)))).rows[0]! : [];
+  const measures = profiles.filter((p) => p.kind === 'measure').map((p) => p.name);
+  let odd: Quality['odd'] = [];
+  if (measures.length && sample.length >= 20) {
+    const at = measures.map((c) => columns.indexOf(c));
+    const scores = isolationForest(fillGaps(at.map((k) => sample.map((r) => (typeof r[k] === 'number' ? (r[k] as number) : null)))));
+    const records = sample.map((r) => Object.fromEntries(columns.map((c, k) => [c, r[k]])));
+    const mads = madsOf(profiles, records);
+    odd = scores
+      .map((score, n) => ({ at: n, score }))
+      .filter((x) => x.score >= 0.6)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8)
+      .map((x) => ({ ...x, why: unusual(profiles, records[x.at]!, mads) }));
+  }
+  return { rows, columns, sample, profiles, measures, odd, suggestions: suggestions.map((x, k) => ({ ...x, failing: Number(counts[k] ?? 0) })) };
+}
+
+/** The latest earlier run whose rows at this step differ from now's: what drift is measured against. */
+function earlierVersion(id: string): RunRecord | undefined {
+  const now = nodeOf(id)?.key;
+  return state.runs.slice(1).find((r) => {
+    const n = r.result.manifest.nodes.find((x) => x.origin === id);
+    return !!n && n.key !== now;
+  });
+}
+
+/** A measure's value for people: about three significant digits. */
+const fmtNum = (v: number) => (Math.abs(v) >= 1000 ? fmtInt(v) : Math.abs(v) >= 100 ? String(Math.round(v)) : Math.abs(v) >= 10 ? String(Math.round(v * 10) / 10) : String(Math.round(v * 100) / 100));
+const fmtTime = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
+const fmtOf = (p: Profile) => (p.kind === 'time' ? fmtTime : fmtNum);
+
+/** A histogram of the sample from its 1st to its 99th percentile, with the median marked. */
+function histogram(p: Profile): HTMLElement | null {
+  const hist = p.hist;
+  const q = p.quantiles;
+  if (!hist || !q) return null;
+  const fmt = fmtOf(p);
+  const W = 240;
+  const H = 44;
+  const max = Math.max(1, ...hist.counts);
+  const bw = W / hist.counts.length;
+  const svg = s('svg', { viewBox: `0 0 ${W} ${H + 14}`, class: 'hist', role: 'img', 'aria-label': `Most values from ${fmt(hist.lo)} to ${fmt(hist.hi)}, the median ${fmt(q.p50)}` });
+  hist.counts.forEach((c, k) => svg.append(s('rect', { class: 'b', x: k * bw + 0.5, y: H - (c / max) * H, width: Math.max(1, bw - 1), height: Math.max(c ? 1 : 0, (c / max) * H) })));
+  const mx = ((q.p50 - hist.lo) / (hist.hi - hist.lo || 1)) * W;
+  svg.append(s('line', { class: 'med', x1: mx, x2: mx, y1: 0, y2: H }));
+  svg.append(s('text', { class: 'ax', x: 0, y: H + 12 }, fmt(hist.lo)), s('text', { class: 'ax', x: W, y: H + 12, 'text-anchor': 'end' }, fmt(hist.hi)));
+  return h('div', { class: 'histwrap' }, svg);
+}
+
+/** A column as a card: how full it is, its shape or its common values, how it moved, and what a check would flag. */
+function columnCard(p: Profile, type: string, moved: Drift | undefined, since: number | undefined, flags: string[]): HTMLElement {
+  const f = p.facts;
+  const gaps = f.rows - f.present;
+  const fmt = fmtOf(p);
+  const card = h('article', { class: 'record colcard' },
+    h('div', { class: 'colhead' }, h('h3', {}, ...breakable(p.name)), h('span', { class: 'tag' }, `${p.kind} · ${type}`)),
+    h('p', { class: 'colline' }, `${pct(f.present / Math.max(1, f.rows))} filled · ${fmtInt(f.distinct)} distinct${gaps ? ` · ${fmtInt(gaps)} empty` : ''}`));
+  const shape = histogram(p);
+  if (shape && p.quantiles) {
+    const q = p.quantiles;
+    const edge = (v: unknown) => (typeof v === 'number' ? fmt(v) : String(v ?? '—').slice(0, 16));
+    const stat = (k: string, v: string) => [h('dt', {}, k), h('dd', {}, v)];
+    card.append(shape, h('dl', { class: 'stats' },
+      ...stat('smallest', edge(f.min)),
+      ...stat('median', fmt(q.p50)),
+      ...stat('largest', edge(f.max)),
+      ...(p.kind === 'measure' && f.mean !== null ? stat('mean', fmt(f.mean)) : []),
+      ...stat('middle half', `${fmt(q.p25)} – ${fmt(q.p75)}`)));
+  } else if (p.top?.length) {
+    card.append(h('div', { class: 'tops' },
+      ...p.top.map((t) => h('div', { class: 'top' }, h('span', { class: 'v' }, t.value), h('span', { class: 'bar' }, h('span', { style: `width:${Math.max(1, t.share * 100).toFixed(1)}%` })), h('span', { class: 'n' }, pct(t.share))))));
+    if (f.distinct > p.top.length) card.append(h('p', { class: 'foot', style: 'margin:0' }, `and ${fmtInt(f.distinct - p.top.length)} more values`));
+  }
+  if (moved && since !== undefined) card.append(h('p', { class: 'drift' }, h('span', { class: `level-chip ${moved.level}` }, moved.level), ` since run ${since}${moved.note ? `: ${moved.note}` : ''} · PSI ${moved.psi.toFixed(2)}`));
+  for (const flag of flags) card.append(h('p', { class: 'colflag' }, flag));
+  return card;
+}
+
+/** Why an odd row is odd, in words: its measures that sit far from most rows'. */
+const whyText = (us: readonly Unusual[]) =>
+  us.length ? us.slice(0, 3).map((u) => `${u.column} ${fmtNum(u.value)}, where most rows have ${fmtNum(u.usual[0])} to ${fmtNum(u.usual[1])}`).join('; ') : 'an unusual mix of its values, none far out on its own';
+
+function oddRows(q: Quality): HTMLElement {
+  const box = h('div', { class: 'quality-part' }, h('p', { class: 'eyebrow' }, `Odd rows · ${q.odd.length}`));
+  if (!q.measures.length) {
+    box.append(h('p', { class: 'foot' }, 'Odd rows are found among measures, numbers that vary, and this step has none.'));
+    return box;
+  }
+  box.append(h('p', { class: 'foot' }, `An isolation forest of 100 trees scored the ${fmtInt(q.sample.length)} sampled rows on ${q.measures.join(', ')}: the fewer random splits it takes to set a row apart, the odder it is (1 is the oddest). ${q.odd.length ? 'The oddest, and what sets each apart:' : 'None stands out.'}`));
+  if (q.odd.length) {
+    const rows = q.odd.map((o) => [whyText(o.why), o.score.toFixed(2), ...q.sample[o.at]!]);
+    box.append(rowsView(['why', 'oddness', ...q.columns], rows, (c, r) => (c === 'why' || c === 'oddness' ? 'hit' : r !== undefined && q.odd[r]!.why.some((u) => u.column === c) ? 'hit' : undefined)));
+  }
+  return box;
+}
+
+function suggestedChecks(id: string, q: Quality): HTMLElement {
+  const box = h('div', { class: 'quality-part' }, h('p', { class: 'eyebrow' }, `Suggested checks · ${q.suggestions.length}`));
+  if (!q.suggestions.length) {
+    box.append(h('p', { class: 'foot' }, 'Nothing to suggest for the columns this step makes: they are checked already, or hold nothing a simple check would catch.'));
+    return box;
+  }
+  box.append(h('p', { class: 'foot' }, 'From what the columns hold today, each counted over every row. They warn: adding them changes no results, and the new box reports the rows they flag.'));
+  const picks: { s: Suggestion; input: HTMLInputElement }[] = [];
+  const catches = q.suggestions.some((x) => x.failing > 0);
+  const list = h('div', { class: 'suggestions' });
+  for (const x of q.suggestions) {
+    const input = h('input', { type: 'checkbox', id: `suggest-${x.name}` });
+    input.checked = catches ? x.failing > 0 : true;
+    picks.push({ s: x, input });
+    list.append(h('label', { class: 'suggestion', for: input.id }, input,
+      h('span', { class: 'sg-body' },
+        h('code', {}, x.check),
+        h('span', { class: 'sg-why' }, x.why),
+        h('span', { class: `pill ${x.failing ? 'warn' : 'ok'}` }, x.failing ? `flags ${plural(x.failing, 'row')} today (${pct(x.failing / Math.max(1, q.rows))})` : 'passes today'))));
+  }
+  box.append(list);
+  if (isOwner()) {
+    const add = h('button', { class: 'run', type: 'button' }, '');
+    const label = () => {
+      const n = picks.filter((p) => p.input.checked).length;
+      add.textContent = n ? `Add ${n === 1 ? 'it' : `these ${n}`} as a check box` : 'Pick a check to add';
+      add.disabled = n === 0;
+    };
+    for (const p of picks) p.input.addEventListener('change', label);
+    label();
+    add.addEventListener('click', () => addCheckBox(id, picks.filter((p) => p.input.checked).map((p) => p.s)));
+    box.append(h('div', { class: 'row' }, add));
+  }
+  return box;
+}
+
+/** A step's columns, odd rows and suggested checks, as a person reads it, with drift since the last run with other rows. */
+async function qualityPanel(id: string, who: string): Promise<HTMLElement | null> {
+  const run = latest();
+  if (!run || !state.engine) return null;
+  const insp = await inspect(run);
+  const i = insp.index.get(id);
+  if (i === undefined || !insp.manifest.has(i)) return null;
+  const q = await qualityOf(insp, i, who);
+  if (!q) return null;
+  if (!q.rows) return h('div', { class: 'quality' }, h('p', { class: 'eyebrow' }, 'Columns'), h('p', { class: 'foot' }, 'No rows to describe.'));
+  const drifts = new Map<string, Drift>();
+  const earlier = earlierVersion(id);
+  let since: number | undefined;
+  if (earlier) {
+    const ei = await inspect(earlier);
+    const j = ei.index.get(id);
+    const before = j === undefined ? null : await qualityOf(ei, j, who);
+    if (before?.rows) {
+      since = earlier.result.run;
+      for (const p of q.profiles) {
+        const k = before.columns.indexOf(p.name);
+        if (k >= 0) drifts.set(p.name, drift(p.kind, before.sample.map((r) => r[k]), q.sample.map((r) => r[q.columns.indexOf(p.name)]), fmtOf(p)));
+      }
+    }
+  }
+  const types = new Map(insp.plan.nodes[i]!.schema!.map(([c, t]) => [c, t as string]));
+  const flags = (column: string) => q.suggestions.filter((x) => x.column === column && x.failing > 0).map((x) => `${x.check} flags ${plural(x.failing, 'row')}`);
+  const gappy = q.profiles.filter((p) => p.facts.present < p.facts.rows).length;
+  const moved = [...drifts.values()].filter((d) => d.level !== 'steady').length;
+  const summary = [gappy ? `${gappy} with empty values` : 'none empty', since !== undefined ? (moved ? `${moved} moved since run ${since}` : `all steady since run ${since}`) : 'no earlier run with other rows here to measure drift against'];
+  return h('div', { class: 'quality' },
+    h('div', { class: 'quality-part' },
+      h('p', { class: 'eyebrow' }, `Columns · ${q.profiles.length}`),
+      h('p', { class: 'foot' }, `${summary.join(' · ')}. Counts are exact; shapes come from an even sample of ${fmtInt(q.sample.length)} of ${plural(q.rows, 'row')}.`),
+      carousel(q.profiles.map((p) => columnCard(p, types.get(p.name) ?? 'any', drifts.get(p.name), since, flags(p.name))), 'column')),
+    oddRows(q),
+    suggestedChecks(id, q));
+}
+
+/**
+ * Add checks as a box beside a step: an expectations step that reads it and warns, so no result changes; it joins the
+ * step's section, sits next to it, and runs straight away (only it runs: everything else is reused).
+ */
+function addCheckBox(stepId: string, picked: readonly Suggestion[]): void {
+  if (!picked.length || !isOwner()) return;
+  const doc = state.doc;
+  const taken = new Set([...doc.sources, ...doc.steps].map((x) => x.id.toLowerCase()));
+  const base = `${stepId.slice(0, 50)}_checks`;
+  let id = base;
+  for (let n = 2; taken.has(id.toLowerCase()); n++) id = `${base}_${n}`;
+  const box: StepDef = { id, kind: 'expectations', inputs: [stepId], description: `Checks suggested from what ${stepId}’s columns hold`, rules: picked.map((x) => ({ name: x.name, check: x.check, onFail: 'warn' })) };
+  const at = doc.steps.findIndex((x) => x.id === stepId);
+  const steps = [...doc.steps];
+  steps.splice(at + 1, 0, box);
+  const groups = doc.groups?.map((g) => {
+    const k = g.steps.indexOf(stepId);
+    return k < 0 ? g : { ...g, steps: [...g.steps.slice(0, k + 1), id, ...g.steps.slice(k + 1)] };
+  });
+  const next: FlowDocument = { ...doc, steps, groups };
+  // Arranged by hand: it sits beside the step rather than wherever the automatic layout would put it.
+  if (Object.keys(doc.layout ?? {}).length) {
+    const before = gridLayout(doc, state.collapsed);
+    const slot = besideSlot(before, before.cards.get(stepId)!, id);
+    next.layout = { ...pinLayout(doc, state.collapsed), [id]: [slot.x, slot.y] };
+  }
+  const issues = validateDocument(next);
+  if (issues.length) {
+    setStatus(`The checks couldn't be added: ${issues[0]!.path}: ${issues[0]!.message}.`, true);
+    return;
+  }
+  state.doc = next;
+  saveFlow();
+  saveArrangement();
+  select(null);
+  void run().then(() => select(id));
+}
+
+/** Take out a step nothing reads, such as a check box: the flow runs again without it. */
+function removeStep(id: string): void {
+  const doc = state.doc;
+  if (!isOwner() || doc.steps.some((x) => x.inputs.includes(id))) return;
+  const next: FlowDocument = { ...doc, steps: doc.steps.filter((x) => x.id !== id), groups: doc.groups?.map((g) => ({ ...g, steps: g.steps.filter((x) => x !== id) })), layout: Object.fromEntries(Object.entries(doc.layout ?? {}).filter(([k]) => k !== id)) };
+  const issues = validateDocument(next);
+  if (issues.length) {
+    setStatus(`${id} can’t be taken out: ${issues[0]!.message}.`, true);
+    return;
+  }
+  state.doc = next;
+  saveFlow();
+  saveArrangement();
+  select(null);
+  void run();
+}
+
+// ------------------------------------------------------------------ the flow's edits, kept in this browser
+
+const flowKey = () => `smaltfl:flow:${state.doc.id}`;
+/** A fingerprint of the example's own steps: edits kept against another version of them aren't used. */
+const FLOW_BASE = (() => {
+  let hash = 0x811c9dc5;
+  for (const ch of canonicalJSON(exampleDoc.steps as unknown as Parameters<typeof canonicalJSON>[0])) hash = Math.imul(hash ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  return hash.toString(16);
+})();
+
+/** The flow's steps as edited here (settings applied, check boxes added or taken out), kept in this browser. */
+function saveFlow(): void {
+  try {
+    localStorage.setItem(flowKey(), JSON.stringify({ v: 1, base: FLOW_BASE, steps: state.doc.steps }));
+  } catch {
+    // Storage can be off: the edits then last as long as the page.
+  }
+}
+
+function loadFlow(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(flowKey()) ?? 'null') as { v?: number; base?: string; steps?: unknown } | null;
+    if (!saved || saved.v !== 1 || saved.base !== FLOW_BASE || !Array.isArray(saved.steps)) return;
+    const next = { ...state.doc, steps: saved.steps } as FlowDocument;
+    if (validateDocument(next).length === 0) state.doc = next;
+  } catch {
+    // Unreadable storage: the example's own steps.
+  }
+}
+
 // ------------------------------------------------------------------ the sheet
 
 async function renderSheet(): Promise<void> {
@@ -1130,13 +1532,17 @@ async function renderSheet(): Promise<void> {
 
   // What it changed comes first: it is what a person opening a step most often wants to know.
   const changed = h('div', { class: 'change' }, h('p', { class: 'eyebrow' }, 'What changed'), h('p', { class: 'foot' }, n ? 'Working it out…' : 'Run the flow to see what this step changes.'));
-  body.append(changed);
+  const quality = h('div', { class: 'quality' }, h('p', { class: 'eyebrow' }, 'Columns'), h('p', { class: 'foot' }, n ? 'Working out what they hold…' : 'Run the flow to see what its columns hold.'));
+  body.append(changed, quality);
   const io = inOut(id);
   if (io) body.append(io);
-  const accessBox = accessPanel(id);
-  if (accessBox) {
-    body.append(accessBox);
-    if (state.sheetFocus === 'access') requestAnimationFrame(() => accessBox.scrollIntoView({ block: 'start' }));
+  const seenBy = accessPanel(id);
+  if (seenBy) {
+    body.append(seenBy.box);
+    if (state.sheetFocus === 'access') {
+      requestAnimationFrame(() => seenBy.box.scrollIntoView({ block: 'start' }));
+      seenBy.count();
+    }
   }
   state.sheetFocus = null;
 
@@ -1162,6 +1568,16 @@ async function renderSheet(): Promise<void> {
   body.append(facts);
 
   if (st) body.append(editor(st));
+  if (st && isOwner() && readersOf(id).length === 0) {
+    const out = h('button', { class: 'btn danger', type: 'button' }, 'Take this step out');
+    let armed = 0;
+    out.addEventListener('click', () => {
+      if (armed) return (clearTimeout(armed), removeStep(id));
+      out.textContent = 'Take it out? Nothing reads it';
+      armed = window.setTimeout(() => ((armed = 0), (out.textContent = 'Take this step out')), 3000);
+    });
+    body.append(h('div', { class: 'row' }, out));
+  }
 
   const preview = h('div', {}, h('p', { class: 'eyebrow' }, 'Preview · first 20 rows'), h('p', { class: 'foot' }, n ? 'Loading…' : 'Run the flow to preview its rows.'));
   const explain = h('details', {}, h('summary', {}, 'What the engine runs'), h('pre', { class: 'code' }, n ? 'Loading…' : 'Run the flow first.'));
@@ -1178,23 +1594,39 @@ async function renderSheet(): Promise<void> {
   } catch (e) {
     changed.lastElementChild!.textContent = message(e);
   }
-  try {
-    const sql = await statementFor(id);
-    if (state.selected !== id || !sql) return;
-    const view = access(id, who);
-    const read = view ? wrapRead(view, sql) : sql;
-    explain.lastElementChild!.textContent = read && read !== sql ? `-- read as ${personName(who)}: ${view!.filters.join(', ') || 'no row rules'}${view!.removed.length ? `; removes ${view!.removed.map((r) => r.column).join(', ')}` : ''}\n${read}` : sql;
-    if (!read) {
-      preview.lastElementChild!.replaceWith(h('p', { class: 'status bad' }, `Closed to ${personName(who)}: ${view!.reason}.`));
-      return;
+  // The preview first (it is quick), then what the columns hold (it reads every row).
+  const engine = state.engine;
+  const showPreview = async (): Promise<void> => {
+    try {
+      const sql = await statementFor(id);
+      if (state.selected !== id || !sql) return;
+      const view = access(id, who);
+      const read = view ? wrapRead(view, sql) : sql;
+      explain.lastElementChild!.textContent = read && read !== sql ? `-- read as ${personName(who)}: ${view!.filters.join(', ') || 'no row rules'}${view!.removed.length ? `; removes ${view!.removed.map((r) => r.column).join(', ')}` : ''}\n${read}` : sql;
+      if (!read) {
+        preview.lastElementChild!.replaceWith(h('p', { class: 'status bad' }, `Closed to ${personName(who)}: ${view!.reason}.`));
+        return;
+      }
+      const r = await engine.query(`SELECT * FROM (\n${read}\n) LIMIT 20`);
+      if (state.selected !== id) return;
+      const note = view && (view.filters.length || view.removed.length) ? h('p', { class: 'foot' }, `As ${personName(who)}: ${[view.filters.length ? `filtered by the ${view.filters.join(' and the ')}` : '', view.removed.length ? `without ${view.removed.map((x) => x.column).join(', ')}` : ''].filter(Boolean).join(', ')}.`) : null;
+      const isNew = new Set(fresh.map((c) => c.toLowerCase()));
+      preview.lastElementChild!.replaceWith(h('div', {}, rowsView(r.columns, r.rows, (c) => (isNew.has(c.toLowerCase()) ? 'new' : undefined)), isNew.size ? h('p', { class: 'foot' }, 'Tinted: the columns this step adds.') : null, note));
+    } catch (e) {
+      preview.lastElementChild!.textContent = message(e);
     }
-    const r = await state.engine.query(`SELECT * FROM (\n${read}\n) LIMIT 20`);
+  };
+  await showPreview();
+  if (state.selected !== id) return;
+  try {
+    const panel = await qualityPanel(id, who);
     if (state.selected !== id) return;
-    const note = view && (view.filters.length || view.removed.length) ? h('p', { class: 'foot' }, `As ${personName(who)}: ${[view.filters.length ? `filtered by the ${view.filters.join(' and the ')}` : '', view.removed.length ? `without ${view.removed.map((x) => x.column).join(', ')}` : ''].filter(Boolean).join(', ')}.`) : null;
-    const isNew = new Set(fresh.map((c) => c.toLowerCase()));
-    preview.lastElementChild!.replaceWith(h('div', {}, rowsView(r.columns, r.rows, (c) => (isNew.has(c.toLowerCase()) ? 'new' : undefined)), isNew.size ? h('p', { class: 'foot' }, 'Tinted: the columns this step adds.') : null, note));
+    if (panel) quality.replaceWith(panel);
+    else quality.remove();
   } catch (e) {
-    preview.lastElementChild!.textContent = message(e);
+    quality.lastElementChild!.textContent = message(e);
+  } finally {
+    seenBy?.count();
   }
 }
 
@@ -1225,14 +1657,17 @@ function inOut(id: string): HTMLElement | null {
  * Who can see a step. The owner sees everyone's access, as their rules give it, with the rows each would read, and
  * taps a person to see the step as they do, here only, or the whole flow a tap further. Anyone else sees their own.
  */
-function accessPanel(id: string): HTMLElement | null {
+function accessPanel(id: string): { box: HTMLElement; count: () => void } | null {
   const p = policies();
   if (!p) return null;
   const box = h('div', { class: 'access', id: 'access' }, h('p', { class: 'eyebrow' }, 'Who can see this'));
   const cols = state.columns.get(id);
+  // Each person's rows are counted when asked: after the columns, unless the sheet opened here.
+  const counts: (() => void)[] = [];
+  const count = () => counts.splice(0).forEach((f) => f());
   if (!cols) {
     box.append(h('p', { class: 'foot' }, 'Run the flow to see who can see it.'));
-    return box;
+    return { box, count };
   }
   const owner = !!p.principals.find((x) => x.id === state.viewer)?.owner;
   const shown = state.previewAs ?? state.viewer;
@@ -1246,10 +1681,12 @@ function accessPanel(id: string): HTMLElement | null {
     const parts = [h('span', { class: 'who' }, x.name), h('span', { class: `level to-${a}` }, ACCESS_LABEL[a]), rows, h('span', { class: 'how' }, accessText(x, view, cols))];
     list.append(owner ? h('button', { type: 'button', class: `person to-${a}`, role: 'radio', 'aria-checked': String(x.id === shown), onclick: () => showAs(x.id) }, ...parts) : h('div', { class: `person to-${a}`, role: 'listitem' }, ...parts));
     if (run && a !== 'closed') {
-      void inspect(run)
-        .then((insp) => (insp.index.has(id) ? rowsAs(insp, insp.index.get(id)!, x.id) : null))
-        .then((count) => (rows.textContent = count === null ? '' : plural(count, 'row')))
-        .catch(() => (rows.textContent = ''));
+      counts.push(() =>
+        void inspect(run)
+          .then((insp) => (insp.index.has(id) ? rowsAs(insp, insp.index.get(id)!, x.id) : null))
+          .then((n) => (rows.textContent = n === null ? '' : plural(n, 'row')))
+          .catch(() => (rows.textContent = '')),
+      );
     }
   }
   box.append(list);
@@ -1257,7 +1694,7 @@ function accessPanel(id: string): HTMLElement | null {
   else if (state.previewAs && state.previewAs !== state.viewer) {
     box.append(h('div', { class: 'row' }, h('span', { class: 'foot', style: 'flex:1;margin:0' }, `This step shows as ${personName(state.previewAs)} sees it; the rest of the flow, as ${personName(state.viewer)}.`), h('button', { class: 'btn', type: 'button', onclick: () => setViewer(state.previewAs!) }, `View all as ${personName(state.previewAs)}`)));
   } else box.append(h('p', { class: 'foot' }, 'Tap someone to see this step as they do.'));
-  return box;
+  return { box, count };
 }
 
 /** Show the open step as someone, in its sheet only. */
@@ -1349,6 +1786,11 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
       box.append(split(out, lost, 'kept', 'dropped'));
       box.append(await rulesTable(insp, i, rows, who));
       if (lost) box.append(h('div', { class: 'row' }, button(`Show the ${plural(lost, 'row')} it dropped`, `Dropped by ${id}`, exceptIn(insp, input!, i, who))));
+      if (c.flagged) {
+        const warns = n.rules.map((r, k) => (r[2] === 'warn' ? k : -1)).filter((k) => k >= 0);
+        say(`Its warnings flag ${plural(c.flagged, 'row')}, and keep them: a warning reports a row rather than dropping it.`);
+        box.append(h('div', { class: 'row' }, button(`Show the ${plural(c.flagged, 'row')} it flags`, `Flagged by ${id}`, readIn(insp, input!, who, emitFailures(insp.plan, i, warns, insp.ctx)))));
+      }
       break;
     }
     case 'filter':
@@ -1563,6 +2005,7 @@ function editor(st: StepDef): HTMLElement {
     }
     state.doc = next;
     state.issues = [];
+    saveFlow();
     void run();
   });
   wrap.append(h('div', { class: 'row', style: 'margin-top:10px' }, apply, h('span', { class: 'foot' }, 'Only this step and what reads it run again.')));
@@ -1602,39 +2045,52 @@ function cellOf(v: unknown): { text: string; cls: string } {
  * A table of rows, its header and first column staying in place as it scrolls; `mark` can give a column a class (its
  * header and cells), to tint the columns that matter.
  */
-function table(columns: string[], rows: unknown[][], mark?: (column: string) => string | undefined, tall = false): HTMLElement {
+/** A class for a column (its header) or one of its cells (`row` given): the tint that says this value matters. */
+type Mark = (column: string, row?: number) => string | undefined;
+
+function table(columns: string[], rows: unknown[][], mark?: Mark, tall = false): HTMLElement {
   const marks = columns.map((c) => mark?.(c));
-  const cell = (v: unknown, k: number) => {
+  const cell = (v: unknown, k: number, r: number) => {
     const { text, cls } = cellOf(v);
-    return h('td', { class: [cls, marks[k] ?? ''].filter(Boolean).join(' ') }, text);
+    return h('td', { class: [cls, mark?.(columns[k]!, r) ?? ''].filter(Boolean).join(' ') }, text);
   };
-  return h('div', { class: `scroll${tall ? ' tall' : ''}` }, h('table', { class: 'data' }, h('thead', {}, h('tr', {}, ...columns.map((c, k) => h('th', marks[k] ? { class: marks[k]! } : {}, c)))), h('tbody', {}, ...rows.map((r) => h('tr', {}, ...r.map(cell))))));
+  return h('div', { class: `scroll${tall ? ' tall' : ''}` }, h('table', { class: 'data' }, h('thead', {}, h('tr', {}, ...columns.map((c, k) => h('th', marks[k] ? { class: marks[k]! } : {}, c)))), h('tbody', {}, ...rows.map((row, r) => h('tr', {}, ...row.map((v, k) => cell(v, k, r)))))));
+}
+
+/** Cards in a row, to swipe or step through, with where you are: "Row 3 of 50". */
+function carousel(items: HTMLElement[], noun: string): HTMLElement {
+  const Noun = noun[0]!.toUpperCase() + noun.slice(1);
+  const track = h('div', { class: 'records', tabindex: '0', role: 'list', 'aria-label': `${plural(items.length, noun)}, one at a time` }, ...items);
+  items.forEach((it, i) => (it.setAttribute('role', 'listitem'), it.setAttribute('aria-label', `${Noun} ${i + 1} of ${items.length}`)));
+  const at = h('span', { class: 'records-at', 'aria-live': 'polite' }, `${Noun} 1 of ${items.length}`);
+  const width = () => (track.firstElementChild as HTMLElement).offsetWidth + 10;
+  const step = (d: number) => track.scrollBy({ left: d * width(), behavior: 'smooth' });
+  track.addEventListener('scroll', () => (at.textContent = `${Noun} ${Math.min(items.length, Math.round(track.scrollLeft / width()) + 1)} of ${items.length}`), { passive: true });
+  return h('div', { class: 'records-wrap' },
+    h('div', { class: 'records-bar' },
+      h('button', { type: 'button', class: 'btn small', 'aria-label': `Previous ${noun}`, onclick: () => step(-1) }, '‹'),
+      at,
+      h('button', { type: 'button', class: 'btn small', 'aria-label': `Next ${noun}`, onclick: () => step(1) }, '›')),
+    track);
 }
 
 /** Rows one at a time, as cards to swipe or step through: each column a label and its value, the marked ones first. */
-function cards(columns: string[], rows: unknown[][], mark?: (column: string) => string | undefined): HTMLElement {
+function cards(columns: string[], rows: unknown[][], mark?: Mark): HTMLElement {
   if (!rows.length) return h('p', { class: 'foot' }, 'No rows.');
-  const marks = columns.map((c) => mark?.(c));
-  const order = [...columns.keys()].sort((a, b) => Number(!marks[a]) - Number(!marks[b]));
-  const track = h('div', { class: 'records', tabindex: '0', role: 'list', 'aria-label': `${plural(rows.length, 'row')}, one at a time` });
-  rows.forEach((r, i) => {
-    const dl = h('dl', {});
-    for (const k of order) {
-      const { text, cls } = cellOf(r[k]);
-      dl.append(h('dt', marks[k] ? { class: marks[k]! } : {}, ...breakable(columns[k]!)), h('dd', { class: [cls, marks[k] ?? ''].filter(Boolean).join(' ') }, text));
-    }
-    track.append(h('article', { class: 'record', role: 'listitem', 'aria-label': `Row ${i + 1} of ${rows.length}` }, dl));
-  });
-  const at = h('span', { class: 'records-at', 'aria-live': 'polite' }, `Row 1 of ${rows.length}`);
-  const width = () => (track.firstElementChild as HTMLElement).offsetWidth + 10;
-  const step = (d: number) => track.scrollBy({ left: d * width(), behavior: 'smooth' });
-  track.addEventListener('scroll', () => (at.textContent = `Row ${Math.min(rows.length, Math.round(track.scrollLeft / width()) + 1)} of ${rows.length}`), { passive: true });
-  return h('div', { class: 'records-wrap' },
-    h('div', { class: 'records-bar' },
-      h('button', { type: 'button', class: 'btn small', 'aria-label': 'Previous row', onclick: () => step(-1) }, '‹'),
-      at,
-      h('button', { type: 'button', class: 'btn small', 'aria-label': 'Next row', onclick: () => step(1) }, '›')),
-    track);
+  return carousel(
+    rows.map((r, i) => {
+      // Each card leads with the values that matter for its own row.
+      const marks = columns.map((c) => mark?.(c, i));
+      const order = [...columns.keys()].sort((a, b) => Number(!marks[a]) - Number(!marks[b]));
+      const dl = h('dl', {});
+      for (const k of order) {
+        const { text, cls } = cellOf(r[k]);
+        dl.append(h('dt', marks[k] ? { class: marks[k]! } : {}, ...breakable(columns[k]!)), h('dd', { class: [cls, marks[k] ?? ''].filter(Boolean).join(' ') }, text));
+      }
+      return h('article', { class: 'record' }, dl);
+    }),
+    'row',
+  );
 }
 
 /** A column's name that wraps after its underscores rather than mid-word: tpep_pickup_ / datetime. */
@@ -1655,7 +2111,7 @@ let rowsMode: 'cards' | 'table' = (() => {
 const rowsViews = new Set<{ el: HTMLElement; draw: () => void }>();
 
 /** Rows a person can read on any screen: cards or a table, with a switch between them that applies everywhere. */
-function rowsView(columns: string[], rows: unknown[][], mark?: (column: string) => string | undefined): HTMLElement {
+function rowsView(columns: string[], rows: unknown[][], mark?: Mark): HTMLElement {
   const el = h('div', { class: 'rows-view' });
   const pick = (m: 'cards' | 'table') => {
     rowsMode = m;
@@ -2096,6 +2552,7 @@ function showView(): void {
 const VIEWS = ['flow', 'ontology', 'policies', 'results', 'runs'];
 
 async function start(): Promise<void> {
+  loadFlow();
   loadArrangement();
   state.collapsed = new Set((state.doc.groups ?? []).filter((g) => g.collapsed).map((g) => g.id));
   $('flow-name').textContent = state.doc.name;

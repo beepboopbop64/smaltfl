@@ -36,6 +36,8 @@ export type { Column, ColumnType, FlowPlan, PlanNode, PlanOutput } from './core/
 export { shapeOf } from './core/optimize.js';
 export type { RunShape } from './core/optimize.js';
 export { emitSelect, nodeSelect } from './core/emit.js';
+export { drift, fillGaps, isolationForest, madsOf, profileColumn, psi, suggestChecks, unusual } from './core/quality.js';
+export type { ColumnFacts, Drift, Kind, Profile, Quantiles, Suggestion, Unusual } from './core/quality.js';
 export { nodeKey } from './core/keys.js';
 export type { KeyEnv } from './core/keys.js';
 export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, signManifest, verifyManifest } from './core/manifest.js';

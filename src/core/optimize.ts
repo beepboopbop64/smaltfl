@@ -15,7 +15,9 @@ export interface RunShape {
  * Which nodes run, and which are stored. A node is stored when it is a source (its snapshot), an output, or read by
  * more than one needed node (so it is computed once). Every other needed node is folded into the statement of the
  * node that reads it. Expectations always run, whether or not anything reads them; their counts are recorded by key,
- * so they don't need their rows stored.
+ * so they don't need their rows stored. A check that nothing reads (a box of checks beside a step) doesn't count as a
+ * reader: it reads its step once, to count, and storing the step for it would cost more (writing and hashing every row)
+ * than computing it again inside the check's own statement.
  */
 export function shapeOf(plan: FlowPlan): RunShape {
   const roots = new Set<number>(plan.outputs.map((o) => o.node));
@@ -27,8 +29,10 @@ export function shapeOf(plan: FlowPlan): RunShape {
     for (const j of plan.nodes[i]!.inputs) visit(j);
   };
   for (const r of roots) visit(r);
+  const read = new Set(plan.nodes.flatMap((n, i) => (needed.has(i) ? n.inputs : [])));
+  const sideCheck = (i: number) => plan.nodes[i]!.op === 'expect' && !read.has(i) && !plan.outputs.some((o) => o.node === i);
   const readers = new Map<number, number>();
-  for (const i of needed) for (const j of plan.nodes[i]!.inputs) readers.set(j, (readers.get(j) ?? 0) + 1);
+  for (const i of needed) if (!sideCheck(i)) for (const j of plan.nodes[i]!.inputs) readers.set(j, (readers.get(j) ?? 0) + 1);
   const stored = new Set<number>();
   for (const i of needed) {
     const n = plan.nodes[i]!;

@@ -135,7 +135,9 @@ inputs.
   other node is folded into the statement of the node that reads it, as a common table expression. The nodes up to a
   stored one form a **segment**: one statement, which the engine plans and fuses as a whole. Expectations always run;
   their counts are recorded by the expectation's key, so their rows needn't be stored, and their filter folds into
-  the statement that reads them.
+  the statement that reads them. A check that nothing reads (a box of checks beside a step) doesn't count as a
+  reader: storing a step for it would mean writing and hashing every row, where computing the step again inside the
+  check's statement only reads it.
 - **With the plan API:** columns nothing downstream reads are pruned, and filters, policy filters included, move
   toward the sources, so Parquet skips row groups.
 
@@ -337,6 +339,25 @@ Builder and drawn in the family's look. The first concepts are on the design can
   sheet names it; Results, the Ontology and the Policies leave out the outputs, object types, rules, people and
   edits that aren't theirs, and Runs shows the run as far as they can see the flow, without its full record.
   Arranging the canvas stays with the owner.
+- **What the columns hold.** A step's sheet has a card for each column: how full it is, its distinct values, and a
+  measure's or a time's shape (a histogram from its 1st to its 99th percentile, the median marked, the smallest,
+  largest, mean and middle half) or a category's common values. Counts are exact, counted by the engine over every row
+  the viewer reads; shapes come from an even sample of up to 2,000 of them. A folded step's rows are copied once into
+  a temporary table for this, so the engine computes them once rather than once a question.
+- **Odd rows.** An isolation forest (100 seeded trees over subsamples of 256) scores the sample's rows on the step's
+  measures, and the oddest are shown as cards, each with what sets it apart: the measures where it sits more than 3.5
+  robust standard deviations from the median, against where most rows lie.
+- **Drift between runs.** Each column is compared with the same step in the last run that had other rows there (a
+  different key), by the population stability index over the earlier run's deciles, or its values, with missing
+  values a bin of their own: steady under 0.1, moved to 0.25, shifted above, with what moved (a median, a share).
+- **Suggested checks, added as a box.** For the columns a step makes itself (an input's, an aggregate's or a SQL
+  step's, the ones a formula, join or select adds), and that no expectation upstream already checks: an upper bound
+  for a far tail, `>= 0` for stray negatives or as a guard, `IS NOT NULL` for a few missing values (columns missing in
+  the same rows get one), `IN (…)` for a small category's values today. Each is counted exactly over every row, as an
+  expectation counts. One tap adds the chosen ones as an expectations step beside the step, in its section, whose
+  rules warn, so no result changes; the flow runs and only the new box computes. The box's card says how many rows it
+  flags; a step nothing reads can be taken out again. Edits to the flow are kept in this browser, and Reset (in
+  Arrange) puts the example back.
 - **Rows on a phone.** Previews and the rows a sheet shows come as cards, one row at a time to swipe or step
   through, each column a label and its value with the columns that matter first (the ones a rule reads, the ones a
   step adds); or as a table whose header and first column stay in place. Cards are the default on a narrow screen,

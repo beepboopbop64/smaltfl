@@ -286,3 +286,17 @@ export function freeSlot(l: GridLayout, frame: GridFrame, card: string): { x: nu
   }
   return { x: frame.x + frame.w + gapX, y: y0 };
 }
+
+/** A free place right beside a card: to its right, below it, or across a corner; else the first free one below. */
+export function besideSlot(l: GridLayout, at: { x: number; y: number }, card: string): { x: number; y: number } {
+  const { cardW, cardH, gapX, gapY } = GRID;
+  const others = [...l.cards.entries()].filter(([id]) => id !== card).map(([, p]) => p);
+  const free = (x: number, y: number) => others.every((p) => Math.abs(p.x - x) >= cardW + gapX / 2 || Math.abs(p.y - y) >= cardH + gapY / 2);
+  for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1]] as const) {
+    const x = at.x + dx * (cardW + gapX);
+    const y = at.y + dy * (cardH + gapY);
+    if (free(x, y)) return { x, y };
+  }
+  for (let r = 2; r < 200; r++) if (free(at.x, at.y + r * (cardH + gapY))) return { x: at.x, y: at.y + r * (cardH + gapY) };
+  return { x: at.x, y: at.y + 200 * (cardH + gapY) };
+}

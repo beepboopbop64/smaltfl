@@ -147,6 +147,18 @@ describe('the run shape', () => {
     expect(needed).toContain(checks);
     expect(stored.has(checks)).toBe(false);
   });
+
+  it("doesn't store a step for a check nothing reads: the check computes it in its own statement", async () => {
+    const doc = visualFlow();
+    doc.steps.push({ id: 'enriched_checks', kind: 'expectations', inputs: ['trips_enriched'], rules: [{ name: 'fast', check: 'speed_mph <= 40', onFail: 'warn' }] });
+    const plan = await translate(doc);
+    const enriched = plan.nodes.findIndex((n) => n.origin === 'trips_enriched');
+    expect(shapeOf(plan).stored.has(enriched)).toBe(false);
+    // Read by a second step that is read in turn, it is stored as before.
+    doc.steps.push({ id: 'fast_trips', kind: 'filter', inputs: ['trips_enriched'], where: 'speed_mph > 40', dataset: {} });
+    const again = await translate(doc);
+    expect(shapeOf(again).stored.has(again.nodes.findIndex((n) => n.origin === 'trips_enriched'))).toBe(true);
+  });
 });
 
 describe('keys', () => {
