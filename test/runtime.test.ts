@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { Database } from 'smaltdb/engine';
 import { createIdentity, runFlow, signManifest, verifyManifest, verifyRun, type FlowDocument, type RunResult } from '../src/index.js';
 import { reference } from './fixtures/reference.js';
-import { loadFixture, makeTrips, sqlFlow, visualFlow } from './fixtures/taxi.js';
+import { loadFixture, makeTrips, sqlFlow, visualFlow, ZONES } from './fixtures/taxi.js';
 import { openEngine, SMALTDB } from './helpers/engine.js';
 
 const TRIPS = makeTrips(6000);
@@ -324,5 +324,29 @@ describe('verifying a run', () => {
     const owner = await createIdentity('Owner');
     const signed = await signManifest(r.manifest, owner);
     expect(await verifyManifest(signed, owner.card)).toEqual({ ok: true });
+  });
+});
+
+describe('external sources', () => {
+  it('snapshots an external table by its rows, reading the file every run', async () => {
+    const { Database } = await import('smaltdb/engine');
+    const io = (await import('@smaltdb/io')).default;
+    const external = (await import('@smaltdb/external')).default;
+    const smaltfl = (await import('../src/plugin/index.js')).default;
+    const db = Database.openMemory({ plugins: [io, external, smaltfl] });
+    loadFixture(db, TRIPS);
+    const zones = 'LocationID,Borough,Zone,service_zone\n' + ZONES.map((z) => z.map((v) => (typeof v === 'string' && v.includes(',') ? `"${v}"` : v)).join(',')).join('\n') + '\n';
+    await db.callPlugin('@smaltdb/external', 'registerFile', ['zones.csv', new TextEncoder().encode(zones)]);
+    await db.execAsync("CREATE EXTERNAL TABLE zones_file(LocationID INTEGER, Borough TEXT, Zone TEXT, service_zone TEXT) WITH (location = 'file:zones.csv', format = 'csv', header = true)");
+    const doc = visualFlow();
+    doc.sources[1]!.table = 'zones_file';
+    const fromFile = await run(db, doc);
+    // The same rows as the table they were written from: the same snapshot, and the same results.
+    const fromTable = await run(fixture());
+    expect(fromFile.manifest.nodes[1]!.content).toBe(fromTable.manifest.nodes[1]!.content);
+    expect(fromFile.manifest.outputs).toEqual(fromTable.manifest.outputs);
+    expect(db.query("SELECT count(*) FROM _smaltfl_sources WHERE source = 'zones_file'").rows[0]![0]).toBe(0);
+    const again = await run(db, doc);
+    expect(status(again)).toMatchObject({ zones: 'reused', zone_hour: 'reused' });
   });
 });

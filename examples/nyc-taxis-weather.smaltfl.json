@@ -1,0 +1,104 @@
+{
+  "smaltfl": 1,
+  "id": "nyc-taxis-weather",
+  "name": "NYC taxis and weather",
+  "description": "How weather changes taxi demand by borough: January 2024 yellow taxi trips, cleaned and enriched, against hourly weather.",
+  "parameters": [{ "name": "month", "type": "text", "default": "2024-01", "description": "The month the trips belong to" }],
+  "sources": [
+    { "id": "trips", "table": "trips_file", "description": "NYC TLC yellow taxi trip records" },
+    { "id": "zones", "table": "zones_file", "description": "The TLC taxi zone lookup" },
+    { "id": "weather", "table": "weather_file", "description": "Open-Meteo hourly weather, one point per district" }
+  ],
+  "steps": [
+    {
+      "id": "trips_valid",
+      "kind": "expectations",
+      "inputs": ["trips"],
+      "description": "Trips that pass the checks",
+      "rules": [
+        { "name": "in_month", "check": "substr(tpep_pickup_datetime, 1, 7) = :month", "onFail": "drop" },
+        { "name": "duration", "check": "unixepoch(tpep_dropoff_datetime) - unixepoch(tpep_pickup_datetime) BETWEEN 60 AND 10800", "onFail": "drop" },
+        { "name": "distance", "check": "trip_distance > 0 AND trip_distance <= 100", "onFail": "drop" },
+        { "name": "fare", "check": "fare_amount >= 0", "onFail": "drop" },
+        { "name": "known_zones", "check": "PULocationID NOT IN (264, 265) AND DOLocationID NOT IN (264, 265)", "onFail": "drop" },
+        { "name": "passengers", "check": "passenger_count IS NOT NULL", "onFail": "warn" }
+      ],
+      "maxDropped": 0.08
+    },
+    { "id": "trips_dedup", "kind": "sql", "inputs": ["trips_valid"], "description": "Exact duplicates removed", "sql": "SELECT DISTINCT * FROM trips_valid" },
+    {
+      "id": "trips_zoned",
+      "kind": "join",
+      "inputs": ["trips_dedup", "zones"],
+      "description": "Each trip's pickup borough and zone",
+      "how": "left",
+      "on": [{ "left": "PULocationID", "right": "LocationID" }],
+      "columns": [{ "name": "pu_borough", "column": "Borough" }, { "name": "pu_zone", "column": "Zone" }]
+    },
+    {
+      "id": "trips_enriched",
+      "kind": "formula",
+      "inputs": ["trips_zoned"],
+      "description": "Duration, pickup hour, speed and card tip rate",
+      "columns": [
+        { "name": "duration_min", "expr": "(unixepoch(tpep_dropoff_datetime) - unixepoch(tpep_pickup_datetime)) / 60.0" },
+        { "name": "pu_hour", "expr": "strftime('%Y-%m-%d %H:00', tpep_pickup_datetime)" },
+        { "name": "speed_mph", "expr": "trip_distance / (duration_min / 60.0)" },
+        { "name": "card_tip_rate", "expr": "CASE WHEN payment_type = 1 AND fare_amount > 0 THEN tip_amount / fare_amount END" }
+      ]
+    },
+    {
+      "id": "zone_hour",
+      "kind": "aggregate",
+      "inputs": ["trips_enriched"],
+      "description": "Trips, duration, speed, fare and tip rate per pickup zone and hour",
+      "groupBy": ["pu_borough", "pu_zone", "pu_hour"],
+      "measures": [
+        { "name": "trips", "expr": "count(*)" },
+        { "name": "avg_duration_min", "expr": "avg(duration_min)" },
+        { "name": "avg_speed_mph", "expr": "avg(speed_mph)" },
+        { "name": "avg_fare", "expr": "avg(fare_amount)" },
+        { "name": "card_tip_rate", "expr": "avg(card_tip_rate)" }
+      ],
+      "dataset": { "description": "Trips per pickup zone and hour" }
+    },
+    {
+      "id": "borough_hour",
+      "kind": "aggregate",
+      "inputs": ["zone_hour"],
+      "description": "Trips per borough and hour",
+      "groupBy": ["pu_borough", "pu_hour"],
+      "measures": [{ "name": "trips", "expr": "sum(trips)" }],
+      "dataset": {}
+    },
+    {
+      "id": "weather_hourly",
+      "kind": "formula",
+      "inputs": ["weather"],
+      "description": "Each district's hour, labelled dry, rain, heavy rain or snow",
+      "columns": [
+        { "name": "hour", "expr": "replace(\"time\", 'T', ' ')" },
+        { "name": "condition", "expr": "CASE WHEN snowfall > 0 THEN 'snow' WHEN precipitation >= 2.5 THEN 'heavy rain' WHEN precipitation > 0 THEN 'rain' ELSE 'dry' END" }
+      ],
+      "dataset": { "description": "Hourly weather per district, with a condition" }
+    },
+    {
+      "id": "borough_hour_weather",
+      "kind": "join",
+      "inputs": ["borough_hour", "weather_hourly"],
+      "description": "Each borough's hour, with its weather",
+      "how": "left",
+      "on": [{ "left": "pu_borough", "right": "borough" }, { "left": "pu_hour", "right": "hour" }],
+      "columns": ["condition", { "name": "temp_c", "column": "temperature_2m" }, { "name": "precip_mm", "column": "precipitation" }]
+    },
+    {
+      "id": "weather_effect",
+      "kind": "sql",
+      "inputs": ["borough_hour_weather"],
+      "description": "Trips per hour in each condition, against dry hours at the same hour of day",
+      "sql": "WITH h AS (\n  SELECT pu_borough, condition, CAST(strftime('%H', pu_hour) AS INTEGER) AS hour_of_day, trips\n  FROM borough_hour_weather WHERE condition IS NOT NULL\n), dry AS (\n  SELECT pu_borough, hour_of_day, avg(trips) AS dry_trips FROM h WHERE condition = 'dry' GROUP BY 1, 2\n)\nSELECT h.pu_borough AS borough, h.condition, count(*) AS hours, avg(h.trips) AS trips_per_hour,\n  avg(h.trips / d.dry_trips) AS vs_dry\nFROM h JOIN dry d ON d.pu_borough = h.pu_borough AND d.hour_of_day = h.hour_of_day\nGROUP BY 1, 2",
+      "dataset": { "description": "Weather's effect on demand, per borough" }
+    }
+  ],
+  "layout": {}
+}

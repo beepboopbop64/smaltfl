@@ -17,8 +17,10 @@ import type { Column, ColumnType, ExpectNode, FlowPlan, PlanNode, TableNode } fr
 import { validatePlan } from '../core/plan.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q } from '../core/sqltext.js';
-import type { TableHash } from './dataset-hash.js';
-import { hashTable } from './dataset-hash.js';
+import type { Declared, TableHash } from './dataset-hash.js';
+import { hashTable, tableColumns } from './dataset-hash.js';
+
+const STATIC: Record<Exclude<Declared, 'ANY'>, ColumnType> = { INTEGER: 'int', REAL: 'real', TEXT: 'text', BLOB: 'blob' };
 import { ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, nameInUse, pointDataset, recordCheck, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
 
 export class RunError extends Error {
@@ -163,13 +165,15 @@ interface Snapshot {
 /**
  * A source's snapshot. While the table's watch is fresh, the last snapshot still holds and is reused without reading
  * the table. Otherwise its rows are copied, the copy is hashed, and it is kept under its key unless that content is
- * already stored.
+ * already stored. An external table (a file or URL the engine reads through `@smaltdb/external`) is copied with the
+ * engine's async API, which fetches it first, and is read again every run: only a base table can be watched.
  */
 async function snapshot(db: Database, n: TableNode, env: KeyEnv): Promise<Snapshot> {
   const st = describe(db, `SELECT * FROM ${q(n.table)}`, n.origin);
-  if (st.external) throw new RunError(`${n.table} is an external table: file and URL sources are not supported yet`, n.origin);
-  const schema = st.schema;
-  const watched = watchable(db, n.table);
+  // An external table's columns read as untyped (`any`) even when declared: take the declared types where it has them.
+  const declared = st.external ? tableColumns(db, n.table) : [];
+  const schema = st.schema.map(([name, type], k): Column => [name, type === 'any' && declared[k] && declared[k][1] !== 'ANY' ? STATIC[declared[k][1]] : type]);
+  const watched = !st.external && watchable(db, n.table);
   const watch = `_smaltfl_w_${(await sha256Hex(n.table.toLowerCase())).slice(0, 24)}`;
   const last = watched ? lastSnapshot(db, n.table) : null;
   if (last && last.schema === canonicalJSON(schema) && isFresh(db, last.watch)) {
@@ -178,13 +182,25 @@ async function snapshot(db: Database, n: TableNode, env: KeyEnv): Promise<Snapsh
     if (v) return { key, table: v.table, content: v.content, rows: v.rows, schema, reused: true };
   }
   const stage = `_smaltfl_stage_${hex(crypto.getRandomValues(new Uint8Array(8)))}`;
-  engine(n.origin, () =>
-    inTransaction(db, () => {
-      db.exec(createTable(stage, schema));
-      db.run(`INSERT INTO ${q(stage)} SELECT * FROM ${q(n.table)}`);
-      if (watched) resetWatch(db, watch, n.table);
-    }),
-  );
+  const copy = `INSERT INTO ${q(stage)} SELECT * FROM ${q(n.table)}`;
+  if (st.external) {
+    // One statement copies the rows, so the copy is all or nothing without a transaction around the await.
+    engine(n.origin, () => db.exec(createTable(stage, schema)));
+    try {
+      await db.runAsync(copy);
+    } catch (e) {
+      db.exec(`DROP TABLE IF EXISTS ${q(stage)}`);
+      throw new RunError((e as Error).message, n.origin);
+    }
+  } else {
+    engine(n.origin, () =>
+      inTransaction(db, () => {
+        db.exec(createTable(stage, schema));
+        db.run(copy);
+        if (watched) resetWatch(db, watch, n.table);
+      }),
+    );
+  }
   let h: TableHash;
   try {
     h = await hashTable(db, stage);

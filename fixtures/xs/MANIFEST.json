@@ -1,0 +1,30 @@
+{
+  "tier": "XS",
+  "from": "the data branch (scripts/data/build.py), built 2026-11-05T16:20:42+00:00",
+  "month": "2024-01",
+  "sources": {
+    "trips": "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet",
+    "zones": "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv",
+    "weather": "https://archive-api.open-meteo.com/v1/archive (hourly temperature_2m,precipitation,rain,snowfall,snow_depth,wind_speed_10m,weather_code; America/New_York; points: {\"Manhattan\": [40.7831, -73.9712], \"Brooklyn\": [40.6782, -73.9442], \"Queens\": [40.7282, -73.7949], \"Bronx\": [40.8448, -73.8648], \"Staten Island\": [40.5795, -74.1502], \"EWR\": [40.6895, -74.1745]})"
+  },
+  "files": {
+    "trips.parquet": {
+      "bytes": 292959,
+      "sha256": "a46aca91e65bf0733b7c00f349231ff6d01fedf07d738d3cb7b051d8d8fa26cc",
+      "rows": 10000,
+      "row_groups": 1,
+      "compression": "SNAPPY",
+      "from": "samples/yellow_tripdata_2024-01_10k.parquet"
+    },
+    "zones.csv": {
+      "bytes": 12331,
+      "sha256": "1a99e105092230f8620f301edcca7f80d3080642ff404d28ed957d3fa222c8ed",
+      "from": "tlc/taxi_zone_lookup.csv"
+    },
+    "weather.csv": {
+      "bytes": 237604,
+      "sha256": "f7d01c07fcc8fb11e70f1b1c349566449b08c6e194907a7782ecabb974b0302f",
+      "from": "weather/open-meteo_2024-01.csv"
+    }
+  }
+}
