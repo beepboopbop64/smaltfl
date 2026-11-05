@@ -5,6 +5,8 @@
  * Expressions are SQL expression text (smaltdb's SQL), so a visual step reads the way its SQL would. Steps refer to
  * their inputs, and SQL steps to their inputs' data, by the inputs' ids.
  */
+import type { Ontology } from './ontology.js';
+import type { Policies } from './policy.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { SqlTextError, tokens } from './sqltext.js';
 
@@ -18,8 +20,22 @@ export interface FlowDocument {
   parameters?: ParameterDef[];
   sources: SourceDef[];
   steps: StepDef[];
+  /** The object, link and action types over the flow's datasets (ontology.ts). */
+  ontology?: Ontology;
+  /** Who may read which rows and columns, and run which actions (policy.ts). */
+  policies?: Policies;
+  /** Display only: sections of the canvas, each holding sources and steps. Not part of any hash. */
+  groups?: GroupDef[];
   /** Display only: where each card sits on the canvas. Not part of any hash. */
   layout?: Record<string, [number, number]>;
+}
+
+export interface GroupDef {
+  id: string;
+  name: string;
+  /** Source and step ids, each in at most one group. */
+  steps: string[];
+  collapsed?: boolean;
 }
 
 export interface ParameterDef {
@@ -209,7 +225,65 @@ export function validateDocument(doc: unknown): Issue[] {
     if (cycle) add('$.steps', `the steps form a cycle: ${cycle.join(' → ')}`);
   }
   if (doc.layout !== undefined && !isRecord(doc.layout)) add('$.layout', 'an object');
+  validateExtras(doc, ids, add);
   return issues;
+}
+
+/** Groups, the ontology and the policies: their references, checked against the flow's ids. */
+function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, add: (path: string, message: string) => void): void {
+  const known = (id: unknown) => typeof id === 'string' && ids.has(id.toLowerCase());
+  if (doc.groups !== undefined) {
+    if (!Array.isArray(doc.groups)) add('$.groups', 'an array');
+    else {
+      const placed = new Set<string>();
+      doc.groups.forEach((g: unknown, i: number) => {
+        if (!isRecord(g) || typeof g.id !== 'string' || typeof g.name !== 'string' || !Array.isArray(g.steps)) return add(`$.groups[${i}]`, '{ id, name, steps }');
+        g.steps.forEach((s: unknown, j: number) => {
+          if (!known(s)) add(`$.groups[${i}].steps[${j}]`, `no source or step ${String(s)}`);
+          else if (placed.has(String(s).toLowerCase())) add(`$.groups[${i}].steps[${j}]`, `${String(s)} is in two groups`);
+          else placed.add(String(s).toLowerCase());
+        });
+      });
+    }
+  }
+  const o = doc.ontology;
+  const types = new Set<string>();
+  if (o !== undefined) {
+    if (!isRecord(o) || !Array.isArray(o.objectTypes) || !Array.isArray(o.linkTypes) || !Array.isArray(o.actionTypes)) add('$.ontology', '{ objectTypes, linkTypes, actionTypes }');
+    else {
+      o.objectTypes.forEach((t: unknown, i: number) => {
+        if (!isRecord(t) || typeof t.id !== 'string' || !Array.isArray(t.key) || typeof t.title !== 'string') return add(`$.ontology.objectTypes[${i}]`, '{ id, name, dataset, key, title }');
+        if (types.has(t.id)) add(`$.ontology.objectTypes[${i}].id`, `duplicate object type ${t.id}`);
+        types.add(t.id);
+        if (!known(t.dataset)) add(`$.ontology.objectTypes[${i}].dataset`, `no source or step ${String(t.dataset)}`);
+      });
+      o.linkTypes.forEach((l: unknown, i: number) => {
+        if (!isRecord(l) || !types.has(String(l.from)) || !types.has(String(l.to))) add(`$.ontology.linkTypes[${i}]`, 'a link between two object types');
+      });
+      o.actionTypes.forEach((a: unknown, i: number) => {
+        if (!isRecord(a) || typeof a.id !== 'string' || !types.has(String(a.on)) || !Array.isArray(a.params)) add(`$.ontology.actionTypes[${i}]`, '{ id, name, on: an object type, params }');
+      });
+    }
+  }
+  const p = doc.policies;
+  if (p !== undefined) {
+    if (!isRecord(p) || !Array.isArray(p.principals) || !Array.isArray(p.rules)) return add('$.policies', '{ principals, rules }');
+    const who = new Set<string>(['*']);
+    p.principals.forEach((x: unknown, i: number) => {
+      if (!isRecord(x) || typeof x.id !== 'string' || typeof x.name !== 'string') return add(`$.policies.principals[${i}]`, '{ id, name }');
+      if (who.has(x.id)) add(`$.policies.principals[${i}].id`, `duplicate person ${x.id}`);
+      who.add(x.id);
+    });
+    if (p.groups !== undefined) (Array.isArray(p.groups) ? p.groups : []).forEach((g: unknown) => isRecord(g) && typeof g.id === 'string' && who.add(g.id));
+    p.rules.forEach((r: unknown, i: number) => {
+      const at = `$.policies.rules[${i}]`;
+      if (!isRecord(r) || !['row', 'column', 'action'].includes(String(r.kind)) || !Array.isArray(r.for)) return add(at, '{ id, kind: row, column or action, name, for }');
+      r.for.forEach((x: unknown, j: number) => !who.has(String(x)) && add(`${at}.for[${j}]`, `no person or group ${String(x)}`));
+      if (r.kind === 'row' && (!Array.isArray(r.columns) || r.columns.length === 0 || typeof r.attribute !== 'string')) add(at, 'a row rule needs columns and an attribute');
+      if (r.kind === 'column' && !Array.isArray(r.remove)) add(at, 'a column rule needs remove');
+      if (r.kind === 'action' && !(isRecord(o) && Array.isArray(o.actionTypes) && o.actionTypes.some((a: unknown) => isRecord(a) && a.id === r.action))) add(`${at}.action`, `no action type ${String(r.action)}`);
+    });
+  }
 }
 
 function validateConfig(s: Record<string, unknown>, at: string, add: (path: string, message: string) => void): void {
@@ -328,8 +402,8 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/** The document without display-only fields: what the flow hash covers. */
-export function withoutDisplay(doc: FlowDocument): Omit<FlowDocument, 'layout'> {
-  const { layout: _layout, ...rest } = doc;
+/** The document without display-only fields (its layout and groups): what the flow hash covers. */
+export function withoutDisplay(doc: FlowDocument): Omit<FlowDocument, 'layout' | 'groups'> {
+  const { layout: _layout, groups: _groups, ...rest } = doc;
   return rest;
 }

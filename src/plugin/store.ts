@@ -8,6 +8,7 @@
  *   _smaltfl_runs(id, flow, hash, manifest, …)         run manifests
  *   _smaltfl_sources(source, watch, content, …)        each source table's last snapshot, and its watch
  *   _smaltfl_checks(key, result)                       expectation counts, by the expectation's key
+ *   _smaltfl_edits(seq, action, object, …, prev, hash)  actions' edits and refusals, in a hash chain
  */
 import type { Database } from 'smaltdb/engine';
 import type { ExpectationResult } from '../core/manifest.js';
@@ -20,6 +21,7 @@ export function ensureStore(db: Database): void {
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_runs(id INTEGER PRIMARY KEY, flow TEXT NOT NULL, hash TEXT NOT NULL, manifest TEXT NOT NULL, started TEXT NOT NULL, finished TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_sources(source TEXT PRIMARY KEY, watch TEXT NOT NULL, content TEXT NOT NULL, rows INTEGER NOT NULL, schema TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_checks(key TEXT PRIMARY KEY, result TEXT NOT NULL)');
+  db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_edits(seq INTEGER PRIMARY KEY, action TEXT NOT NULL, object_type TEXT NOT NULL, object TEXT NOT NULL, params TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, outcome TEXT NOT NULL, reason TEXT NOT NULL, prev TEXT, hash TEXT NOT NULL)');
 }
 
 /** An expectation's recorded counts: the same key means the same input and rules, so the same counts. */

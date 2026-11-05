@@ -6,12 +6,15 @@
  *   run [plan, { smaltdb }]           → RunResult     run a flow plan; only what changed is rebuilt
  *   verify [run, { smaltdb }]         → VerifyResult  check a run's hashes, then recompute it from its snapshots
  *   manifest [run]                    → RunManifest   a stored run's manifest
+ *   act [ActInput]                    → Edit          check an action and record its edit or refusal
+ *   edits / verifyEdits               → Edit[] / …    the hash chain of edits, and its check
  *
  * Like every plugin, it imports nothing from the engine at run time, only types.
  */
 import type { SmaltPlugin } from 'smaltdb/engine';
 import type { RunManifest } from '../core/manifest.js';
 import { PLUGIN_NAME, type RunOptions } from '../core/protocol.js';
+import { act, listEdits, verifyEdits, type ActInput } from './actions.js';
 import { RunError, runPlan } from './runtime.js';
 import { ensureStore } from './store.js';
 import { verifyRun } from './verify.js';
@@ -27,6 +30,9 @@ const smaltfl: SmaltPlugin = {
   setup(host) {
     host.addMethod('run', (ctx, [plan, options]) => runPlan(ctx.db, plan, options as RunOptions, VERSION, ctx.signal));
     host.addMethod('verify', (ctx, [run, options]) => verifyRun(ctx.db, Number(run), options as RunOptions, ctx.signal));
+    host.addMethod('act', (ctx, [input]) => act(ctx.db, input as ActInput));
+    host.addMethod('edits', (ctx) => listEdits(ctx.db));
+    host.addMethod('verifyEdits', (ctx) => verifyEdits(ctx.db));
     host.addMethod('manifest', (ctx, [run]) => {
       ensureStore(ctx.db);
       const row = ctx.db.query('SELECT manifest FROM _smaltfl_runs WHERE id = ?', [Number(run)]).rows[0];
