@@ -23,6 +23,7 @@
   --ok: #1d6b3a;
   --warn: #8a5a12;
   --warn-wash: #f8eedb;
+  --row-alt: #f6f7fa;
   --bad: #a3195b;
   --bad-wash: #f8e3ec;
   --font: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -34,13 +35,13 @@
   :root:not([data-theme="light"]) {
     --bg: #0f131a; --surface: #171c25; --sunk: #1e2430; --ink: #e8ebf1; --ink-2: #c3c9d6; --muted: #98a1b3; --line: #2c3442;
     --smalt: #8fa8ff; --smalt-wash: #1d2742; --teal: #4fd1c5; --teal-fill: #2bb3a6; --teal-wash: #14302e;
-    --ok: #67d391; --warn: #e3b55f; --warn-wash: #33280f; --bad: #ff86b5; --bad-wash: #3a1828; color-scheme: dark;
+    --ok: #67d391; --warn: #e3b55f; --warn-wash: #33280f; --row-alt: #1b212b; --bad: #ff86b5; --bad-wash: #3a1828; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f131a; --surface: #171c25; --sunk: #1e2430; --ink: #e8ebf1; --ink-2: #c3c9d6; --muted: #98a1b3; --line: #2c3442;
   --smalt: #8fa8ff; --smalt-wash: #1d2742; --teal: #4fd1c5; --teal-fill: #2bb3a6; --teal-wash: #14302e;
-  --ok: #67d391; --warn: #e3b55f; --warn-wash: #33280f; --bad: #ff86b5; --bad-wash: #3a1828; color-scheme: dark;
+  --ok: #67d391; --warn: #e3b55f; --warn-wash: #33280f; --row-alt: #1b212b; --bad: #ff86b5; --bad-wash: #3a1828; color-scheme: dark;
 }
 /* Section colours: a wash, an edge and a label colour for each, light and dark. Slate is the canvas's own. */
 .c-slate { --f: var(--sunk); --s: var(--line); --t: var(--ink-2); }
@@ -159,7 +160,6 @@ section.view { display: grid; gap: 14px; }
 .card .shield path { fill: none; stroke: var(--muted); stroke-width: 1.3; stroke-linejoin: round; }
 .card .shield.muted path { opacity: 0.75; }
 .card .shield.on path { fill: var(--smalt); stroke: var(--smalt); }
-.card .shield.closed path { fill: var(--muted); stroke: var(--muted); }
 .card .shield-hit { fill: transparent; }
 .card .badge { fill: var(--warn-wash); stroke: var(--warn); stroke-width: 1; }
 .card .badge-text { fill: var(--warn); font-family: var(--mono); font-size: 10.5px; font-weight: 600; }
@@ -268,6 +268,36 @@ textarea { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertic
 .split-key .k { color: var(--teal); } .split-key .l { color: var(--warn); font-weight: 600; }
 .rows-box { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 4px; }
 .change th, .change td { padding: 5px 8px; }
+/* Rows: a table whose header and first column stay put, striped; or cards, one row at a time. */
+.scroll.tall { max-height: min(60vh, 520px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+table.data th { z-index: 1; }
+table.data tbody tr:nth-child(even) td { background: var(--row-alt); }
+table.data tbody tr:nth-child(odd) td { background: var(--surface); }
+table.data th:first-child, table.data td:first-child { position: sticky; left: 0; z-index: 2; box-shadow: 1px 0 0 var(--line); }
+table.data th:first-child { z-index: 3; }
+table.data td.hit, table.data th.hit { background: var(--warn-wash); }
+table.data td.new, table.data th.new { background: var(--teal-wash); }
+.rows-view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.seg { display: inline-flex; justify-self: start; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface); color: var(--ink-2); padding: 4px 14px; min-height: 32px; font-size: 13px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--smalt); color: var(--surface); font-weight: 600; }
+.records-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.records-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.records-bar .btn { min-width: 44px; font-size: 18px; line-height: 1; }
+.records-at { font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.records { display: grid; grid-auto-flow: column; grid-auto-columns: 90%; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; padding-bottom: 2px; }
+.records::-webkit-scrollbar { display: none; }
+.record { scroll-snap-align: start; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 10px 12px; }
+.record dl { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr); gap: 0; margin: 0; }
+.record dt, .record dd { padding: 5px 6px; border-bottom: 1px solid var(--line); }
+.record dt { font-family: var(--mono); font-size: 11.5px; color: var(--muted); overflow-wrap: break-word; }
+.record dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.record dt:nth-last-of-type(1), .record dd:last-of-type { border-bottom: 0; }
+.record .null { color: var(--muted); font-style: italic; }
+.record dt.hit, .record dd.hit { background: var(--warn-wash); }
+.record dt.hit { color: var(--warn); }
+.record dt.new, .record dd.new { background: var(--teal-wash); }
 .change .warns { margin-left: 6px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; color: var(--muted); text-transform: uppercase; }
 .btn.show { color: var(--smalt); border-color: var(--smalt); font-weight: 600; }
 .btn.small { min-height: 30px; padding: 3px 10px; font-size: 13px; color: var(--smalt); }
@@ -345,7 +375,7 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
 
   <section class="view" id="view-policies" aria-label="Policies" hidden>
     <p class="lede">Who sees what, enforced on every read in this app: pick a person under <b>Viewing as</b> and every preview, result and object shows only what their rules allow.</p>
-    <div class="panel"><h2>Who sees what</h2><p class="sub">Rows each person can read in each dataset, from this run. Closed means none: a rule applies but can't filter that dataset's rows.</p><div class="scroll" id="matrix"><p class="foot">Run the flow to see the counts.</p></div></div>
+    <div class="panel"><h2>Who sees what</h2><p class="sub" id="matrix-sub">Rows each person can read in each output, from this run. Closed means none: a rule applies but can’t filter that output’s rows.</p><div class="scroll" id="matrix"><p class="foot">Run the flow to see the counts.</p></div></div>
     <div class="grid2">
       <div class="panel"><h2>People</h2><p class="sub">Each will hold an identity card made in their own browser; here the app acts for them.</p><ul class="list" id="people"></ul></div>
       <div class="panel"><h2>Rules</h2><p class="sub">Row rules filter, column rules remove, action rules allow.</p><ul class="list" id="rules"></ul></div>
@@ -359,7 +389,7 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
       <div id="effect-chart"><p class="foot">Run the flow to see the results.</p></div>
     </div>
     <div class="grid2">
-      <div class="panel"><h2>Busiest pickup zones</h2><p class="sub">From zone_hour, the sample's trips per zone.</p><div class="scroll" id="zones-table"></div></div>
+      <div class="panel" id="zones-panel"><h2>Busiest pickup zones</h2><p class="sub">From zone_hour, the sample's trips per zone.</p><div id="zones-table"></div></div>
       <div class="panel"><h2>Outputs</h2><p class="sub">The datasets the flow publishes. Tap one to look inside.</p><div id="datasets"></div></div>
     </div>
   </section>

@@ -332,6 +332,15 @@ Builder and drawn in the family's look. The first concepts are on the design can
   the step's sheet at Who can see this: the owner sees each person's access (all of it, some rows, some columns,
   closed) with the rules behind it and the rows they would read, and taps a person to see that step as they do, while
   the rest of the flow stays as it was; View all as switches the whole app. Anyone else sees only their own access.
+- **What is closed to someone isn't shown to them.** Viewing as someone, a step closed to them is left out of the
+  canvas with its edges (the flow is laid out again without it), as is a section with nothing left in it, and no
+  sheet names it; Results, the Ontology and the Policies leave out the outputs, object types, rules, people and
+  edits that aren't theirs, and Runs shows the run as far as they can see the flow, without its full record.
+  Arranging the canvas stays with the owner.
+- **Rows on a phone.** Previews and the rows a sheet shows come as cards, one row at a time to swipe or step
+  through, each column a label and its value with the columns that matter first (the ones a rule reads, the ones a
+  step adds); or as a table whose header and first column stay in place. Cards are the default on a narrow screen,
+  and the choice is kept.
 - **What each step changed.** After a run, each card says what its step did to the data: rows it left out (with a
   badge on the card), columns it added, rows in and out of an aggregate, rows a join found no match for. Its sheet
   leads with the same in full: a bar of rows kept against rows dropped, each expectation rule's failures, and the

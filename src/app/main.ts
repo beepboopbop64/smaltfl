@@ -77,6 +77,28 @@ const access = (id: string, who = state.viewer): ReadView | null => {
   const cols = state.columns.get(id);
   return cols ? readView(policies(), who, cols) : null;
 };
+/** Whether a person owns the flow (with no policies, everyone does). */
+const isOwner = (who = state.viewer) => {
+  const p = policies();
+  return !p || !!p.principals.find((x) => x.id === who)?.owner;
+};
+/** Whether the viewer may see a source or step at all: not when it is closed to them. Before a run, everything shows. */
+const visible = (id: string) => access(id)?.open !== false;
+/**
+ * The flow as the viewer sees it. What is closed to them is left out, with the edges to it, and so is a section that
+ * has nothing left in it: they see the flow they can read, not a map of what they can't. The owner sees all of it.
+ */
+function viewDoc(): FlowDocument {
+  const d = state.doc;
+  if (isOwner()) return d;
+  return {
+    ...d,
+    sources: d.sources.filter((x) => visible(x.id)),
+    steps: d.steps.filter((x) => visible(x.id)).map((st) => ({ ...st, inputs: st.inputs.filter(visible) })) as StepDef[],
+    groups: d.groups?.map((g) => ({ ...g, steps: g.steps.filter(visible) })).filter((g) => g.steps.length > 0),
+  };
+}
+
 /** A stored dataset's rows as the viewer may read them, as a subquery, or null when closed. */
 const readDataset = (name: string): string | null => {
   const view = access(name);
@@ -199,16 +221,14 @@ function accessText(p: Principal, view: ReadView, columns: readonly string[]): s
 
 /**
  * A card's shield, small and quiet: for the owner, on any step a rule limits for someone; viewing as someone, on the
- * steps their rules limit (closed ones are already greyed). Tapping it opens who can see the step.
+ * steps their rules limit (the ones closed to them aren't shown at all). Tapping it opens who can see the step.
  */
-function shieldOf(id: string): 'muted' | 'on' | 'closed' | null {
+function shieldOf(id: string): 'muted' | 'on' | null {
   const p = policies();
   const cols = state.columns.get(id);
   if (!p || !cols) return null;
-  const me = p.principals.find((x) => x.id === state.viewer);
-  if (!me || me.owner) return p.principals.some((x) => !x.owner && accessOf(readView(p, x.id, cols)) !== 'all') ? 'muted' : null;
-  const mine = accessOf(readView(p, state.viewer, cols));
-  return mine === 'all' ? null : mine === 'closed' ? 'closed' : 'on';
+  if (isOwner()) return p.principals.some((x) => !x.owner && accessOf(readView(p, x.id, cols)) !== 'all') ? 'muted' : null;
+  return accessOf(readView(p, state.viewer, cols)) === 'all' ? null : 'on';
 }
 
 // ------------------------------------------------------------------ what each step changed
@@ -474,7 +494,7 @@ function applyView(): void {
 
 function fitView(): void {
   const host = $('canvas');
-  const { left, top, width, height } = gridLayout(state.doc, state.collapsed);
+  const { left, top, width, height } = gridLayout(viewDoc(), state.collapsed);
   const W = host.clientWidth || 360;
   const H = host.clientHeight || 420;
   view.k = Math.max(MIN_ZOOM, Math.min(1.2, (W - 32) / width, (H - 32) / height));
@@ -498,7 +518,7 @@ const HINT = {
 
 function setHint(text?: string): void {
   const el = document.querySelector('#canvas .canvas-hint');
-  if (el) el.textContent = text ?? (state.arranging ? HINT.arrange : HINT.look);
+  if (el) el.textContent = text ?? (state.arranging ? HINT.arrange : isOwner() ? HINT.look : `As ${personName(state.viewer)} sees it: what is closed to them is left out · drag to move around · pinch to zoom`);
 }
 
 function renderTools(): void {
@@ -510,7 +530,7 @@ function renderTools(): void {
   tools.replaceChildren(
     ...(state.arranging
       ? [b('Fit', fitView), b('+ Section', addSection), resetButton(), b('Done', () => setArranging(false), { class: 'primary' })]
-      : [b('−', () => zoom(1 / 1.25), { 'aria-label': 'Zoom out' }), b('+', () => zoom(1.25), { 'aria-label': 'Zoom in' }), b('Fit', fitView), b('Tidy', tidy), b('Arrange', () => setArranging(true), { class: 'accent' })]),
+      : [b('−', () => zoom(1 / 1.25), { 'aria-label': 'Zoom out' }), b('+', () => zoom(1.25), { 'aria-label': 'Zoom in' }), b('Fit', fitView), ...(isOwner() ? [b('Tidy', tidy), b('Arrange', () => setArranging(true), { class: 'accent' })] : [])]),
   );
   host.classList.toggle('arranging', state.arranging);
   setHint();
@@ -543,7 +563,7 @@ function tidy(): void {
   state.doc = { ...state.doc, layout: {} };
   saveArrangement();
   renderCanvas();
-  startView(gridLayout(state.doc, state.collapsed));
+  startView(gridLayout(viewDoc(), state.collapsed));
 }
 
 /** The beginning of the flow, at a size where its cards are easy to read: on a phone, two columns and a bit. */
@@ -593,7 +613,7 @@ function setUpCanvas(host: HTMLElement): SVGSVGElement {
       press = { card: el.closest('[data-card]')?.getAttribute('data-card') ?? undefined, head: el.closest('[data-head]')?.getAttribute('data-head') ?? undefined, shield: !!el.closest('[data-shield]') };
       gesture = press.card || press.head ? 'press' : 'pan';
       // Outside Arrange a finger on a card pans, as on the background; holding it still picks the card up.
-      if (gesture === 'press' && !state.arranging) hold = window.setTimeout(() => gesture === 'press' && beginMove(press) && (gesture = 'drag'), HOLD_MS);
+      if (gesture === 'press' && !state.arranging && isOwner()) hold = window.setTimeout(() => gesture === 'press' && beginMove(press) && (gesture = 'drag'), HOLD_MS);
     } else if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       start = { ...start, dist: Math.hypot(a!.x - b!.x, a!.y - b!.y), cx: (a!.x + b!.x) / 2, cy: (a!.y + b!.y) / 2, vx: view.x, vy: view.y, k: view.k };
@@ -943,7 +963,8 @@ function renderCanvas(): void {
   const svg = host.querySelector('svg') ?? setUpCanvas(host);
   const world = svg.querySelector('#world')!;
   const { cardW, cardH, head } = GRID;
-  const layout = gridLayout(state.doc, state.collapsed);
+  const doc = viewDoc();
+  const layout = gridLayout(doc, state.collapsed);
   // Focus stays on the card or section it was on: the canvas redraws as counts arrive, under a keyboard user's feet.
   const active = document.activeElement;
   const focused = active && world.contains(active) ? { card: active.getAttribute('data-card'), head: active.getAttribute('data-head') } : null;
@@ -982,7 +1003,7 @@ function renderCanvas(): void {
   const shown = (id: string) => shownAs.get(id) ?? id;
   for (const [id, p] of layout.cards) drawn.at.set(shown(id), p);
   const seen = new Set<string>();
-  for (const st of state.doc.steps) {
+  for (const st of doc.steps) {
     for (const input of st.inputs) {
       const from = shown(input);
       const to = shown(st.id);
@@ -999,7 +1020,7 @@ function renderCanvas(): void {
   const card = (key: string, kind: string, name: string, line: CardLine, classes: string[], extra: { port?: 'in' | 'out'; end?: boolean; shield?: ReturnType<typeof shieldOf> } = {}) => {
     const { x, y } = drawn.at.get(key)!;
     if (line.tone !== 'same') classes.push(`tone-${line.tone}`);
-    const guard = extra.shield ? ` ${extra.shield === 'muted' ? 'Rules limit who sees it' : extra.shield === 'closed' ? `Closed to ${personName(state.viewer)}` : `${personName(state.viewer)} sees part of it`}.` : '';
+    const guard = extra.shield ? ` ${extra.shield === 'muted' ? 'Rules limit who sees it' : `${personName(state.viewer)} sees part of it`}.` : '';
     const g = s('g', { class: ['card', ...classes].join(' '), 'data-card': key, tabindex: 0, role: 'button', 'aria-label': `${name}: ${kind}. ${line.text}.${guard}` });
     g.append(s('rect', { class: 'box', x, y, width: cardW, height: cardH, rx: 9 }));
     g.append(s('text', { class: 'kind', x: x + 12, y: y + 18 }, fit(kind, Math.floor(chars * 1.15))));
@@ -1126,14 +1147,18 @@ async function renderSheet(): Promise<void> {
     fact('Key', h('span', { class: 'hash' }, short(n.key)));
     if (n.content) fact('Content', h('span', { class: 'hash' }, short(n.content)));
   } else fact('This run', 'not run yet');
-  if (st) fact('Reads', h('span', { class: 'mono' }, st.inputs.join(', ')));
-  const next = readersOf(id);
+  // Only what the viewer can see is named: a step closed to them stays out of sight here too.
+  const reads = st?.inputs.filter(visible) ?? [];
+  if (reads.length) fact('Reads', h('span', { class: 'mono' }, reads.join(', ')));
+  const next = readersOf(id).filter(visible);
   if (next.length) fact('Read by', h('span', { class: 'mono' }, next.join(', ')));
-  const section = h('select', { id: 'section-of', 'aria-label': 'Section' });
-  section.append(...(state.doc.groups ?? []).map((g) => h('option', { value: g.id }, g.name)), h('option', { value: '' }, 'No section'), h('option', { value: '+' }, 'A new section, around it'));
-  section.value = sectionOf(id) ?? '';
-  section.addEventListener('change', () => placeInSection(id, section.value));
-  fact('Section', section);
+  if (isOwner()) {
+    const section = h('select', { id: 'section-of', 'aria-label': 'Section' });
+    section.append(...(state.doc.groups ?? []).map((g) => h('option', { value: g.id }, g.name)), h('option', { value: '' }, 'No section'), h('option', { value: '+' }, 'A new section, around it'));
+    section.value = sectionOf(id) ?? '';
+    section.addEventListener('change', () => placeInSection(id, section.value));
+    fact('Section', section);
+  }
   body.append(facts);
 
   if (st) body.append(editor(st));
@@ -1167,7 +1192,7 @@ async function renderSheet(): Promise<void> {
     if (state.selected !== id) return;
     const note = view && (view.filters.length || view.removed.length) ? h('p', { class: 'foot' }, `As ${personName(who)}: ${[view.filters.length ? `filtered by the ${view.filters.join(' and the ')}` : '', view.removed.length ? `without ${view.removed.map((x) => x.column).join(', ')}` : ''].filter(Boolean).join(', ')}.`) : null;
     const isNew = new Set(fresh.map((c) => c.toLowerCase()));
-    preview.lastElementChild!.replaceWith(h('div', {}, table(r.columns, r.rows, (c) => (isNew.has(c.toLowerCase()) ? 'new' : undefined)), isNew.size ? h('p', { class: 'foot' }, 'Tinted: the columns this step adds.') : null, note));
+    preview.lastElementChild!.replaceWith(h('div', {}, rowsView(r.columns, r.rows, (c) => (isNew.has(c.toLowerCase()) ? 'new' : undefined)), isNew.size ? h('p', { class: 'foot' }, 'Tinted: the columns this step adds.') : null, note));
   } catch (e) {
     preview.lastElementChild!.textContent = message(e);
   }
@@ -1176,7 +1201,7 @@ async function renderSheet(): Promise<void> {
 /** Where an input's rows come from, or where an output's go: the flow's two ends, said plainly. */
 function inOut(id: string): HTMLElement | null {
   const n = nodeOf(id);
-  const readers = readersOf(id);
+  const readers = readersOf(id).filter(visible);
   const box = (kind: 'in' | 'out', label: string, ...kids: Child[]) => h('div', { class: `io ${kind}` }, h('p', { class: 'eyebrow' }, label), ...kids);
   const src = state.doc.sources.find((x) => x.id === id);
   if (src) {
@@ -1265,7 +1290,7 @@ async function showRows(into: HTMLElement, title: string, sql: string, first: Re
     const order = [...r.columns.keys()].sort((a, b) => lead(a) - lead(b));
     into.replaceChildren(
       h('div', { class: 'row' }, h('p', { class: 'eyebrow', style: 'flex:1' }, title), h('button', { class: 'btn', type: 'button', onclick: () => ((into.hidden = true), into.replaceChildren()) }, 'Hide')),
-      table(order.map((k) => r.columns[k]!), r.rows.map((row) => order.map((k) => row[k])), (c) => (first.has(c.toLowerCase()) ? 'hit' : undefined)),
+      rowsView(order.map((k) => r.columns[k]!), r.rows.map((row) => order.map((k) => row[k])), (c) => (first.has(c.toLowerCase()) ? 'hit' : undefined)),
       h('p', { class: 'foot' }, r.rows.length === 50 ? 'The first 50.' : r.rows.length ? plural(r.rows.length, 'row') + '.' : 'None.'),
     );
   } catch (e) {
@@ -1305,10 +1330,11 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
   }
   const out = c.rowsOut;
   const input = n.op === 'table' ? undefined : n.inputs[0];
-  const inputName = input === undefined ? '' : insp.plan.nodes[input]!.origin;
+  // A step the viewer can't see isn't named, here or anywhere.
+  const named = (origin: string, otherwise: string) => (visible(origin) ? origin : otherwise);
   if (input !== undefined && c.rowsIn === null) {
     headline(plural(out, 'row'));
-    say(`What it reads, ${inputName}, is closed to ${name}, so what it changed is closed to them too.`);
+    say(`What it reads is closed to ${name}, so what it changed is closed to them too.`);
     return done();
   }
   const inn = c.rowsIn ?? 0;
@@ -1331,7 +1357,7 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
         headline(`${plural(inn, 'row')} in, ${fmtInt(out)} out`, removedRows(c) ? 'drop' : 'same');
         if (c.added.length) say(`New columns: ${list(c.added)}.`);
         if (c.removed.length) say(`Columns it doesn’t keep: ${list(c.removed)}.`);
-        say(`Its columns aren’t ${inputName}’s, so the rows it returns can’t be matched one to one with the rows it read.`);
+        say(`Its columns aren’t the ones it reads, so the rows it returns can’t be matched one to one with the rows it read.`);
         break;
       }
       const lost = Math.max(0, inn - out);
@@ -1346,22 +1372,22 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
       const [gone, fresh] = await Promise.all([removed ? countOnce(`${key}|removed|${where}`, removed) : 0, changedSql ? countOnce(`${key}|new|${where}`, changedSql) : 0]);
       if (gone) box.append(h('div', { class: 'row' }, button(`Show the ${plural(gone, 'row')} it removed`, `Removed by ${id}`, removed)));
       if (fresh) {
-        say(`It also returns ${plural(fresh, 'row')} that ${inputName} doesn’t have: rows whose values it changed, or new ones.`);
+        say(`It also returns ${plural(fresh, 'row')} that it didn’t read: rows whose values it changed, or new ones.`);
         box.append(h('div', { class: 'row' }, button(`Show the ${plural(fresh, 'new or changed row')}`, `New or changed in ${id}`, changedSql)));
       }
       if (gone && !fresh && n.op === 'sql') say('It only removes rows: every row it returns is one it read, unchanged.');
       break;
     }
     case 'join': {
-      const right = insp.plan.nodes[n.inputs[1]!]!.origin;
+      const right = named(insp.plan.nodes[n.inputs[1]!]!.origin, 'the lookup');
       headline(`Added ${plural(c.added.length, 'column')} from ${right}: ${list(c.added)}`, 'add');
       const u = c.unmatched;
       const keys = new Set(n.on.map(([l]) => l.toLowerCase()));
       const on = list(n.on.map(([l]) => l));
-      if (u === null || u === undefined) say(`Which rows found a match is closed to ${name}: ${inputName} is closed to them.`);
+      if (u === null || u === undefined) say(`Which rows found a match is closed to ${name}: what it reads is closed to them.`);
       else {
         box.append(split(inn - u, u, 'matched', n.how === 'left' ? 'no match, kept with empty columns' : 'no match, left out'));
-        if (u === 0) say(`Every row of ${inputName} found its ${on} in ${right}.`);
+        if (u === 0) say(`Every row found its ${on} in ${right}.`);
         else {
           say(n.how === 'left' ? `${plural(u, 'row')} found no ${on} in ${right}: they are kept, with ${list(c.added)} empty.` : `${plural(u, 'row')} found no ${on} in ${right}, so the join leaves them out.`);
           box.append(h('div', { class: 'row' }, button(`Show the ${plural(u, 'row')} with no match`, `No match in ${right}`, readIn(insp, input!, who, emitUnmatched(insp.plan, i, insp.ctx)!), keys)));
@@ -1564,19 +1590,91 @@ async function statementFor(id: string): Promise<string | null> {
   return emitRead(insp.plan, i, insp.ctx);
 }
 
-/** A table of rows; `mark` can give a column a class (its header and cells), to tint the columns that matter. */
-function table(columns: string[], rows: unknown[][], mark?: (column: string) => string | undefined): HTMLElement {
+/** How a value reads: numbers rounded and right-aligned, a missing value as a muted null. */
+function cellOf(v: unknown): { text: string; cls: string } {
+  if (v === null || v === undefined) return { text: 'null', cls: 'null' };
+  if (typeof v === 'number') return { text: Number.isInteger(v) ? String(v) : String(Math.round(v * 10000) / 10000), cls: 'n' };
+  if (typeof v === 'bigint') return { text: v.toString(), cls: 'n' };
+  return { text: String(v), cls: '' };
+}
+
+/**
+ * A table of rows, its header and first column staying in place as it scrolls; `mark` can give a column a class (its
+ * header and cells), to tint the columns that matter.
+ */
+function table(columns: string[], rows: unknown[][], mark?: (column: string) => string | undefined, tall = false): HTMLElement {
   const marks = columns.map((c) => mark?.(c));
   const cell = (v: unknown, k: number) => {
-    const td =
-      v === null || v === undefined ? h('td', { class: 'null' }, 'null')
-      : typeof v === 'number' ? h('td', { class: 'n' }, Number.isInteger(v) ? String(v) : String(Math.round(v * 10000) / 10000))
-      : typeof v === 'bigint' ? h('td', { class: 'n' }, v.toString())
-      : h('td', {}, String(v));
-    if (marks[k]) td.classList.add(marks[k]!);
-    return td;
+    const { text, cls } = cellOf(v);
+    return h('td', { class: [cls, marks[k] ?? ''].filter(Boolean).join(' ') }, text);
   };
-  return h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ...columns.map((c, k) => h('th', marks[k] ? { class: marks[k]! } : {}, c)))), h('tbody', {}, ...rows.map((r) => h('tr', {}, ...r.map(cell))))));
+  return h('div', { class: `scroll${tall ? ' tall' : ''}` }, h('table', { class: 'data' }, h('thead', {}, h('tr', {}, ...columns.map((c, k) => h('th', marks[k] ? { class: marks[k]! } : {}, c)))), h('tbody', {}, ...rows.map((r) => h('tr', {}, ...r.map(cell))))));
+}
+
+/** Rows one at a time, as cards to swipe or step through: each column a label and its value, the marked ones first. */
+function cards(columns: string[], rows: unknown[][], mark?: (column: string) => string | undefined): HTMLElement {
+  if (!rows.length) return h('p', { class: 'foot' }, 'No rows.');
+  const marks = columns.map((c) => mark?.(c));
+  const order = [...columns.keys()].sort((a, b) => Number(!marks[a]) - Number(!marks[b]));
+  const track = h('div', { class: 'records', tabindex: '0', role: 'list', 'aria-label': `${plural(rows.length, 'row')}, one at a time` });
+  rows.forEach((r, i) => {
+    const dl = h('dl', {});
+    for (const k of order) {
+      const { text, cls } = cellOf(r[k]);
+      dl.append(h('dt', marks[k] ? { class: marks[k]! } : {}, ...breakable(columns[k]!)), h('dd', { class: [cls, marks[k] ?? ''].filter(Boolean).join(' ') }, text));
+    }
+    track.append(h('article', { class: 'record', role: 'listitem', 'aria-label': `Row ${i + 1} of ${rows.length}` }, dl));
+  });
+  const at = h('span', { class: 'records-at', 'aria-live': 'polite' }, `Row 1 of ${rows.length}`);
+  const width = () => (track.firstElementChild as HTMLElement).offsetWidth + 10;
+  const step = (d: number) => track.scrollBy({ left: d * width(), behavior: 'smooth' });
+  track.addEventListener('scroll', () => (at.textContent = `Row ${Math.min(rows.length, Math.round(track.scrollLeft / width()) + 1)} of ${rows.length}`), { passive: true });
+  return h('div', { class: 'records-wrap' },
+    h('div', { class: 'records-bar' },
+      h('button', { type: 'button', class: 'btn small', 'aria-label': 'Previous row', onclick: () => step(-1) }, '‹'),
+      at,
+      h('button', { type: 'button', class: 'btn small', 'aria-label': 'Next row', onclick: () => step(1) }, '›')),
+    track);
+}
+
+/** A column's name that wraps after its underscores rather than mid-word: tpep_pickup_ / datetime. */
+function breakable(name: string): Child[] {
+  return name.split('_').flatMap((part, i, all) => (i < all.length - 1 ? [`${part}_`, document.createElement('wbr')] : [part]));
+}
+
+/** How rows show: as cards on a phone, as a table on a wide screen, until someone picks; the pick is kept here. */
+let rowsMode: 'cards' | 'table' = (() => {
+  try {
+    const m = localStorage.getItem('smaltfl:rows');
+    if (m === 'cards' || m === 'table') return m;
+  } catch {
+    // Storage can be off; the screen's width decides.
+  }
+  return window.matchMedia('(max-width: 640px)').matches ? 'cards' : 'table';
+})();
+const rowsViews = new Set<{ el: HTMLElement; draw: () => void }>();
+
+/** Rows a person can read on any screen: cards or a table, with a switch between them that applies everywhere. */
+function rowsView(columns: string[], rows: unknown[][], mark?: (column: string) => string | undefined): HTMLElement {
+  const el = h('div', { class: 'rows-view' });
+  const pick = (m: 'cards' | 'table') => {
+    rowsMode = m;
+    try {
+      localStorage.setItem('smaltfl:rows', m);
+    } catch {
+      // Kept for this page only.
+    }
+    for (const v of [...rowsViews]) v.el.isConnected ? v.draw() : rowsViews.delete(v);
+  };
+  const draw = () => {
+    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Show rows as' },
+      h('button', { type: 'button', 'aria-pressed': String(rowsMode === 'cards'), onclick: () => pick('cards') }, 'Cards'),
+      h('button', { type: 'button', 'aria-pressed': String(rowsMode === 'table'), onclick: () => pick('table') }, 'Table'));
+    el.replaceChildren(seg, rowsMode === 'cards' ? cards(columns, rows, mark) : table(columns, rows, mark, true));
+  };
+  rowsViews.add({ el, draw });
+  draw();
+  return el;
 }
 
 // ------------------------------------------------------------------ results
@@ -1585,24 +1683,26 @@ async function renderResults(): Promise<void> {
   const engine = state.engine;
   const run = latest();
   if (!engine || !run) return;
-  const outputs = Object.entries(run.result.manifest.outputs);
+  // Only what the viewer can read: an output closed to them isn't listed, and a result built on one isn't shown.
+  const outputs = Object.entries(run.result.manifest.outputs).filter(([name]) => visible(name));
+  const owner = isOwner();
   $('datasets').replaceChildren(
-    h('ul', { class: 'runs' }, ...outputs.map(([name, d]) => h('li', {}, h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => select(name) }, name), h('span', { class: 'foot num' }, `${fmtInt(d.rows)} rows`), h('span', { class: 'hash' }, short(d.content)))))),
+    outputs.length
+      ? h('ul', { class: 'runs' }, ...outputs.map(([name, d]) => h('li', {}, h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => select(name) }, name), owner ? h('span', { class: 'foot num' }, `${fmtInt(d.rows)} rows`) : null, h('span', { class: 'hash' }, short(d.content))))))
+      : h('p', { class: 'foot' }, `No output is open to ${personName(state.viewer)}.`),
   );
-  const closed = (name: string) => h('p', { class: 'status bad' }, `Closed to ${personName(state.viewer)}: ${access(name)?.reason ?? 'not run yet'}.`);
   try {
     const zh = readDataset('zone_hour');
+    $('zones-panel').hidden = !zh;
     if (zh) {
       const zones = await engine.query(
         `SELECT pu_zone AS zone, pu_borough AS borough, sum(trips) AS trips, round(sum(avg_duration_min * trips) / sum(trips), 1) AS minutes, round(sum(avg_speed_mph * trips) / sum(trips), 1) AS mph FROM (${zh}) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 8`,
       );
       $('zones-table').replaceChildren(table(zones.columns, zones.rows));
-    } else $('zones-table').replaceChildren(closed('zone_hour'));
-    const we = readDataset('weather_effect');
-    if (!we) {
-      $('effect-chart').replaceChildren(closed('weather_effect'));
-      return;
     }
+    const we = readDataset('weather_effect');
+    $('effect-panel').hidden = !we;
+    if (!we) return;
     const effect = await engine.query(`SELECT borough, condition, hours, trips_per_hour, vs_dry FROM (${we}) WHERE condition <> 'dry' ORDER BY borough, condition`);
     const dry = await engine.query(`SELECT borough, hours, trips_per_hour FROM (${we}) WHERE condition = 'dry'`);
     const width = Math.min(720, Math.max(300, $('effect-chart').clientWidth || 340));
@@ -1663,14 +1763,22 @@ function setViewer(id: string): void {
   $<HTMLSelectElement>('viewer').value = id;
   state.object = null;
   state.verdict = null;
+  if (!isOwner()) state.arranging = false;
   void computeChanges();
-  renderCanvas();
-  if (state.selected) void renderSheet();
-  const view = location.hash.slice(1);
-  if (view === 'results') void renderResults();
-  if (view === 'policies') void renderPolicies();
-  if (view === 'ontology') void renderOntology();
-  setStatus(id === 'owner' ? 'Viewing as the owner: every row and column.' : `Viewing as ${personName(id)}: every read below goes through their rules.`);
+  // Their flow is laid out without what they can't see: start at its beginning.
+  view.ready = false;
+  renderTools();
+  if ((state.selected && !visible(state.selected)) || (state.section && !isOwner())) select(null);
+  else {
+    renderCanvas();
+    if (state.selected) void renderSheet();
+  }
+  const where = location.hash.slice(1);
+  if (where === 'results') void renderResults();
+  if (where === 'policies') void renderPolicies();
+  if (where === 'ontology') void renderOntology();
+  renderRuns();
+  setStatus(isOwner(id) ? 'Viewing as the owner: every row and column.' : `Viewing as ${personName(id)}: every read goes through their rules, and what is closed to them is left out.`);
 }
 
 let policiesRender = 0;
@@ -1678,8 +1786,14 @@ async function renderPolicies(): Promise<void> {
   const p = policies();
   if (!p) return;
   const token = ++policiesRender;
+  // Anyone but the owner sees their own access, the rules that apply to them, and only datasets open to them.
+  const owner = isOwner();
+  const people = owner ? p.principals : p.principals.filter((x) => x.id === state.viewer);
+  $('matrix-sub').textContent = owner
+    ? 'Rows each person can read in each output, from this run. Closed means none: a rule applies but can’t filter that output’s rows.'
+    : `The rows ${personName(state.viewer)} can read in each output open to them, from this run.`;
   $('people').replaceChildren(
-    ...p.principals.map((x) => {
+    ...people.map((x) => {
       const attrs = x.owner ? 'sees everything' : Object.entries(x.attributes ?? {}).map(([k, v]) => `${k}: ${v.join(', ')}`).join('; ') || 'no row limits';
       const groups = (p.groups ?? []).filter((g) => g.members.includes(x.id)).map((g) => g.name);
       return h('li', {},
@@ -1689,7 +1803,7 @@ async function renderPolicies(): Promise<void> {
     }),
   );
   $('rules').replaceChildren(
-    ...p.rules.map((r) => {
+    ...p.rules.filter((r) => owner || covers(p, r.for, state.viewer)).map((r) => {
       const text = r.kind === 'row' ? `Keeps rows whose ${r.columns.join(' (or ') + (r.columns.length > 1 ? ')' : '')} is one of each person's ${r.attribute}. A dataset without it is closed to them.`
         : r.kind === 'column' ? `Removes ${r.remove.join(', ')}.`
         : `${actionName(r.action)}${r.scope ? `, only where ${r.scope.columns.join(' or ')} is one of their ${r.scope.attribute}` : ''}.`;
@@ -1698,9 +1812,9 @@ async function renderPolicies(): Promise<void> {
   );
   const run = latest();
   if (!run || !state.engine) return;
-  const outputs = Object.keys(run.result.manifest.outputs);
+  const outputs = Object.keys(run.result.manifest.outputs).filter((o) => owner || visible(o));
   const body: HTMLElement[] = [];
-  for (const x of p.principals) {
+  for (const x of people) {
     const cells: HTMLElement[] = [];
     for (const o of outputs) {
       const cols = state.columns.get(o);
@@ -1716,7 +1830,7 @@ async function renderPolicies(): Promise<void> {
     body.push(h('tr', {}, h('td', { style: 'font-weight:600' }, x.name), ...cells));
   }
   if (token !== policiesRender) return;
-  $('matrix').replaceChildren(h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Person'), ...outputs.map((o) => h('th', { class: 'n' }, o)))), h('tbody', {}, ...body)));
+  $('matrix').replaceChildren(h('table', { class: 'data' }, h('thead', {}, h('tr', {}, h('th', {}, 'Person'), ...outputs.map((o) => h('th', { class: 'n' }, o)))), h('tbody', {}, ...body)));
 }
 
 // ------------------------------------------------------------------ ontology
@@ -1736,9 +1850,13 @@ async function renderOntology(): Promise<void> {
   const token = ++ontologyRender;
   const stale = () => token !== ontologyRender;
   const typeName = (id: string) => o.objectTypes.find((t) => t.id === id)?.name ?? id;
+  // An object type on a dataset closed to the viewer isn't shown, nor are its links and actions.
+  const types = o.objectTypes.filter((t) => visible(t.dataset));
+  const shownType = new Set(types.map((t) => t.id));
+  if (state.ontologyType && !shownType.has(state.ontologyType)) state.ontologyType = null;
   const counts = new Map<string, number | null>();
   if (latest() && engine) {
-    for (const t of o.objectTypes) {
+    for (const t of types) {
       const sql = readDataset(t.dataset);
       counts.set(t.id, sql ? Number((await engine.query(`SELECT count(*) FROM (${sql})`)).rows[0]![0]) : null);
     }
@@ -1746,19 +1864,19 @@ async function renderOntology(): Promise<void> {
   if (stale()) return;
   $('ontology-map').replaceChildren(
     h('div', { class: 'types' },
-      ...o.objectTypes.map((t) => {
+      ...types.map((t) => {
         const c = counts.get(t.id);
-        const links = o.linkTypes.filter((l) => l.from === t.id || l.to === t.id).map((l) => (l.from === t.id ? `${l.name} ${typeName(l.to)}` : `${typeName(l.from)} ${l.name} it`));
+        const links = o.linkTypes.filter((l) => (l.from === t.id || l.to === t.id) && shownType.has(l.from) && shownType.has(l.to)).map((l) => (l.from === t.id ? `${l.name} ${typeName(l.to)}` : `${typeName(l.from)} ${l.name} it`));
         const acts = o.actionTypes.filter((a) => a.on === t.id).map((a) => a.name);
         return h('button', { class: 'type', type: 'button', 'aria-pressed': String(state.ontologyType === t.id), onclick: () => ((state.ontologyType = t.id), (state.object = null), (state.verdict = null), void renderOntology()) },
           h('span', { class: 'tag' }, 'Object type'),
           h('span', { class: 'name' }, t.name),
-          h('span', { class: 'meta' }, `${c === undefined ? '' : c === null ? `closed to ${personName(state.viewer)} · ` : `${fmtInt(c)} objects · `}from ${t.dataset}, keyed by ${t.key.join(' + ')}`),
+          h('span', { class: 'meta' }, `${c === undefined || c === null ? '' : `${fmtInt(c)} objects · `}from ${t.dataset}, keyed by ${t.key.join(' + ')}`),
           links.length ? h('span', { class: 'links' }, `Links: ${links.join(' · ')}`) : null,
           acts.length ? h('span', { class: 'links' }, `Actions: ${acts.join(', ')}`) : null);
       })),
   );
-  const t = o.objectTypes.find((x) => x.id === state.ontologyType);
+  const t = types.find((x) => x.id === state.ontologyType);
   const objects = $('objects');
   if (!t || !engine || !latest()) {
     objects.replaceChildren(h('p', { class: 'foot' }, latest() ? 'Choose an object type to see its objects.' : 'Run the flow to see the objects.'));
@@ -1792,12 +1910,15 @@ async function renderOntology(): Promise<void> {
     }
   }
   const chain = state.chain;
+  // The owner sees every record; anyone else, their own.
+  const owner = isOwner();
+  const edits = owner ? state.edits : state.edits.filter((e) => e.actor === state.viewer);
   $('edits').replaceChildren(
     h('h2', {}, 'Edits'),
-    h('p', { class: 'sub' }, 'Every action, allowed or refused, in one hash chain: each record hashes itself and the record before it.'),
-    chain ? h('div', { class: 'row' }, h('span', { class: `pill ${chain.ok ? 'ok' : 'bad'}` }, chain.ok ? 'chain verified' : `chain broken at #${chain.broken}`), h('span', { class: 'foot', style: 'margin:0' }, `${chain.edits} record${chain.edits === 1 ? '' : 's'}`)) : '',
-    state.edits.length
-      ? h('ul', { class: 'checks' }, ...[...state.edits].reverse().slice(0, 12).map((e) => h('li', {}, h('span', { class: e.outcome === 'applied' ? 'ok' : 'bad' }, e.outcome), h('span', {}, `#${e.seq} ${actionName(e.action)} by ${personName(e.actor)}: ${e.reason}. `, h('span', { class: 'hash' }, short(e.hash))))))
+    h('p', { class: 'sub' }, owner ? 'Every action, allowed or refused, in one hash chain: each record hashes itself and the record before it.' : `${personName(state.viewer)}’s actions, allowed or refused, in the flow’s hash chain: each record hashes itself and the record before it.`),
+    chain ? h('div', { class: 'row' }, h('span', { class: `pill ${chain.ok ? 'ok' : 'bad'}` }, chain.ok ? 'chain verified' : `chain broken at #${chain.broken}`), owner ? h('span', { class: 'foot', style: 'margin:0' }, `${chain.edits} record${chain.edits === 1 ? '' : 's'}`) : null) : '',
+    edits.length
+      ? h('ul', { class: 'checks' }, ...[...edits].reverse().slice(0, 12).map((e) => h('li', {}, h('span', { class: e.outcome === 'applied' ? 'ok' : 'bad' }, e.outcome), h('span', {}, `#${e.seq} ${actionName(e.action)} by ${personName(e.actor)}: ${e.reason}. `, h('span', { class: 'hash' }, short(e.hash))))))
       : h('p', { class: 'foot' }, 'No edits yet.'),
   );
 }
@@ -1859,22 +1980,26 @@ function renderRuns(): void {
   list.replaceChildren(
     ...state.runs.map((r) => {
       const m = r.result.manifest;
-      const count = (status: string) => m.nodes.filter((n) => n.status === status).length;
+      // Anyone but the owner sees the run as far as they can see the flow: no steps closed to them, no full record.
+      const owner = isOwner();
+      const nodes = m.nodes.filter((n) => owner || visible(n.origin));
+      const count = (status: string) => nodes.filter((n) => n.status === status).length;
       const li = h('li', { class: 'panel' });
       li.append(
         h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Run ${r.result.run}`), h('span', { class: 'pill' }, `${count('built')} built`), h('span', { class: 'pill' }, `${count('reused')} reused`), h('span', { class: 'pill' }, `${count('folded')} folded`), h('span', { class: 'foot num' }, `${fmtMs(r.ms)} · ${r.at.toLocaleTimeString()}`)),
         h('p', { class: 'hash' }, `manifest ${r.result.hash}`),
-        h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => void verify(r) }, 'Verify'), h('button', { class: 'btn', type: 'button', onclick: () => void sign(r) }, r.signed ? 'Signed' : 'Sign')),
+        h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => void verify(r) }, 'Verify'), owner ? h('button', { class: 'btn', type: 'button', onclick: () => void sign(r) }, r.signed ? 'Signed' : 'Sign') : null),
       );
       if (r.verified) {
-        const failed = r.verified.checks.filter((c) => !c.ok);
+        const checks = r.verified.checks.filter((c) => owner || visible(c.origin));
+        const failed = checks.filter((c) => !c.ok);
         li.append(
-          h('div', { class: 'row' }, h('span', { class: `pill ${r.verified.ok ? 'ok' : 'bad'}` }, r.verified.ok ? 'verified' : 'verification failed'), h('span', { class: 'foot' }, `${r.verified.checks.length} checks: stored hashes, then a recomputation from the snapshots`)),
-          h('ul', { class: 'checks' }, ...(failed.length ? failed : r.verified.checks).slice(0, 12).map((c) => h('li', {}, h('span', { class: c.ok ? 'ok' : 'bad' }, c.ok ? 'ok' : 'failed'), h('span', {}, `${c.origin} · ${c.check}${c.note ? ` · ${c.note}` : ''}`)))),
+          h('div', { class: 'row' }, h('span', { class: `pill ${r.verified.ok ? 'ok' : 'bad'}` }, r.verified.ok ? 'verified' : 'verification failed'), h('span', { class: 'foot' }, `${checks.length} checks: stored hashes, then a recomputation from the snapshots`)),
+          h('ul', { class: 'checks' }, ...(failed.length ? failed : checks).slice(0, 12).map((c) => h('li', {}, h('span', { class: c.ok ? 'ok' : 'bad' }, c.ok ? 'ok' : 'failed'), h('span', {}, `${c.origin} · ${c.check}${c.note ? ` · ${c.note}` : ''}`)))),
         );
       }
-      if (r.signed) li.append(h('div', { class: 'row' }, h('span', { class: `pill ${r.signatureOk ? 'ok' : 'bad'}` }, r.signatureOk ? 'signature valid' : 'signature invalid'), h('span', { class: 'hash' }, `${r.signed.signer.name} · ${short(r.signed.signer.fingerprint)}`)));
-      li.append(h('details', {}, h('summary', {}, 'The manifest'), h('pre', { class: 'code' }, JSON.stringify(JSON.parse(canonicalJSON(m)), null, 2))));
+      if (r.signed && owner) li.append(h('div', { class: 'row' }, h('span', { class: `pill ${r.signatureOk ? 'ok' : 'bad'}` }, r.signatureOk ? 'signature valid' : 'signature invalid'), h('span', { class: 'hash' }, `${r.signed.signer.name} · ${short(r.signed.signer.fingerprint)}`)));
+      if (owner) li.append(h('details', {}, h('summary', {}, 'The manifest'), h('pre', { class: 'code' }, JSON.stringify(JSON.parse(canonicalJSON(m)), null, 2))));
       return li;
     }),
   );
@@ -1914,8 +2039,8 @@ async function run(): Promise<void> {
     const result = await runFlow(engine, state.doc, { smaltdb: SMALTDB });
     const ms = performance.now() - t;
     state.runs.unshift({ result, ms, at: new Date() });
-    const count = (status: string) => result.manifest.nodes.filter((n) => n.status === status).length;
     await learnColumns();
+    const count = (status: string) => result.manifest.nodes.filter((n) => n.status === status && (isOwner() || visible(n.origin))).length;
     void computeChanges();
     await refreshEdits();
     setStatus(`Run ${result.run} took ${fmtMs(ms)}: ${count('built')} built, ${count('reused')} reused, ${count('folded')} folded${engine.mode === 'page' ? ' (the engine runs in the page here)' : ''}.`);
