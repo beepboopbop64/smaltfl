@@ -7,7 +7,7 @@ ontology, actions, enforced access policies and content hashes attached to every
 of the [smalt family](https://smaltworks.dev).
 
 > **Status: design.** There is no code yet.
-> - Decisions so far: [docs/adr/](docs/adr/README.md) (ADR 0001 to 0003)
+> - Decisions so far: [docs/adr/](docs/adr/README.md) (ADR 0001 to 0004)
 > - The architecture (draft): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 > - The example it is built and measured against: [docs/SCENARIO.md](docs/SCENARIO.md)
 > - Questions still open: [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md)

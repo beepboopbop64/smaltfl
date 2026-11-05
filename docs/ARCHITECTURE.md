@@ -34,7 +34,7 @@
 | Component | Where it runs | Responsibility |
 | --- | --- | --- |
 | **App** (`src/app/`) | Main thread | The UI: canvas, step configuration, data previews, ontology and action forms, run history and lineage, policy editor, "view as", sharing. Plain DOM, CSS and SVG, with smaltkit; colours and type from the brand tokens |
-| **Core** (`src/core/`) | Anywhere: page, worker, Node | Pure TypeScript with no DOM or engine imports. The flow model and its validation, the step compilers, canonical JSON and hashing, lineage, the policy model and its compilation to SQL, the ontology model, the package format |
+| **Core** (`src/core/`) | Anywhere: page, worker, Node | Pure TypeScript with no DOM or engine imports. The flow model and its validation, the translation to the flow plan, the optimizer and the emitters, canonical JSON and hashing, lineage, the policy model and its compilation to SQL, the ontology model, the package format |
 | **Runtime plugin** (`src/plugin/`) | The engine worker | A `SmaltPlugin` (API v1). Runs a segment of a flow in one transaction, hashes datasets while scanning them in the worker, stores input snapshots, applies actions, builds and opens packages. Data stays in the worker except what the app asks to show |
 | **Worker entry** (`src/worker.ts`) | The engine worker | `serve({ plugins: [external, io, parquet, smaltfl] })`, the pattern every smaltdb app with plugins uses (smaltdb ADR 0012) |
 | **Storage** | OPFS | The smaltdb database (datasets and smaltfl's own tables), and a content-addressed blob store for snapshots and packages |
@@ -47,8 +47,8 @@ it in Node for tests, and later for the host. Nothing in the core knows which on
 
 1. **One engine.** Every step runs in smaltdb. smaltfl orchestrates, compiles and checks; it never processes rows
    itself, except to hash, encrypt or import them.
-2. **The canvas never hides the code.** Every step shows the exact statement it runs; a visual step can be turned
-   into a SQL step.
+2. **The canvas never hides the logic.** Every step shows what it computes as SQL, and a visual step can be turned
+   into a SQL step. What the engine actually ran is one click away (Explain).
 3. **Hashes all the way through.** Every flow, step, input, dataset, edit and run has a content hash, and every rebuild
    decision is made from them.
 4. **Policies on every path.** Reads, actions and shares go through the same policy model. There is no unchecked path,
@@ -59,6 +59,9 @@ it in Node for tests, and later for the host. Nothing in the core knows which on
    required by it.
 7. **Family-native.** smaltdb and smaltkit are the only runtime dependencies; cryptography is WebCrypto. The family's
    conventions for repositories, tests, docs and brand apply.
+8. **People say what, the machine decides how** ([ADR 0004](adr/0004-the-flow-plan.md)). The document holds what a
+   flow computes, readable by people; the flow plan decides how it runs, and may change freely as long as the
+   output hashes don't.
 
 ## 4. The flow document
 
@@ -92,19 +95,48 @@ it in Node for tests, and later for the host. Nothing in the core knows which on
 
 A separate document (`docs/FORMAT.md`, to come) specifies it completely, as smaltbi's REPORT_FORMAT does.
 
-## 5. Compiling and running
+## 5. From the document to the engine
 
-**Compiling.** Each step compiles to one `SELECT` over the names of its inputs. The visual tools generate readable SQL
-today and plans once the public plan API exists (ADR 0001 §5). The steps between two datasets form a **segment**,
-compiled to one statement with the intermediate steps as common table expressions, so the engine plans and fuses
-across them.
+[ADR 0004](adr/0004-the-flow-plan.md): the document is for people, the flow plan is for the machine.
 
-**Typing.** Before anything runs, the runtime plugin prepares each segment and reads its static column types
-(`Statement.columnTypes`), which gives every step on the canvas its schema. With the plan API, `bind()` replaces this.
+```
+flow document ── translate ──▶ flow plan ── type, key, optimize ──▶ segments ── emit ──▶ smaltdb
+(canvas, SQL,                  (complete, canonical,                (stored or folded)    (SQL today,
+ later notebooks)               hashed)                                                     plans later)
+```
 
-**Keys.** A step's key is the hash of its kind, its canonical configuration, its inputs' keys, the parameter values it
-uses, and the engine and plugin versions. A source's key is the hash of its snapshot. A dataset whose key already has a
-stored version is not rebuilt: this is how "only what changed is rebuilt" works, and it covers external inputs.
+**Translating.** A pure, deterministic function in the core turns the document into the flow plan: each step becomes
+one or more plan nodes, references by name become references to nodes, parameters are filled in, and display fields
+are dropped. The nodes:
+- `snapshot`: an input, pinned by its content hash when a run first reads it;
+- `query`: a relational step over its inputs. Today it is a SQL statement, written in a SQL step or generated from a
+  visual tool; with the public plan API it is a smaltdb plan;
+- `expect`: row expectations (warn, drop, fail) and dataset checks, with the counts the run reports.
+
+The flow's **outputs** name the nodes stored as datasets. Reads for a principal and shares add policy nodes
+(section 7).
+
+**Typing.** The runtime plugin prepares each query node in the engine and records its output columns and their static
+types (`Statement.columnTypes`), so the plan is complete before anything runs and every step on the canvas has its
+schema. With the plan API, `bind()` replaces this.
+
+**Keys.** A node's key is the hash of its canonical form, with its inputs replaced by their keys, and the engine and
+plugin versions. A snapshot's key is the hash of its content. Keys come from the flow plan, not the document: moving a
+card or renaming a dataset changes no key, and two surfaces that produce the same plan share keys. A node whose key
+already has a stored version is not rebuilt: this is how "only what changed is rebuilt" works, and it covers external
+inputs.
+
+**Optimizing** (smaltfl's part; the engine optimizes within each statement):
+- **Reuse:** a node whose key has a stored version is read, not rebuilt.
+- **Store or fold:** a node is stored if it is an output, an expectation (its counts and rows are reported), read by
+  more than one node, or pinned by the user. Every other node is folded into the statement of the node that reads it,
+  as a common table expression. The nodes up to a stored one form a **segment**: one statement, which the engine plans
+  and fuses as a whole.
+- **With the plan API:** columns nothing downstream reads are pruned, and filters, policy filters included, move
+  toward the sources, so Parquet skips row groups.
+
+**Emitting.** Only the emitter knows what the engine accepts: SQL today, plans later. The SQL it writes is for the
+engine, not for people; the readable SQL of a visual step on the canvas is a separate rendering of the same node.
 
 **Running a segment.**
 1. Snapshot any external input not yet stored: fetch it once, hash it, store it under its hash, and register it with
@@ -114,19 +146,20 @@ stored version is not rebuilt: this is how "only what changed is rebuilt" works,
 3. Hash the new version while scanning it in the worker (section 6), and record it.
 4. Point the dataset's name (a view) at the new version. A failure at any step leaves the previous version current.
 
-**Runs** are recorded as manifests (section 6). Cancellation uses the client's `AbortSignal`; progress is reported per
-step. Previews run a segment up to the chosen step, with a `LIMIT`.
+**Runs** are recorded as manifests (section 6), with the flow plan they ran stored by its hash. Cancellation uses the
+client's `AbortSignal`; progress is reported per step. Previews run a segment up to the chosen step, with a `LIMIT`.
 
 ## 6. Hashes and provenance
 
 | What | Hash of | Notes |
 | --- | --- | --- |
 | Flow | The canonical JSON of the document, without display fields | Canonical JSON: sorted keys, no insignificant whitespace, numbers in shortest form |
-| Step key | Kind, canonical configuration, input keys, parameter values used, engine and plugin versions | Merkle-style: a change upstream changes every key downstream |
+| Flow plan | The canonical JSON of the plan a run executed | Stored with the run, so a re-run replays exactly what ran |
+| Step key | Its plan node in canonical form, its inputs' keys, the engine and plugin versions | Merkle-style: a change upstream changes every key downstream. Names and display fields are not in it |
 | Snapshot | The source's bytes, in 1 MiB chunks, then the chunk hashes | Chunked so large files hash as they stream and parts can be checked alone |
 | Dataset version | Its schema, then its rows in canonical order (by its declared key, else by every column), in a canonical binary encoding | Exact: `REAL` values hash by their IEEE-754 bits; `NULL` and each type are tagged |
 | Edit | The edit and the previous edit's hash | A hash chain: the action history can't be rewritten unnoticed |
-| Run manifest | The flow hash, parameters, versions, step keys, snapshot and dataset hashes, row counts, expectation results, the policy hash, the previous run | Signed when shared (section 7) |
+| Run manifest | The flow and flow plan hashes, parameters, versions, step keys, snapshot and dataset hashes, row counts, expectation results, the policy hash, the previous run | Signed when shared (section 7) |
 
 - **Algorithm:** SHA-256 through WebCrypto, available in pages, workers and Node, with no dependency.
 - **Verification** has two levels: *check* (signatures, and the hashes of whatever data was shipped) and *re-run*
