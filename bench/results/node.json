@@ -1,0 +1,41 @@
+{
+  "engine": "smaltdb 0.9.0",
+  "runtime": "Node v22.23.4",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+  "date": "2026-11-05",
+  "results": [
+    {
+      "trips": 10000,
+      "directSqlMs": 235,
+      "firstRunMs": 304,
+      "overhead": 0.29,
+      "hashTripsMs": 58,
+      "unchangedRunMs": 15,
+      "editGoldStepMs": 29,
+      "verifyMs": 217,
+      "zoneHourRows": 4641
+    },
+    {
+      "trips": 100000,
+      "directSqlMs": 1330,
+      "firstRunMs": 1914,
+      "overhead": 0.44,
+      "hashTripsMs": 242,
+      "unchangedRunMs": 10,
+      "editGoldStepMs": 45,
+      "verifyMs": 1663,
+      "zoneHourRows": 8440
+    },
+    {
+      "trips": 300000,
+      "directSqlMs": 4407,
+      "firstRunMs": 5983,
+      "overhead": 0.36,
+      "hashTripsMs": 729,
+      "unchangedRunMs": 16,
+      "editGoldStepMs": 36,
+      "verifyMs": 4672,
+      "zoneHourRows": 8898
+    }
+  ]
+}

@@ -166,6 +166,13 @@ laptop, with the results saved as JSON in `bench/results/`, as smaltdb does.
 Correctness, enforcement and verification come before speed: a faster version that weakens any check in section 6 is
 rejected.
 
+**A first baseline** (`bench/results/node.json`: Node 22 in a cloud container, on the seeded stand-in for the data,
+not yet Chromium). At 300,000 trips, the flow's statements run on their own in 4.4 s, and a first run takes 6.0 s; the
+difference is the table source's snapshot (its copy and its hash), which a Parquet source replaces by hashing the
+file's bytes. A run with nothing changed takes 16 ms, a run after editing a gold step 36 ms, and verifying a run
+4.7 s. The engine's own statements dominate, `DISTINCT` and the date functions above all, so the tier M budget is
+first a question of what those statements cost in smaltdb, measured in Chromium.
+
 ## 8. Later
 
 - **Congestion pricing.** Q1 2025 against Q1 2024: the same flow with a second parameter, and the 2025 data's

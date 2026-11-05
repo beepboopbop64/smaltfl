@@ -118,7 +118,10 @@ The flow's **outputs** name the nodes stored as datasets. Reads for a principal 
 
 **Typing.** The runtime plugin prepares each query node in the engine and records its output columns and their static
 types (`Statement.columnTypes`), so the plan is complete before anything runs and every step on the canvas has its
-schema. With the plan API, `bind()` replaces this.
+schema. The same check refuses a statement that writes, reads external data, names two columns alike, or reads a table
+or view other than its inputs. That last check uses `EXPLAIN QUERY PLAN`, which in smaltdb 0.9 doesn't list tables read
+inside subqueries in expressions, so for now it catches the common mistake rather than every case. With the plan API,
+`bind()` replaces this, and the check becomes exact.
 
 **Keys.** A node's key is the hash of its canonical form, with its inputs replaced by their keys, and the engine and
 plugin versions. A snapshot's key is the hash of its content. Keys come from the flow plan, not the document: moving a
@@ -128,15 +131,23 @@ inputs.
 
 **Optimizing** (smaltfl's part; the engine optimizes within each statement):
 - **Reuse:** a node whose key has a stored version is read, not rebuilt.
-- **Store or fold:** a node is stored if it is an output, an expectation (its counts and rows are reported), read by
-  more than one node, or pinned by the user. Every other node is folded into the statement of the node that reads it,
-  as a common table expression. The nodes up to a stored one form a **segment**: one statement, which the engine plans
-  and fuses as a whole.
+- **Store or fold:** a node is stored if it is an output, read by more than one node, or pinned by the user. Every
+  other node is folded into the statement of the node that reads it, as a common table expression. The nodes up to a
+  stored one form a **segment**: one statement, which the engine plans and fuses as a whole. Expectations always run;
+  their counts are recorded by the expectation's key, so their rows needn't be stored, and their filter folds into
+  the statement that reads them.
 - **With the plan API:** columns nothing downstream reads are pruned, and filters, policy filters included, move
   toward the sources, so Parquet skips row groups.
 
 **Emitting.** Only the emitter knows what the engine accepts: SQL today, plans later. The SQL it writes is for the
 engine, not for people; the readable SQL of a visual step on the canvas is a separate rendering of the same node.
+
+**Sources in the database.** A table source is snapshotted by copying its rows into a version table, keyed by their
+content hash. Each source table has a **watch**: a materialized view of its row count, which the engine marks stale on
+any committed write to the table, even one that keeps the count. While the watch is fresh, the last snapshot still
+holds and a run doesn't read the table at all; the copy and the watch's refresh share one transaction, so no write can
+fall between them. Views are not watched (their definition can change while their tables don't), so they are read
+every run.
 
 **Running a segment.**
 1. Snapshot any external input not yet stored: fetch it once, hash it, store it under its hash, and register it with
@@ -156,8 +167,8 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
 | Flow | The canonical JSON of the document, without display fields | Canonical JSON: sorted keys, no insignificant whitespace, numbers in shortest form |
 | Flow plan | The canonical JSON of the plan a run executed | Stored with the run, so a re-run replays exactly what ran |
 | Step key | Its plan node in canonical form, its inputs' keys, the engine and plugin versions | Merkle-style: a change upstream changes every key downstream. Names and display fields are not in it |
-| Snapshot | The source's bytes, in 1 MiB chunks, then the chunk hashes | Chunked so large files hash as they stream and parts can be checked alone |
-| Dataset version | Its schema, then its rows in canonical order (by its declared key, else by every column), in a canonical binary encoding | Exact: `REAL` values hash by their IEEE-754 bits; `NULL` and each type are tagged |
+| Snapshot | A file: its bytes, in 1 MiB chunks, then the chunk hashes. A table: its rows, as a dataset version | Chunked so large files hash as they stream and parts can be checked alone |
+| Dataset version | Its schema and the multiset of its rows: each row's canonical binary encoding is hashed, and the sorted row hashes are hashed in 1 MiB chunks | Exact: `REAL` values hash by their IEEE-754 bits; `NULL` and each type are tagged. The same rows in any order give the same hash, with no sort in the engine (`src/plugin/dataset-hash.ts`) |
 | Edit | The edit and the previous edit's hash | A hash chain: the action history can't be rewritten unnoticed |
 | Run manifest | The flow and flow plan hashes, parameters, versions, step keys, snapshot and dataset hashes, row counts, expectation results, the policy hash, the previous run | Signed when shared (section 7) |
 
@@ -254,7 +265,7 @@ src/
   plugin/     the runtime plugin (engine worker)
   worker.ts   the app's worker entry
   app/        the UI
-test/         node --test unit tests on the in-process engine; Playwright end-to-end tests
+test/         vitest on the in-process engine and through the worker protocol; Playwright end-to-end tests with the app
 bench/        scenario benchmarks (SCENARIO.md §7); results in bench/results/
 fixtures/     tier XS data with its hashes
 docs/         this file, SCENARIO, FORMAT, OPEN_QUESTIONS, adr/, research/, brand/
