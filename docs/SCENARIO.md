@@ -123,8 +123,8 @@ The flow's owner shares results with four people:
 Each person gets one package (Q-35). Rows are partitioned by the columns the rules use (the district, and the airport
 zones for Cara's rule), each partition is encrypted with its own key, and each key is wrapped only for the people
 allowed to read it (ADR 0001 §7): the JFK and LaGuardia zones' partition has one key, wrapped for Ben and for Cara.
-Columns a recipient may not see are removed before encryption. The package carries the flow, the run manifest and its signature, so a recipient can
-check where every number came from.
+Columns a recipient may not see are removed before encryption. The package carries the flow, the run manifest and its
+signature, so a recipient can check where every number came from.
 
 ## 6. Checks that must pass
 
