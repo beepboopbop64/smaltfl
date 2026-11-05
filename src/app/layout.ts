@@ -48,3 +48,37 @@ export function placeCards(doc: FlowDocument): { cards: Placed[]; rows: number; 
   }
   return { cards, rows, cols: Math.max(...cards.map((c) => c.col)) + 1 };
 }
+
+export interface SectionLayout {
+  id: string;
+  name: string;
+  members: string[];
+  collapsed: boolean;
+  /** The members' rows and columns inside the section (empty when collapsed). */
+  cards: Placed[];
+  rows: number;
+  cols: number;
+}
+
+/**
+ * The canvas in sections: the document's groups, in the order the document gives them (the author's reading order),
+ * each laid out on its own grid, one row per depth among its members. Sources and steps no group holds form a last
+ * section.
+ */
+export function placeSections(doc: FlowDocument, collapsed: ReadonlySet<string>): SectionLayout[] {
+  const { cards } = placeCards(doc);
+  const row = new Map(cards.map((c) => [c.id, c.row]));
+  const groups = (doc.groups ?? []).map((g) => ({ id: g.id, name: g.name, members: g.steps.filter((s) => row.has(s)) }));
+  const grouped = new Set(groups.flatMap((g) => g.members));
+  const rest = [...row.keys()].filter((id) => !grouped.has(id));
+  if (rest.length) groups.push({ id: '_other', name: 'Other steps', members: rest });
+  return groups
+    .filter((g) => g.members.length > 0)
+    .map((g) => {
+      const depths = [...new Set(g.members.map((m) => row.get(m)!))].sort((a, b) => a - b);
+      const placed: Placed[] = [];
+      for (const [r, d] of depths.entries()) g.members.filter((m) => row.get(m) === d).forEach((id, col) => placed.push({ id, row: r, col }));
+      const isCollapsed = collapsed.has(g.id);
+      return { ...g, collapsed: isCollapsed, cards: isCollapsed ? [] : placed, rows: isCollapsed ? 1 : depths.length, cols: Math.max(1, ...placed.map((c) => c.col + 1)) };
+    });
+}

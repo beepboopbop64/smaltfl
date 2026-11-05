@@ -62,11 +62,15 @@ header.bar {
   border: 0; border-radius: 8px; background: var(--smalt); color: var(--surface); font-weight: 600; padding: 9px 16px; min-height: 40px;
 }
 .run[disabled] { opacity: 0.55; cursor: default; }
-.status { margin: 6px 0 0; font-size: 13px; color: var(--muted); min-height: 1.45em; }
+.bar-second { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 6px; }
+.viewer { font-size: 13px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+.viewer select { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 3px 6px; font-size: 13px; font-weight: 600; color: var(--smalt); }
+.status { margin: 0; font-size: 13px; color: var(--muted); min-height: 1.45em; flex: 1 1 220px; min-width: 0; }
 .status.bad { color: var(--bad); }
 nav.tabs { display: flex; gap: 4px; margin-top: 6px; }
+nav.tabs { overflow-x: auto; scrollbar-width: none; }
 nav.tabs a {
-  flex: 1; text-align: center; padding: 9px 0 10px; color: var(--ink-2); text-decoration: none; font-weight: 500; font-size: 14px;
+  flex: 1 0 auto; text-align: center; padding: 9px 6px 10px; color: var(--ink-2); text-decoration: none; font-weight: 500; font-size: 14px;
   border-bottom: 2px solid transparent;
 }
 nav.tabs a[aria-current="page"] { color: var(--smalt); border-bottom-color: var(--smalt); font-weight: 600; }
@@ -101,6 +105,13 @@ section.view { display: grid; gap: 14px; }
 .card.failed .what { fill: var(--bad); }
 .card { cursor: pointer; }
 .edge { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: 0.7; }
+.section rect.frame { fill: var(--sunk); stroke: var(--line); stroke-width: 1; }
+.section .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.07em; fill: var(--ink-2); font-weight: 500; }
+.section .toggle { font-family: var(--mono); font-size: 11px; fill: var(--smalt); }
+.section .hit { fill: transparent; cursor: pointer; }
+.card.closed rect.box { fill: var(--sunk); stroke: var(--line); stroke-dasharray: 2 3; }
+.card.closed .name, .card.closed .what { fill: var(--muted); }
+.card.summary rect.box { stroke: var(--ink-2); }
 .edge-dot { fill: var(--muted); }
 
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
@@ -139,13 +150,13 @@ details > summary { cursor: pointer; color: var(--smalt); font-size: 13px; }
 pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-radius: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre; }
 
 #sheet {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; max-height: 82vh; overflow-y: auto; background: var(--surface);
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; box-sizing: border-box; max-height: min(82vh, calc(100vh - var(--head, 170px) - 8px)); overflow-y: auto; background: var(--surface);
   border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; box-shadow: 0 -10px 30px rgb(0 0 0 / 0.18);
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-block: 12px calc(18px + env(safe-area-inset-bottom, 0px));
 }
 @media (min-width: 960px) {
-  #sheet { left: auto; top: 0; width: 440px; max-height: none; border-radius: 0; border-top: 0; border-left: 1px solid var(--line); padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
+  #sheet { left: auto; top: var(--head, 0px); width: 440px; max-height: none; border-radius: 0; border-top: 0; border-left: 1px solid var(--line); padding-top: 16px; }
 }
 .sheet-head { display: flex; align-items: flex-start; gap: 10px; }
 .sheet-head h2 { margin: 2px 0 0; font-size: 18px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -158,6 +169,26 @@ textarea { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertic
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
 .facts dt { color: var(--muted); } .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .foot { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.list li { display: grid; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.list li:last-child { border-bottom: 0; padding-bottom: 0; }
+.list .who { font-weight: 600; }
+.tag { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; color: var(--muted); text-transform: uppercase; }
+.closed-cell { color: var(--muted); font-style: italic; }
+.types { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); }
+.type { text-align: left; border: 1.5px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 12px; display: grid; gap: 4px; min-width: 0; }
+.type[aria-pressed="true"] { border-color: var(--teal); background: var(--teal-wash); }
+.type .name { font-weight: 700; font-size: 15px; }
+.type .meta { font-size: 12px; color: var(--ink-2); }
+.type .links { font-size: 12px; color: var(--muted); }
+.objects { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.object { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-align: left; width: 100%; }
+.object[aria-pressed="true"] { border-color: var(--smalt); background: var(--smalt-wash); }
+.object .t { font-weight: 600; } .object .d { font-size: 12px; color: var(--muted); }
+.form { display: grid; gap: 8px; margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.form input { border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; background: var(--surface); font-size: 14px; }
+.verdict { margin: 0; font-size: 13px; }
+.verdict.ok { color: var(--ok); } .verdict.bad { color: var(--bad); }
 @media (prefers-reduced-motion: no-preference) { .card rect.box { transition: fill 0.25s, stroke 0.25s; } }
 </style>
 
@@ -167,9 +198,14 @@ textarea { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertic
     <h1 class="flow-name" id="flow-name">NYC taxis and weather</h1>
     <button class="run" id="run" type="button" disabled>Run</button>
   </div>
-  <p class="status" id="status" role="status">Starting the engine…</p>
+  <div class="bar-second">
+    <label class="viewer" for="viewer">Viewing as <select id="viewer"><option value="owner">Owner</option></select></label>
+    <p class="status" id="status" role="status">Starting the engine…</p>
+  </div>
   <nav class="tabs" aria-label="Views">
     <a href="#flow" id="tab-flow" aria-current="page">Flow</a>
+    <a href="#ontology" id="tab-ontology">Ontology</a>
+    <a href="#policies" id="tab-policies">Policies</a>
     <a href="#results" id="tab-results">Results</a>
     <a href="#runs" id="tab-runs">Runs</a>
   </nav>
@@ -184,6 +220,22 @@ textarea { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertic
       <li><span class="swatch folded"></span>folded into a later step</li>
     </ul>
     <div id="canvas"></div>
+  </section>
+
+  <section class="view" id="view-ontology" aria-label="Ontology" hidden>
+    <p class="lede">The things the data describes, each backed by one of the flow's datasets and read through the policies, so you see the objects the person you're viewing as may see. An action checks its rule before it writes, and every edit or refusal joins a hash chain.</p>
+    <div id="ontology-map"></div>
+    <div class="panel" id="objects"><p class="foot">Choose an object type to see its objects.</p></div>
+    <div class="panel" id="edits"></div>
+  </section>
+
+  <section class="view" id="view-policies" aria-label="Policies" hidden>
+    <p class="lede">Who sees what, enforced on every read in this app: pick a person under <b>Viewing as</b> and every preview, result and object shows only what their rules allow.</p>
+    <div class="panel"><h2>Who sees what</h2><p class="sub">Rows each person can read in each dataset, from this run. Closed means none: a rule applies but can't filter that dataset's rows.</p><div class="scroll" id="matrix"><p class="foot">Run the flow to see the counts.</p></div></div>
+    <div class="grid2">
+      <div class="panel"><h2>People</h2><p class="sub">Each will hold an identity card made in their own browser; here the app acts for them.</p><ul class="list" id="people"></ul></div>
+      <div class="panel"><h2>Rules</h2><p class="sub">Row rules filter, column rules remove, action rules allow.</p><ul class="list" id="rules"></ul></div>
+    </div>
   </section>
 
   <section class="view" id="view-results" aria-label="Results" hidden>

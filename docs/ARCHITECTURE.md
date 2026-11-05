@@ -211,6 +211,13 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
 | Shares | Rows are split into partitions by the columns the rules use (district, airport zone), and columns into groups by the column rules. Each partition and column group is encrypted with its own key (AES-GCM). Each key is wrapped only for the recipients allowed to read it (ECDH P-256 and HKDF, in the style of HPKE). A recipient's smaltfl can decrypt only what their rules allow |
 | A server, later | The same rules, applied by the host before it streams or aggregates |
 
+**As built (v1, `src/core/policy.ts`).** A row rule names its column under each name it has (`pu_borough`, `borough`)
+and applies to every dataset that has one; a dataset without it is closed to the people the rule is for, because its
+rows can't be filtered. A column rule lists the columns it removes, the ones made from them included. Every read the
+app makes (previews, results, objects, the who-sees-what counts) goes through the same compiled view, and "View as"
+switches whose. Inheritance through lineage, with aggregates, replaces the column names when plans are bound
+**[Q-41]**.
+
 **The limit, stated plainly.** Whoever holds data in their own browser can read it. Enforcement protects what is
 shared and what a server serves, and the in-app checks make sure every flow is built to respect it.
 
@@ -234,6 +241,10 @@ keys are wrapped for them) and the last run's policy checks **[Q-40]**.
   they edit. A selected type shows its key, title, properties, links, actions and policy. Browsing a type's objects
   goes through the same policies, so "View as" shows exactly what a recipient would see. An action's form shows its
   permission check before anything is submitted.
+- **As built (v1):** the types live in the document's `ontology`; the runtime's `act` method reads the object's row
+  itself, checks the action rule and its row scope (`checkAction`), and records the edit or the refusal in one hash
+  chain (`_smaltfl_edits`), extended in a single synchronous transaction so it can't fork. The app's Ontology view
+  lists the types with their objects as the viewer may see them, the latest edits applied, and an action form.
 
 ## 9. Toward a server
 
