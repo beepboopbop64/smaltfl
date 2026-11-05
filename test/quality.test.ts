@@ -211,5 +211,6 @@ describe('data quality on real data', () => {
     expect(why).toHaveLength(dropped);
     expect(why.every((r) => r.some((v) => Number(v) === 1))).toBe(true);
     expect(catches.map((_, k) => why.filter((r) => Number(r[k]) === 1).length)).toEqual(box3.expectations!.rules.map((r) => r.failed));
-  });
+    // Three runs of the flow on real data: about four seconds alone, more beside the other real-data tests.
+  }, 30_000);
 });

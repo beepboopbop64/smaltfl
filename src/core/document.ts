@@ -279,6 +279,43 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
       o.actionTypes.forEach((a: unknown, i: number) => {
         if (!isRecord(a) || typeof a.id !== 'string' || !types.has(String(a.on)) || !Array.isArray(a.params)) add(`$.ontology.actionTypes[${i}]`, '{ id, name, on: an object type, params }');
       });
+      // What the columns mean, and where that comes from.
+      const refs = new Set<string>();
+      if (o.references !== undefined) {
+        if (!Array.isArray(o.references)) add('$.ontology.references', 'a list of { id, title, url }');
+        else
+          o.references.forEach((r: unknown, i: number) => {
+            if (!isRecord(r) || typeof r.id !== 'string' || typeof r.title !== 'string' || typeof r.url !== 'string') return add(`$.ontology.references[${i}]`, '{ id, title, url }');
+            if (refs.has(r.id)) add(`$.ontology.references[${i}].id`, `duplicate reference ${r.id}`);
+            refs.add(r.id);
+          });
+      }
+      if (o.properties !== undefined) {
+        if (!Array.isArray(o.properties)) add('$.ontology.properties', 'a list of { column, title, description }');
+        else {
+          const described = new Set<string>();
+          o.properties.forEach((p: unknown, i: number) => {
+            const at = `$.ontology.properties[${i}]`;
+            if (!isRecord(p) || typeof p.column !== 'string' || p.column === '' || typeof p.title !== 'string' || typeof p.description !== 'string') return add(at, '{ column, title, description }');
+            for (const f of ['unit', 'note'] as const) if (p[f] !== undefined && typeof p[f] !== 'string') add(`${at}.${f}`, 'text');
+            if (p.values !== undefined && (!isRecord(p.values) || Object.values(p.values).some((v) => typeof v !== 'string'))) add(`${at}.values`, 'each code with its meaning, as text');
+            if (p.lookup !== undefined && (!isRecord(p.lookup) || !known(p.lookup.dataset) || typeof p.lookup.key !== 'string' || typeof p.lookup.label !== 'string')) add(`${at}.lookup`, '{ dataset: a source or step, key, label }');
+            if (p.sources !== undefined) {
+              if (!Array.isArray(p.sources)) add(`${at}.sources`, 'a list of reference ids');
+              else p.sources.forEach((r: unknown, j: number) => !refs.has(String(r)) && add(`${at}.sources[${j}]`, `no reference ${String(r)}`));
+            }
+            if (p.datasets !== undefined && (!Array.isArray(p.datasets) || p.datasets.length === 0)) add(`${at}.datasets`, 'a list of sources or steps');
+            const column = p.column;
+            const scopes = Array.isArray(p.datasets) ? p.datasets : ['*'];
+            scopes.forEach((d: unknown, j: number) => {
+              if (d !== '*' && !known(d)) add(`${at}.datasets[${j}]`, `no source or step ${String(d)}`);
+              const k = `${column.toLowerCase()}|${String(d).toLowerCase()}`;
+              if (described.has(k)) add(`${at}.column`, `${column} is described twice${d === '*' ? '' : ` on ${String(d)}`}`);
+              described.add(k);
+            });
+          });
+        }
+      }
     }
   }
   const p = doc.policies;

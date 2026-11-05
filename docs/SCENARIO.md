@@ -75,7 +75,9 @@ range). Steps, in the order a person would build them:
 **Enrich (silver).**
 7. `trips_enriched`: pickup and dropoff borough and zone, local pickup hour, hour of week, duration, average speed,
    airport flag, card tip rate (cash tips aren't recorded).
-8. `weather_hourly`: one row per borough and hour, with a condition label (dry, rain, heavy rain, snow).
+8. `weather_hourly`: one row per borough and hour, with a condition label (dry, rain, heavy rain, snow). Open-Meteo
+   stamps an hour's precipitation, rain and snowfall at the hour's end (they sum the preceding hour), so the row
+   stamped 15:00 is the hour from 14:00, the pickup hour it joins.
 
 **Aggregate (gold), persisted as datasets.**
 9. `zone_hour`: trips, average duration, speed, fare and card tip rate, per pickup zone and hour.

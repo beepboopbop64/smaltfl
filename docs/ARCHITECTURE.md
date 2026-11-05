@@ -247,6 +247,17 @@ keys are wrapped for them) and the last run's policy checks **[Q-40]**.
   itself, checks the action rule and its row scope (`checkAction`), and records the edit or the refusal in one hash
   chain (`_smaltfl_edits`), extended in a single synchronous transaction so it can't fork. The app's Ontology view
   lists the types with their objects as the viewer may see them, the latest edits applied, and an action form.
+- **What the columns mean** (`ontology.properties`, shared property types): one per column name, for every dataset
+  with a column of that name, or only for the ones its `datasets` lists where a name means something else there
+  (`card_tip_rate` is a trip's rate in `trips_enriched`, an average in `zone_hour`). Each has a title, a description
+  in its source's own words, a unit, the codes of a coded column and what each stands for, a `lookup` for a column of
+  another dataset's keys (a zone number reads as the zone's name), a note on what the data itself shows that the
+  source doesn't say, and the `references` it comes from (title, link, publisher, version). A column a step makes
+  cites none: the step says how it is made. Meanings are for people: they are not in the flow plan, so no key
+  changes with them (the flow hash, which covers the document, does). The example describes every column of every
+  source and step, from the TLC's yellow trip data dictionary (March 18, 2025), its trip record and fare pages, the
+  zone lookup, and Open-Meteo's Historical Weather API documentation, with notes measured on January 2024's records;
+  a test checks that every column has a meaning and every code in the data is listed.
 
 ## 9. Toward a server
 
@@ -345,16 +356,31 @@ Builder and drawn in the family's look. The first concepts are on the design can
   the viewer reads; shapes come from an even sample of up to 2,000 of them. A folded step's rows are copied once into
   a temporary table for this, so the engine computes them once rather than once a question.
 - **Odd rows.** An isolation forest (100 seeded trees over subsamples of 256) scores the sample's rows on the step's
-  measures, and the oddest are shown as cards, each with what sets it apart: the measures where it sits more than 3.5
-  robust standard deviations from the median, against where most rows lie.
+  measures. The oddest come folded, with a tally (taken care of, flagged, checked, not checked yet), as cards a phone
+  can read: how odd, what sets the row apart in its own units (the measures where it sits more than 3.5 robust
+  standard deviations from the median, against where most rows lie), what already deals with it, and the whole row
+  on demand. What deals with it comes from the checks that judge the step's rows as they are (`checksOver`): the
+  rules of checks steps before it and after it, on a path of steps that keep their first input's rows and values
+  (filters, checks, formulas, joins, projections, and SQL that only selects `*` from one input), as long as nothing on
+  the way sets a column the rule reads. Each sampled row is evaluated against them in the same statement as the
+  sample, so a card says "already taken care of after this step: trips_valid drops it", that a check before it looked
+  and let it pass, or that nothing checks it yet. Only checks the person may read count: on a step open to them, on
+  columns they see.
+- **What the columns mean, wherever they show.** A row card labels each column by its title over its name, an amount
+  in dollars or its unit, a code with what it stands for, a zone number with the zone's name (read through the
+  viewer's policy, so none from a lookup closed to them); a table's header gives the title and unit, with the
+  description on hover. A column card says what the column is, decodes its common values, and adds the note. The
+  Ontology view lists every column the viewer can read somewhere, grouped by the source it comes from or the steps
+  that make it, with its codes, where it is, how a step makes it, and links to its sources.
 - **Drift between runs.** Each column is compared with the same step in the last run that had other rows there (a
   different key), by the population stability index over the earlier run's deciles, or its values, with missing
   values a bin of their own: steady under 0.1, moved to 0.25, shifted above, with what moved (a median, a share).
 - **Suggested checks, added as a filter box.** For the columns a step makes itself (an input's, an aggregate's or a SQL
-  step's, the ones a formula, join or select adds), and that no expectation upstream already checks: an upper bound
-  for a far tail, `>= 0` for stray negatives or as a guard, `IS NOT NULL` for a few missing values (columns missing in
-  the same rows get one), `IN (…)` for a small category's values today. Each is counted exactly over every row, as an
-  expectation counts. One tap puts the chosen ones in a filter box between the step and what reads it: an
+  step's, the ones a formula, join or select adds), and that no check before or after it already judges: an upper
+  bound for a far tail, `>= 0` for stray negatives or as a guard, `IS NOT NULL` for a few missing values (columns
+  missing in the same rows get one), `IN (…)` for a small category's values today, or for a coded column, the codes its
+  source documents (a catch if it holds one they don't list). Each is counted exactly over every row, as an
+  expectation counts; the checks already judging the step are listed beside them, folded. One tap puts the chosen ones in a filter box between the step and what reads it: an
   expectations step whose rules drop the rows they flag, each rule keeping why it was suggested (the rule's
   `description`, which is for people: it is not in the plan, so no key changes with it). What read the step reads the
   box instead (a SQL step's text is rewired by token), so everything after it runs again without those rows; a step

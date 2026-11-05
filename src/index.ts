@@ -44,7 +44,8 @@ export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, s
 export type { DatasetRecord, ExpectationResult, Identity, IdentityCard, ManifestNode, RunManifest, SignatureCheck, SignedManifest } from './core/manifest.js';
 export { checkAction, covers, readView, wrapRead } from './core/policy.js';
 export type { ActionCheck, ActionRule, ColumnRule, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
-export type { ActRequest, ActionType, Edit, LinkType, ObjectType, Ontology } from './core/ontology.js';
+export type { ActRequest, ActionType, Edit, LinkType, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
+export { meaningOf, propertyOf } from './core/ontology.js';
 export { PLUGIN_NAME } from './core/protocol.js';
 export type { PluginCaller, RunOptions, RunResult, VerifyCheck, VerifyResult } from './core/protocol.js';
 export type { ParamType, ParamValue } from './core/sqltext.js';

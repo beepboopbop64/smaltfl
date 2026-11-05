@@ -234,10 +234,21 @@ export function emitColumnFacts(sql: string, columns: readonly { name: string; n
   return `SELECT ${parts.join(', ')} FROM (\n${sql}\n)`;
 }
 
-/** An even sample of a relation: its first row and every `every`-th one after, in the order it gives them. */
-export function emitSample(sql: string, columns: readonly string[], every: number): string {
+/**
+ * An even sample of a relation: its first row and every `every`-th one after, in the order it gives them. Each check
+ * in `flags` adds a column after the relation's, 1 where the row fails it (NULL failing, as an expectation counts).
+ */
+export function emitSample(sql: string, columns: readonly string[], every: number, flags: readonly string[] = []): string {
   const list = columns.map(q).join(', ');
-  return `SELECT ${list} FROM (SELECT ${list}, row_number() OVER () AS "_smaltfl_n" FROM (\n${sql}\n)) WHERE ("_smaltfl_n" - 1) % ${Math.max(1, Math.floor(every))} = 0`;
+  const marks = flags.map((check, k) => `CASE WHEN (\n${check}\n) THEN 0 ELSE 1 END AS ${q(`_smaltfl_check_${k}`)}`);
+  const inner = [list, ...marks, 'row_number() OVER () AS "_smaltfl_n"'].join(', ');
+  const outer = [list, ...flags.map((_, k) => q(`_smaltfl_check_${k}`))].join(', ');
+  return `SELECT ${outer} FROM (SELECT ${inner} FROM (\n${sql}\n)) WHERE ("_smaltfl_n" - 1) % ${Math.max(1, Math.floor(every))} = 0`;
+}
+
+/** A relation's keys and what names them: the two columns of a lookup (a zone's LocationID and Zone). */
+export function emitLookup(sql: string, key: string, label: string): string {
+  return `SELECT ${q(key)}, ${q(label)} FROM (\n${sql}\n) WHERE ${q(key)} IS NOT NULL AND ${q(label)} IS NOT NULL`;
 }
 
 /** Up to `limit` distinct values of one column of a relation. */

@@ -12,14 +12,14 @@ import { EXAMPLE_SOURCES } from '../../examples/sources.js';
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, takeOut, validateDocument } from '../core/document.js';
-import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitRead, emitRuleFailures, emitSample, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
+import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
-import type { Edit } from '../core/ontology.js';
+import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
 import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, FlowPlan, PlanNode } from '../core/plan.js';
-import { drift, fillGaps, isolationForest, madsOf, profileColumn, suggestChecks, unusual, type Drift, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
+import { checksOver, drift, fillGaps, isolationForest, madsOf, profileColumn, suggestChecks, unusual, type Drift, type Judge, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
 import type { RunResult, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
 import { runFlow, verifyRun } from '../index.js';
@@ -1141,6 +1141,10 @@ interface Quality {
   measures: string[];
   odd: { at: number; score: number; why: Unusual[] }[];
   suggestions: (Suggestion & { failing: number })[];
+  /** The checks in the flow that judge these rows (the person may read them all), and which each sampled row fails. */
+  judges: (Judge & { origin: string; description?: string })[];
+  /** For each sampled row, a 1 for each judge it fails. */
+  verdicts: number[][];
 }
 
 /** The sample's size: enough for a column's shape, small enough to read in a moment on a phone. */
@@ -1152,7 +1156,7 @@ function qualityOf(insp: Inspection, i: number, who = state.viewer): Promise<Qua
   const view = viewIn(insp, i, who);
   const m = insp.manifest.get(i);
   if (!view.open || !m) return Promise.resolve(null);
-  const key = `${m.key}|${view.where ?? ''}|${view.columns.join(',')}`;
+  const key = `${m.key}|${who}|${view.where ?? ''}|${view.columns.join(',')}`;
   let found = qualities.get(key);
   if (!found) {
     found = measureQuality(insp, i, who);
@@ -1219,35 +1223,64 @@ async function measureQuality(insp: Inspection, i: number, who: string): Promise
   const typeOf = (c: string) => types.get(c.toLowerCase()) ?? 'any';
   // A stored step's table is quick to read again and again. A folded step's rows, as the person reads them, are copied
   // once into a table of their own, so they are computed once for all the questions asked of them, not once a question.
-  if (insp.ctx.table(i) !== undefined) return lookInto(insp, i, rowsOf, columns, typeOf);
+  if (insp.ctx.table(i) !== undefined) return lookInto(insp, i, rowsOf, columns, typeOf, who);
   const tmp = `_smaltfl_look_${++qualityTables}`;
   await engine.exec(createTable(tmp, columns.map((c) => [c, typeOf(c)] as Column), { temp: true }));
   try {
     await engine.exec(emitCopy(tmp, columns, rowsOf));
-    return await lookInto(insp, i, `SELECT * FROM ${quoteIdent(tmp)}`, columns, typeOf);
+    return await lookInto(insp, i, `SELECT * FROM ${quoteIdent(tmp)}`, columns, typeOf, who);
   } finally {
     await engine.exec(emitDrop(tmp)).catch(() => undefined);
   }
 }
 
-async function lookInto(insp: Inspection, i: number, read: string, columns: string[], typeOf: (c: string) => string): Promise<Quality> {
+async function lookInto(insp: Inspection, i: number, read: string, columns: string[], typeOf: (c: string) => string, who: string): Promise<Quality> {
   const engine = state.engine!;
   const f = (await engine.query(emitColumnFacts(read, columns.map((name) => ({ name, numeric: ['int', 'real', 'num'].includes(typeOf(name)) }))))).rows[0]!;
   const rows = Number(f[0]);
-  const sample = rows ? (await engine.query(emitSample(read, columns, Math.ceil(rows / SAMPLE)))).rows : [];
+  // The checks in the flow that judge these rows, before the step or after it, as far as the person may read them: on
+  // a step open to them, on columns they see. Each sampled row says which of them it fails.
+  const shown = new Set(columns.map((c) => c.toLowerCase()));
+  const judges: Quality['judges'] = checksOver(insp.plan, i, (j) => insp.ctx.columns(j))
+    .map((jd) => ({ ...jd, origin: insp.plan.nodes[jd.node]!.origin }))
+    .filter((jd) => jd.reads.every((x) => shown.has(x)) && access(jd.origin, who)?.open !== false)
+    .map((jd) => ({ ...jd, description: ruleReasons(jd.origin).get(jd.name) }));
+  let sample: unknown[][] = [];
+  let verdicts: number[][] = [];
+  if (rows) {
+    const every = Math.ceil(rows / SAMPLE);
+    try {
+      const got = (await engine.query(emitSample(read, columns, every, judges.map((jd) => jd.check)))).rows;
+      sample = got.map((r) => r.slice(0, columns.length));
+      verdicts = got.map((r) => r.slice(columns.length).map(Number));
+    } catch {
+      // A check that reads something only its own step has: the sample without verdicts.
+      judges.splice(0);
+      sample = (await engine.query(emitSample(read, columns, every))).rows;
+      verdicts = sample.map(() => []);
+    }
+  }
   const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
   const profiles = columns.map((name, k) => profileColumn(name, typeOf(name), { rows, present: Number(f[1 + 5 * k]), distinct: Number(f[2 + 5 * k]), min: f[3 + 5 * k], max: f[4 + 5 * k], mean: num(f[5 + 5 * k]) }, sample.map((r) => r[k])));
-  const covered = coveredColumns(insp, i);
+  const covered = new Set([...coveredColumns(insp, i), ...judges.flatMap((jd) => jd.reads)]);
   const only = ownColumns(insp, i);
+  // The codes the ontology documents, to check a coded column against.
+  const meanings = meaningsOf(insp.plan.nodes[i]!.origin);
+  const documented = new Map<string, string[]>();
+  for (const p of profiles) {
+    const codes = meanings(p.name)?.values;
+    if (codes) documented.set(p.name, Object.keys(codes));
+  }
   // A small category's values, exactly, for the ones a check could be suggested on.
   const values = new Map<string, string[]>();
   for (const p of profiles) {
     const mine = !covered.has(p.name.toLowerCase()) && (!only || only.has(p.name.toLowerCase()));
-    if (mine && (p.kind === 'category' || p.kind === 'code') && p.facts.distinct <= 12) {
-      values.set(p.name, (await engine.query(emitDistinct(read, p.name, 13))).rows.map((r) => r[0]).filter((v) => v !== null && v !== undefined).map(String));
+    const most = documented.has(p.name) ? 40 : 12;
+    if (mine && (p.kind === 'category' || p.kind === 'code') && p.facts.distinct <= most) {
+      values.set(p.name, (await engine.query(emitDistinct(read, p.name, most + 1))).rows.map((r) => r[0]).filter((v) => v !== null && v !== undefined).map(String));
     }
   }
-  const suggestions = suggestChecks(profiles, { covered, only, values });
+  const suggestions = suggestChecks(profiles, { covered, only, values, documented });
   const counts = suggestions.length ? (await engine.query(emitCheckCounts(read, suggestions.map((x) => x.check)))).rows[0]! : [];
   const measures = profiles.filter((p) => p.kind === 'measure').map((p) => p.name);
   let odd: Quality['odd'] = [];
@@ -1263,7 +1296,7 @@ async function lookInto(insp: Inspection, i: number, read: string, columns: stri
       .slice(0, 8)
       .map((x) => ({ ...x, why: unusual(profiles, records[x.at]!, mads) }));
   }
-  return { rows, columns, sample, profiles, measures, odd, suggestions: suggestions.map((x, k) => ({ ...x, failing: Number(counts[k] ?? 0) })) };
+  return { rows, columns, sample, profiles, measures, odd, suggestions: suggestions.map((x, k) => ({ ...x, failing: Number(counts[k] ?? 0) })), judges, verdicts };
 }
 
 /** The latest earlier run whose rows at this step differ from now's: what drift is measured against. */
@@ -1299,12 +1332,16 @@ function histogram(p: Profile): HTMLElement | null {
 }
 
 /** A column as a card: how full it is, its shape or its common values, how it moved, and what a check would flag. */
-function columnCard(p: Profile, type: string, moved: Drift | undefined, since: number | undefined, flags: string[]): HTMLElement {
+function columnCard(p: Profile, type: string, moved: Drift | undefined, since: number | undefined, flags: string[], meaning?: PropertyType): HTMLElement {
   const f = p.facts;
   const gaps = f.rows - f.present;
-  const fmt = fmtOf(p);
+  const plain = fmtOf(p);
+  // A measure in its unit; a time as it is.
+  const fmt = (v: number) => (p.kind === 'time' ? plain(v) : inUnit(plain(v), v, meaning));
   const card = h('article', { class: 'record colcard' },
-    h('div', { class: 'colhead' }, h('h3', {}, ...breakable(p.name)), h('span', { class: 'tag' }, `${p.kind} · ${type}`)),
+    h('div', { class: 'colhead' }, h('h3', {}, ...(meaning ? [meaning.title] : breakable(p.name))), h('span', { class: 'tag' }, `${p.kind} · ${type}`)),
+    meaning ? h('p', { class: 'colname' }, h('code', {}, ...breakable(p.name)), meaning.unit ? ` · in ${meaning.unit}` : '') : null,
+    meaning ? h('p', { class: 'means-text' }, meaning.description) : null,
     h('p', { class: 'colline' }, `${pct(f.present / Math.max(1, f.rows))} filled · ${fmtInt(f.distinct)} distinct${gaps ? ` · ${fmtInt(gaps)} empty` : ''}`));
   const shape = histogram(p);
   if (shape && p.quantiles) {
@@ -1319,36 +1356,108 @@ function columnCard(p: Profile, type: string, moved: Drift | undefined, since: n
       ...stat('middle half', `${fmt(q.p25)} – ${fmt(q.p75)}`)));
   } else if (p.top?.length) {
     card.append(h('div', { class: 'tops' },
-      ...p.top.map((t) => h('div', { class: 'top' }, h('span', { class: 'v' }, t.value), h('span', { class: 'bar' }, h('span', { style: `width:${Math.max(1, t.share * 100).toFixed(1)}%` })), h('span', { class: 'n' }, pct(t.share))))));
+      ...p.top.map((t) => {
+        const means = meaningFor(meaning, t.value);
+        return h('div', { class: 'top' }, h('span', { class: 'v' }, t.value, means ? h('span', { class: 'means' }, means) : null), h('span', { class: 'bar' }, h('span', { style: `width:${Math.max(1, t.share * 100).toFixed(1)}%` })), h('span', { class: 'n' }, pct(t.share)));
+      })));
     if (f.distinct > p.top.length) card.append(h('p', { class: 'foot', style: 'margin:0' }, `and ${fmtInt(f.distinct - p.top.length)} more values`));
   }
   if (moved && since !== undefined) card.append(h('p', { class: 'drift' }, h('span', { class: `level-chip ${moved.level}` }, moved.level), ` since run ${since}${moved.note ? `: ${moved.note}` : ''} · PSI ${moved.psi.toFixed(2)}`));
+  if (meaning?.note) card.append(h('p', { class: 'note' }, meaning.note));
   for (const flag of flags) card.append(h('p', { class: 'colflag' }, flag));
   return card;
 }
 
-/** Why an odd row is odd, in words: its measures that sit far from most rows'. */
-const whyText = (us: readonly Unusual[]) =>
-  us.length ? us.slice(0, 3).map((u) => `${u.column} ${fmtNum(u.value)}, where most rows have ${fmtNum(u.usual[0])} to ${fmtNum(u.usual[1])}`).join('; ') : 'an unusual mix of its values, none far out on its own';
+/** Where a check runs, seen from the step being looked at. */
+const whereText = (at: Judge['at']) => (at === 'before' ? 'before this step' : at === 'after' ? 'after this step' : 'in this step');
 
-function oddRows(q: Quality): HTMLElement {
-  const box = h('div', { class: 'quality-part' }, h('p', { class: 'eyebrow' }, `Odd rows · ${q.odd.length}`));
-  if (!q.measures.length) {
-    box.append(h('p', { class: 'foot' }, 'Odd rows are found among measures, numbers that vary, and this step has none.'));
-    return box;
-  }
-  box.append(h('p', { class: 'foot' }, `An isolation forest of 100 trees scored the ${fmtInt(q.sample.length)} sampled rows on ${q.measures.join(', ')}: the fewer random splits it takes to set a row apart, the odder it is (1 is the oddest). ${q.odd.length ? 'The oddest, and what sets each apart:' : 'None stands out.'}`));
-  if (q.odd.length) {
-    const rows = q.odd.map((o) => [whyText(o.why), o.score.toFixed(2), ...q.sample[o.at]!]);
-    box.append(rowsView(['why', 'oddness', ...q.columns], rows, (c, r) => (c === 'why' || c === 'oddness' ? 'hit' : r !== undefined && q.odd[r]!.why.some((u) => u.column === c) ? 'hit' : undefined)));
-  }
-  return box;
+/** A part of the sheet that folds: its summary always shows; what it holds, once opened. Open ones stay open. */
+const foldsOpen = new Map<string, boolean>();
+function fold(name: string, summary: Child[], ...body: Child[]): HTMLElement {
+  const d = h('details', { class: 'fold' }, h('summary', {}, ...summary), h('div', { class: 'fold-body' }, ...body));
+  d.open = foldsOpen.get(name) ?? false;
+  d.addEventListener('toggle', () => foldsOpen.set(name, d.open));
+  return d;
 }
 
-function suggestedChecks(id: string, q: Quality): HTMLElement {
+type Tone = 'done' | 'flag' | 'allowed' | 'open';
+const TONES: Record<Tone, string> = { done: 'taken care of', flag: 'flagged', allowed: 'checked', open: 'not checked yet' };
+
+/**
+ * How an odd row stands with the flow's checks: one that drops it or warns on it has already taken care of it; one
+ * that reads what makes it odd and lets it pass has looked at it; otherwise nothing checks it yet.
+ */
+function standing(q: Quality, at: number, odd: ReadonlySet<string>, meanings: Meanings): { tone: Tone; lines: { tone: Tone; body: Child[] }[] } {
+  const verdict = q.verdicts[at] ?? [];
+  const named = (c: string) => meanings(c)?.title ?? q.columns.find((x) => x.toLowerCase() === c) ?? c;
+  const rule = (jd: Quality['judges'][number]) => [h('b', {}, jd.origin), ` ${jd.onFail === 'drop' ? 'drops it' : jd.onFail === 'warn' ? 'warns on it' : 'stops the run on it'}: `, h('i', {}, jd.name), jd.description ? `, ${jd.description}` : '', h('code', {}, jd.check)];
+  const lines: { tone: Tone; body: Child[] }[] = [];
+  for (const [k, jd] of q.judges.entries()) {
+    if (verdict[k] !== 1) continue;
+    const tone: Tone = jd.onFail === 'warn' ? 'flag' : 'done';
+    lines.push({ tone, body: [`${tone === 'done' ? 'Already taken care of' : 'Already flagged'} ${whereText(jd.at)}: `, ...rule(jd)] });
+  }
+  if (!lines.length) {
+    for (const [k, jd] of q.judges.entries()) {
+      if (verdict[k] === 1 || !jd.reads.some((c) => odd.has(c))) continue;
+      lines.push({ tone: 'allowed', body: [`Checked ${whereText(jd.at)}, and it passes: `, h('b', {}, jd.origin), '’s ', h('i', {}, jd.name), h('code', {}, jd.check)] });
+    }
+  }
+  if (!lines.length) lines.push({ tone: 'open', body: [`Nothing in the flow checks ${[...odd].map(named).join(', ')} yet. A suggested check below may.`] });
+  const tone = lines.some((l) => l.tone === 'done') ? 'done' : lines.some((l) => l.tone === 'flag') ? 'flag' : lines[0]!.tone;
+  return { tone, lines };
+}
+
+/** One odd row as a card: how odd, what sets it apart in its own units, what already deals with it, and the whole row on demand. */
+function oddCard(q: Quality, o: Quality['odd'][number], meanings: Meanings): HTMLElement {
+  const row = q.sample[o.at]!;
+  const odd = new Set((o.why.length ? o.why.map((u) => u.column) : q.measures).map((c) => c.toLowerCase()));
+  const { tone, lines } = standing(q, o.at, odd, meanings);
+  const apart = o.why.length
+    ? h('ul', { class: 'unusual' },
+        ...o.why.slice(0, 4).map((u) => {
+          const p = meanings(u.column);
+          const v = (x: number) => inUnit(fmtNum(x), x, p);
+          return h('li', {}, h('span', { class: 'u-what' }, p?.title ?? u.column), h('b', {}, v(u.value)), p ? h('code', {}, u.column) : null, h('span', { class: 'u-usual' }, `Most rows: ${v(u.usual[0])} to ${v(u.usual[1])}`));
+        }))
+    : h('p', { class: 'foot', style: 'margin:0' }, 'No one value is far out: the mix of its values is what’s unusual.');
+  const marks = q.columns.map((c) => (odd.has(c.toLowerCase()) ? 'hit' : undefined));
+  return h('article', { class: 'record oddcard' },
+    h('div', { class: 'oddhead' }, h('span', { class: `chip ${tone}` }, TONES[tone]), h('span', { class: 'oddness' }, `oddness ${o.score.toFixed(2)}`)),
+    apart,
+    h('ul', { class: 'standing' }, ...lines.map((l) => h('li', { class: l.tone }, ...l.body))),
+    h('details', { class: 'whole' }, h('summary', {}, 'The whole row'), record(q.columns, row, marks, meanings)));
+}
+
+function oddRows(q: Quality, meanings: Meanings): HTMLElement {
+  const head = (text: string) => [h('span', { class: 'eyebrow' }, `Odd rows · ${q.odd.length}`), h('span', { class: 'fold-sum' }, text)];
+  if (!q.measures.length) return h('div', { class: 'quality-part' }, fold('odd', head('none to look for'), h('p', { class: 'foot' }, 'Odd rows are found among measures, numbers that vary, and this step has none.')));
+  const tones = q.odd.map((o) => standing(q, o.at, new Set((o.why.length ? o.why.map((u) => u.column) : q.measures).map((c) => c.toLowerCase())), meanings).tone);
+  const tally = (Object.keys(TONES) as Tone[]).map((t) => [t, tones.filter((x) => x === t).length] as const).filter(([, n]) => n > 0).map(([t, n]) => `${n} ${TONES[t]}`);
+  const titled = q.measures.map((c) => meanings(c)?.title ?? c);
+  return h('div', { class: 'quality-part' },
+    fold('odd', head(q.odd.length ? tally.join(' · ') : 'none stands out'),
+      h('p', { class: 'foot' }, `An isolation forest of 100 trees scored ${fmtInt(q.sample.length)} sampled rows on ${titled.length === 1 ? titled[0] : `${titled.slice(0, -1).join(', ')} and ${titled.at(-1)}`}: the fewer random splits it takes to set a row apart, the odder it is, up to 1. Each card says what sets the row apart, and whether a check in the flow already deals with it.`),
+      q.odd.length ? carousel(q.odd.map((o) => oddCard(q, o, meanings)), 'odd row') : null));
+}
+
+/** The checks already judging a step's rows, before it or after it: the reason a column gets no suggestion. */
+function alreadyChecked(q: Quality, meanings: Meanings): HTMLElement | null {
+  if (!q.judges.length) return null;
+  const named = (c: string) => meanings(c)?.title ?? q.columns.find((x) => x.toLowerCase() === c) ?? c;
+  return fold('checked', [h('span', { class: 'eyebrow' }, `Already checked · ${q.judges.length}`), h('span', { class: 'fold-sum' }, [...new Set(q.judges.map((jd) => jd.origin))].join(', '))],
+    h('p', { class: 'foot' }, 'Rules in the flow that judge these rows as they are here: their columns get no suggestion.'),
+    h('ul', { class: 'checked-list' },
+      ...q.judges.map((jd) => h('li', {},
+        h('span', { class: 'ck-head' }, h('b', {}, jd.origin), ` ${whereText(jd.at)} · `, h('i', {}, jd.name), ` · ${jd.onFail === 'drop' ? 'drops' : jd.onFail === 'warn' ? 'warns' : 'stops the run'}`),
+        h('span', { class: 'ck-cols' }, jd.reads.map(named).join(', ')),
+        h('code', {}, jd.check)))));
+}
+
+function suggestedChecks(id: string, q: Quality, meanings: Meanings): HTMLElement {
   const box = h('div', { class: 'quality-part' }, h('p', { class: 'eyebrow' }, `Suggested checks · ${q.suggestions.length}`));
   if (!q.suggestions.length) {
-    box.append(h('p', { class: 'foot' }, 'Nothing to suggest for the columns this step makes: they are checked already, or hold nothing a simple check would catch.'));
+    box.append(h('p', { class: 'foot' }, 'Nothing to suggest for the columns this step makes: they are checked already, or hold nothing a simple check would catch.'), alreadyChecked(q, meanings) ?? '');
     return box;
   }
   const after = readersOf(id).filter(visible);
@@ -1362,6 +1471,7 @@ function suggestedChecks(id: string, q: Quality): HTMLElement {
     picks.push({ s: x, input });
     list.append(h('label', { class: 'suggestion', for: input.id }, input,
       h('span', { class: 'sg-body' },
+        meanings(x.column) ? h('span', { class: 'sg-col' }, `${meanings(x.column)!.title} · `, h('code', {}, x.column)) : null,
         h('code', {}, x.check),
         h('span', { class: 'sg-why' }, x.why),
         h('span', { class: `pill ${x.failing ? 'warn' : 'ok'}` }, x.failing ? `flags ${plural(x.failing, 'row')} today (${pct(x.failing / Math.max(1, q.rows))})` : 'passes today'))));
@@ -1379,6 +1489,8 @@ function suggestedChecks(id: string, q: Quality): HTMLElement {
     add.addEventListener('click', () => addFilterBox(id, picks.filter((p) => p.input.checked).map((p) => p.s)));
     box.append(h('div', { class: 'row' }, add));
   }
+  const checked = alreadyChecked(q, meanings);
+  if (checked) box.append(checked);
   return box;
 }
 
@@ -1408,6 +1520,7 @@ async function qualityPanel(id: string, who: string): Promise<HTMLElement | null
     }
   }
   const types = new Map(insp.plan.nodes[i]!.schema!.map(([c, t]) => [c, t as string]));
+  const meanings = meaningsOf(id);
   const flags = (column: string) => q.suggestions.filter((x) => x.column === column && x.failing > 0).map((x) => `${x.check} flags ${plural(x.failing, 'row')}`);
   const gappy = q.profiles.filter((p) => p.facts.present < p.facts.rows).length;
   const moved = [...drifts.values()].filter((d) => d.level !== 'steady').length;
@@ -1416,9 +1529,9 @@ async function qualityPanel(id: string, who: string): Promise<HTMLElement | null
     h('div', { class: 'quality-part' },
       h('p', { class: 'eyebrow' }, `Columns · ${q.profiles.length}`),
       h('p', { class: 'foot' }, `${summary.join(' · ')}. Counts are exact; shapes come from an even sample of ${fmtInt(q.sample.length)} of ${plural(q.rows, 'row')}.`),
-      carousel(q.profiles.map((p) => columnCard(p, types.get(p.name) ?? 'any', drifts.get(p.name), since, flags(p.name))), 'column')),
-    oddRows(q),
-    suggestedChecks(id, q));
+      carousel(q.profiles.map((p) => columnCard(p, types.get(p.name) ?? 'any', drifts.get(p.name), since, flags(p.name), meanings(p.name))), 'column')),
+    oddRows(q, meanings),
+    suggestedChecks(id, q, meanings));
 }
 
 /**
@@ -1525,6 +1638,8 @@ async function renderSheet(): Promise<void> {
   const n = nodeOf(id);
   // Whom this sheet shows the step as: the viewer, or the person chosen under Who can see this.
   const who = state.previewAs ?? state.viewer;
+  await useLookups(who);
+  if (state.selected !== id) return;
   const body = h('div', { class: 'sheet-body' });
   sheet.setAttribute('aria-label', 'Step details');
   sheet.replaceChildren(
@@ -1618,7 +1733,7 @@ async function renderSheet(): Promise<void> {
       if (state.selected !== id) return;
       const note = view && (view.filters.length || view.removed.length) ? h('p', { class: 'foot' }, `As ${personName(who)}: ${[view.filters.length ? `filtered by the ${view.filters.join(' and the ')}` : '', view.removed.length ? `without ${view.removed.map((x) => x.column).join(', ')}` : ''].filter(Boolean).join(', ')}.`) : null;
       const isNew = new Set(fresh.map((c) => c.toLowerCase()));
-      preview.lastElementChild!.replaceWith(h('div', {}, rowsView(r.columns, r.rows, (c) => (isNew.has(c.toLowerCase()) ? 'new' : undefined)), isNew.size ? h('p', { class: 'foot' }, 'Tinted: the columns this step adds.') : null, note));
+      preview.lastElementChild!.replaceWith(h('div', {}, rowsView(r.columns, r.rows, (c) => (isNew.has(c.toLowerCase()) ? 'new' : undefined), meaningsOf(id)), isNew.size ? h('p', { class: 'foot' }, 'Tinted: the columns this step adds.') : null, note));
     } catch (e) {
       preview.lastElementChild!.textContent = message(e);
     }
@@ -1725,7 +1840,7 @@ function split(kept: number, lost: number, keptLabel: string, lostLabel: string)
  * Up to 50 rows into a box, as the viewer reads them: the columns `first` names lead and are tinted (the columns a rule
  * reads, or a join matched on), so the reason a row is here is the first thing in it.
  */
-async function showRows(into: HTMLElement, title: string, sql: string, first: ReadonlySet<string> = new Set()): Promise<void> {
+async function showRows(into: HTMLElement, title: string, sql: string, first: ReadonlySet<string> = new Set(), meanings: Meanings = noMeanings): Promise<void> {
   into.hidden = false;
   into.replaceChildren(h('p', { class: 'eyebrow' }, title), h('p', { class: 'foot' }, 'Loading…'));
   try {
@@ -1734,7 +1849,7 @@ async function showRows(into: HTMLElement, title: string, sql: string, first: Re
     const order = [...r.columns.keys()].sort((a, b) => lead(a) - lead(b));
     into.replaceChildren(
       h('div', { class: 'row' }, h('p', { class: 'eyebrow', style: 'flex:1' }, title), h('button', { class: 'btn', type: 'button', onclick: () => ((into.hidden = true), into.replaceChildren()) }, 'Hide')),
-      rowsView(order.map((k) => r.columns[k]!), r.rows.map((row) => order.map((k) => row[k])), (c) => (first.has(c.toLowerCase()) ? 'hit' : undefined)),
+      rowsView(order.map((k) => r.columns[k]!), r.rows.map((row) => order.map((k) => row[k])), (c) => (first.has(c.toLowerCase()) ? 'hit' : undefined), meanings),
       h('p', { class: 'foot' }, r.rows.length === 50 ? 'The first 50.' : r.rows.length ? plural(r.rows.length, 'row') + '.' : 'None.'),
     );
   } catch (e) {
@@ -1752,7 +1867,7 @@ function ruleReasons(id: string): Map<string, string | undefined> {
  * Up to 50 rows a step dropped, each leading with why: the rules it failed and their reasons. `rules` are the ones the
  * person may read (none on a column their policy removes), each with a flag column the statement computed.
  */
-async function showDropped(into: HTMLElement, title: string, sql: string, rules: readonly { k: number; name: string; description?: string; reads: ReadonlySet<string> }[]): Promise<void> {
+async function showDropped(into: HTMLElement, title: string, sql: string, rules: readonly { k: number; name: string; description?: string; reads: ReadonlySet<string> }[], meanings: Meanings = noMeanings): Promise<void> {
   into.hidden = false;
   into.replaceChildren(h('p', { class: 'eyebrow' }, title), h('p', { class: 'foot' }, 'Loading…'));
   try {
@@ -1776,7 +1891,7 @@ async function showDropped(into: HTMLElement, title: string, sql: string, rules:
     const rows = r.rows.map((row, n) => [why[n], ...keep.map((k) => row[k])]);
     into.replaceChildren(
       h('div', { class: 'row' }, h('p', { class: 'eyebrow', style: 'flex:1' }, title), h('button', { class: 'btn', type: 'button', onclick: () => ((into.hidden = true), into.replaceChildren()) }, 'Hide')),
-      rowsView(columns, rows, (c, n) => (c === 'why' ? 'hit' : n !== undefined && failed[n]!.some((x) => x.reads.has(c.toLowerCase())) ? 'hit' : undefined)),
+      rowsView(columns, rows, (c, n) => (c === 'why' ? 'hit' : n !== undefined && failed[n]!.some((x) => x.reads.has(c.toLowerCase())) ? 'hit' : undefined), meanings),
       h('p', { class: 'foot' }, r.rows.length === 50 ? 'The first 50.' : r.rows.length ? plural(r.rows.length, 'row') + '.' : 'None.'),
     );
   } catch (e) {
@@ -1799,7 +1914,7 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
   const headline = (text: string, tone: CardLine['tone'] = 'same') => box.append(h('p', { class: `headline ${tone}` }, text));
   const say = (...text: Child[]) => box.append(h('p', { class: 'foot' }, ...text));
   const button = (label: string, title: string, sql: string | null, first?: ReadonlySet<string>) =>
-    sql ? h('button', { class: 'btn show', type: 'button', onclick: () => void showRows(rows, title, sql, first) }, label) : null;
+    sql ? h('button', { class: 'btn show', type: 'button', onclick: () => void showRows(rows, title, sql, first, meaningsOf(id)) }, label) : null;
   const list = (names: readonly string[]) => names.join(', ');
   const done = () => {
     const view = access(id, who);
@@ -1845,7 +1960,7 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
           return reads.some((x) => hidden.has(x)) ? [] : [{ k, name: rule, description: reasons.get(rule), reads: new Set(reads.filter((x) => visibleCols.has(x))) }];
         });
         const sql = wrapRead(view, emitDropped(insp.plan, i, flagged.map((f) => f.k), insp.ctx), flagged.map((f) => `_smaltfl_fail_${f.k}`));
-        if (sql) box.append(h('div', { class: 'row' }, h('button', { class: 'btn show', type: 'button', onclick: () => void showDropped(rows, `Dropped by ${id}, and why`, sql, flagged) }, `Show the ${plural(lost, 'row')} it dropped, and why`)));
+        if (sql) box.append(h('div', { class: 'row' }, h('button', { class: 'btn show', type: 'button', onclick: () => void showDropped(rows, `Dropped by ${id}, and why`, sql, flagged, meaningsOf(id)) }, `Show the ${plural(lost, 'row')} it dropped, and why`)));
       }
       if (c.flagged) {
         const warns = n.rules.map((r, k) => (r[2] === 'warn' ? k : -1)).filter((k) => k >= 0);
@@ -1949,7 +2064,7 @@ async function rulesTable(insp: Inspection, i: number, rows: HTMLElement, who = 
       h('td', {}, r.name, r.onFail === 'warn' ? h('span', { class: 'warns' }, 'warns') : null, reasons.get(r.name) ? h('span', { class: 'rule-why' }, reasons.get(r.name)!) : null),
       h('td', { class: 'n' }, r.failed === null ? 'closed' : fmtInt(r.failed)),
       h('td', { class: 'n' }, r.failed === null ? '' : pct(r.failed / Math.max(1, inn))),
-      h('td', {}, r.failed && r.sql ? h('button', { class: 'btn small', type: 'button', onclick: () => void showRows(rows, `Rows that fail ${r.name}${r.onFail === 'warn' ? ' (kept, with a warning)' : ''}`, r.sql!, r.reads) }, 'Show') : null),
+      h('td', {}, r.failed && r.sql ? h('button', { class: 'btn small', type: 'button', onclick: () => void showRows(rows, `Rows that fail ${r.name}${r.onFail === 'warn' ? ' (kept, with a warning)' : ''}`, r.sql!, r.reads, meaningsOf(insp.plan.nodes[i]!.origin)) }, 'Show') : null),
     ),
   );
   const closed = rules.filter((r) => r.secret.length);
@@ -2095,6 +2210,70 @@ async function statementFor(id: string): Promise<string | null> {
   return emitRead(insp.plan, i, insp.ctx);
 }
 
+// ------------------------------------------------------------------ what the columns mean
+
+/** What a dataset's columns mean, from the ontology, column by column. */
+type Meanings = (column: string) => PropertyType | undefined;
+const noMeanings: Meanings = () => undefined;
+const meaningsOf = (dataset: string): Meanings => (column) => propertyOf(state.doc.ontology, dataset, column);
+
+/** A number in its unit: $12.80 for dollars, 1.2 miles, 2.5 °C; `text` is the number as already written. */
+const inUnit = (text: string, v: number, p: PropertyType | undefined) => (p?.unit === 'USD' ? `${v < 0 ? '−' : ''}$${Math.abs(v).toFixed(2)}` : p?.unit ? `${text} ${p.unit}` : text);
+
+/**
+ * The names behind a column of another dataset's keys (a zone's name for its LocationID), as the person reads that
+ * dataset: none from one closed to them. Loaded once a run and person, before a sheet, the Ontology or the Results
+ * show rows.
+ */
+let lookups = new Map<string, Map<string, string>>();
+let lookupsAre = '';
+const lookupsLoading = new Map<string, Promise<Map<string, Map<string, string>>>>();
+const lookupKey = (p: PropertyType) => `${p.column}|${(p.datasets ?? []).join(',')}`.toLowerCase();
+async function useLookups(who: string): Promise<void> {
+  const run = latest();
+  if (!run || !state.engine) return;
+  const at = `${run.result.run}|${who}`;
+  if (lookupsAre === at) return;
+  let loading = lookupsLoading.get(at);
+  if (!loading) {
+    loading = loadLookups(run, who);
+    for (const k of [...lookupsLoading.keys()]) if (!k.startsWith(`${run.result.run}|`)) lookupsLoading.delete(k);
+    lookupsLoading.set(at, loading);
+  }
+  const got = await loading;
+  if (latest() === run) [lookups, lookupsAre] = [got, at];
+}
+async function loadLookups(run: RunRecord, who: string): Promise<Map<string, Map<string, string>>> {
+  const out = new Map<string, Map<string, string>>();
+  const insp = await inspect(run);
+  for (const p of state.doc.ontology?.properties ?? []) {
+    const i = p.lookup ? insp.index.get(p.lookup.dataset) : undefined;
+    const sql = i === undefined ? null : readIn(insp, i, who);
+    if (!p.lookup || !sql) continue;
+    try {
+      const r = await state.engine!.query(emitLookup(sql, p.lookup.key, p.lookup.label));
+      out.set(lookupKey(p), new Map(r.rows.map(([k, v]) => [String(k), String(v)])));
+    } catch {
+      // A lookup the person reads without its key or label: its values show as they are.
+    }
+  }
+  return out;
+}
+
+/** What a value stands for: its code's meaning, or the name its key has in the lookup. */
+const meaningFor = (p: PropertyType | undefined, v: unknown): string | undefined => meaningOf(p, v) ?? (p?.lookup && v !== null && v !== undefined ? lookups.get(lookupKey(p))?.get(String(v)) : undefined);
+
+/** A value as people read it: in its unit, and for a code, with what it stands for (`means`). */
+function readValue(v: unknown, p: PropertyType | undefined): { text: string; cls: string; means?: string } {
+  const c = cellOf(v);
+  const means = meaningFor(p, v);
+  if (means !== undefined) return { ...c, means };
+  return typeof v === 'number' ? { ...c, text: inUnit(c.text, v, p) } : c;
+}
+
+/** A column's label: what people call it, over its name in the data; just the name where the ontology says nothing. */
+const columnLabel = (column: string, p: PropertyType | undefined): Child[] => (p ? [h('span', { class: 'col-title' }, p.title), h('span', { class: 'col-name' }, ...breakable(column))] : breakable(column));
+
 /** How a value reads: numbers rounded and right-aligned, a missing value as a muted null. */
 function cellOf(v: unknown): { text: string; cls: string } {
   if (v === null || v === undefined) return { text: 'null', cls: 'null' };
@@ -2110,13 +2289,22 @@ function cellOf(v: unknown): { text: string; cls: string } {
 /** A class for a column (its header) or one of its cells (`row` given): the tint that says this value matters. */
 type Mark = (column: string, row?: number) => string | undefined;
 
-function table(columns: string[], rows: unknown[][], mark?: Mark, tall = false): HTMLElement {
+function table(columns: string[], rows: unknown[][], mark?: Mark, tall = false, meanings: Meanings = noMeanings): HTMLElement {
   const marks = columns.map((c) => mark?.(c));
+  const props = columns.map((c) => meanings(c));
+  // A code shows what it stands for under it; the header, what the column is called and its unit.
   const cell = (v: unknown, k: number, r: number) => {
     const { text, cls } = cellOf(v);
-    return h('td', { class: [cls, mark?.(columns[k]!, r) ?? ''].filter(Boolean).join(' ') }, text);
+    const means = meaningFor(props[k], v);
+    return h('td', { class: [cls, mark?.(columns[k]!, r) ?? ''].filter(Boolean).join(' ') }, text, means ? h('span', { class: 'means' }, means) : null);
   };
-  return h('div', { class: `scroll${tall ? ' tall' : ''}` }, h('table', { class: 'data' }, h('thead', {}, h('tr', {}, ...columns.map((c, k) => h('th', marks[k] ? { class: marks[k]! } : {}, c)))), h('tbody', {}, ...rows.map((row, r) => h('tr', {}, ...row.map((v, k) => cell(v, k, r)))))));
+  const head = (c: string, k: number) => {
+    const p = props[k];
+    const attrs: Record<string, string> = marks[k] ? { class: marks[k]! } : {};
+    if (p) attrs.title = `${p.title}: ${p.description}`;
+    return h('th', attrs, c, p ? h('span', { class: 'th-title' }, p.unit ? `${p.title} · ${p.unit}` : p.title) : null);
+  };
+  return h('div', { class: `scroll${tall ? ' tall' : ''}` }, h('table', { class: 'data' }, h('thead', {}, h('tr', {}, ...columns.map(head))), h('tbody', {}, ...rows.map((row, r) => h('tr', {}, ...row.map((v, k) => cell(v, k, r)))))));
 }
 
 /** Cards in a row, to swipe or step through, with where you are: "Row 3 of 50". */
@@ -2137,22 +2325,30 @@ function carousel(items: HTMLElement[], noun: string): HTMLElement {
 }
 
 /** Rows one at a time, as cards to swipe or step through: each column a label and its value, the marked ones first. */
-function cards(columns: string[], rows: unknown[][], mark?: Mark): HTMLElement {
+function cards(columns: string[], rows: unknown[][], mark?: Mark, meanings: Meanings = noMeanings): HTMLElement {
   if (!rows.length) return h('p', { class: 'foot' }, 'No rows.');
   return carousel(
     rows.map((r, i) => {
       // Each card leads with the values that matter for its own row.
       const marks = columns.map((c) => mark?.(c, i));
-      const order = [...columns.keys()].sort((a, b) => Number(!marks[a]) - Number(!marks[b]));
-      const dl = h('dl', {});
-      for (const k of order) {
-        const { text, cls } = cellOf(r[k]);
-        dl.append(h('dt', marks[k] ? { class: marks[k]! } : {}, ...breakable(columns[k]!)), h('dd', { class: [cls, marks[k] ?? ''].filter(Boolean).join(' ') }, text));
-      }
-      return h('article', { class: 'record' }, dl);
+      return h('article', { class: 'record' }, record(columns, r, marks, meanings));
     }),
     'row',
   );
+}
+
+/** One row as a list: each column by what it's called, its value in its unit, a code with its meaning; marked ones first. */
+function record(columns: readonly string[], row: readonly unknown[], marks: readonly (string | undefined)[], meanings: Meanings): HTMLDListElement {
+  const order = [...columns.keys()].sort((a, b) => Number(!marks[a]) - Number(!marks[b]));
+  const dl = h('dl', {});
+  for (const k of order) {
+    const p = meanings(columns[k]!);
+    const { text, cls, means } = readValue(row[k], p);
+    const at: Record<string, string> = marks[k] ? { class: marks[k]! } : {};
+    if (p) at.title = p.description;
+    dl.append(h('dt', at, ...columnLabel(columns[k]!, p)), h('dd', { class: [cls, marks[k] ?? ''].filter(Boolean).join(' ') }, text, means ? h('span', { class: 'means' }, means) : null));
+  }
+  return dl;
 }
 
 /** A column's name that wraps after its underscores rather than mid-word: tpep_pickup_ / datetime. */
@@ -2173,7 +2369,7 @@ let rowsMode: 'cards' | 'table' = (() => {
 const rowsViews = new Set<{ el: HTMLElement; draw: () => void }>();
 
 /** Rows a person can read on any screen: cards or a table, with a switch between them that applies everywhere. */
-function rowsView(columns: string[], rows: unknown[][], mark?: Mark): HTMLElement {
+function rowsView(columns: string[], rows: unknown[][], mark?: Mark, meanings: Meanings = noMeanings): HTMLElement {
   const el = h('div', { class: 'rows-view' });
   const pick = (m: 'cards' | 'table') => {
     rowsMode = m;
@@ -2188,7 +2384,7 @@ function rowsView(columns: string[], rows: unknown[][], mark?: Mark): HTMLElemen
     const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Show rows as' },
       h('button', { type: 'button', 'aria-pressed': String(rowsMode === 'cards'), onclick: () => pick('cards') }, 'Cards'),
       h('button', { type: 'button', 'aria-pressed': String(rowsMode === 'table'), onclick: () => pick('table') }, 'Table'));
-    el.replaceChildren(seg, rowsMode === 'cards' ? cards(columns, rows, mark) : table(columns, rows, mark, true));
+    el.replaceChildren(seg, rowsMode === 'cards' ? cards(columns, rows, mark, meanings) : table(columns, rows, mark, true, meanings));
   };
   rowsViews.add({ el, draw });
   draw();
@@ -2201,6 +2397,7 @@ async function renderResults(): Promise<void> {
   const engine = state.engine;
   const run = latest();
   if (!engine || !run) return;
+  await useLookups(state.viewer);
   // Only what the viewer can read: an output closed to them isn't listed, and a result built on one isn't shown.
   const outputs = Object.entries(run.result.manifest.outputs).filter(([name]) => visible(name));
   const owner = isOwner();
@@ -2216,7 +2413,7 @@ async function renderResults(): Promise<void> {
       const zones = await engine.query(
         `SELECT pu_zone AS zone, pu_borough AS borough, sum(trips) AS trips, round(sum(avg_duration_min * trips) / sum(trips), 1) AS minutes, round(sum(avg_speed_mph * trips) / sum(trips), 1) AS mph FROM (${zh}) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 8`,
       );
-      $('zones-table').replaceChildren(table(zones.columns, zones.rows));
+      $('zones-table').replaceChildren(table(zones.columns, zones.rows, undefined, false, meaningsOf('zone_hour')));
     }
     const we = readDataset('weather_effect');
     $('effect-panel').hidden = !we;
@@ -2359,6 +2556,90 @@ async function refreshEdits(): Promise<void> {
   state.chain = (await state.engine.callPlugin('smaltfl', 'verifyEdits', [])) as typeof state.chain;
 }
 
+/** How a step makes a column: the expression, the column it takes, or its SQL. */
+function makes(st: StepDef, column: string): Child[] | null {
+  const c = column.toLowerCase();
+  const named = (x: string | { name: string }) => (typeof x === 'string' ? x : x.name).toLowerCase() === c;
+  switch (st.kind) {
+    case 'formula':
+    case 'select': {
+      const x = (st.columns as (string | { name: string; expr: string })[]).find(named);
+      return x && typeof x !== 'string' ? [h('code', {}, x.expr)] : null;
+    }
+    case 'aggregate': {
+      const m = st.measures.find(named);
+      return m ? [h('code', {}, m.expr)] : null;
+    }
+    case 'join': {
+      const x = st.columns?.find(named);
+      return x ? [`${typeof x === 'string' ? x : x.column} of `, h('b', {}, st.inputs[1]!)] : null;
+    }
+    case 'sql': {
+      const had = st.inputs.some((i) => (state.columns.get(i) ?? []).some((x) => x.toLowerCase() === c));
+      return !had && (state.columns.get(st.id) ?? []).some((x) => x.toLowerCase() === c) ? ['its SQL'] : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * What the columns mean, from the ontology: grouped by the source a column comes from, or the steps that make it,
+ * each with its codes, what the data shows, where it is and where its meaning comes from. Only columns the viewer can
+ * read somewhere are listed.
+ */
+function propertiesPanel(): HTMLElement | null {
+  const o = state.doc.ontology;
+  const props = o?.properties ?? [];
+  if (!o || !props.length) return null;
+  const ids = [...state.doc.sources.map((x) => x.id), ...state.doc.steps.map((x) => x.id)];
+  const where = new Map<PropertyType, string[]>();
+  const order = new Map<PropertyType, number>();
+  ids.forEach((d, n) => {
+    const view = access(d);
+    if (!view?.open) return;
+    view.columns.forEach((c, k) => {
+      const p = propertyOf(o, d, c);
+      if (!p) return;
+      where.set(p, [...(where.get(p) ?? []), d]);
+      if (!order.has(p)) order.set(p, n * 1000 + k);
+    });
+  });
+  const head = h('h2', {}, 'What the columns mean');
+  if (!where.size) return h('div', {}, head, h('p', { class: 'foot' }, latest() ? `None of the columns described is open to ${personName(state.viewer)}.` : 'Run the flow to see what its columns mean.'));
+  const sources = state.doc.sources.filter((x) => where.size && visible(x.id));
+  const groupOf = (p: PropertyType) => sources.find((x) => where.get(p)!.includes(x.id))?.id ?? '';
+  const refs = new Map((o.references ?? []).map((r) => [r.id, r]));
+  const used = new Set<string>();
+  const few = (list: readonly string[]) => (list.length <= 4 ? list.join(', ') : `${list.slice(0, 3).join(', ')} and ${list.length - 3} more`);
+  const card = (p: PropertyType) => {
+    const cited = (p.sources ?? []).map((r) => refs.get(r)).filter((r) => r !== undefined);
+    for (const r of cited) used.add(r.id);
+    const codes = Object.entries(p.values ?? {});
+    const list = codes.length ? h('dl', { class: 'codes' }, ...codes.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])) : null;
+    const maker = cited.length ? null : where.get(p)!.map((d) => steps().get(d)).find((st) => st && makes(st, p.column));
+    return h('article', { class: 'prop' },
+      h('div', { class: 'prop-head' }, h('h3', {}, p.title), h('code', {}, p.column), p.unit ? h('span', { class: 'unit' }, p.unit) : null),
+      h('p', {}, p.description),
+      list && codes.length > 8 ? h('details', { class: 'whole' }, h('summary', {}, `What its ${codes.length} codes stand for`), list) : list,
+      p.note ? h('p', { class: 'note' }, p.note) : null,
+      maker ? h('p', { class: 'made' }, 'Made in ', h('b', {}, maker.id), ': ', ...makes(maker, p.column)!) : null,
+      p.lookup && visible(p.lookup.dataset) ? h('p', { class: 'made' }, 'Reads as its ', h('b', {}, p.lookup.label), ' in ', h('b', {}, p.lookup.dataset)) : null,
+      h('p', { class: 'where' }, `In ${few(where.get(p)!)}`, ...(cited.length ? [' · from ', ...cited.flatMap((r, k) => [k ? ', ' : '', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, r.title)])] : [])));
+  };
+  const groups = [...sources.map((x) => ({ id: x.id, title: x.description ?? x.id })), { id: '', title: 'Made by the flow’s steps' }]
+    .map((g) => ({ ...g, props: props.filter((p) => where.has(p) && groupOf(p) === g.id).sort((a, b) => order.get(a)! - order.get(b)!) }))
+    .filter((g) => g.props.length);
+  if (!foldsOpen.has(`props:${groups[0]!.id}`)) foldsOpen.set(`props:${groups[0]!.id}`, true);
+  const body = groups.map((g) => fold(`props:${g.id}`, [h('span', { class: 'eyebrow' }, g.title), h('span', { class: 'fold-sum' }, plural(g.props.length, 'column'))], h('div', { class: 'props' }, ...g.props.map(card))));
+  const cited = [...used].map((r) => refs.get(r)!);
+  return h('div', {}, head,
+    h('p', { class: 'sub' }, 'Each column once, by what people call it, with what it holds in its source’s own words, what the data itself shows, and where it is. A step’s sheet shows the same on each column, and a code’s meaning wherever its rows are shown.'),
+    ...body,
+    cited.length ? h('div', { class: 'refs' }, h('p', { class: 'eyebrow' }, 'Where the meanings come from'),
+      h('ul', {}, ...cited.map((r) => h('li', {}, h('a', { href: r.url, target: '_blank', rel: 'noopener' }, r.title), [r.publisher, r.version].filter(Boolean).length ? ` · ${[r.publisher, r.version].filter(Boolean).join(', ')}` : '')))) : null);
+}
+
 let ontologyRender = 0;
 async function renderOntology(): Promise<void> {
   const o = state.doc.ontology;
@@ -2367,6 +2648,7 @@ async function renderOntology(): Promise<void> {
   // A newer render (the viewer changed, an object was chosen) wins over one still waiting on the engine.
   const token = ++ontologyRender;
   const stale = () => token !== ontologyRender;
+  await useLookups(state.viewer);
   const typeName = (id: string) => o.objectTypes.find((t) => t.id === id)?.name ?? id;
   // An object type on a dataset closed to the viewer isn't shown, nor are its links and actions.
   const types = o.objectTypes.filter((t) => visible(t.dataset));
@@ -2380,6 +2662,8 @@ async function renderOntology(): Promise<void> {
     }
   }
   if (stale()) return;
+  $('properties').replaceChildren(propertiesPanel() ?? '');
+  $('properties').hidden = !o.properties?.length;
   $('ontology-map').replaceChildren(
     h('div', { class: 'types' },
       ...types.map((t) => {

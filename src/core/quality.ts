@@ -5,7 +5,8 @@
  * shapes (percentiles, histogram, common values) come from an even sample of the rows. No engine, no DOM: emit.ts
  * writes the SQL that gathers the inputs.
  */
-import { quoteIdent } from './sqltext.js';
+import type { FailAction, FlowPlan, PlanNode } from './plan.js';
+import { identifiers, quoteIdent, tokens } from './sqltext.js';
 
 /**
  * What a column is, for showing and checking it: a measure (numbers that vary), a code (numbers or ids standing for
@@ -364,15 +365,19 @@ export function niceCeil(x: number): number {
  * - a measure with negative values where most are not gets `>= 0`; one that never goes below zero, a guard that it doesn't;
  * - a column with a few values missing (up to 5% of rows) gets `IS NOT NULL`, which flags them;
  * - a category of a dozen values or fewer gets `IN (…)` its values today, which flags a new one, and if it is never
- *   missing, a guard that it isn't.
+ *   missing, a guard that it isn't;
+ * - a column whose codes the ontology documents (`documented`) gets `IN (…)` those codes instead: a catch if it holds
+ *   a code they don't list, else a guard against one.
  *
  * A column an expectation already checks (in `covered`) is left alone, as is one outside `only` when it is given
  * (the columns a step makes itself, so a check sits where its column is made). Columns missing in the same rows get
  * one check between them. Range checks let a missing value pass: missing values are a check of their own. `values`
  * holds each small category's values, exactly.
  */
-export function suggestChecks(profiles: readonly Profile[], options: { covered?: ReadonlySet<string>; only?: ReadonlySet<string>; values?: ReadonlyMap<string, readonly string[]>; limit?: number } = {}): Suggestion[] {
+export function suggestChecks(profiles: readonly Profile[], options: { covered?: ReadonlySet<string>; only?: ReadonlySet<string>; values?: ReadonlyMap<string, readonly string[]>; documented?: ReadonlyMap<string, readonly string[]>; limit?: number } = {}): Suggestion[] {
   const catches: Suggestion[] = [];
+  // A column's documented codes guard it better than the codes it holds today: they come first among the guards.
+  const documentedGuards: Suggestion[] = [];
   const guards: Suggestion[] = [];
   const covered = options.covered ?? new Set<string>();
   const mine = profiles.filter((p) => !covered.has(p.name.toLowerCase()) && (!options.only || options.only.has(p.name.toLowerCase())));
@@ -414,6 +419,16 @@ export function suggestChecks(profiles: readonly Profile[], options: { covered?:
       else if (min >= 0) guards.push({ name: `${p.name}_not_negative`, column: p.name, check: `${c} IS NULL OR ${c} >= 0`, guard: true, why: `It has never been below 0; this flags a run where it is.` });
     }
     const known = options.values?.get(p.name);
+    const codes = options.documented?.get(p.name);
+    if ((p.kind === 'category' || p.kind === 'code') && codes?.length && known?.length && known.length === p.facts.distinct) {
+      const numeric = codes.every((v) => /^-?\d+$/.test(v)) && p.kind === 'code';
+      const list = [...codes].sort((a, b) => (numeric ? Number(a) - Number(b) : a < b ? -1 : 1)).map((v) => (numeric ? v : textSql(v)));
+      const other = known.filter((v) => !codes.includes(v));
+      const rule = { name: `${p.name}_documented`, column: p.name, check: `${c} IS NULL OR ${c} IN (${list.join(', ')})` };
+      if (other.length) catches.push({ ...rule, guard: false, why: `Its source documents ${codes.length} codes, and ${other.join(', ')} ${other.length === 1 ? 'isn’t one' : 'aren’t among them'}.` });
+      else documentedGuards.push({ ...rule, guard: true, why: `Its source documents ${codes.length} codes and it holds ${known.length} of them; this flags any other.` });
+      continue;
+    }
     if ((p.kind === 'category' || p.kind === 'code') && known && known.length > 0 && known.length <= 12 && p.facts.distinct <= 12) {
       const numeric = known.every((v) => /^-?\d+(\.\d+)?$/.test(v)) && p.kind === 'code';
       const list = [...known].sort((a, b) => (numeric ? Number(a) - Number(b) : a < b ? -1 : 1)).map((v) => (numeric ? v : textSql(v)));
@@ -422,7 +437,122 @@ export function suggestChecks(profiles: readonly Profile[], options: { covered?:
     }
   }
   const names = new Set<string>();
-  return [...catches, ...guards].filter((s) => !names.has(s.name) && (names.add(s.name), true)).slice(0, options.limit ?? 8);
+  return [...catches, ...documentedGuards, ...guards].filter((s) => !names.has(s.name) && (names.add(s.name), true)).slice(0, options.limit ?? 8);
 }
 
 const pctText = (x: number) => `${(x * 100).toFixed(x < 0.01 ? 2 : 1)}%`;
+
+/** A check somewhere in the flow that judges a step's rows with the values the step has. */
+export interface Judge {
+  /** The checks step, and the rule's place in it. */
+  node: number;
+  rule: number;
+  name: string;
+  check: string;
+  onFail: FailAction;
+  /** Where it runs, seen from the step: before it, in it (the step is the checks step), or after it. */
+  at: 'before' | 'here' | 'after';
+  /** The step's columns it reads, lowercased. */
+  reads: string[];
+}
+
+/**
+ * Whether SQL only selects * from its one input: maybe DISTINCT, maybe filtered, sorted or limited, nothing joined or
+ * added. Its rows are some of its input's, their values unchanged.
+ */
+export function selectsStar(sql: string, input: string): boolean {
+  let ts;
+  try {
+    ts = tokens(sql).filter((t) => t.kind !== 'space' && t.kind !== 'comment');
+  } catch {
+    return false;
+  }
+  const word = (k: number) => (ts[k]?.kind === 'word' ? ts[k]!.text.toLowerCase() : undefined);
+  const name = (k: number) => (ts[k]?.kind === 'word' ? ts[k]!.text.toLowerCase() : ts[k]?.kind === 'quoted' ? [...identifiers(ts[k]!.text)][0] : undefined);
+  let k = 0;
+  if (word(k++) !== 'select') return false;
+  if (word(k) === 'distinct' || word(k) === 'all') k++;
+  if (ts[k++]?.text !== '*' || word(k++) !== 'from' || name(k++) !== input.toLowerCase()) return false;
+  if (k < ts.length && !['where', 'order', 'limit'].includes(word(k) ?? '')) return false;
+  let depth = 0;
+  for (const t of ts.slice(k)) {
+    if (t.text === '(') depth++;
+    else if (t.text === ')') depth--;
+    else if (depth === 0 && t.kind === 'word' && ['from', 'join', 'union', 'intersect', 'except', 'group', 'window', 'values'].includes(t.text.toLowerCase())) return false;
+  }
+  return true;
+}
+
+/**
+ * The columns a node sets on rows it keeps, lowercased, or null when it makes rows of its own (a source, an
+ * aggregate, SQL other than a plain select of its input): a check across it judges other values.
+ */
+function keeps(plan: FlowPlan, n: PlanNode, columnsOf: (j: number) => readonly string[]): Set<string> | null {
+  const lc = (c: string) => c.toLowerCase();
+  switch (n.op) {
+    case 'filter':
+    case 'expect':
+      return new Set();
+    case 'formula':
+      return new Set(n.set.map(([c]) => lc(c)));
+    case 'join':
+      return new Set(n.take.map(([c]) => lc(c)));
+    case 'select': {
+      const had = new Set(columnsOf(n.inputs[0]!).map(lc));
+      return new Set(n.project.filter(([c, e]) => !had.has(lc(c)) || e.trim().replace(/^"(.*)"$/s, '$1').toLowerCase() !== lc(c)).map(([c]) => lc(c)));
+    }
+    case 'sql':
+      return n.inputs.length === 1 && n.names.length === 1 && selectsStar(n.sql, n.names[0]!) ? new Set() : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The checks that judge a step's rows as they are: the rules of checks steps before and after it, on a path of steps
+ * that keep their first input's rows and values (filters, checks, formulas, joins, projections, a plain select), as
+ * long as nothing on the way sets a column the rule reads. A rule reading a column the step lacks doesn't judge it.
+ */
+export function checksOver(plan: FlowPlan, i: number, columnsOf: (j: number) => readonly string[]): Judge[] {
+  const mine = new Set(columnsOf(i).map((c) => c.toLowerCase()));
+  const out: Judge[] = [];
+  const take = (j: number, at: Judge['at'], changed: ReadonlySet<string>) => {
+    const n = plan.nodes[j]!;
+    if (n.op !== 'expect') return;
+    const cols = new Set(columnsOf(n.inputs[0]!).map((c) => c.toLowerCase()));
+    n.rules.forEach(([name, check, onFail], rule) => {
+      let ids: Set<string>;
+      try {
+        ids = identifiers(check);
+      } catch {
+        return;
+      }
+      const reads = [...ids].filter((x) => cols.has(x));
+      if (reads.length && reads.every((x) => mine.has(x) && !changed.has(x))) out.push({ node: j, rule, name, check, onFail, at, reads });
+    });
+  };
+  // Up from the step, while each step keeps its input's rows.
+  const changed = new Set<string>();
+  for (let j: number | undefined = i, at: Judge['at'] = 'here'; j !== undefined; at = 'before') {
+    const n: PlanNode = plan.nodes[j]!;
+    take(j, at, changed);
+    const sets = keeps(plan, n, columnsOf);
+    if (!sets) break;
+    for (const c of sets) changed.add(c);
+    j = n.inputs[0];
+  }
+  // Down from it, through the steps that read it first.
+  const seen = new Set<number>();
+  const down = (j: number, changed: ReadonlySet<string>) => {
+    plan.nodes.forEach((r, k) => {
+      if (r.inputs[0] !== j || seen.has(k)) return;
+      seen.add(k);
+      take(k, 'after', changed);
+      const sets = keeps(plan, r, columnsOf);
+      if (sets) down(k, new Set([...changed, ...sets]));
+    });
+  };
+  down(i, new Set());
+  return out;
+}
+
