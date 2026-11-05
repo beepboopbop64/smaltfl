@@ -1,7 +1,7 @@
 """
 Builds the scenario's data (docs/SCENARIO.md §2) for the repository's `data` branch: the NYC TLC yellow taxi trips
-for one month, the TLC zone lookup, Open-Meteo hourly weather for one point per district, and the samples the tests,
-the benchmarks and the app use. .github/workflows/data.yml runs it, because a GitHub runner can reach the data hosts
+for one month, the TLC zone lookup, Open-Meteo hourly weather for one point per district, the samples the tests and
+the benchmarks use, and the month's first seven days as daily loads, the way a feed would bring them, for the app. .github/workflows/data.yml runs it, because a GitHub runner can reach the data hosts
 and this project's cloud sessions can't yet. Every file's size and SHA-256 are in MANIFEST.json.
 
     python scripts/data/build.py OUT [MONTH]
@@ -95,9 +95,22 @@ def main() -> None:
         idx = sorted(random.Random(SEED).sample(range(rows), n))
         save(f'{n // 1000}k', table.take(pa.array(idx)))
     pickup = table['tpep_pickup_datetime']
-    lo = pa.scalar(first).cast(pickup.type)
-    hi = pa.scalar(first + timedelta(days=7)).cast(pickup.type)
-    save('first-week', table.filter(pc.and_(pc.greater_equal(pickup, lo), pc.less(pickup, hi))))
+
+    def picked_up(lo: datetime, hi: datetime) -> pa.Table:
+        """The trips picked up from lo to before hi, New York local time as the records give it, in file order."""
+        return table.filter(pc.and_(pc.greater_equal(pickup, pa.scalar(lo).cast(pickup.type)), pc.less(pickup, pa.scalar(hi).cast(pickup.type))))
+
+    save('first-week', picked_up(first, first + timedelta(days=7)))
+
+    # Daily loads: each of the first seven days, every trip picked up that day, one file a day. The app runs the flow
+    # on one load at a time and compares each with the one before.
+    for d in range(7):
+        day = first + timedelta(days=d)
+        path = OUT / 'loads' / f'yellow_tripdata_{day.date().isoformat()}.parquet'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        t = picked_up(day, day + timedelta(days=1))
+        pq.write_table(t, path, compression='snappy', row_group_size=65536)
+        print(f'{path.relative_to(OUT)}: {t.num_rows:,} rows, {path.stat().st_size:,} bytes', flush=True)
 
     files = []
     for p in sorted(OUT.rglob('*')):
@@ -119,6 +132,7 @@ def main() -> None:
             'weather': f'{WEATHER} (hourly {",".join(HOURLY)}; America/New_York; points: {json.dumps(POINTS)})',
         },
         'samples': {'seed': SEED, 'method': 'random.Random(seed).sample over row positions, kept in file order'},
+        'loads': {'days': [(first + timedelta(days=d)).date().isoformat() for d in range(7)], 'method': 'every trip picked up on the day (tpep_pickup_datetime, local time), in file order'},
         'schema': {f.name: str(f.type) for f in table.schema},
         'files': files,
     }
@@ -134,7 +148,8 @@ by hand. Each run replaces this branch with one new commit. Sizes, row counts an
 | `tlc/yellow_tripdata_{MONTH}.parquet` | NYC TLC yellow taxi trip records, {MONTH} |
 | `tlc/taxi_zone_lookup.csv` | The TLC taxi zone lookup |
 | `weather/open-meteo_{MONTH}.csv` | Hourly weather for one point per district, New York local time |
-| `samples/` | Seeded samples: 10k rows (test fixtures), 100k (the app), and the month's first week |
+| `samples/` | Seeded samples: 10k rows (test fixtures), 100k, and the month's first week |
+| `loads/` | Daily loads: every trip picked up on each of the month's first seven days, one file a day (the app) |
 
 **Sources and terms.** Trip records and the zone lookup are published by the NYC Taxi and Limousine Commission
 (nyc.gov/tlc) under the NYC Open Data terms of use. Weather data by [Open-Meteo.com](https://open-meteo.com/),
