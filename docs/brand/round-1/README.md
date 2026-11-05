@@ -2,7 +2,7 @@
 
 The words are decided (ADR 0001 §13): `smaltfl`, said "smalt-flow"; **Small. Alternative. Flow.**; **Data pipelines
 for smaltdb.** This round shows every candidate mark in every candidate colour, for feedback. The boards are on the
-design canvas "smaltfl brand round 1" (light, dark, lockups, and beside the family with the colour check).
+design canvas "smaltfl brand" (light, dark, lockups, and beside the family with the colour check).
 
 ## The marks
 
@@ -32,6 +32,11 @@ How the wheel was measured: [../../research/ecosystem-survey.md](../../research/
 - `marks.py`: the marks and colourways, in the format of smalt-brand's `scripts/brand_assets.py`, so a picked mark
   drops into its `MARKS` table unchanged. `python3 docs/brand/round-1/marks.py` regenerates `svg/`.
 - `svg/`: every mark in every colour, light and dark, and the app icons.
+
+## Feedback
+
+Cobalt teal (C1) is the colour. None of the marks felt like a flow; the bars (M5) came closest. Round 2 explores
+marks that read as flow: [../round-2/](../round-2/).
 
 ## After the picks
 

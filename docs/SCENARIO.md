@@ -1,6 +1,7 @@
 # The reference scenario: NYC taxis, weather and districts
 
-- **Status:** draft (open points: [Q-32](OPEN_QUESTIONS.md), [Q-36](OPEN_QUESTIONS.md), [Q-37](OPEN_QUESTIONS.md))
+- **Status:** draft (open points: [Q-36](OPEN_QUESTIONS.md), [Q-37](OPEN_QUESTIONS.md); districts are boroughs,
+  [ADR 0002](adr/0002-second-round-decisions.md) §2)
 - **Date:** 2026-11-05
 
 One realistic example that smaltfl is built, tested and optimized against (ADR 0001 §15). Every feature is checked

@@ -219,3 +219,22 @@ docs/         this file, SCENARIO, FORMAT, OPEN_QUESTIONS, adr/, research/, bran
 | Every plugin source and format is read-only | Exports and packages are written by smaltfl; the data inside a package is CSV or JSON until there is a binary format |
 | Timers run only while a tab has the database open | No schedules in v1 (ADR 0001 §3) |
 | WebCrypto keys can be kept non-extractable in IndexedDB | A person's private keys never leave their browser |
+
+## 13. The builder
+
+The app's main screen ([ADR 0002](adr/0002-second-round-decisions.md) §4), in the spirit of Foundry's Pipeline
+Builder and drawn in the family's look. The first concepts are on the design canvas "smaltfl app concepts" **[Q-38]**.
+
+- **The flow graph.** Steps are cards in lanes (sources, clean, enrich, aggregate, serve), joined by arrows from
+  their inputs. A card shows its kind, its name and what matters about it: rows, its rules, the policy it carries.
+  Datasets take the product colour; object types and actions sit in the serve lane.
+- **The palette,** on the left: sources, the visual tools, SQL, expectations, outputs, and ontology types.
+- **Properties,** on the right, for the selected step: its inputs, whether it is stored or runs inside a later
+  step's query, the policy it inherits, its column lineage and its step key.
+- **The data panel,** under the graph: preview, schema, SQL, lineage and runs for the selected step.
+- **Opening a step** shows its sub-steps in order, the settings of the selected one, the SQL it runs ("Edit as SQL"
+  turns it into a SQL step), the data after it, and the output schema with where each column came from.
+- **The top bar:** parameters, "View as" (the flow as one principal's policies allow them to see it), Share, Run, and
+  whether every dataset is fresh. Its views: Flow, Ontology, Runs, Policies.
+- **How it is built:** DOM, CSS and SVG. The graph generalises smaltbi's model view: cards placed on a board, with one
+  SVG layer for the connectors.

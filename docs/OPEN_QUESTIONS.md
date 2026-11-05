@@ -1,18 +1,18 @@
 # Open Questions
 
 The design interview for smaltfl. Each question records the decision needed, the decision or a proposal, and its
-status. Decided questions are recorded in ADRs: round 1 in [adr/0001-initial-decisions.md](adr/0001-initial-decisions.md).
-The research behind the proposals is in [research/ecosystem-survey.md](research/ecosystem-survey.md).
+status. Decided questions are recorded in ADRs: round 1 in [adr/0001-initial-decisions.md](adr/0001-initial-decisions.md),
+round 2 in [adr/0002-second-round-decisions.md](adr/0002-second-round-decisions.md). The research behind the proposals
+is in [research/ecosystem-survey.md](research/ecosystem-survey.md).
 
 **Who decides:** the maintainers, together (ADR 0001 §1).
 
-## Round 2: open
+## Open
 
 | ID | Question | Proposal | Status |
 | --- | --- | --- | --- |
-| Q-31 | Identity: enforcement and sharing need to know who someone is. Without a server, how? | **Identity cards.** Each person's smaltfl creates a key pair in their browser (WebCrypto, kept in IndexedDB, never exported). Their card (name, public keys, a fingerprint) is a small file or link they send you; you add them as a principal and give them attributes, such as districts. Sign-in through GitHub or another provider arrives with the server and maps onto the same principals | open |
-| Q-32 | What is a "district" in the reference scenario? | **The borough** (Manhattan, Brooklyn, Queens, the Bronx, Staten Island, plus Newark airport), from the TLC zone table. Policies can also name zones, so "airports only" works too. Community districts (59) would need a map overlay of the zones | open |
-| Q-33 | Snapshots: recreating any run needs the exact input bytes. How much is kept? | Keep every input snapshot by hash, within a storage budget you set (oldest unpinned first); runs you share or pin keep theirs. A run whose snapshot is gone can still be verified against its hashes, but not recreated | open |
+| Q-38 | The builder (design canvas "smaltfl app concepts"): does it match what data engineering needs? What is missing or in the way? | The graph of steps in lanes, a step palette, a properties panel, a data preview under the graph, and every step opening into sub-steps, settings, its SQL, a preview and its schema with column lineage | open |
+| Q-29 | The mark: brand round 2 shows six marks that read as flow (M6–M11), in cobalt teal | Pick one, or say what flow should feel like | in review |
 | Q-34 | Verified runs and speed: parallel execution can change a floating-point sum in its last digit | Verification is bit-exact: runs pin the engine settings that affect results (no parallel aggregation of floating-point values), and the cost is measured. Revisit if it is large | open |
 | Q-35 | What is a share? | **One package file** (`.smaltfl`): the flow, its run manifests and signatures, and optionally the data, encrypted per policy partition. The recipient opens it in smaltfl. Hosted links come with the server | open |
 | Q-36 | Which actions does the scenario need? | *Exclude trips* (a steward marks bad records; the clean step drops them), *set a zone service target* (a district lead, for their own district only), *annotate a weather event* (labels a period, used in analysis) | open |
@@ -20,6 +20,17 @@ The research behind the proposals is in [research/ecosystem-survey.md](research/
 | Q-2 | Who is the first user? | Data engineers build; analysts use and extend. The canvas must stay readable for both | open |
 | Q-15 | Lineage granularity in v1? | Dataset-level and run-level from the start; column-level when the plan API lands | open |
 | Q-18 | Data quality in v1? | Row expectations (warn, drop, fail) and dataset checks (freshness, row count, uniqueness, schema) | open |
+
+## Round 2: decided (ADR 0002)
+
+| ID | Question | Decision | Status |
+| --- | --- | --- | --- |
+| Q-31 | Identity without a server | Identity cards: a key pair created in each person's browser; the public card is shared to be added as a principal. Sign-in comes with the server | decided |
+| Q-32 | What is a "district"? | The borough (five boroughs and Newark airport); policies can also name zones | decided |
+| Q-33 | How much snapshot history is kept? | Every snapshot by hash, within a budget; oldest unpinned first; shared or pinned runs keep theirs | decided |
+| Q-22 | The UI (clarified) | A visual builder for data engineering, in the spirit of Foundry's Pipeline Builder, built without a UI framework | decided |
+| Q-28 | Colour | Cobalt teal: `#00786F`, text `#006861`, dark `#4FD1C5` | decided |
+| Q-30 | Brand work | Through the fork `beepboopbop64/smalt-brand`, then a pull request to `stenhoor/smalt-brand` | decided |
 
 ## Round 1: decided (ADR 0001)
 
@@ -43,12 +54,8 @@ The research behind the proposals is in [research/ecosystem-survey.md](research/
 | Q-19 | Versioning | Flows in Git; datasets versioned by content hash, with retention (Q-33) | decided |
 | Q-20 | Collaboration | Single user; flows and data can be shared under policy | decided |
 | Q-21 | Repository home | `beepboopbop64/smaltfl` for now | decided |
-| Q-22 | UI | A visual UI, plain DOM, CSS and SVG, smaltdb and smaltkit only | decided |
 | Q-23 | A canvas kit in smaltkit? | Not now: it stays in this repository | decided |
 | Q-24 | Changes in other smalt repositories | Not for now; discussed with stenhoor first | decided |
 | Q-25 | Name | `smaltfl`, said "smalt-flow" | decided |
 | Q-26 | Tagline | Small. Alternative. Flow. | decided |
 | Q-27 | Positioning | Data pipelines for smaltdb. | decided |
-| Q-28 | Colour | Round 1 shows all three: cobalt teal `#00786F`, plum `#8A3F8F`, smalt only | in review |
-| Q-29 | Mark | Round 1 shows Fork, Merge, Relay and Pipe-forward in each colour | in review |
-| Q-30 | Brand work | Boards here; assets in smalt-brand once someone with push access (or a fork) is set up | blocked |

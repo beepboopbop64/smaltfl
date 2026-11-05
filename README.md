@@ -7,9 +7,9 @@ ontology, actions, enforced access policies and content hashes attached to every
 of the [smalt family](https://smaltworks.dev).
 
 > **Status: design.** There is no code yet.
-> - Decisions so far: [docs/adr/0001-initial-decisions.md](docs/adr/0001-initial-decisions.md)
+> - Decisions so far: [docs/adr/](docs/adr/README.md) (ADR 0001 and 0002)
 > - The architecture (draft): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 > - The example it is built and measured against: [docs/SCENARIO.md](docs/SCENARIO.md)
 > - Questions still open: [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md)
 > - What the family already provides: [docs/research/ecosystem-survey.md](docs/research/ecosystem-survey.md)
-> - Brand, round 1: [docs/brand/round-1/](docs/brand/round-1/)
+> - Brand: [docs/brand/DECISIONS.md](docs/brand/DECISIONS.md) (the colour is cobalt teal; the mark is in round 2)
