@@ -83,6 +83,7 @@ def main() -> None:
     # Samples, all seeded: 10k (tier XS: test fixtures), 100k (the app on a phone), the first week (tier S).
     table = pq.read_table(trips_path)
     rows = table.num_rows
+    print(f'{trips_path.name}: {rows:,} rows; schema: {table.schema}', flush=True)
 
     def save(name: str, t: pa.Table) -> None:
         path = OUT / 'samples' / f'yellow_tripdata_{MONTH}_{name}.parquet'
