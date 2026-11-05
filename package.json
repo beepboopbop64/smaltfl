@@ -10,6 +10,7 @@
     "lineage",
     "reproducibility"
   ],
+  "license": "MIT",
   "homepage": "https://github.com/beepboopbop64/smaltfl#readme",
   "repository": {
     "type": "git",
@@ -36,6 +37,7 @@
   },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "scripts": {

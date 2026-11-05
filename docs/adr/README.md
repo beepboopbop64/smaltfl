@@ -9,3 +9,4 @@ records start from the answers to the questions in [../OPEN_QUESTIONS.md](../OPE
 | [0002](0002-second-round-decisions.md) | Identity, districts, snapshots, the builder, the colour | accepted |
 | [0003](0003-third-round-decisions.md) | The ontology screens, the scenario's actions, the mark on hold | accepted |
 | [0004](0004-the-flow-plan.md) | The flow plan: people say what, the machine decides how | accepted |
+| [0005](0005-licence.md) | The licence | accepted |
