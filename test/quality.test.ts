@@ -10,7 +10,8 @@ import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../src/plugin/index.js';
 import { runFlow, validateDocument, type FlowDocument, type FlowPlan } from '../src/index.js';
-import { emitCheckCounts, emitColumnFacts, emitDistinct, emitRead, emitSample, type EmitContext } from '../src/core/emit.js';
+import { emitCheckCounts, emitColumnFacts, emitDistinct, emitDropped, emitRead, emitSample, type EmitContext } from '../src/core/emit.js';
+import { insertAfter } from '../src/core/document.js';
 import { shapeOf } from '../src/core/optimize.js';
 import { identifiers } from '../src/core/sqltext.js';
 import { columnSql, drift, fillGaps, isolationForest, madsOf, niceCeil, profileColumn, psi, quantile, random, suggestChecks, unusual, type ColumnFacts } from '../src/core/quality.js';
@@ -180,5 +181,35 @@ describe('data quality on real data', () => {
     for (const n of second.manifest.nodes) if (n.origin !== 'trips_enriched_checks') expect(n.key, n.origin).toBe(before.get(n.origin));
     expect(second.manifest.nodes.filter((n) => n.status === 'built').map((n) => n.origin)).toEqual([]);
     expect(second.manifest.nodes.find((n) => n.origin === 'zone_hour')!.status).toBe('reused');
+
+    // As a filter box between the step and what reads it: the rows the checks flag are dropped, what follows runs
+    // again without them, and each dropped row says which rules it failed.
+    const catches = suggestions.filter((x) => !x.guard);
+    const filter = { id: 'trips_enriched_filtered', kind: 'expectations' as const, inputs: ['trips_enriched'], rules: catches.map((x) => ({ name: x.name, check: x.check, onFail: 'drop' as const, description: x.why })) };
+    const filtered = insertAfter(doc, 'trips_enriched', filter);
+    expect(validateDocument(filtered)).toEqual([]);
+    const dropped = Number(db.query(emitCheckCounts(read, [catches.map((x) => `(${x.check})`).join(' AND ')])).rows[0]![0]);
+    expect(dropped).toBeGreaterThan(0);
+    const trips = () => Number(db.query('SELECT sum(trips) FROM zone_hour').rows[0]![0]);
+    const tripsBefore = trips();
+    const third = await runFlow(db, filtered, { smaltdb: SMALTDB });
+    const box3 = third.manifest.nodes.find((n) => n.origin === 'trips_enriched_filtered')!;
+    expect(box3.expectations!.dropped).toBe(dropped);
+    expect(trips()).toBe(tripsBefore - dropped);
+    expect(third.manifest.nodes.find((n) => n.origin === 'zone_hour')!.status).toBe('built');
+    const plan3 = JSON.parse(String(db.query('SELECT plan FROM _smaltfl_plans WHERE hash = ?', [third.manifest.plan]).rows[0]![0])) as FlowPlan;
+    const tables3 = new Map<number, string>();
+    for (const m of third.manifest.nodes) {
+      const t = db.query('SELECT tbl FROM _smaltfl_versions WHERE key = ?', [m.key]).rows[0];
+      if (t) tables3.set(m.node, String(t[0]));
+    }
+    const stored3 = shapeOf(plan3).stored;
+    const ctx3: EmitContext = { table: (j) => (stored3.has(j) ? tables3.get(j) : undefined), columns: (j) => plan3.nodes[j]!.schema!.map(([c]) => c) };
+    const at3 = plan3.nodes.findIndex((n) => n.origin === 'trips_enriched_filtered');
+    const flags = catches.map((_, k) => k);
+    const why = db.query(`SELECT ${flags.map((k) => `"_smaltfl_fail_${k}"`).join(', ')} FROM (${emitDropped(plan3, at3, flags, ctx3)})`).rows;
+    expect(why).toHaveLength(dropped);
+    expect(why.every((r) => r.some((v) => Number(v) === 1))).toBe(true);
+    expect(catches.map((_, k) => why.filter((r) => Number(r[k]) === 1).length)).toEqual(box3.expectations!.rules.map((r) => r.failed));
   });
 });

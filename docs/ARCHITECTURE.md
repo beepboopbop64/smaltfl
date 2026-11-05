@@ -350,14 +350,19 @@ Builder and drawn in the family's look. The first concepts are on the design can
 - **Drift between runs.** Each column is compared with the same step in the last run that had other rows there (a
   different key), by the population stability index over the earlier run's deciles, or its values, with missing
   values a bin of their own: steady under 0.1, moved to 0.25, shifted above, with what moved (a median, a share).
-- **Suggested checks, added as a box.** For the columns a step makes itself (an input's, an aggregate's or a SQL
+- **Suggested checks, added as a filter box.** For the columns a step makes itself (an input's, an aggregate's or a SQL
   step's, the ones a formula, join or select adds), and that no expectation upstream already checks: an upper bound
   for a far tail, `>= 0` for stray negatives or as a guard, `IS NOT NULL` for a few missing values (columns missing in
   the same rows get one), `IN (…)` for a small category's values today. Each is counted exactly over every row, as an
-  expectation counts. One tap adds the chosen ones as an expectations step beside the step, in its section, whose
-  rules warn, so no result changes; the flow runs and only the new box computes. The box's card says how many rows it
-  flags; a step nothing reads can be taken out again. Edits to the flow are kept in this browser, and Reset (in
-  Arrange) puts the example back.
+  expectation counts. One tap puts the chosen ones in a filter box between the step and what reads it: an
+  expectations step whose rules drop the rows they flag, each rule keeping why it was suggested (the rule's
+  `description`, which is for people: it is not in the plan, so no key changes with it). What read the step reads the
+  box instead (a SQL step's text is rewired by token), so everything after it runs again without those rows; a step
+  nothing reads gets the box as an output of its own. The box reads FILTER on its card, with the rows it dropped, and
+  its sheet shows each dropped row leading with why: the values that failed, the rule, and its reason. A filter box
+  can be taken out again, and what read it reads the step once more, its earlier versions reused. A check that only
+  warns, and that nothing reads, doesn't make the step it reads stored. Edits to the flow are kept in this browser,
+  and Reset (in Arrange) puts the example back.
 - **Rows on a phone.** Previews and the rows a sheet shows come as cards, one row at a time to swipe or step
   through, each column a label and its value with the columns that matter first (the ones a rule reads, the ones a
   step adds); or as a table whose header and first column stay in place. Cards are the default on a narrow screen,

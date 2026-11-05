@@ -162,6 +162,18 @@ export function emitRuleFailures(plan: FlowPlan, node: number, rule: number, ctx
   return emitFailures(plan, node, [rule], ctx);
 }
 
+/**
+ * The rows an expectation drops (those failing any of its drop rules), each with a flag for each rule in `flags`
+ * (by index): `_smaltfl_fail_<k>` is 1 when the row fails rule k, so a person can be told why it went.
+ */
+export function emitDropped(plan: FlowPlan, node: number, flags: readonly number[], ctx: EmitContext): string {
+  const n = plan.nodes[node] as ExpectNode;
+  const drops = n.rules.flatMap((r, k) => (r[2] === 'drop' ? [k] : []));
+  const marks = flags.map((k) => `, CASE WHEN (\n${n.rules[k]![1]}\n) THEN 0 ELSE 1 END AS ${q(`_smaltfl_fail_${k}`)}`).join('');
+  const all = drops.map((k) => `(\n${n.rules[k]![1]}\n)`).join(' AND ') || 'TRUE';
+  return `SELECT *${marks} FROM (\n${emitRead(plan, n.inputs[0]!, ctx)}\n) WHERE CASE WHEN ${all} THEN 0 ELSE 1 END = 1`;
+}
+
 /** The rows that fail any of an expectation's rules (by index), each row once. */
 export function emitFailures(plan: FlowPlan, node: number, rules: readonly number[], ctx: EmitContext): string {
   const n = plan.nodes[node] as ExpectNode;

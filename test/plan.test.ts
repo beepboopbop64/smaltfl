@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { validateDocument, type FlowDocument } from '../src/core/document.js';
+import { insertAfter, takeOut, validateDocument, type FlowDocument } from '../src/core/document.js';
+import { renameIdentifier } from '../src/core/sqltext.js';
 import { nodeKey } from '../src/core/keys.js';
 import { shapeOf } from '../src/core/optimize.js';
 import { flowHash, PlanError, translate, validatePlan, type FlowPlan } from '../src/core/plan.js';
@@ -124,6 +125,32 @@ describe('translating into the flow plan', () => {
     forward.nodes[2]!.inputs = [5];
     expect(() => validatePlan(forward)).toThrow('node 2 reads a node that does not come before it');
     expect(() => validatePlan({ ...plan, outputs: [{ name: 'trips', node: 0 }] })).toThrow('output trips is a source');
+  });
+});
+
+describe('putting a step between a step and what reads it', () => {
+  const box = { id: 'trips_valid_filtered', kind: 'expectations' as const, inputs: ['trips_valid'], rules: [{ name: 'short', check: 'trip_distance < 50', onFail: 'drop' as const, description: 'Longer trips are rare.' }] };
+
+  it('rewires what read the step, SQL included, and takes it out again exactly', () => {
+    const doc = { ...visualFlow(), groups: [{ id: 'clean', name: 'Clean', steps: ['trips', 'trips_valid', 'trips_dedup'] }] };
+    const next = insertAfter(doc, 'trips_valid', box);
+    expect(validateDocument(next)).toEqual([]);
+    const dedup = next.steps.find((s) => s.id === 'trips_dedup')!;
+    expect(dedup.inputs).toEqual(['trips_valid_filtered']);
+    expect(dedup.kind === 'sql' && dedup.sql).toBe('SELECT DISTINCT * FROM trips_valid_filtered;');
+    expect(next.groups![0]!.steps).toEqual(['trips', 'trips_valid', 'trips_valid_filtered', 'trips_dedup']);
+    expect(takeOut(next, 'trips_valid_filtered')).toEqual({ ...doc, layout: doc.layout });
+    // A step that changes columns can't be taken out from under what reads it.
+    expect(takeOut(doc, 'trips_enriched')).toBeUndefined();
+  });
+
+  it('renames a name in SQL, bare or quoted, but not in strings or comments', () => {
+    expect(renameIdentifier(`SELECT a FROM Trips_Valid t JOIN "trips_valid" u ON 1 -- trips_valid\nWHERE x = 'trips_valid'`, 'trips_valid', 'tv2')).toBe(`SELECT a FROM tv2 t JOIN "tv2" u ON 1 -- trips_valid\nWHERE x = 'trips_valid'`);
+  });
+
+  it('keeps a rule’s reason out of the keys', async () => {
+    const keys = async (description?: string) => keysOf(await translate(insertAfter(visualFlow(), 'trips_valid', { ...box, rules: [{ ...box.rules[0]!, description }] })));
+    expect(await keys('Longer trips are rare.')).toEqual(await keys(undefined));
   });
 });
 

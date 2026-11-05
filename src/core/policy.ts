@@ -119,10 +119,13 @@ export function readView(p: Policies | undefined, viewer: string, columns: reado
   return { open: true, filters, removed, columns: kept, where: conditions.length ? conditions.join(' AND ') : null };
 }
 
-/** A statement's rows as a viewer may read them, or null when the dataset is closed to them. */
-export function wrapRead(view: ReadView, sql: string): string | null {
+/**
+ * A statement's rows as a viewer may read them, or null when the dataset is closed to them. `keep` names columns the
+ * statement adds that aren't the dataset's (flags it computed from columns the viewer can read), kept after theirs.
+ */
+export function wrapRead(view: ReadView, sql: string, keep: readonly string[] = []): string | null {
   if (!view.open) return null;
-  const cols = view.columns.map(quoteIdent).join(', ');
+  const cols = [...view.columns, ...keep].map(quoteIdent).join(', ');
   return `SELECT ${cols} FROM (\n${sql}\n) AS "_smaltfl_read"${view.where ? ` WHERE ${view.where}` : ''}`;
 }
 

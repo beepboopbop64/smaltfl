@@ -11,8 +11,8 @@ import exampleDoc from '../../examples/nyc-taxis-weather.smaltfl.json';
 import { EXAMPLE_SOURCES } from '../../examples/sources.js';
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, StepDef } from '../core/document.js';
-import { GROUP_COLORS, validateDocument } from '../core/document.js';
-import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitExcept, emitFailures, emitRead, emitRuleFailures, emitSample, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
+import { GROUP_COLORS, insertAfter, takeOut, validateDocument } from '../core/document.js';
+import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitRead, emitRuleFailures, emitSample, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Edit } from '../core/ontology.js';
 import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule } from '../core/policy.js';
@@ -188,7 +188,9 @@ function kindLabel(id: string): string {
     return f ? `INPUT · ${formatOf(f.file).toUpperCase()}` : 'INPUT';
   }
   const st = steps().get(id)!;
-  return `${KIND[st.kind] ?? st.kind.toUpperCase()}${st.dataset ? ' · OUTPUT' : ''}`;
+  // Checks that only drop rows are a filter, with a reason for each rule.
+  const kind = st.kind === 'expectations' && st.rules.every((r) => r.onFail === 'drop') ? 'FILTER' : (KIND[st.kind] ?? st.kind.toUpperCase());
+  return `${kind}${st.dataset ? ' · OUTPUT' : ''}`;
 }
 
 // ------------------------------------------------------------------ who can see what, per step
@@ -1349,7 +1351,8 @@ function suggestedChecks(id: string, q: Quality): HTMLElement {
     box.append(h('p', { class: 'foot' }, 'Nothing to suggest for the columns this step makes: they are checked already, or hold nothing a simple check would catch.'));
     return box;
   }
-  box.append(h('p', { class: 'foot' }, 'From what the columns hold today, each counted over every row. They warn: adding them changes no results, and the new box reports the rows they flag.'));
+  const after = readersOf(id).filter(visible);
+  box.append(h('p', { class: 'foot' }, `From what the columns hold today, each counted over every row. Adding them puts a filter box after ${id} that drops the rows they flag, each with its reason; ${after.length ? `${after.join(', ')} then ${after.length === 1 ? 'reads' : 'read'} the filtered rows and ${after.length === 1 ? 'runs' : 'run'} again` : 'the filtered rows become an output of their own'}.`));
   const picks: { s: Suggestion; input: HTMLInputElement }[] = [];
   const catches = q.suggestions.some((x) => x.failing > 0);
   const list = h('div', { class: 'suggestions' });
@@ -1368,12 +1371,12 @@ function suggestedChecks(id: string, q: Quality): HTMLElement {
     const add = h('button', { class: 'run', type: 'button' }, '');
     const label = () => {
       const n = picks.filter((p) => p.input.checked).length;
-      add.textContent = n ? `Add ${n === 1 ? 'it' : `these ${n}`} as a check box` : 'Pick a check to add';
+      add.textContent = n ? `Drop the rows ${n === 1 ? 'it flags' : `these ${n} flag`}, in a filter box` : 'Pick a check to add';
       add.disabled = n === 0;
     };
     for (const p of picks) p.input.addEventListener('change', label);
     label();
-    add.addEventListener('click', () => addCheckBox(id, picks.filter((p) => p.input.checked).map((p) => p.s)));
+    add.addEventListener('click', () => addFilterBox(id, picks.filter((p) => p.input.checked).map((p) => p.s)));
     box.append(h('div', { class: 'row' }, add));
   }
   return box;
@@ -1419,25 +1422,28 @@ async function qualityPanel(id: string, who: string): Promise<HTMLElement | null
 }
 
 /**
- * Add checks as a box beside a step: an expectations step that reads it and warns, so no result changes; it joins the
- * step's section, sits next to it, and runs straight away (only it runs: everything else is reused).
+ * Suggested checks as a filter box: an expectations step whose rules drop the rows they flag, each keeping the reason
+ * it was suggested. It goes between the step and what reads it, so everything after the step runs again without
+ * those rows; a step nothing reads gets the box as an output of its own. It joins the step's section, sits next to it,
+ * and the flow runs straight away.
  */
-function addCheckBox(stepId: string, picked: readonly Suggestion[]): void {
+function addFilterBox(stepId: string, picked: readonly Suggestion[]): void {
   if (!picked.length || !isOwner()) return;
   const doc = state.doc;
   const taken = new Set([...doc.sources, ...doc.steps].map((x) => x.id.toLowerCase()));
-  const base = `${stepId.slice(0, 50)}_checks`;
+  const base = `${stepId.slice(0, 54)}_filtered`;
   let id = base;
   for (let n = 2; taken.has(id.toLowerCase()); n++) id = `${base}_${n}`;
-  const box: StepDef = { id, kind: 'expectations', inputs: [stepId], description: `Checks suggested from what ${stepId}’s columns hold`, rules: picked.map((x) => ({ name: x.name, check: x.check, onFail: 'warn' })) };
-  const at = doc.steps.findIndex((x) => x.id === stepId);
-  const steps = [...doc.steps];
-  steps.splice(at + 1, 0, box);
-  const groups = doc.groups?.map((g) => {
-    const k = g.steps.indexOf(stepId);
-    return k < 0 ? g : { ...g, steps: [...g.steps.slice(0, k + 1), id, ...g.steps.slice(k + 1)] };
-  });
-  const next: FlowDocument = { ...doc, steps, groups };
+  const read = readersOf(stepId).length > 0;
+  const box: StepDef = {
+    id,
+    kind: 'expectations',
+    inputs: [stepId],
+    description: `${stepId} without the rows these checks drop`,
+    rules: picked.map((x) => ({ name: x.name, check: x.check, onFail: 'drop', description: x.why })),
+    ...(read ? {} : { dataset: { description: `${stepId}, filtered by its checks` } }),
+  };
+  const next = insertAfter(doc, stepId, box);
   // Arranged by hand: it sits beside the step rather than wherever the automatic layout would put it.
   if (Object.keys(doc.layout ?? {}).length) {
     const before = gridLayout(doc, state.collapsed);
@@ -1446,7 +1452,7 @@ function addCheckBox(stepId: string, picked: readonly Suggestion[]): void {
   }
   const issues = validateDocument(next);
   if (issues.length) {
-    setStatus(`The checks couldn't be added: ${issues[0]!.path}: ${issues[0]!.message}.`, true);
+    setStatus(`The filter couldn't be added: ${issues[0]!.path}: ${issues[0]!.message}.`, true);
     return;
   }
   state.doc = next;
@@ -1456,11 +1462,11 @@ function addCheckBox(stepId: string, picked: readonly Suggestion[]): void {
   void run().then(() => select(id));
 }
 
-/** Take out a step nothing reads, such as a check box: the flow runs again without it. */
+/** Take a step out (a filter box, or a step nothing reads): what read it reads its input again, and the flow runs. */
 function removeStep(id: string): void {
-  const doc = state.doc;
-  if (!isOwner() || doc.steps.some((x) => x.inputs.includes(id))) return;
-  const next: FlowDocument = { ...doc, steps: doc.steps.filter((x) => x.id !== id), groups: doc.groups?.map((g) => ({ ...g, steps: g.steps.filter((x) => x !== id) })), layout: Object.fromEntries(Object.entries(doc.layout ?? {}).filter(([k]) => k !== id)) };
+  if (!isOwner()) return;
+  const next = takeOut(state.doc, id);
+  if (!next) return;
   const issues = validateDocument(next);
   if (issues.length) {
     setStatus(`${id} can’t be taken out: ${issues[0]!.message}.`, true);
@@ -1568,12 +1574,13 @@ async function renderSheet(): Promise<void> {
   body.append(facts);
 
   if (st) body.append(editor(st));
-  if (st && isOwner() && readersOf(id).length === 0) {
+  if (st && isOwner() && takeOut(state.doc, id)) {
     const out = h('button', { class: 'btn danger', type: 'button' }, 'Take this step out');
+    const reads = readersOf(id);
     let armed = 0;
     out.addEventListener('click', () => {
       if (armed) return (clearTimeout(armed), removeStep(id));
-      out.textContent = 'Take it out? Nothing reads it';
+      out.textContent = reads.length ? `Take it out? ${reads.join(', ')} will read ${st.inputs[0]} again` : 'Take it out? Nothing reads it';
       armed = window.setTimeout(() => ((armed = 0), (out.textContent = 'Take this step out')), 3000);
     });
     body.append(h('div', { class: 'row' }, out));
@@ -1735,6 +1742,48 @@ async function showRows(into: HTMLElement, title: string, sql: string, first: Re
   }
 }
 
+/** The reasons a checks step gives its rules, by rule name: why each is there. */
+function ruleReasons(id: string): Map<string, string | undefined> {
+  const st = steps().get(id);
+  return new Map(st?.kind === 'expectations' ? st.rules.map((r) => [r.name, r.description]) : []);
+}
+
+/**
+ * Up to 50 rows a step dropped, each leading with why: the rules it failed and their reasons. `rules` are the ones the
+ * person may read (none on a column their policy removes), each with a flag column the statement computed.
+ */
+async function showDropped(into: HTMLElement, title: string, sql: string, rules: readonly { k: number; name: string; description?: string; reads: ReadonlySet<string> }[]): Promise<void> {
+  into.hidden = false;
+  into.replaceChildren(h('p', { class: 'eyebrow' }, title), h('p', { class: 'foot' }, 'Loading…'));
+  try {
+    const r = await state.engine!.query(`SELECT * FROM (\n${sql}\n) LIMIT 50`);
+    const flagAt = new Map(rules.map((x) => [x, r.columns.indexOf(`_smaltfl_fail_${x.k}`)]));
+    const keep = [...r.columns.keys()].filter((k) => !r.columns[k]!.startsWith('_smaltfl_fail_'));
+    const failed = r.rows.map((row) => rules.filter((x) => Number(row[flagAt.get(x)!]) === 1));
+    // Why, in the row's own values first: "speed_mph 46.1 fails speed_mph_range: …" and the reason the rule has.
+    const valueOf = (row: unknown[], c: string) => {
+      const k = keep.find((j) => r.columns[j]!.toLowerCase() === c);
+      return k === undefined ? null : `${r.columns[k]} ${typeof row[k] === 'number' ? fmtNum(row[k] as number) : cellOf(row[k]).text}`;
+    };
+    const why = failed.map((fs, n) =>
+      fs.length
+        ? fs.map((x) => {
+            const values = [...x.reads].map((c) => valueOf(r.rows[n]!, c)).filter((v): v is string => v !== null);
+            return `${values.length ? `${values.join(', ')} ${values.length === 1 ? 'fails' : 'fail'} ` : ''}${x.name}${x.description ? `: ${x.description}` : ''}`;
+          }).join(' · ')
+        : 'a rule on a column hidden from you');
+    const columns = ['why', ...keep.map((k) => r.columns[k]!)];
+    const rows = r.rows.map((row, n) => [why[n], ...keep.map((k) => row[k])]);
+    into.replaceChildren(
+      h('div', { class: 'row' }, h('p', { class: 'eyebrow', style: 'flex:1' }, title), h('button', { class: 'btn', type: 'button', onclick: () => ((into.hidden = true), into.replaceChildren()) }, 'Hide')),
+      rowsView(columns, rows, (c, n) => (c === 'why' ? 'hit' : n !== undefined && failed[n]!.some((x) => x.reads.has(c.toLowerCase())) ? 'hit' : undefined)),
+      h('p', { class: 'foot' }, r.rows.length === 50 ? 'The first 50.' : r.rows.length ? plural(r.rows.length, 'row') + '.' : 'None.'),
+    );
+  } catch (e) {
+    into.replaceChildren(h('p', { class: 'status bad' }, message(e)));
+  }
+}
+
 /** The sheet's account of what a step changed, as the viewer reads it, and the columns it adds (for the preview's tint). */
 async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLElement; fresh: string[] } | null> {
   const run = latest();
@@ -1785,7 +1834,19 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
       headline(lost ? `Dropped ${fmtInt(lost)} of ${plural(inn, 'row')} (${pct(lost / Math.max(1, inn))})` : `Kept all ${plural(inn, 'row')}`, lost ? 'drop' : 'same');
       box.append(split(out, lost, 'kept', 'dropped'));
       box.append(await rulesTable(insp, i, rows, who));
-      if (lost) box.append(h('div', { class: 'row' }, button(`Show the ${plural(lost, 'row')} it dropped`, `Dropped by ${id}`, exceptIn(insp, input!, i, who))));
+      if (lost) {
+        // Each dropped row with why it went: the rules it fails that the person can read, and their reasons.
+        const view = viewIn(insp, input!, who);
+        const hidden = new Set(view.removed.map((r) => r.column.toLowerCase()));
+        const visibleCols = new Set(view.columns.map((x) => x.toLowerCase()));
+        const reasons = ruleReasons(id);
+        const flagged = n.rules.flatMap(([rule, check], k) => {
+          const reads = [...identifiers(check)];
+          return reads.some((x) => hidden.has(x)) ? [] : [{ k, name: rule, description: reasons.get(rule), reads: new Set(reads.filter((x) => visibleCols.has(x))) }];
+        });
+        const sql = wrapRead(view, emitDropped(insp.plan, i, flagged.map((f) => f.k), insp.ctx), flagged.map((f) => `_smaltfl_fail_${f.k}`));
+        if (sql) box.append(h('div', { class: 'row' }, h('button', { class: 'btn show', type: 'button', onclick: () => void showDropped(rows, `Dropped by ${id}, and why`, sql, flagged) }, `Show the ${plural(lost, 'row')} it dropped, and why`)));
+      }
       if (c.flagged) {
         const warns = n.rules.map((r, k) => (r[2] === 'warn' ? k : -1)).filter((k) => k >= 0);
         say(`Its warnings flag ${plural(c.flagged, 'row')}, and keep them: a warning reports a row rather than dropping it.`);
@@ -1882,9 +1943,10 @@ async function rulesTable(insp: Inspection, i: number, rows: HTMLElement, who = 
     }),
   );
   const inn = (await rowsAs(insp, n.inputs[0]!, who)) ?? 0;
+  const reasons = ruleReasons(insp.plan.nodes[i]!.origin);
   const body = rules.map((r) =>
     h('tr', {},
-      h('td', {}, r.name, r.onFail === 'warn' ? h('span', { class: 'warns' }, 'warns') : null),
+      h('td', {}, r.name, r.onFail === 'warn' ? h('span', { class: 'warns' }, 'warns') : null, reasons.get(r.name) ? h('span', { class: 'rule-why' }, reasons.get(r.name)!) : null),
       h('td', { class: 'n' }, r.failed === null ? 'closed' : fmtInt(r.failed)),
       h('td', { class: 'n' }, r.failed === null ? '' : pct(r.failed / Math.max(1, inn))),
       h('td', {}, r.failed && r.sql ? h('button', { class: 'btn small', type: 'button', onclick: () => void showRows(rows, `Rows that fail ${r.name}${r.onFail === 'warn' ? ' (kept, with a warning)' : ''}`, r.sql!, r.reads) }, 'Show') : null),

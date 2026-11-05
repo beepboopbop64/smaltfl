@@ -147,6 +147,17 @@ export function identifiers(sql: string): Set<string> {
   return out;
 }
 
+/**
+ * SQL text with every reference to one name (bare or quoted, in any case) changed to another, strings and comments
+ * untouched: for a step whose SQL reads an input by name, when that input is replaced.
+ */
+export function renameIdentifier(sql: string, from: string, to: string): string {
+  const f = from.toLowerCase();
+  return tokens(sql)
+    .map((t) => (t.kind === 'word' && t.text.toLowerCase() === f ? to : t.kind === 'quoted' && unquote(t.text).toLowerCase() === f ? quoteIdent(to) : t.text))
+    .join('');
+}
+
 function unquote(text: string): string {
   const q = text[0];
   if (q === '[') return text.slice(1, -1);

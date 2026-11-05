@@ -8,7 +8,7 @@
 import type { Ontology } from './ontology.js';
 import type { Policies } from './policy.js';
 import type { ParamType, ParamValue } from './sqltext.js';
-import { SqlTextError, tokens } from './sqltext.js';
+import { renameIdentifier, SqlTextError, tokens } from './sqltext.js';
 
 export const DOCUMENT_FORMAT = 1;
 
@@ -126,6 +126,8 @@ export interface ExpectationRule {
   check: string;
   /** warn: count the failures; drop: also leave the row out; fail: fail the run if any row fails. */
   onFail: 'warn' | 'drop' | 'fail';
+  /** Why the rule is there, for people: shown with the rows it flags or drops. Not part of the plan, nor of any key. */
+  description?: string;
 }
 
 export interface ExpectationsStep extends StepBase {
@@ -371,6 +373,7 @@ function validateConfig(s: Record<string, unknown>, at: string, add: (path: stri
           else rules.add(r.name);
           sqlText(r.check, `${rat}.check`);
           if (r.onFail !== 'warn' && r.onFail !== 'drop' && r.onFail !== 'fail') add(`${rat}.onFail`, 'warn, drop or fail');
+          if (r.description !== undefined && typeof r.description !== 'string') add(`${rat}.description`, 'text');
         });
       }
       if (s.maxDropped !== undefined && (typeof s.maxDropped !== 'number' || !(s.maxDropped >= 0 && s.maxDropped <= 1))) add(`${at}.maxDropped`, 'a fraction from 0 to 1');
@@ -414,6 +417,56 @@ function fits(value: unknown, type: ParamType): boolean {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/**
+ * The document with `to` read in place of `from` by every step that read `from` (but `except`): in its inputs, and
+ * where its SQL names it.
+ */
+export function rewire(doc: FlowDocument, from: string, to: string, except?: string): FlowDocument {
+  return {
+    ...doc,
+    steps: doc.steps.map((st) => {
+      if (st.id === except || !st.inputs.some((i) => sameId(i, from))) return st;
+      const inputs = st.inputs.map((i) => (sameId(i, from) ? to : i));
+      return st.kind === 'sql' ? { ...st, inputs, sql: renameIdentifier(st.sql, from, to) } : { ...st, inputs };
+    }),
+  };
+}
+
+/**
+ * The document with a step put between `id` and what reads it, such as a box of checks that drops rows: everything
+ * that read `id` reads the new step instead, and the new step joins `id`'s section, just after it.
+ */
+export function insertAfter(doc: FlowDocument, id: string, step: StepDef): FlowDocument {
+  const rewired = rewire(doc, id, step.id);
+  const steps = [...rewired.steps];
+  steps.splice(steps.findIndex((s) => s.id === id) + 1, 0, step);
+  const groups = rewired.groups?.map((g) => {
+    const k = g.steps.indexOf(id);
+    return k < 0 ? g : { ...g, steps: [...g.steps.slice(0, k + 1), step.id, ...g.steps.slice(k + 1)] };
+  });
+  return { ...rewired, steps, groups };
+}
+
+/**
+ * The document without a step: what read it reads its one input instead. Undefined when that can't be done (it reads
+ * more than one input, and something reads it), and for a step that changes columns, since what reads it may need them.
+ */
+export function takeOut(doc: FlowDocument, id: string): FlowDocument | undefined {
+  const st = doc.steps.find((s) => s.id === id);
+  if (!st) return undefined;
+  const read = doc.steps.some((s) => s.inputs.some((i) => sameId(i, id)));
+  if (read && (st.inputs.length !== 1 || (st.kind !== 'expectations' && st.kind !== 'filter'))) return undefined;
+  const rewired = read ? rewire(doc, id, st.inputs[0]!) : doc;
+  return {
+    ...rewired,
+    steps: rewired.steps.filter((s) => s.id !== id),
+    groups: rewired.groups?.map((g) => ({ ...g, steps: g.steps.filter((s) => s !== id) })),
+    layout: rewired.layout && Object.fromEntries(Object.entries(rewired.layout).filter(([k]) => k !== id)),
+  };
 }
 
 /** The document without display-only fields (its layout and groups): what the flow hash covers. */
