@@ -26,6 +26,8 @@ round, and a clarification about the UI.
    lineage and the policies that apply. "No UI framework" in ADR 0001 §11 means the UI is built without a library
    such as React, as smaltbi's designer is; it does not mean less UI. The first concepts are on the design canvas
    "smaltfl app concepts" (the builder, and a step opened). (Q-22, clarified)
+   *Amended after the first concepts:* the canvas is open, a grid where steps go anywhere and groups hold any number
+   of them, rather than fixed lanes with one box per section (concept A3).
 5. **The colour is cobalt teal** (`#00786F` fill, `#006861` text, `#4FD1C5` on dark), picked in brand round 1. It is
    closer to smaltui's cerulean (CIE76 36 / 34) than the teal judged too close by eye in smaltdf's round (38), so the
    pick goes to stenhoor with that note. (Q-28)

@@ -225,9 +225,12 @@ docs/         this file, SCENARIO, FORMAT, OPEN_QUESTIONS, adr/, research/, bran
 The app's main screen ([ADR 0002](adr/0002-second-round-decisions.md) §4), in the spirit of Foundry's Pipeline
 Builder and drawn in the family's look. The first concepts are on the design canvas "smaltfl app concepts" **[Q-38]**.
 
-- **The flow graph.** Steps are cards in lanes (sources, clean, enrich, aggregate, serve), joined by arrows from
-  their inputs. A card shows its kind, its name and what matters about it: rows, its rules, the policy it carries.
-  Datasets take the product colour; object types and actions sit in the serve lane.
+- **An open canvas.** Steps are cards placed anywhere on a grid, joined by arrows from their inputs, with no fixed
+  lanes: a flow grows in any direction. **Groups** hold any number of steps, can be named, resized and nested, and
+  collapse into one card. A card shows its kind and its name; datasets take the product colour. Edits written by
+  actions flow back into the flow as dashed arrows.
+- **Moving around:** zoom, fit, tidy (automatic layout), and a map of the whole flow with the visible part outlined.
+  Steps are added from the palette (anywhere, or into a group) or with + on a step.
 - **The palette,** on the left: sources, the visual tools, SQL, expectations, outputs, and ontology types.
 - **Properties,** on the right, for the selected step: its inputs, whether it is stored or runs inside a later
   step's query, the policy it inherits, its column lineage and its step key.

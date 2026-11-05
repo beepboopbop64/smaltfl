@@ -11,8 +11,8 @@ is in [research/ecosystem-survey.md](research/ecosystem-survey.md).
 
 | ID | Question | Proposal | Status |
 | --- | --- | --- | --- |
-| Q-38 | The builder (design canvas "smaltfl app concepts"): does it match what data engineering needs? What is missing or in the way? | The graph of steps in lanes, a step palette, a properties panel, a data preview under the graph, and every step opening into sub-steps, settings, its SQL, a preview and its schema with column lineage | open |
-| Q-29 | The mark: brand round 2 shows six marks that read as flow (M6–M11), in cobalt teal | Pick one, or say what flow should feel like | in review |
+| Q-38 | The builder (design canvas "smaltfl app concepts"): does it match what data engineering needs? What is missing or in the way? | Liked; made open after feedback (A3): a grid canvas where steps go anywhere, groups that hold any number of steps and collapse, zoom, fit, tidy and a map; every step opens into sub-steps, settings, its SQL, a preview and its schema with column lineage | in review |
+| Q-29 | The mark: neither round 1 nor round 2 (M6–M11) has landed | Settle a direction before drawing more: show the product (connected step cards, like the builder), break from the family's geometric style, a letterform, or the wordmark alone for now | open |
 | Q-34 | Verified runs and speed: parallel execution can change a floating-point sum in its last digit | Verification is bit-exact: runs pin the engine settings that affect results (no parallel aggregation of floating-point values), and the cost is measured. Revisit if it is large | open |
 | Q-35 | What is a share? | **One package file** (`.smaltfl`): the flow, its run manifests and signatures, and optionally the data, encrypted per policy partition. The recipient opens it in smaltfl. Hosted links come with the server | open |
 | Q-36 | Which actions does the scenario need? | *Exclude trips* (a steward marks bad records; the clean step drops them), *set a zone service target* (a district lead, for their own district only), *annotate a weather event* (labels a period, used in analysis) | open |

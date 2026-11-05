@@ -45,4 +45,6 @@ pipe and a drop), and M11 Wave, which needs a curve: an exception to the angle r
 Dropped while drawing: a Meander (one pipe snaking back and forth), which read as the digit 2, and a steeper Bend,
 which read as a backslash and a dot.
 
-Feedback: pending.
+Feedback: still not right. Two rounds of variations in one style haven't found it, so the next step is to settle a
+direction before drawing more: a mark that shows the product (connected step cards, like the builder canvas, which
+was liked), a break from the family's geometric style, a letterform, or the wordmark alone for now.
