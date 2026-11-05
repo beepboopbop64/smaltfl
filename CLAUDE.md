@@ -15,6 +15,7 @@ match smaltdb's `CLAUDE.md`.
 | `npm run check` | `npm run typecheck` then `npm test` (vitest): what CI runs | Before every commit |
 | `npm run build` | `dist/`: the core (`index.js`), the runtime plugin (`plugin/index.js`) and their declarations | Packaging checks |
 | `npm run bench` | The scenario benchmarks in `bench/`, written to `bench/results/node.json` | Changes that could affect speed |
+| `npm run build:app` | The app in `dist/app`, with the `data` branch's 100k sample if fetched (else the XS fixtures) | Changes to `src/app` |
 
 ## Layout
 
@@ -30,6 +31,11 @@ match smaltdb's `CLAUDE.md`.
   reference flow; `fixtures/reference.ts` computes the same flow in plain JavaScript to check results against;
   `worker-protocol.test.ts` runs through the smaltdb client and engine server, the path a page takes.
 - `bench/`: the scenario benchmarks (docs/SCENARIO.md §7).
+- `src/app/`: the app. `main.ts` (plain DOM and SVG), `engine.ts` (smaltdb in a worker, `worker.ts`, or in the page,
+  `inline.ts`), `layout.ts` (where cards sit), `page.html` (the page's content). `npm run build:app` writes `dist/app`.
+- `examples/`: flow documents and their sources; `fixtures/xs/`: real tier XS data for the tests.
+- `scripts/data/build.py` and `.github/workflows/data.yml`: the scenario's data, fetched on a GitHub runner into the
+  `data` branch (`git fetch origin data --depth 1`).
 
 ## Rules for this repository
 

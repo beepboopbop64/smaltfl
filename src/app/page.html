@@ -1,0 +1,209 @@
+<title>smaltfl taxi flow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Martian+Mono:wght@600&display=swap">
+<style>
+/* Layout: one column on a phone (the flow runs down the page, a step opens in a sheet from the bottom); on a wide
+   screen the sheet becomes a panel beside the flow. Colours are the smalt family's Kiln neutrals with smalt for
+   actions and cobalt teal, smaltfl's colour, for what the data produces. */
+:root {
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --sunk: #eceff5;
+  --ink: #151922;
+  --ink-2: #3f4656;
+  --muted: #5c6375;
+  --line: #d6dbe4;
+  --smalt: #003399;
+  --smalt-wash: #e0e6f3;
+  --teal: #006861;
+  --teal-fill: #00786f;
+  --teal-wash: #dcefed;
+  --ok: #1d6b3a;
+  --warn: #8a5a12;
+  --bad: #a3195b;
+  --bad-wash: #f8e3ec;
+  --font: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --mark: 'Martian Mono', 'Geist Mono', ui-monospace, monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f131a; --surface: #171c25; --sunk: #1e2430; --ink: #e8ebf1; --ink-2: #c3c9d6; --muted: #98a1b3; --line: #2c3442;
+    --smalt: #8fa8ff; --smalt-wash: #1d2742; --teal: #4fd1c5; --teal-fill: #2bb3a6; --teal-wash: #14302e;
+    --ok: #67d391; --warn: #e3b55f; --bad: #ff86b5; --bad-wash: #3a1828; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f131a; --surface: #171c25; --sunk: #1e2430; --ink: #e8ebf1; --ink-2: #c3c9d6; --muted: #98a1b3; --line: #2c3442;
+  --smalt: #8fa8ff; --smalt-wash: #1d2742; --teal: #4fd1c5; --teal-fill: #2bb3a6; --teal-wash: #14302e;
+  --ok: #67d391; --warn: #e3b55f; --bad: #ff86b5; --bad-wash: #3a1828; color-scheme: dark;
+}
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--font); font-size: 15px; line-height: 1.45; -webkit-text-size-adjust: 100%; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--smalt); outline-offset: 2px; }
+.mono { font-family: var(--mono); font-size: 0.86em; }
+.num { font-variant-numeric: tabular-nums; }
+
+header.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 10px 0;
+}
+.bar-top { display: flex; align-items: center; gap: 12px; }
+.mark { font-family: var(--mark); font-weight: 600; font-size: 19px; letter-spacing: -0.06em; line-height: 1; margin: 0; }
+.mark .a { color: var(--smalt); } .mark .f { color: var(--teal); }
+.flow-name { margin: 0; min-width: 0; flex: 1; font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.run {
+  border: 0; border-radius: 8px; background: var(--smalt); color: var(--surface); font-weight: 600; padding: 9px 16px; min-height: 40px;
+}
+.run[disabled] { opacity: 0.55; cursor: default; }
+.status { margin: 6px 0 0; font-size: 13px; color: var(--muted); min-height: 1.45em; }
+.status.bad { color: var(--bad); }
+nav.tabs { display: flex; gap: 4px; margin-top: 6px; }
+nav.tabs a {
+  flex: 1; text-align: center; padding: 9px 0 10px; color: var(--ink-2); text-decoration: none; font-weight: 500; font-size: 14px;
+  border-bottom: 2px solid transparent;
+}
+nav.tabs a[aria-current="page"] { color: var(--smalt); border-bottom-color: var(--smalt); font-weight: 600; }
+
+main {
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 40px;
+  max-width: 1180px; margin: 0 auto; box-sizing: border-box;
+}
+section.view { display: grid; gap: 14px; }
+.lede { margin: 0; color: var(--ink-2); max-width: 62ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin: 0; padding: 0; list-style: none; }
+.legend li { display: flex; align-items: center; gap: 6px; }
+.swatch { width: 14px; height: 10px; border-radius: 3px; border: 1.5px solid var(--line); background: var(--surface); }
+.swatch.built { border-color: var(--teal); background: var(--teal-wash); }
+.swatch.reused { border-color: var(--muted); }
+.swatch.folded { border-style: dashed; border-color: var(--muted); }
+
+#canvas { width: 100%; overflow: hidden; }
+#canvas svg { display: block; width: 100%; height: auto; }
+.card rect.box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.card.source rect.box { stroke: var(--smalt); }
+.card.dataset rect.box { stroke: var(--teal); }
+.card.built rect.box { fill: var(--teal-wash); stroke: var(--teal); }
+.card.folded rect.box { stroke-dasharray: 5 4; }
+.card.failed rect.box { fill: var(--bad-wash); stroke: var(--bad); }
+.card.selected rect.box { stroke: var(--smalt); stroke-width: 2.5; }
+.card text { fill: var(--ink); }
+.card .kind { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; fill: var(--muted); }
+.card .name { font-weight: 600; font-size: 13px; }
+.card .what { font-size: 11.5px; fill: var(--ink-2); }
+.card.built .what { fill: var(--teal); }
+.card.failed .what { fill: var(--bad); }
+.card { cursor: pointer; }
+.edge { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: 0.7; }
+.edge-dot { fill: var(--muted); }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
+.panel h2 { margin: 0 0 4px; font-size: 16px; text-wrap: balance; }
+.panel .sub { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.eyebrow { margin: 0; font-family: var(--mono); font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.grid2 { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); }
+
+.chart svg { display: block; width: 100%; height: auto; }
+.chart text { fill: var(--ink); font-size: 12px; }
+.chart .axis { fill: var(--muted); font-size: 11px; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .base { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.chart .bar.rain { fill: var(--smalt); } .chart .bar.heavy { fill: var(--teal-fill); } .chart .bar.snow { fill: var(--muted); }
+
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { border-collapse: collapse; font-size: 13px; width: 100%; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 600; color: var(--ink-2); background: var(--sunk); position: sticky; top: 0; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.null { color: var(--muted); font-style: italic; }
+
+.runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.runs li { display: grid; gap: 8px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--sunk); color: var(--ink-2); }
+.pill.ok { background: var(--teal-wash); color: var(--ok); }
+.pill.bad { background: var(--bad-wash); color: var(--bad); }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 7px 12px; min-height: 36px; font-size: 14px; }
+.btn:hover { border-color: var(--smalt); }
+.hash { font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.checks li { display: flex; gap: 8px; align-items: baseline; }
+.checks .ok { color: var(--ok); font-weight: 600; } .checks .bad { color: var(--bad); font-weight: 600; }
+details > summary { cursor: pointer; color: var(--smalt); font-size: 13px; }
+pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-radius: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre; }
+
+#sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; max-height: 82vh; overflow-y: auto; background: var(--surface);
+  border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; box-shadow: 0 -10px 30px rgb(0 0 0 / 0.18);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px calc(18px + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 960px) {
+  #sheet { left: auto; top: 0; width: 440px; max-height: none; border-radius: 0; border-top: 0; border-left: 1px solid var(--line); padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
+}
+.sheet-head { display: flex; align-items: flex-start; gap: 10px; }
+.sheet-head h2 { margin: 2px 0 0; font-size: 18px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.close { border: 0; background: var(--sunk); border-radius: 999px; width: 34px; height: 34px; font-size: 18px; line-height: 1; }
+.sheet-body { display: grid; gap: 14px; margin-top: 10px; }
+.field { display: grid; gap: 4px; }
+.field label { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+textarea { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); font-family: var(--mono); font-size: 12.5px; line-height: 1.45; }
+.issues { margin: 0; padding-left: 18px; color: var(--bad); font-size: 13px; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.facts dt { color: var(--muted); } .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.foot { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+@media (prefers-reduced-motion: no-preference) { .card rect.box { transition: fill 0.25s, stroke 0.25s; } }
+</style>
+
+<header class="bar">
+  <div class="bar-top">
+    <p class="mark" aria-label="smaltfl">sm<span class="a">alt</span><span class="f">fl</span></p>
+    <h1 class="flow-name" id="flow-name">NYC taxis and weather</h1>
+    <button class="run" id="run" type="button" disabled>Run</button>
+  </div>
+  <p class="status" id="status" role="status">Starting the engine…</p>
+  <nav class="tabs" aria-label="Views">
+    <a href="#flow" id="tab-flow" aria-current="page">Flow</a>
+    <a href="#results" id="tab-results">Results</a>
+    <a href="#runs" id="tab-runs">Runs</a>
+  </nav>
+</header>
+
+<main>
+  <section class="view" id="view-flow" aria-label="Flow">
+    <p class="lede" id="lede">100,000 yellow-taxi trips sampled from the NYC TLC's records for January 2024, checked, joined to their zones and to each borough's hourly weather, all run in this browser.</p>
+    <ul class="legend" aria-label="Legend">
+      <li><span class="swatch built"></span>built this run</li>
+      <li><span class="swatch reused"></span>reused, same key</li>
+      <li><span class="swatch folded"></span>folded into a later step</li>
+    </ul>
+    <div id="canvas"></div>
+  </section>
+
+  <section class="view" id="view-results" aria-label="Results" hidden>
+    <div class="panel chart" id="effect-panel">
+      <h2>When it rains or snows, how many taxis do people take?</h2>
+      <p class="sub" id="effect-sub">Trips per hour in each kind of weather, against dry hours at the same hour of day.</p>
+      <div id="effect-chart"><p class="foot">Run the flow to see the results.</p></div>
+    </div>
+    <div class="grid2">
+      <div class="panel"><h2>Busiest pickup zones</h2><p class="sub">From zone_hour, the sample's trips per zone.</p><div class="scroll" id="zones-table"></div></div>
+      <div class="panel"><h2>Datasets</h2><p class="sub">What the flow stores. Tap one to look inside.</p><div id="datasets"></div></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-runs" aria-label="Runs" hidden>
+    <p class="lede">Every run records the hash of its flow, its plan, its inputs and every dataset it stored. Verify a run to check those hashes and recompute it from its snapshots; sign it with a key this browser makes.</p>
+    <ul class="runs" id="runs-list"></ul>
+  </section>
+</main>
+
+<aside id="sheet" hidden aria-label="Step details"></aside>
+
+<script type="module" src="app.js"></script>

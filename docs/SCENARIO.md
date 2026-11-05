@@ -66,8 +66,8 @@ range). Steps, in the order a person would build them:
 **Clean (silver).**
 4. `trips_valid`: expectations with actions on failure. Drop: pickup outside the month, duration under 1 minute or
    over 3 hours, distance at or below 0 or over 100 miles, negative fare, unknown zones. Warn: missing passenger
-   count. Fail the run: more than 5% of rows dropped (to calibrate against the real defect rate). The run report lists
-   counts per rule.
+   count. Fail the run: more than 8% of rows dropped (calibrated on the real data: the drop rules remove 4.5% of a
+   100,000-trip sample of January 2024). The run report lists counts per rule.
 5. `trips_dedup`: exact duplicates removed; each trip gets a stable `trip_id` (a hash of its fields plus an occurrence
    number, so true duplicates stay distinguishable).
 6. `trips_clean`: minus the trips stewards excluded (the *Exclude trips* action's edits).

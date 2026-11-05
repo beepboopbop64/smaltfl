@@ -303,3 +303,8 @@ Builder and drawn in the family's look. The first concepts are on the design can
   whether every dataset is fresh. Its views: Flow, Ontology (section 8), Runs (section 6) and Policies (section 7).
 - **How it is built:** DOM, CSS and SVG. The graph generalises smaltbi's model view: cards placed on a board, with one
   SVG layer for the connectors.
+- **The first version** (`src/app/`) runs the weather example on real data in the browser, with the engine and the
+  runtime plugin in a worker. Its canvas places cards in rows by depth, each source just above the step that reads
+  it; a card opens a sheet with the step's settings (text fields can be edited and run, which rebuilds only what
+  depends on them), its expectation counts, a preview of its rows (a folded step's statement runs over the stored
+  versions) and the statement the engine runs. Runs can be verified and signed.
