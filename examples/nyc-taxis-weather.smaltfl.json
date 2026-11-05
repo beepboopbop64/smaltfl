@@ -534,20 +534,21 @@
   },
   "groups": [
     {
-      "id": "ingest",
-      "name": "Ingest",
+      "id": "clean",
+      "name": "Clean trips",
       "steps": [
         "trips",
-        "zones",
-        "weather"
+        "trips_valid",
+        "trips_dedup"
       ]
     },
     {
-      "id": "clean",
-      "name": "Clean",
+      "id": "places",
+      "name": "Places",
       "steps": [
-        "trips_valid",
-        "trips_dedup"
+        "zones",
+        "zone_list",
+        "districts"
       ]
     },
     {
@@ -559,19 +560,18 @@
       ]
     },
     {
-      "id": "aggregate",
-      "name": "Aggregate",
+      "id": "demand",
+      "name": "Demand",
       "steps": [
         "zone_hour",
-        "borough_hour",
-        "zone_list",
-        "districts"
+        "borough_hour"
       ]
     },
     {
-      "id": "weather_effect_group",
+      "id": "weather_group",
       "name": "Weather and demand",
       "steps": [
+        "weather",
         "weather_hourly",
         "borough_hour_weather",
         "weather_effect"

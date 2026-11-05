@@ -23,7 +23,7 @@ import type { RunResult, VerifyResult } from '../core/protocol.js';
 import { literal, quoteIdent } from '../core/sqltext.js';
 import { runFlow, verifyRun } from '../index.js';
 import { connect, type Engine } from './engine.js';
-import { placeSections } from './layout.js';
+import { GRID, gridLayout } from './layout.js';
 
 declare const __SMALTDB_VERSION__: string;
 const SMALTDB = typeof __SMALTDB_VERSION__ === 'string' ? __SMALTDB_VERSION__ : '0.9.0';
@@ -150,104 +150,232 @@ function cardLine(id: string): string {
 
 // ------------------------------------------------------------------ the canvas
 
+// The canvas is an open grid you move around: pan by dragging the background, pinch or ctrl/⌘-scroll to zoom, drag a
+// card to place it (snapped to the grid, kept in the document's display-only layout). Fit shows everything; Tidy
+// puts every card back where the automatic layout places it.
+const view = { x: 16, y: 16, k: 1, ready: false };
+const SNAP = 20;
+/** Far enough out for Fit to show a long flow on a phone. */
+const MIN_ZOOM = 0.08;
+
+function applyView(): void {
+  const svg = document.querySelector<SVGSVGElement>('#canvas svg');
+  if (!svg) return;
+  svg.querySelector('#world')!.setAttribute('transform', `translate(${view.x} ${view.y}) scale(${view.k})`);
+  svg.querySelector('#dots')!.setAttribute('patternTransform', `translate(${view.x} ${view.y}) scale(${view.k})`);
+}
+
+function fitView(): void {
+  const host = $('canvas');
+  const { width, height } = gridLayout(state.doc, state.collapsed);
+  const W = host.clientWidth || 360;
+  const H = host.clientHeight || 420;
+  view.k = Math.max(MIN_ZOOM, Math.min(1.2, (W - 32) / width, (H - 32) / height));
+  view.x = (W - width * view.k) / 2;
+  view.y = (H - height * view.k) / 2;
+  applyView();
+}
+
+function zoomAt(factor: number, cx: number, cy: number): void {
+  const k = Math.max(MIN_ZOOM, Math.min(2.5, view.k * factor));
+  view.x = cx - ((cx - view.x) * k) / view.k;
+  view.y = cy - ((cy - view.y) * k) / view.k;
+  view.k = k;
+  applyView();
+}
+
+function setUpCanvas(host: HTMLElement): SVGSVGElement {
+  const svg = s('svg', { role: 'group', 'aria-label': 'The flow on an open grid: drag to move around, pinch to zoom' }) as SVGSVGElement;
+  const defs = s('defs');
+  const pattern = s('pattern', { id: 'dots', width: SNAP, height: SNAP, patternUnits: 'userSpaceOnUse' });
+  pattern.append(s('circle', { class: 'dot', cx: 1, cy: 1, r: 1 }));
+  defs.append(pattern);
+  svg.append(defs, s('rect', { class: 'grid-bg', x: 0, y: 0, width: '100%', height: '100%', fill: 'url(#dots)' }), s('g', { id: 'world' }));
+  const tools = h('div', { class: 'canvas-tools' },
+    h('button', { type: 'button', 'aria-label': 'Zoom out', onclick: () => zoomAt(1 / 1.25, host.clientWidth / 2, host.clientHeight / 2) }, '−'),
+    h('button', { type: 'button', 'aria-label': 'Zoom in', onclick: () => zoomAt(1.25, host.clientWidth / 2, host.clientHeight / 2) }, '+'),
+    h('button', { type: 'button', onclick: fitView }, 'Fit'),
+    h('button', { type: 'button', onclick: () => ((state.doc = { ...state.doc, layout: {} }), renderCanvas(), fitView()) }, 'Tidy'));
+  host.replaceChildren(svg, tools, h('p', { class: 'canvas-hint' }, 'Drag to move around · pinch to zoom · drag a card to place it'));
+
+  const pointers = new Map<number, { x: number; y: number }>();
+  let mode: 'none' | 'pan' | 'press' | 'drag' | 'pinch' = 'none';
+  let start = { x: 0, y: 0, vx: 0, vy: 0, k: 1, dist: 0, cx: 0, cy: 0 };
+  let target: { card?: string; group?: string } = {};
+  let origin = { x: 0, y: 0 };
+  let frame = 0;
+  const local = (e: PointerEvent) => {
+    const r = svg.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  svg.addEventListener('pointerdown', (e) => {
+    svg.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, local(e));
+    const el = e.target as Element;
+    if (pointers.size === 1) {
+      const p = local(e);
+      start = { ...start, x: p.x, y: p.y, vx: view.x, vy: view.y, k: view.k };
+      target = { card: el.closest('[data-card]')?.getAttribute('data-card') ?? undefined, group: el.closest('[data-group]')?.getAttribute('data-group') ?? undefined };
+      if (target.card) origin = { ...(gridLayout(state.doc, state.collapsed).cards.get(target.card) ?? { x: 0, y: 0 }) };
+      mode = target.card || target.group ? 'press' : 'pan';
+    } else if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      start = { ...start, dist: Math.hypot(a!.x - b!.x, a!.y - b!.y), cx: (a!.x + b!.x) / 2, cy: (a!.y + b!.y) / 2, vx: view.x, vy: view.y, k: view.k };
+      mode = 'pinch';
+    }
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, local(e));
+    const p = local(e);
+    const dx = p.x - start.x;
+    const dy = p.y - start.y;
+    if (mode === 'press' && Math.hypot(dx, dy) > 6) mode = target.card && !state.collapsed.has(target.card) ? 'drag' : 'pan';
+    if (mode === 'pan') {
+      view.x = start.vx + dx;
+      view.y = start.vy + dy;
+      applyView();
+    } else if (mode === 'drag' && target.card) {
+      const id = target.card;
+      const x = Math.round((origin.x + dx / view.k) / SNAP) * SNAP;
+      const y = Math.round((origin.y + dy / view.k) / SNAP) * SNAP;
+      state.doc = { ...state.doc, layout: { ...(state.doc.layout ?? {}), [id]: [x, y] } };
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(renderCanvas);
+    } else if (mode === 'pinch' && pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
+      const k = Math.max(MIN_ZOOM, Math.min(2.5, (start.k * dist) / Math.max(1, start.dist)));
+      view.x = start.cx - ((start.cx - start.vx) * k) / start.k;
+      view.y = start.cy - ((start.cy - start.vy) * k) / start.k;
+      view.k = k;
+      applyView();
+    }
+  });
+  const end = (e: PointerEvent) => {
+    if (!pointers.delete(e.pointerId)) return;
+    if (mode === 'press') {
+      if (target.group && !target.card) {
+        if (state.collapsed.has(target.group)) state.collapsed.delete(target.group);
+        else state.collapsed.add(target.group);
+        renderCanvas();
+      } else if (target.card) {
+        const folded = state.doc.groups?.find((g) => g.id === target.card);
+        if (folded) {
+          state.collapsed.delete(folded.id);
+          renderCanvas();
+        } else select(target.card);
+      }
+    }
+    if (pointers.size === 0) mode = 'none';
+    else if (mode === 'pinch') mode = 'none';
+  };
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', end);
+  svg.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      const r = svg.getBoundingClientRect();
+      if (e.ctrlKey || e.metaKey) zoomAt(Math.exp(-e.deltaY / 300), e.clientX - r.left, e.clientY - r.top);
+      else {
+        view.x -= e.deltaX;
+        view.y -= e.deltaY;
+        applyView();
+      }
+    },
+    { passive: false },
+  );
+  host.addEventListener('keydown', (e) => {
+    const step = 60;
+    const keys: Record<string, () => void> = {
+      ArrowLeft: () => (view.x += step),
+      ArrowRight: () => (view.x -= step),
+      ArrowUp: () => (view.y += step),
+      ArrowDown: () => (view.y -= step),
+      '+': () => zoomAt(1.25, host.clientWidth / 2, host.clientHeight / 2),
+      '-': () => zoomAt(1 / 1.25, host.clientWidth / 2, host.clientHeight / 2),
+    };
+    if (keys[e.key] && e.target === host) {
+      e.preventDefault();
+      keys[e.key]!();
+      applyView();
+    }
+  });
+  return svg;
+}
+
 function renderCanvas(): void {
   const host = $('canvas');
-  const width = Math.max(300, Math.floor(host.clientWidth || 360));
-  const sections = placeSections(state.doc, state.collapsed);
-  const pad = 10;
-  const head = 30;
-  const gapX = 10;
-  const gapY = 24;
-  const cardH = 62;
-  const maxCols = Math.max(1, ...sections.map((sec) => sec.cols));
-  const cardW = Math.min(232, (width - 2 * pad - gapX * (maxCols - 1)) / maxCols);
-  const pos = new Map<string, { x: number; y: number }>();
-  const frames: { sec: (typeof sections)[number]; y: number; h: number }[] = [];
-  let y = 2;
-  for (const sec of sections) {
-    const rowsH = sec.rows * cardH + (sec.rows - 1) * gapY;
-    const h = head + rowsH + pad;
-    const offX = (width - (sec.collapsed ? cardW : sec.cols * cardW + (sec.cols - 1) * gapX)) / 2;
-    if (sec.collapsed) for (const m of sec.members) pos.set(m, { x: offX, y: y + head });
-    else for (const c of sec.cards) pos.set(c.id, { x: offX + c.col * (cardW + gapX), y: y + head + c.row * (cardH + gapY) });
-    frames.push({ sec, y, h });
-    y += h + 14;
-  }
-  const height = y;
-  const svg = s('svg', { viewBox: `0 0 ${width} ${height}`, width, height, role: 'group', 'aria-label': 'The flow in sections, from its sources down to its datasets' });
-  const sectionOf = new Map(sections.flatMap((sec) => sec.members.map((m) => [m, sec] as const)));
-  for (const f of frames) {
-    const g = s('g', { class: 'section' });
-    g.append(s('rect', { class: 'frame', x: 0.5, y: f.y, width: width - 1, height: f.h, rx: 12 }));
-    const steps = f.sec.members.length;
-    g.append(s('text', { class: 'label', x: 12, y: f.y + 19 }, `${f.sec.name.toUpperCase()} · ${steps} ${steps === 1 ? 'STEP' : 'STEPS'}`));
-    g.append(s('text', { class: 'toggle', x: width - 12, y: f.y + 19, 'text-anchor': 'end' }, f.sec.collapsed ? 'open ▸' : 'fold ▾'));
-    const hit = s('rect', { class: 'hit', x: 0, y: f.y, width, height: head, tabindex: 0, role: 'button', 'aria-label': `${f.sec.collapsed ? 'Open' : 'Fold'} the ${f.sec.name} section` });
-    const toggle = () => {
-      if (state.collapsed.has(f.sec.id)) state.collapsed.delete(f.sec.id);
-      else state.collapsed.add(f.sec.id);
-      renderCanvas();
-    };
-    hit.addEventListener('click', toggle);
-    hit.addEventListener('keydown', (e) => ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') && (e.preventDefault(), toggle()));
-    g.append(hit);
-    svg.append(g);
+  const svg = host.querySelector('svg') ?? setUpCanvas(host);
+  const world = svg.querySelector('#world')!;
+  const { cardW, cardH, head } = GRID;
+  const layout = gridLayout(state.doc, state.collapsed);
+  const parts: SVGElement[] = [];
+  for (const f of layout.frames) {
+    const g = s('g', { class: 'section', 'data-group': f.id });
+    g.append(s('rect', { class: 'frame', x: f.x, y: f.y, width: f.w, height: f.h, rx: 12 }));
+    const n = f.members.length;
+    g.append(s('text', { class: 'label', x: f.x + 12, y: f.y + 18 }, `${f.name.toUpperCase()} · ${n} ${n === 1 ? 'STEP' : 'STEPS'}`));
+    g.append(s('text', { class: 'toggle', x: f.x + f.w - 12, y: f.y + 18, 'text-anchor': 'end' }, f.collapsed ? 'open ▸' : 'fold ▾'));
+    g.append(s('rect', { class: 'hit', x: f.x, y: f.y, width: f.w, height: head }));
+    parts.push(g);
   }
   const drawn = new Set<string>();
   for (const st of state.doc.steps) {
     for (const input of st.inputs) {
-      const from = pos.get(input)!;
-      const to = pos.get(st.id)!;
-      if (from === to || (from.x === to.x && from.y === to.y)) continue;
+      const from = layout.cards.get(input)!;
+      const to = layout.cards.get(st.id)!;
       const key = `${from.x},${from.y}>${to.x},${to.y}`;
-      if (drawn.has(key)) continue;
+      if ((from.x === to.x && from.y === to.y) || drawn.has(key)) continue;
       drawn.add(key);
-      const x1 = from.x + cardW / 2;
-      const y1 = from.y + cardH;
-      const x2 = to.x + cardW / 2;
-      const y2 = to.y;
-      const mid = (y1 + y2) / 2;
-      svg.append(s('path', { class: 'edge', d: `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2 - 4}` }));
-      svg.append(s('circle', { class: 'edge-dot', cx: x2, cy: y2 - 3, r: 2.5 }));
+      const x1 = from.x + cardW;
+      const y1 = from.y + cardH / 2;
+      const x2 = to.x;
+      const y2 = to.y + cardH / 2;
+      const bend = Math.max(36, Math.abs(x2 - x1) / 2);
+      parts.push(s('path', { class: 'edge', d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2 - 5} ${y2}` }));
+      parts.push(s('circle', { class: 'edge-dot', cx: x2 - 3, cy: y2, r: 2.5 }));
     }
   }
-  const chars = Math.max(8, Math.floor((cardW - 24) / 7.4));
+  const chars = Math.floor((cardW - 24) / 7.2);
   const fit = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
-  const card = (id: string, x: number, yy: number, kind: string, name: string, line: string, classes: string[], onOpen: () => void) => {
-    const g = s('g', { class: ['card', ...classes].join(' '), tabindex: 0, role: 'button', 'aria-label': `${name}: ${kind}. ${line}` });
-    g.append(s('rect', { class: 'box', x, y: yy, width: cardW, height: cardH, rx: 9 }));
-    g.append(s('text', { class: 'kind', x: x + 12, y: yy + 18 }, fit(kind, Math.floor(chars * 1.15))));
-    g.append(s('text', { class: 'name', x: x + 12, y: yy + 36 }, fit(name, chars)));
-    g.append(s('text', { class: 'what', x: x + 12, y: yy + 53 }, fit(line, Math.floor(chars * 1.12))));
-    g.addEventListener('click', onOpen);
-    g.addEventListener('keydown', (e) => ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') && (e.preventDefault(), onOpen()));
-    svg.append(g);
-    void id;
+  const card = (key: string, x: number, y: number, kind: string, name: string, line: string, classes: string[]) => {
+    const g = s('g', { class: ['card', ...classes].join(' '), 'data-card': key, tabindex: 0, role: 'button', 'aria-label': `${name}: ${kind}. ${line}` });
+    g.append(s('rect', { class: 'box', x, y, width: cardW, height: cardH, rx: 9 }));
+    g.append(s('text', { class: 'kind', x: x + 12, y: y + 18 }, fit(kind, Math.floor(chars * 1.15))));
+    g.append(s('text', { class: 'name', x: x + 12, y: y + 36 }, fit(name, chars)));
+    g.append(s('text', { class: 'what', x: x + 12, y: y + 53 }, fit(line, Math.floor(chars * 1.12))));
+    g.addEventListener('keydown', (e) => ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') && (e.preventDefault(), select(key)));
+    parts.push(g);
   };
-  for (const f of frames) {
-    if (f.sec.collapsed) {
-      const p0 = pos.get(f.sec.members[0]!)!;
-      const built = f.sec.members.filter((m) => nodeOf(m)?.status === 'built').length;
-      card(f.sec.id, p0.x, p0.y, 'SECTION', f.sec.name, latest() ? `${f.sec.members.length} steps · ${built} built` : `${f.sec.members.length} steps`, ['summary'], () => {
-        state.collapsed.delete(f.sec.id);
-        renderCanvas();
-      });
-      continue;
-    }
-    for (const c of f.sec.cards) {
-      const { x, y: yy } = pos.get(c.id)!;
-      const n = nodeOf(c.id);
-      const view = access(c.id);
-      const classes = [sourceIds().has(c.id) ? 'source' : steps().get(c.id)?.dataset ? 'dataset' : 'step'];
-      if (state.failed?.origin === c.id) classes.push('failed');
-      else if (view && !view.open) classes.push('closed');
-      else if (n) classes.push(n.status);
-      if (state.selected === c.id) classes.push('selected');
-      card(c.id, x, yy, kindLabel(c.id), c.id, cardLine(c.id), classes, () => select(c.id));
-    }
+  for (const f of layout.frames) {
+    if (!f.collapsed) continue;
+    const p0 = layout.cards.get(f.members[0]!)!;
+    const built = f.members.filter((m) => nodeOf(m)?.status === 'built').length;
+    card(f.id, p0.x, p0.y, 'SECTION', f.name, latest() ? `${f.members.length} steps · ${built} built` : `${f.members.length} steps`, ['summary']);
   }
-  void sectionOf;
-  host.replaceChildren(svg);
+  const folded = new Set(layout.frames.filter((f) => f.collapsed).flatMap((f) => f.members));
+  for (const [id, { x, y }] of layout.cards) {
+    if (folded.has(id)) continue;
+    const n = nodeOf(id);
+    const readable = access(id);
+    const classes = [sourceIds().has(id) ? 'source' : steps().get(id)?.dataset ? 'dataset' : 'step'];
+    if (state.failed?.origin === id) classes.push('failed');
+    else if (readable && !readable.open) classes.push('closed');
+    else if (n) classes.push(n.status);
+    if (state.selected === id) classes.push('selected');
+    card(id, x, y, kindLabel(id), id, cardLine(id), classes);
+  }
+  world.replaceChildren(...parts);
+  if (!view.ready && host.clientWidth > 0) {
+    // Start at the beginning of the flow, at a size where the cards are easy to read.
+    view.k = Math.max(0.55, Math.min(1, (host.clientHeight - 40) / layout.height));
+    view.x = 16;
+    view.y = Math.max(16, (host.clientHeight - layout.height * view.k) / 2);
+    view.ready = true;
+  }
+  applyView();
 }
 
 function select(id: string | null): void {
@@ -510,9 +638,11 @@ function setViewer(id: string): void {
   setStatus(id === 'owner' ? 'Viewing as the owner: every row and column.' : `Viewing as ${personName(id)}: every read below goes through their rules.`);
 }
 
+let policiesRender = 0;
 async function renderPolicies(): Promise<void> {
   const p = policies();
   if (!p) return;
+  const token = ++policiesRender;
   $('people').replaceChildren(
     ...p.principals.map((x) => {
       const attrs = x.owner ? 'sees everything' : Object.entries(x.attributes ?? {}).map(([k, v]) => `${k}: ${v.join(', ')}`).join('; ') || 'no row limits';
@@ -550,6 +680,7 @@ async function renderPolicies(): Promise<void> {
     }
     body.push(h('tr', {}, h('td', { style: 'font-weight:600' }, x.name), ...cells));
   }
+  if (token !== policiesRender) return;
   $('matrix').replaceChildren(h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Person'), ...outputs.map((o) => h('th', { class: 'n' }, o)))), h('tbody', {}, ...body)));
 }
 
@@ -561,10 +692,14 @@ async function refreshEdits(): Promise<void> {
   state.chain = (await state.engine.callPlugin('smaltfl', 'verifyEdits', [])) as typeof state.chain;
 }
 
+let ontologyRender = 0;
 async function renderOntology(): Promise<void> {
   const o = state.doc.ontology;
   const engine = state.engine;
   if (!o) return;
+  // A newer render (the viewer changed, an object was chosen) wins over one still waiting on the engine.
+  const token = ++ontologyRender;
+  const stale = () => token !== ontologyRender;
   const typeName = (id: string) => o.objectTypes.find((t) => t.id === id)?.name ?? id;
   const counts = new Map<string, number | null>();
   if (latest() && engine) {
@@ -573,6 +708,7 @@ async function renderOntology(): Promise<void> {
       counts.set(t.id, sql ? Number((await engine.query(`SELECT count(*) FROM (${sql})`)).rows[0]![0]) : null);
     }
   }
+  if (stale()) return;
   $('ontology-map').replaceChildren(
     h('div', { class: 'types' },
       ...o.objectTypes.map((t) => {
@@ -600,6 +736,7 @@ async function renderOntology(): Promise<void> {
       const cols = state.columns.get(t.dataset) ?? [];
       const order = cols.includes('trips') ? '"trips" DESC' : quoteIdent(t.title);
       const r = await engine.query(`SELECT * FROM (${sql}) ORDER BY ${order} LIMIT 30`);
+      if (stale()) return;
       const keyOf = (row: Record<string, unknown>) => canonicalJSON(Object.fromEntries(t.key.map((k) => [k, row[k] ?? null])));
       const latestEdit = new Map<string, Edit>();
       for (const e of state.edits) if (e.objectType === t.id && e.outcome === 'applied') latestEdit.set(`${e.action}|${e.object}`, e);
