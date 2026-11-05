@@ -40,6 +40,28 @@ describe('validating a flow document', () => {
     doc.steps[0]!.inputs = ['borough_hour'];
     expect(validateDocument(doc)).toEqual([{ path: '$.steps', message: 'the steps form a cycle: trips_valid → borough_hour → zone_hour → trips_enriched → trips_zoned → trips_dedup → trips_valid' }]);
   });
+
+  it('checks the display fields: sections, their colours, and places on the canvas', () => {
+    const ok = visualFlow();
+    ok.groups = [{ id: 'clean', name: 'Clean', steps: ['trips', 'trips_valid'], color: 'amber' }, { id: 'later', name: 'Empty for now', steps: [] }];
+    ok.layout = { trips: [0, -40], 'group:later': [600, 20] };
+    expect(validateDocument(ok)).toEqual([]);
+    const bad = visualFlow() as unknown as Record<string, unknown> & FlowDocument;
+    bad.groups = [
+      { id: 'a', name: 'A', steps: ['trips'], color: 'plaid' as never },
+      { id: 'A', name: 'Again', steps: ['trips'] },
+      { id: 'zones', name: 'Named like a source', steps: [] },
+    ];
+    bad.layout = { trips: [1, Number.NaN], zones: 'here' as never };
+    expect(validateDocument(bad)).toEqual([
+      { path: '$.layout.trips', message: '[x, y]' },
+      { path: '$.layout.zones', message: '[x, y]' },
+      { path: '$.groups[0].color', message: 'one of slate, smalt, teal, green, amber, rose, violet' },
+      { path: '$.groups[1].id', message: 'A is already the id of a group, source or step' },
+      { path: '$.groups[1].steps[0]', message: 'trips is in two groups' },
+      { path: '$.groups[2].id', message: 'zones is already the id of a group, source or step' },
+    ]);
+  });
 });
 
 describe('translating into the flow plan', () => {

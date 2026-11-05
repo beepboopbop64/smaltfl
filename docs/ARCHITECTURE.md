@@ -317,7 +317,21 @@ Builder and drawn in the family's look. The first concepts are on the design can
 - **The first version** (`src/app/`) runs the weather example on real data in the browser, with the engine and the
   runtime plugin in a worker. Its canvas is an open grid you pan, pinch-zoom, fit and tidy: the flow runs left to
   right, sections are laid out as blocks one column after the sections they read from, so reference data and other
-  sources sit just before the steps they feed, and a dragged card keeps its place (snapped to the grid, in the
-  document's display-only layout). A card opens a sheet with the step's settings (text fields can be edited and run, which rebuilds only what
-  depends on them), its expectation counts, a preview of its rows (a folded step's statement runs over the stored
-  versions) and the statement the engine runs. Runs can be verified and signed.
+  sources sit just before the steps they feed. A card opens a sheet with the step's settings (text fields can be
+  edited and run, which rebuilds only what depends on them), a preview of its rows (a folded step's statement runs
+  over the stored versions) and the statement the engine runs. Runs can be verified and signed.
+- **What each step changed.** After a run, each card says what its step did to the data: rows it left out (with a
+  badge on the card), columns it added, rows in and out of an aggregate, rows a join found no match for. Its sheet
+  leads with the same in full: a bar of rows kept against rows dropped, each expectation rule's failures, and the
+  rows themselves on request, with the columns a rule reads first. The rows a step removed are found as a multiset
+  (`emitExcept`), so a removed duplicate shows too, and a SQL step that keeps its columns also shows the rows it
+  changed; a join's unmatched rows are found by their keys (`emitUnmatched`), not by empty columns. Everything is
+  counted as the viewer reads it, through their policy, so it never shows more than they could read themselves; a
+  rule that reads a column their policy removes stays closed to them.
+- **Arranging.** Outside Arrange a finger pans, even on a card, and holding a card picks it up; in Arrange, cards and
+  sections move at a touch, a step dropped on a section moves into it (or out, dropped outside every section), and
+  sections can be made, named, coloured (seven colours from the family's palette, light and dark), folded and deleted.
+  A step's sheet moves it between sections without dragging, and arrow keys move a focused card. A drag moves the
+  drawn elements and never rebuilds the canvas under the finger, since iOS stops reporting a touch whose element
+  leaves the page. Sections and places stay display only, out of every hash; this version keeps them in the browser
+  (local storage), and once flows are saved they travel with the document's display fields.

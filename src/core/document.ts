@@ -33,10 +33,16 @@ export interface FlowDocument {
 export interface GroupDef {
   id: string;
   name: string;
-  /** Source and step ids, each in at most one group. */
+  /** Source and step ids, each in at most one group. A group may be empty: a box waiting for steps. */
   steps: string[];
   collapsed?: boolean;
+  /** One of the canvas's section colours. */
+  color?: GroupColor;
 }
+
+/** The colours a section can take, each drawn from the family's tokens in light and dark. */
+export const GROUP_COLORS = ['slate', 'smalt', 'teal', 'green', 'amber', 'rose', 'violet'] as const;
+export type GroupColor = (typeof GROUP_COLORS)[number];
 
 export interface ParameterDef {
   name: string;
@@ -224,7 +230,11 @@ export function validateDocument(doc: unknown): Issue[] {
     const cycle = findCycle(steps as unknown as StepDef[]);
     if (cycle) add('$.steps', `the steps form a cycle: ${cycle.join(' → ')}`);
   }
-  if (doc.layout !== undefined && !isRecord(doc.layout)) add('$.layout', 'an object');
+  if (doc.layout !== undefined) {
+    if (!isRecord(doc.layout)) add('$.layout', 'an object');
+    // Keys are card ids, or `group:<id>` for where an empty section sits; a key nothing uses is ignored.
+    else for (const [k, v] of Object.entries(doc.layout)) if (!(Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && Number.isFinite(n)))) add(`$.layout.${k}`, '[x, y]');
+  }
   validateExtras(doc, ids, add);
   return issues;
 }
@@ -236,8 +246,12 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
     if (!Array.isArray(doc.groups)) add('$.groups', 'an array');
     else {
       const placed = new Set<string>();
+      const named = new Set<string>();
       doc.groups.forEach((g: unknown, i: number) => {
         if (!isRecord(g) || typeof g.id !== 'string' || typeof g.name !== 'string' || !Array.isArray(g.steps)) return add(`$.groups[${i}]`, '{ id, name, steps }');
+        if (named.has(g.id.toLowerCase()) || known(g.id)) add(`$.groups[${i}].id`, `${g.id} is already the id of a group, source or step`);
+        named.add(g.id.toLowerCase());
+        if (g.color !== undefined && !(GROUP_COLORS as readonly unknown[]).includes(g.color)) add(`$.groups[${i}].color`, `one of ${GROUP_COLORS.join(', ')}`);
         g.steps.forEach((s: unknown, j: number) => {
           if (!known(s)) add(`$.groups[${i}].steps[${j}]`, `no source or step ${String(s)}`);
           else if (placed.has(String(s).toLowerCase())) add(`$.groups[${i}].steps[${j}]`, `${String(s)} is in two groups`);

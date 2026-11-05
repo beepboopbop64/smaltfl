@@ -154,3 +154,50 @@ export function createTable(name: string, schema: readonly Column[], options: { 
   const cols = schema.map(([n, t]) => `${q(n)} ${declaredType(t)}`).join(', ');
   return `CREATE ${options.temp ? 'TEMP ' : ''}TABLE ${q(name)}(${cols})${options.storage === 'columnar' ? " WITH (storage = 'columnar')" : ''}`;
 }
+
+// ------------------------------------------------------------------ inspection: what a step changed
+
+/** The rows an expectation rule fails on: where its check is not true, NULL included, as the counts count them. */
+export function emitRuleFailures(plan: FlowPlan, node: number, rule: number, ctx: EmitContext): string {
+  const n = plan.nodes[node] as ExpectNode;
+  const check = n.rules[rule]![1];
+  return `SELECT * FROM (\n${emitRead(plan, n.inputs[0]!, ctx)}\n) WHERE CASE WHEN (\n${check}\n) THEN 0 ELSE 1 END = 1`;
+}
+
+/**
+ * The rows of a step's first input that its output doesn't have, as a multiset, for a step whose output has the same
+ * columns as that input (a filter, a dedupe, an expectation's drops, a SQL step that keeps the columns).
+ */
+export function emitRemoved(plan: FlowPlan, node: number, ctx: EmitContext): string | null {
+  const input = plan.nodes[node]!.inputs[0];
+  if (input === undefined || !sameColumns(ctx.columns(input), ctx.columns(node))) return null;
+  return emitExcept(emitRead(plan, input, ctx), emitRead(plan, node, ctx), ctx.columns(input));
+}
+
+/** Whether two column lists name the same columns in the same order (names compare without case, as the engine's do). */
+export function sameColumns(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((c, i) => c.toLowerCase() === b[i]!.toLowerCase());
+}
+
+/**
+ * The rows of `a` that `b` doesn't have, as a multiset over `columns` (which both have): each row is numbered among its
+ * identical copies, so a removed duplicate shows up too.
+ */
+export function emitExcept(a: string, b: string, columns: readonly string[]): string {
+  const list = columns.map(q).join(', ');
+  const numbered = (sql: string) => `SELECT ${list}, row_number() OVER (PARTITION BY ${list} ORDER BY ${q(columns[0]!)}) AS "_smaltfl_copy" FROM (\n${sql}\n)`;
+  return `SELECT ${list} FROM (\n${numbered(a)}\nEXCEPT\n${numbered(b)}\n)`;
+}
+
+/**
+ * A join's left-hand rows that found no match on the right: the rows a left join keeps with its new columns empty, and
+ * an inner join leaves out. Exact: a row matches when some right-hand row has its key (a NULL key matches nothing).
+ */
+export function emitUnmatched(plan: FlowPlan, node: number, ctx: EmitContext): string | null {
+  const n = plan.nodes[node]!;
+  if (n.op !== 'join') return null;
+  const keys = n.on.map(([, r]) => q(r)).join(', ');
+  const on = n.on.map(([l, r]) => `"_l".${q(l)} = "_r".${q(r)}`).join(' AND ');
+  const right = `SELECT DISTINCT ${keys} FROM (\n${emitRead(plan, n.inputs[1]!, ctx)}\n)`;
+  return `SELECT "_l".* FROM (\n${emitRead(plan, n.inputs[0]!, ctx)}\n) AS "_l" LEFT JOIN (${right}) AS "_r" ON ${on} WHERE "_r".${q(n.on[0]![1])} IS NULL`;
+}

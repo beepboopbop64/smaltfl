@@ -1,87 +1,9 @@
 /**
- * Where each card sits on the canvas: rows by depth, with a source or side branch placed just above the step that
- * reads it, so the main line runs straight down and side inputs join it from the right.
+ * Where each card sits on the canvas: an open grid, left to right (ARCHITECTURE.md §13). The automatic layout places
+ * sections as blocks; an arrangement (the document's display-only layout) pins cards, and empty sections, where a
+ * person put them.
  */
-import type { FlowDocument } from '../core/document.js';
-
-export interface Placed {
-  id: string;
-  row: number;
-  col: number;
-}
-
-export function placeCards(doc: FlowDocument): { cards: Placed[]; rows: number; cols: number } {
-  const ids = [...doc.sources.map((s) => s.id), ...doc.steps.map((s) => s.id)];
-  const inputs = new Map<string, string[]>([...doc.sources.map((s) => [s.id, []] as [string, string[]]), ...doc.steps.map((s) => [s.id, s.inputs] as [string, string[]])]);
-  const consumers = new Map<string, string[]>(ids.map((id) => [id, []]));
-  for (const [id, ins] of inputs) for (const i of ins) consumers.get(i)?.push(id);
-  const depth = new Map<string, number>();
-  const visit = (id: string): number => {
-    const known = depth.get(id);
-    if (known !== undefined) return known;
-    const d = Math.max(-1, ...(inputs.get(id) ?? []).map(visit)) + 1;
-    depth.set(id, d);
-    return d;
-  };
-  ids.forEach(visit);
-  // Latest-possible rows for anything that feeds a single later step: walk from the bottom up.
-  const order = [...ids].sort((a, b) => depth.get(b)! - depth.get(a)!);
-  for (const id of order) {
-    const cs = consumers.get(id)!;
-    if (cs.length === 0) continue;
-    depth.set(id, Math.max(depth.get(id)!, Math.min(...cs.map((c) => depth.get(c)!)) - 1));
-  }
-  const rows = Math.max(...depth.values()) + 1;
-  const cards: Placed[] = [];
-  const colOf = new Map<string, number>();
-  for (let r = 0; r < rows; r++) {
-    const here = ids.filter((id) => depth.get(id) === r);
-    const bary = (id: string) => {
-      const ins = (inputs.get(id) ?? []).map((i) => colOf.get(i)).filter((c): c is number => c !== undefined);
-      return ins.length ? ins.reduce((a, b) => a + b, 0) / ins.length : Number.POSITIVE_INFINITY;
-    };
-    here.sort((a, b) => bary(a) - bary(b) || ids.indexOf(a) - ids.indexOf(b));
-    here.forEach((id, col) => {
-      colOf.set(id, col);
-      cards.push({ id, row: r, col });
-    });
-  }
-  return { cards, rows, cols: Math.max(...cards.map((c) => c.col)) + 1 };
-}
-
-export interface SectionLayout {
-  id: string;
-  name: string;
-  members: string[];
-  collapsed: boolean;
-  /** The members' rows and columns inside the section (empty when collapsed). */
-  cards: Placed[];
-  rows: number;
-  cols: number;
-}
-
-/**
- * The canvas in sections: the document's groups, in the order the document gives them (the author's reading order),
- * each laid out on its own grid, one row per depth among its members. Sources and steps no group holds form a last
- * section.
- */
-export function placeSections(doc: FlowDocument, collapsed: ReadonlySet<string>): SectionLayout[] {
-  const { cards } = placeCards(doc);
-  const row = new Map(cards.map((c) => [c.id, c.row]));
-  const groups = (doc.groups ?? []).map((g) => ({ id: g.id, name: g.name, members: g.steps.filter((s) => row.has(s)) }));
-  const grouped = new Set(groups.flatMap((g) => g.members));
-  const rest = [...row.keys()].filter((id) => !grouped.has(id));
-  if (rest.length) groups.push({ id: '_other', name: 'Other steps', members: rest });
-  return groups
-    .filter((g) => g.members.length > 0)
-    .map((g) => {
-      const depths = [...new Set(g.members.map((m) => row.get(m)!))].sort((a, b) => a - b);
-      const placed: Placed[] = [];
-      for (const [r, d] of depths.entries()) g.members.filter((m) => row.get(m) === d).forEach((id, col) => placed.push({ id, row: r, col }));
-      const isCollapsed = collapsed.has(g.id);
-      return { ...g, collapsed: isCollapsed, cards: isCollapsed ? [] : placed, rows: isCollapsed ? 1 : depths.length, cols: Math.max(1, ...placed.map((c) => c.col + 1)) };
-    });
-}
+import type { FlowDocument, GroupColor } from '../core/document.js';
 
 /** World coordinates of the grid canvas, in pixels at zoom 1. */
 export const GRID = { cardW: 176, cardH: 64, gapX: 40, gapY: 26, pad: 14, head: 28, groupGapX: 56, groupGapY: 34 };
@@ -89,6 +11,7 @@ export const GRID = { cardW: 176, cardH: 64, gapX: 40, gapY: 26, pad: 14, head: 
 export interface GridFrame {
   id: string;
   name: string;
+  color?: GroupColor;
   members: string[];
   collapsed: boolean;
   x: number;
@@ -101,26 +24,34 @@ export interface GridLayout {
   /** Each card's top-left corner; members of a folded section share the section's card. */
   cards: Map<string, { x: number; y: number }>;
   frames: GridFrame[];
+  /** The bounds of everything drawn: cards can be placed left of or above the automatic layout's origin. */
+  left: number;
+  top: number;
   width: number;
   height: number;
 }
 
+/** The layout key that holds where an empty section sits. */
+export const groupKey = (id: string): string => `group:${id}`;
+
 /**
- * An open grid, left to right (ARCHITECTURE.md §13). Sections are laid out as blocks, each placed one column after
- * the sections it reads from, so a section of reference data (or one source on its own) sits just before the steps
- * it feeds rather than at the top. Inside a block, a member's column is its depth among the section's members.
- * Positions the document's layout gives (dragged cards) win over the automatic ones, and frames then fit around
- * their members.
+ * Sections are laid out as blocks, each placed one column after the sections it reads from, so a section of reference
+ * data (or one source on its own) sits just before the steps it feeds rather than at the top. Inside a block, a
+ * member's column is its depth among the section's members. Positions the document's layout gives win over the
+ * automatic ones, and frames then fit around their members; a folded section's card sits at its members' top-left
+ * corner. An empty section sits where it was left, or after everything else.
  */
 export function gridLayout(doc: FlowDocument, collapsed: ReadonlySet<string>): GridLayout {
   const ids = [...doc.sources.map((s) => s.id), ...doc.steps.map((s) => s.id)];
   const inputs = new Map<string, string[]>(ids.map((id) => [id, doc.steps.find((s) => s.id === id)?.inputs ?? []]));
-  const groups = (doc.groups ?? []).map((g) => ({ id: g.id, name: g.name, members: g.steps.filter((m) => inputs.has(m)), frame: true }));
+  const declared = (doc.groups ?? []).map((g) => ({ id: g.id, name: g.name, color: g.color, members: g.steps.filter((m) => inputs.has(m)), frame: true }));
+  const empty = declared.filter((g) => g.members.length === 0);
+  const groups = declared.filter((g) => g.members.length > 0);
   const grouped = new Set(groups.flatMap((g) => g.members));
-  for (const id of ids) if (!grouped.has(id)) groups.push({ id: `_${id}`, name: id, members: [id], frame: false });
+  for (const id of ids) if (!grouped.has(id)) groups.push({ id: `_${id}`, name: id, color: undefined, members: [id], frame: false });
   const groupOf = new Map(groups.flatMap((g, gi) => g.members.map((m) => [m, gi] as const)));
   // Section-level depth: one column after every section read from, then pulled right to just before its first reader.
-  const reads = groups.map((_, gi) => new Set<number>());
+  const reads = groups.map(() => new Set<number>());
   for (const [id, ins] of inputs) for (const i of ins) if (groupOf.get(i) !== groupOf.get(id)) reads[groupOf.get(id)!]!.add(groupOf.get(i)!);
   const depth = new Map<number, number>();
   const visit = (gi: number, seen: Set<number>): number => {
@@ -159,7 +90,6 @@ export function gridLayout(doc: FlowDocument, collapsed: ReadonlySet<string>): G
   const cards = new Map<string, { x: number; y: number }>();
   const frames: GridFrame[] = [];
   let x = 0;
-  let height = 0;
   for (const c of columns) {
     const here = [...groups.keys()].filter((gi) => depth.get(gi) === c);
     let y = 0;
@@ -169,28 +99,96 @@ export function gridLayout(doc: FlowDocument, collapsed: ReadonlySet<string>): G
       const oy = y + (g.frame ? head : 0);
       if (collapsed.has(g.id)) for (const m of g.members) cards.set(m, { x: ox, y: oy });
       else for (const m of g.members) cards.set(m, { x: ox + local.get(m)!.col * (cardW + gapX), y: oy + local.get(m)!.row * (cardH + gapY) });
-      if (g.frame) frames.push({ id: g.id, name: g.name, members: g.members, collapsed: collapsed.has(g.id), x, y, w: blockW(gi), h: blockH(gi) });
+      if (g.frame) frames.push({ id: g.id, name: g.name, color: g.color, members: g.members, collapsed: collapsed.has(g.id), x, y, w: blockW(gi), h: blockH(gi) });
       y += blockH(gi) + groupGapY;
     }
-    height = Math.max(height, y - groupGapY);
     x += Math.max(...here.map(blockW)) + groupGapX;
   }
-  // Dragged cards keep their place; their sections fit around them.
   const placed = doc.layout ?? {};
-  for (const [id, [px, py]] of Object.entries(placed)) if (cards.has(id) && !frames.some((f) => f.collapsed && f.members.includes(id))) cards.set(id, { x: px, y: py });
+  let emptyY = 0;
+  for (const g of empty) {
+    const at = placed[groupKey(g.id)];
+    frames.push({ id: g.id, name: g.name, color: g.color, members: [], collapsed: false, x: at ? at[0] : x, y: at ? at[1] : emptyY, w: cardW + 2 * pad, h: head + cardH + pad });
+    if (!at) emptyY += head + cardH + pad + groupGapY;
+  }
+  // Placed cards keep their place, a folded section's members too; their sections fit around them.
+  for (const [id, p] of Object.entries(placed)) if (cards.has(id)) cards.set(id, { x: p[0], y: p[1] });
   for (const f of frames) {
-    if (f.collapsed || !f.members.some((m) => m in placed)) continue;
-    const xs = f.members.map((m) => cards.get(m)!);
-    f.x = Math.min(...xs.map((p) => p.x)) - pad;
-    f.y = Math.min(...xs.map((p) => p.y)) - head;
-    f.w = Math.max(...xs.map((p) => p.x)) + cardW + pad - f.x;
-    f.h = Math.max(...xs.map((p) => p.y)) + cardH + pad - f.y;
+    if (f.members.length === 0 || !f.members.some((m) => m in placed)) continue;
+    const ps = f.members.map((m) => cards.get(m)!);
+    const x0 = Math.min(...ps.map((p) => p.x));
+    const y0 = Math.min(...ps.map((p) => p.y));
+    if (f.collapsed) {
+      for (const m of f.members) cards.set(m, { x: x0, y: y0 });
+      Object.assign(f, { x: x0 - pad, y: y0 - head, w: cardW + 2 * pad, h: head + cardH + pad });
+    } else {
+      Object.assign(f, { x: x0 - pad, y: y0 - head, w: Math.max(...ps.map((p) => p.x)) + cardW + pad - (x0 - pad), h: Math.max(...ps.map((p) => p.y)) + cardH + pad - (y0 - head) });
+    }
   }
   const all = [...cards.values()];
-  return {
-    cards,
-    frames,
-    width: Math.max(x - groupGapX, ...all.map((p) => p.x + cardW), ...frames.map((f) => f.x + f.w)),
-    height: Math.max(height, ...all.map((p) => p.y + cardH), ...frames.map((f) => f.y + f.h)),
-  };
+  const left = Math.min(0, ...all.map((p) => p.x), ...frames.map((f) => f.x));
+  const top = Math.min(0, ...all.map((p) => p.y), ...frames.map((f) => f.y));
+  const right = Math.max(x - groupGapX, ...all.map((p) => p.x + cardW), ...frames.map((f) => f.x + f.w));
+  const bottom = Math.max(0, ...all.map((p) => p.y + cardH), ...frames.map((f) => f.y + f.h));
+  return { cards, frames, left, top, width: right - left, height: bottom - top };
+}
+
+/**
+ * Every card's place, written down: the layout an arrangement edit starts from, so that moving or folding one thing
+ * leaves everything else where it is. A folded section's steps keep their arrangement, unfolding from its card.
+ */
+export function pinLayout(doc: FlowDocument, collapsed: ReadonlySet<string>): Record<string, [number, number]> {
+  const now = gridLayout(doc, collapsed);
+  const open = gridLayout(doc, new Set());
+  const layout: Record<string, [number, number]> = { ...(doc.layout ?? {}) };
+  for (const f of now.frames) {
+    if (!f.collapsed || f.members.length === 0) continue;
+    const at = now.cards.get(f.members[0]!)!;
+    const of = open.frames.find((o) => o.id === f.id)!;
+    for (const m of f.members) {
+      if (m in layout) continue;
+      const o = open.cards.get(m)!;
+      layout[m] = [at.x + o.x - (of.x + GRID.pad), at.y + o.y - (of.y + GRID.head)];
+    }
+  }
+  for (const [id, p] of now.cards) if (!(id in layout)) layout[id] = [p.x, p.y];
+  for (const f of now.frames) if (f.members.length === 0) layout[groupKey(f.id)] = [f.x, f.y];
+  return layout;
+}
+
+/**
+ * The section a point falls in: the last drawn (the one on top) when sections overlap, or else the nearest one within
+ * `slack`, so a drop just short of a small section, far out on a phone, still lands in it.
+ */
+export function frameAt(l: GridLayout, x: number, y: number, slack = 0): GridFrame | undefined {
+  const inside = [...l.frames].reverse().find((f) => x >= f.x && x <= f.x + f.w && y >= f.y && y <= f.y + f.h);
+  if (inside || slack <= 0) return inside;
+  let near: GridFrame | undefined;
+  let best = slack;
+  for (const f of l.frames) {
+    const d = Math.hypot(Math.max(f.x - x, 0, x - f.x - f.w), Math.max(f.y - y, 0, y - f.y - f.h));
+    if (d <= best) [near, best] = [f, d];
+  }
+  return near;
+}
+
+/**
+ * A place for one more card in a section: the first slot of its grid, row by row, that no other card covers, so a
+ * step moved into a section without dragging lands inside it.
+ */
+export function freeSlot(l: GridLayout, frame: GridFrame, card: string): { x: number; y: number } {
+  const { cardW, cardH, gapX, gapY, pad, head } = GRID;
+  const x0 = frame.x + pad;
+  const y0 = frame.y + head;
+  const others = [...l.cards.entries()].filter(([id]) => id !== card).map(([, p]) => p);
+  const free = (x: number, y: number) => others.every((p) => Math.abs(p.x - x) >= cardW + gapX / 2 || Math.abs(p.y - y) >= cardH + gapY / 2);
+  const cols = Math.max(1, Math.round((frame.w - 2 * pad + gapX) / (cardW + gapX)));
+  for (let r = 0; r < 200; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = x0 + c * (cardW + gapX);
+      const y = y0 + r * (cardH + gapY);
+      if (free(x, y)) return { x, y };
+    }
+  }
+  return { x: frame.x + frame.w + gapX, y: y0 };
 }
