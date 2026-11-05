@@ -2,7 +2,7 @@
   "smaltfl": 1,
   "id": "nyc-taxis-weather",
   "name": "NYC taxis and weather",
-  "description": "How weather changes taxi demand by borough: January 2024 yellow taxi trips, cleaned and enriched, against hourly weather.",
+  "description": "How weather changes taxi demand by borough: January 2024 yellow taxi trips, a day at a time, cleaned and enriched, against hourly weather.",
   "parameters": [
     {
       "name": "month",
@@ -68,7 +68,7 @@
           "onFail": "warn"
         }
       ],
-      "maxDropped": 0.08
+      "maxDropped": 0.1
     },
     {
       "id": "trips_dedup",
@@ -410,7 +410,7 @@
           "6": "Myle Technologies Inc",
           "7": "Helix"
         },
-        "note": "January 2024 is almost all 1 and 2: the 100,000-trip sample has 4 from 6, all Flex Fare trips. Dictionaries before 2025 name 2 VeriFone Inc. Vendors 1 and 2 fill extra differently.",
+        "note": "January 2024 is almost all 1 and 2: 260 of its 2,964,624 trips come from 6, all of them Flex Fare trips. Dictionaries before 2025 name 2 VeriFone Inc. Vendors 1 and 2 fill extra differently.",
         "sources": [
           "tlc-yellow",
           "tlc-trips"
@@ -463,7 +463,7 @@
           "6": "Group ride",
           "99": "Null/unknown"
         },
-        "note": "JFK (2) is the airport’s flat fare: rate-2 meter fares in January 2024 are $70.00, or −$70.00 where reversed. Empty on Flex Fare trips (payment type 0).",
+        "note": "JFK (2) is the airport’s flat fare: almost every rate-2 meter fare in January 2024 is $70.00, or −$70.00 where reversed. Empty on Flex Fare trips (payment type 0).",
         "sources": [
           "tlc-yellow"
         ]
@@ -562,7 +562,7 @@
         "title": "Tip",
         "description": "Tip amount: automatically populated for credit card tips. Cash tips are not included.",
         "unit": "USD",
-        "note": "Practically always 0 on cash trips (one of the sample’s 14,865 has a tip), so a tip rate means something only for card trips.",
+        "note": "Practically always 0 on cash trips (128 of January 2024’s 439,191 have one), so a tip rate means something only for card trips.",
         "sources": [
           "tlc-yellow"
         ]
@@ -1113,6 +1113,13 @@
         "borough_hour_weather",
         "weather_effect"
       ]
+    }
+  ],
+  "profiles": [
+    {
+      "id": "trips_profile",
+      "of": "trips",
+      "description": "What each load of trips holds: its columns, the rows an isolation forest finds odd, how it moved from the day before, and checks worth adding. It only looks: no data changes here."
     }
   ],
   "layout": {}

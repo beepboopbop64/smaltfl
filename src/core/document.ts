@@ -26,6 +26,11 @@ export interface FlowDocument {
   policies?: Policies;
   /** Display only: sections of the canvas, each holding sources and steps. Not part of any hash. */
   groups?: GroupDef[];
+  /**
+   * Display only: profile boxes, each looking at one source's or step's rows (what its columns hold, the rows an
+   * isolation forest finds odd, how it moved from one load to the next). A profile changes no data. Not part of any hash.
+   */
+  profiles?: ProfileDef[];
   /** Display only: where each card sits on the canvas. Not part of any hash. */
   layout?: Record<string, [number, number]>;
 }
@@ -38,6 +43,14 @@ export interface GroupDef {
   collapsed?: boolean;
   /** One of the canvas's section colours. */
   color?: GroupColor;
+}
+
+/** A profile box: what it looks at, and what it is for. It sits beside that source or step, in its section. */
+export interface ProfileDef {
+  id: string;
+  /** The source or step whose rows it profiles. */
+  of: string;
+  description?: string;
 }
 
 /** The colours a section can take, each drawn from the family's tokens in light and dark. */
@@ -259,6 +272,18 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
           else if (placed.has(String(s).toLowerCase())) add(`$.groups[${i}].steps[${j}]`, `${String(s)} is in two groups`);
           else placed.add(String(s).toLowerCase());
         });
+      });
+    }
+  }
+  if (doc.profiles !== undefined) {
+    if (!Array.isArray(doc.profiles)) add('$.profiles', 'an array');
+    else {
+      const taken = new Set((Array.isArray(doc.groups) ? doc.groups : []).map((g: unknown) => (isRecord(g) && typeof g.id === 'string' ? g.id.toLowerCase() : '')));
+      doc.profiles.forEach((p: unknown, i: number) => {
+        if (!isRecord(p) || typeof p.id !== 'string' || p.id === '' || typeof p.of !== 'string') return add(`$.profiles[${i}]`, '{ id, of }');
+        if (taken.has(p.id.toLowerCase()) || known(p.id)) add(`$.profiles[${i}].id`, `${p.id} is already the id of a profile, group, source or step`);
+        taken.add(p.id.toLowerCase());
+        if (!known(p.of)) add(`$.profiles[${i}].of`, `no source or step ${p.of}`);
       });
     }
   }
@@ -502,12 +527,14 @@ export function takeOut(doc: FlowDocument, id: string): FlowDocument | undefined
     ...rewired,
     steps: rewired.steps.filter((s) => s.id !== id),
     groups: rewired.groups?.map((g) => ({ ...g, steps: g.steps.filter((s) => s !== id) })),
-    layout: rewired.layout && Object.fromEntries(Object.entries(rewired.layout).filter(([k]) => k !== id)),
+    // A profile of the step goes with it.
+    profiles: rewired.profiles?.filter((p) => !sameId(p.of, id)),
+    layout: rewired.layout && Object.fromEntries(Object.entries(rewired.layout).filter(([k]) => k !== id && !rewired.profiles?.some((p) => p.id === k && sameId(p.of, id)))),
   };
 }
 
-/** The document without display-only fields (its layout and groups): what the flow hash covers. */
-export function withoutDisplay(doc: FlowDocument): Omit<FlowDocument, 'layout' | 'groups'> {
-  const { layout: _layout, groups: _groups, ...rest } = doc;
+/** The document without display-only fields (its layout, groups and profiles): what the flow hash covers. */
+export function withoutDisplay(doc: FlowDocument): Omit<FlowDocument, 'layout' | 'groups' | 'profiles'> {
+  const { layout: _layout, groups: _groups, profiles: _profiles, ...rest } = doc;
   return rest;
 }

@@ -246,6 +246,21 @@ export function emitSample(sql: string, columns: readonly string[], every: numbe
   return `SELECT ${outer} FROM (SELECT ${inner} FROM (\n${sql}\n)) WHERE ("_smaltfl_n" - 1) % ${Math.max(1, Math.floor(every))} = 0`;
 }
 
+/**
+ * A SQL step's text over relations other than its inputs': each name it reads bound to a relation (a subquery), as
+ * nodeSelect binds a step's inputs. For a step measured over many runs' rows at once.
+ */
+export function emitSqlOver(sql: string, bindings: readonly (readonly [name: string, relation: string])[]): string {
+  const inner = `SELECT * FROM (\n${sql}\n)`;
+  if (!bindings.length) return inner;
+  return `SELECT * FROM (\nWITH ${bindings.map(([name, rel]) => `${q(name)} AS (\n${rel}\n)`).join(', ')}\n${inner}\n)`;
+}
+
+/** Relations' rows together, one after another. */
+export function emitUnionAll(relations: readonly string[]): string {
+  return relations.map((r) => `SELECT * FROM (\n${r}\n)`).join('\nUNION ALL\n');
+}
+
 /** A relation's keys and what names them: the two columns of a lookup (a zone's LocationID and Zone). */
 export function emitLookup(sql: string, key: string, label: string): string {
   return `SELECT ${q(key)}, ${q(label)} FROM (\n${sql}\n) WHERE ${q(key)} IS NOT NULL AND ${q(label)} IS NOT NULL`;

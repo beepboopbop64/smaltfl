@@ -10,16 +10,16 @@ import { registerFile } from '@smaltdb/external/client';
 import exampleDoc from '../../examples/nyc-taxis-weather.smaltfl.json';
 import { EXAMPLE_SOURCES } from '../../examples/sources.js';
 import { canonicalJSON } from '../core/canonical.js';
-import type { FlowDocument, GroupDef, StepDef } from '../core/document.js';
+import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, takeOut, validateDocument } from '../core/document.js';
-import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
+import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
 import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, FlowPlan, PlanNode } from '../core/plan.js';
-import { checksOver, drift, fillGaps, isolationForest, madsOf, profileColumn, suggestChecks, unusual, type Drift, type Judge, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
+import { checksOver, clockText, drift, fillGaps, growForest, isolationPath, madsOf, minuteOfDay, pathLength, principalComponents, profileColumn, quantile, scoreOf, suggestChecks, unusual, type Cut, type Drift, type Forest, type Judge, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
 import type { RunResult, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
 import { runFlow, verifyRun } from '../index.js';
@@ -33,6 +33,8 @@ interface RunRecord {
   result: RunResult;
   ms: number;
   at: Date;
+  /** The daily load it ran on, by place in the list. */
+  load?: number;
   verified?: VerifyResult;
   signed?: SignedManifest;
   signatureOk?: boolean;
@@ -72,6 +74,24 @@ const state = {
 };
 
 const policies = () => state.doc.policies;
+/** The flow's profile boxes, and the one with an id. */
+const profiles = (): ProfileDef[] => state.doc.profiles ?? [];
+const profileOf = (id: string) => profiles().find((p) => p.id === id);
+
+/**
+ * The flow as the canvas lays it out: a profile box of a step shown is a box reading that step, in its section, so
+ * the automatic layout puts it beside the step. Only the canvas sees them so: the plan never does.
+ */
+function canvasDoc(doc: FlowDocument): FlowDocument {
+  const shown = new Set([...doc.sources.map((x) => x.id), ...doc.steps.map((x) => x.id)]);
+  const boxes = (doc.profiles ?? []).filter((p) => shown.has(p.of));
+  if (!boxes.length) return doc;
+  return {
+    ...doc,
+    steps: [...doc.steps, ...boxes.map((p): StepDef => ({ id: p.id, kind: 'sql', inputs: [p.of], sql: 'SELECT 1', description: p.description }))],
+    groups: doc.groups?.map((g) => ({ ...g, steps: [...g.steps, ...boxes.filter((p) => g.steps.includes(p.of)).map((p) => p.id)] })),
+  };
+}
 const personName = (id: string) => policies()?.principals.find((x) => x.id === id)?.name ?? id;
 /** What the current viewer may read of a node, or null before the node has run. */
 const access = (id: string, who = state.viewer): ReadView | null => {
@@ -183,6 +203,7 @@ const isOutput = (id: string) => !!steps().get(id)?.dataset;
 const readersOf = (id: string) => state.doc.steps.filter((st) => st.inputs.includes(id)).map((st) => st.id);
 
 function kindLabel(id: string): string {
+  if (profileOf(id)) return 'PROFILE';
   if (sourceIds().has(id)) {
     const f = inputFile(id);
     return f ? `INPUT · ${formatOf(f.file).toUpperCase()}` : 'INPUT';
@@ -512,7 +533,7 @@ function applyView(): void {
 
 function fitView(): void {
   const host = $('canvas');
-  const { left, top, width, height } = gridLayout(viewDoc(), state.collapsed);
+  const { left, top, width, height } = gridLayout(canvasDoc(viewDoc()), state.collapsed);
   const W = host.clientWidth || 360;
   const H = host.clientHeight || 420;
   view.k = Math.max(MIN_ZOOM, Math.min(1.2, (W - 32) / width, (H - 32) / height));
@@ -581,7 +602,7 @@ function tidy(): void {
   state.doc = { ...state.doc, layout: {} };
   saveArrangement();
   renderCanvas();
-  startView(gridLayout(viewDoc(), state.collapsed));
+  startView(gridLayout(canvasDoc(viewDoc()), state.collapsed));
 }
 
 /** The beginning of the flow, at a size where its cards are easy to read: on a phone, two columns and a bit. */
@@ -810,7 +831,7 @@ function endMove(commit: boolean): void {
   if (m && before && commit) {
     const joins = m.card !== undefined && m.target !== undefined && m.target !== sectionOf(m.card);
     if (m.dx || m.dy || joins) {
-      const layout = pinLayout(state.doc, state.collapsed);
+      const layout = pinLayout(canvasDoc(state.doc), state.collapsed);
       const shift = (key: string) => {
         const p = layout[key];
         if (p) layout[key] = [p[0] + m.dx, p[1] + m.dy];
@@ -833,6 +854,8 @@ function endMove(commit: boolean): void {
 
 /** The document with a step moved into a section, or out of every section (null). A section it leaves empty stays put. */
 function intoSection(doc: FlowDocument, id: string, target: string | null, before: GridLayout): FlowDocument {
+  // A profile box stays in the section of the step it looks at.
+  if (profileOf(id)) return doc;
   const layout = { ...(doc.layout ?? {}) };
   const groups = (doc.groups ?? []).map((g) => {
     if (!g.steps.includes(id)) return g.id === target ? { ...g, steps: [...g.steps, id] } : g;
@@ -845,7 +868,7 @@ function intoSection(doc: FlowDocument, id: string, target: string | null, befor
 
 /** Arrange, from the keyboard: an arrow key moves the focused card one grid step. */
 function nudge(key: string, dx: number, dy: number): void {
-  const layout = pinLayout(state.doc, state.collapsed);
+  const layout = pinLayout(canvasDoc(state.doc), state.collapsed);
   const folded = state.doc.groups?.find((g) => g.id === key);
   for (const id of folded ? folded.steps : [key]) {
     const p = layout[id];
@@ -875,7 +898,7 @@ function addSection(): void {
   const x = snap((host.clientWidth / 2 - view.x) / view.k - (cardW + 2 * pad) / 2);
   const y = snap((host.clientHeight / 2 - view.y) / view.k - (head + cardH + pad) / 2);
   const color = nextColor(groups);
-  const layout = { ...pinLayout(state.doc, state.collapsed), [groupKey(id)]: [x, y] as [number, number] };
+  const layout = { ...pinLayout(canvasDoc(state.doc), state.collapsed), [groupKey(id)]: [x, y] as [number, number] };
   state.doc = { ...state.doc, groups: [...groups, { id, name, steps: [], color }], layout };
   saveArrangement();
   openSection(id, true);
@@ -898,7 +921,7 @@ function nextColor(groups: readonly GroupDef[]): GroupDef['color'] {
 }
 
 function removeSection(id: string): void {
-  const layout = pinLayout(state.doc, state.collapsed);
+  const layout = pinLayout(canvasDoc(state.doc), state.collapsed);
   delete layout[groupKey(id)];
   state.collapsed.delete(id);
   state.doc = { ...state.doc, groups: (state.doc.groups ?? []).filter((g) => g.id !== id), layout };
@@ -908,8 +931,8 @@ function removeSection(id: string): void {
 
 /** Move a step into a section from its sheet: it lands in the section's first free slot; a new section is drawn around it. */
 function placeInSection(id: string, target: string): void {
-  const before = gridLayout(state.doc, state.collapsed);
-  const doc: FlowDocument = { ...state.doc, layout: pinLayout(state.doc, state.collapsed) };
+  const before = gridLayout(canvasDoc(state.doc), state.collapsed);
+  const doc: FlowDocument = { ...state.doc, layout: pinLayout(canvasDoc(state.doc), state.collapsed) };
   if (target === '+') {
     // A new section drawn around the step where it stands, named straight away.
     const fresh: GroupDef = { ...newSection(doc), steps: [], color: nextColor(doc.groups ?? []) };
@@ -974,7 +997,7 @@ function resetArrangement(): void {
     // Nothing kept to forget.
   }
   select(null);
-  startView(gridLayout(viewDoc(), state.collapsed));
+  startView(gridLayout(canvasDoc(viewDoc()), state.collapsed));
   if (edited) void run();
 }
 
@@ -987,7 +1010,7 @@ function renderCanvas(): void {
   const svg = host.querySelector('svg') ?? setUpCanvas(host);
   const world = svg.querySelector('#world')!;
   const { cardW, cardH, head } = GRID;
-  const doc = viewDoc();
+  const doc = canvasDoc(viewDoc());
   const layout = gridLayout(doc, state.collapsed);
   // Focus stays on the card or section it was on: the canvas redraws as counts arrive, under a keyboard user's feet.
   const active = document.activeElement;
@@ -1001,7 +1024,7 @@ function renderCanvas(): void {
   const parts: SVGElement[] = [];
   const fit = (text: string, n: number) => (text.length > n ? `${text.slice(0, Math.max(1, n - 1))}…` : text);
   for (const f of layout.frames) {
-    const n = f.members.length;
+    const n = f.members.filter((m) => !profileOf(m)).length;
     const classes = ['section', `c-${f.color ?? 'slate'}`, n ? '' : 'empty', state.section === f.id ? 'selected' : ''].filter(Boolean);
     const g = s('g', { class: classes.join(' '), 'data-group': f.id });
     g.append(s('rect', { class: 'frame', x: f.x, y: f.y, width: f.w, height: f.h, rx: 12 }));
@@ -1034,7 +1057,8 @@ function renderCanvas(): void {
       if (from === to || seen.has(`${from}>${to}`)) continue;
       seen.add(`${from}>${to}`);
       const { d, cx, cy } = edgePath(drawn.at.get(from)!, drawn.at.get(to)!);
-      const path = s('path', { class: 'edge', d });
+      // A profile box only looks: its edge is dashed.
+      const path = s('path', { class: profileOf(st.id) ? 'edge look' : 'edge', d });
       const dot = s('circle', { class: 'edge-dot', cx, cy, r: 2.5 });
       parts.push(path, dot);
       drawn.edges.push({ from, to, path, dot });
@@ -1093,6 +1117,11 @@ function renderCanvas(): void {
   }
   for (const id of layout.cards.keys()) {
     if (shownAs.has(id)) continue;
+    const box = profileOf(id);
+    if (box) {
+      card(id, 'PROFILE', id, profileLine(box), ['profile', ...(state.selected === id ? ['selected'] : [])], { shield: shieldOf(box.of) });
+      continue;
+    }
     const n = nodeOf(id);
     const readable = access(id);
     const classes = [sourceIds().has(id) ? 'source' : steps().get(id)?.dataset ? 'dataset' : 'step'];
@@ -1145,6 +1174,10 @@ interface Quality {
   judges: (Judge & { origin: string; description?: string })[];
   /** For each sampled row, a 1 for each judge it fails. */
   verdicts: number[][];
+  /** The measures the forest grew on, a row of numbers per sampled row (gaps filled), its trees, and each row's score. */
+  matrix: number[][];
+  forest: Forest | null;
+  scores: number[];
 }
 
 /** The sample's size: enough for a column's shape, small enough to read in a moment on a phone. */
@@ -1284,9 +1317,15 @@ async function lookInto(insp: Inspection, i: number, read: string, columns: stri
   const counts = suggestions.length ? (await engine.query(emitCheckCounts(read, suggestions.map((x) => x.check)))).rows[0]! : [];
   const measures = profiles.filter((p) => p.kind === 'measure').map((p) => p.name);
   let odd: Quality['odd'] = [];
+  let matrix: number[][] = [];
+  let forest: Forest | null = null;
+  let scores: number[] = [];
   if (measures.length && sample.length >= 20) {
     const at = measures.map((c) => columns.indexOf(c));
-    const scores = isolationForest(fillGaps(at.map((k) => sample.map((r) => (typeof r[k] === 'number' ? (r[k] as number) : null)))));
+    matrix = fillGaps(at.map((k) => sample.map((r) => (typeof r[k] === 'number' ? (r[k] as number) : null))));
+    const grown = growForest(matrix);
+    forest = grown;
+    scores = grown ? matrix.map((x) => scoreOf(grown, x)) : matrix.map(() => 0.5);
     const records = sample.map((r) => Object.fromEntries(columns.map((c, k) => [c, r[k]])));
     const mads = madsOf(profiles, records);
     odd = scores
@@ -1296,7 +1335,7 @@ async function lookInto(insp: Inspection, i: number, read: string, columns: stri
       .slice(0, 8)
       .map((x) => ({ ...x, why: unusual(profiles, records[x.at]!, mads) }));
   }
-  return { rows, columns, sample, profiles, measures, odd, suggestions: suggestions.map((x, k) => ({ ...x, failing: Number(counts[k] ?? 0) })), judges, verdicts };
+  return { rows, columns, sample, profiles, measures, odd, suggestions: suggestions.map((x, k) => ({ ...x, failing: Number(counts[k] ?? 0) })), judges, verdicts, matrix, forest, scores };
 }
 
 /** The latest earlier run whose rows at this step differ from now's: what drift is measured against. */
@@ -1332,7 +1371,7 @@ function histogram(p: Profile): HTMLElement | null {
 }
 
 /** A column as a card: how full it is, its shape or its common values, how it moved, and what a check would flag. */
-function columnCard(p: Profile, type: string, moved: Drift | undefined, since: number | undefined, flags: string[], meaning?: PropertyType): HTMLElement {
+function columnCard(p: Profile, type: string, moved: Drift | undefined, since: string | undefined, flags: string[], meaning?: PropertyType): HTMLElement {
   const f = p.facts;
   const gaps = f.rows - f.present;
   const plain = fmtOf(p);
@@ -1362,7 +1401,7 @@ function columnCard(p: Profile, type: string, moved: Drift | undefined, since: n
       })));
     if (f.distinct > p.top.length) card.append(h('p', { class: 'foot', style: 'margin:0' }, `and ${fmtInt(f.distinct - p.top.length)} more values`));
   }
-  if (moved && since !== undefined) card.append(h('p', { class: 'drift' }, h('span', { class: `level-chip ${moved.level}` }, moved.level), ` since run ${since}${moved.note ? `: ${moved.note}` : ''} · PSI ${moved.psi.toFixed(2)}`));
+  if (moved && since !== undefined) card.append(h('p', { class: 'drift' }, h('span', { class: `level-chip ${moved.level}` }, moved.level), ` since ${since}${moved.note ? `: ${moved.note}` : ''} · PSI ${moved.psi.toFixed(2)}`));
   if (meaning?.note) card.append(h('p', { class: 'note' }, meaning.note));
   for (const flag of flags) card.append(h('p', { class: 'colflag' }, flag));
   return card;
@@ -1494,44 +1533,270 @@ function suggestedChecks(id: string, q: Quality, meanings: Meanings): HTMLElemen
   return box;
 }
 
-/** A step's columns, odd rows and suggested checks, as a person reads it, with drift since the last run with other rows. */
-async function qualityPanel(id: string, who: string): Promise<HTMLElement | null> {
+/**
+ * How each column of a step moved from one run's rows to another's, as a person reads them: from the two samples.
+ * Between days (`days`), a time is compared by its time of day: each day's dates are its own.
+ */
+async function driftsBetween(of: string, now: RunRecord, before: RunRecord, who: string, days = false): Promise<Map<string, Drift> | null> {
+  const [ni, bi] = [await inspect(now), await inspect(before)];
+  const [i, j] = [ni.index.get(of), bi.index.get(of)];
+  if (i === undefined || j === undefined || !ni.manifest.has(i) || !bi.manifest.has(j)) return null;
+  const q = await qualityOf(ni, i, who);
+  const b = await qualityOf(bi, j, who);
+  if (!q?.rows || !b?.rows) return null;
+  const out = new Map<string, Drift>();
+  for (const p of q.profiles) {
+    const k = b.columns.indexOf(p.name);
+    if (k < 0) continue;
+    const [was, is] = [b.sample.map((r) => r[k]), q.sample.map((r) => r[q.columns.indexOf(p.name)])];
+    out.set(p.name, p.kind === 'time' && days ? drift('measure', was.map(minuteOfDay), is.map(minuteOfDay), clockText) : drift(p.kind, was, is, fmtOf(p)));
+  }
+  return out;
+}
+
+/**
+ * What a profile box shows of a step's rows, as a person reads them: how this load compares with the one before, the
+ * isolation forest at play on a map of the rows, the odd rows, each column, how the columns moved from load to load,
+ * and the checks worth adding. Drift is against the load before when the step's rows come in daily loads, else the
+ * latest earlier run with other rows here.
+ */
+async function profilePanel(of: string, who: string, current: () => boolean): Promise<HTMLElement | null> {
   const run = latest();
   if (!run || !state.engine) return null;
   const insp = await inspect(run);
-  const i = insp.index.get(id);
+  const i = insp.index.get(of);
   if (i === undefined || !insp.manifest.has(i)) return null;
   const q = await qualityOf(insp, i, who);
-  if (!q) return null;
+  if (!q || !current()) return null;
   if (!q.rows) return h('div', { class: 'quality' }, h('p', { class: 'eyebrow' }, 'Columns'), h('p', { class: 'foot' }, 'No rows to describe.'));
-  const drifts = new Map<string, Drift>();
-  const earlier = earlierVersion(id);
-  let since: number | undefined;
-  if (earlier) {
-    const ei = await inspect(earlier);
-    const j = ei.index.get(id);
-    const before = j === undefined ? null : await qualityOf(ei, j, who);
-    if (before?.rows) {
-      since = earlier.result.run;
-      for (const p of q.profiles) {
-        const k = before.columns.indexOf(p.name);
-        if (k >= 0) drifts.set(p.name, drift(p.kind, before.sample.map((r) => r[k]), q.sample.map((r) => r[q.columns.indexOf(p.name)]), fmtOf(p)));
-      }
-    }
-  }
+  const daily = run.load !== undefined && loads.list.length > 1;
+  // Against the run before on this same load when the flow changed since (other rows here, the same day), else
+  // against the day before.
+  const changed = earlierVersion(of);
+  const sameDay = changed && changed.load === run.load ? changed : undefined;
+  const earlier = sameDay ?? (daily ? (run.load! > 0 ? runOfLoad(run.load! - 1) : undefined) : changed);
+  const byDay = !!earlier && !sameDay && daily;
+  const since = earlier ? (byDay ? dayLabel(loads.list[earlier.load!]!.day) : `run ${earlier.result.run}`) : undefined;
+  const drifts = (earlier && (await driftsBetween(of, run, earlier, who, byDay))) || new Map<string, Drift>();
+  if (!current()) return null;
   const types = new Map(insp.plan.nodes[i]!.schema!.map(([c, t]) => [c, t as string]));
-  const meanings = meaningsOf(id);
+  const meanings = meaningsOf(of);
   const flags = (column: string) => q.suggestions.filter((x) => x.column === column && x.failing > 0).map((x) => `${x.check} flags ${plural(x.failing, 'row')}`);
   const gappy = q.profiles.filter((p) => p.facts.present < p.facts.rows).length;
-  const moved = [...drifts.values()].filter((d) => d.level !== 'steady').length;
-  const summary = [gappy ? `${gappy} with empty values` : 'none empty', since !== undefined ? (moved ? `${moved} moved since run ${since}` : `all steady since run ${since}`) : 'no earlier run with other rows here to measure drift against'];
+  const movedNames = [...drifts.entries()].filter(([, d]) => d.level !== 'steady').map(([c]) => meanings(c)?.title ?? c);
+  const summary = [gappy ? `${gappy} with empty values` : 'none empty', since !== undefined ? (movedNames.length ? `${movedNames.length} moved since ${since}` : `all steady since ${since}`) : daily ? 'the first load: nothing before it to compare with' : 'no earlier run with other rows here to measure drift against'];
+  const odd = oddRows(q, meanings);
+  // A row the map picks out opens its card among the odd rows.
+  const openOdd = (k: number) => {
+    const d = odd.querySelector('details.fold') as HTMLDetailsElement | null;
+    if (d) d.open = true;
+    const track = odd.querySelector('.records') as HTMLElement | null;
+    const card = track?.children[k] as HTMLElement | undefined;
+    if (track && card) track.scrollTo({ left: card.offsetLeft - track.offsetLeft, behavior: 'smooth' });
+    odd.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
+  const rowsNow = q.rows;
+  const before = earlier ? (await rowsAs(await inspect(earlier), (await inspect(earlier)).index.get(of)!, who)) : null;
+  const lead = since !== undefined && before !== null
+    ? `${fmtInt(rowsNow)} rows, ${rowsNow === before ? 'as many as' : `${pct(Math.abs(rowsNow - before) / Math.max(1, before))} ${rowsNow > before ? 'more than' : 'fewer than'}`} ${since}${movedNames.length ? `; moved since then: ${movedNames.slice(0, 4).join(', ')}${movedNames.length > 4 ? ` and ${movedNames.length - 4} more` : ''}` : '; every column steady since then'}.`
+    : `${fmtInt(rowsNow)} rows.`;
   return h('div', { class: 'quality' },
+    h('div', { class: 'quality-part' }, h('p', { class: 'eyebrow' }, daily ? `This load · ${dayLabel(loads.list[run.load!]!.day)}` : 'These rows'), h('p', { class: 'load-lead' }, lead)),
+    isoMap(q, meanings, openOdd),
+    odd,
     h('div', { class: 'quality-part' },
       h('p', { class: 'eyebrow' }, `Columns · ${q.profiles.length}`),
       h('p', { class: 'foot' }, `${summary.join(' · ')}. Counts are exact; shapes come from an even sample of ${fmtInt(q.sample.length)} of ${plural(q.rows, 'row')}.`),
       carousel(q.profiles.map((p) => columnCard(p, types.get(p.name) ?? 'any', drifts.get(p.name), since, flags(p.name), meanings(p.name))), 'column')),
-    oddRows(q, meanings),
-    suggestedChecks(id, q, meanings));
+    daily ? acrossLoads(of, who, q.profiles.map((p) => p.name), meanings) : null,
+    suggestedChecks(of, q, meanings));
+}
+
+// ------------------------------------------------------------------ the isolation forest at play
+
+/** Numbers along a list, said: "a, b and c". */
+const listed = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+
+/**
+ * The isolation forest at play, on a map of the sampled rows: each placed by its two principal components (the
+ * directions the measures vary most; the axes stretch near the middle and squeeze far out, so the bulk and the far
+ * rows both show), the odd ones marked and numbered as their cards are. Play has the forest pick them out one by
+ * one: one of its trees (one that takes a typical number of cuts for that row, not its luckiest) cuts at random, and
+ * the tree's rows on the other side of each cut fall away until the row stands alone. A row tapped on the map is cut
+ * out the same way: an ordinary one takes many more cuts.
+ */
+function isoMap(q: Quality, meanings: Meanings, openOdd: (k: number) => void): HTMLElement | null {
+  const forest = q.forest;
+  const pca = forest ? principalComponents(q.matrix) : null;
+  if (!forest || !pca) return null;
+  const W = 340;
+  const H = 240;
+  const pad = 16;
+  const xs = pca.points.map(([x]) => Math.asinh(x));
+  const ys = pca.points.map(([, y]) => Math.asinh(y));
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const X = (v: number) => pad + ((v - x0) / (x1 - x0 || 1)) * (W - 2 * pad);
+  const Y = (v: number) => H - pad - ((v - y0) / (y1 - y0 || 1)) * (H - 2 * pad);
+  const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, class: 'isomap', role: 'img', 'aria-label': `The ${fmtInt(q.sample.length)} sampled rows on their two principal components, the ${q.odd.length} odd ones numbered` }) as SVGSVGElement;
+  svg.append(s('line', { class: 'axis', x1: X(0), x2: X(0), y1: 4, y2: H - 4 }), s('line', { class: 'axis', x1: 4, x2: W - 4, y1: Y(0), y2: Y(0) }));
+  const oddAt = new Map(q.odd.map((o, k) => [o.at, k]));
+  const dots = pca.points.map((_, n) => s('circle', { class: oddAt.has(n) ? 'dot odd' : 'dot', cx: X(xs[n]!).toFixed(1), cy: Y(ys[n]!).toFixed(1), r: oddAt.has(n) ? 4 : 2.2 }));
+  // The odd ones on top, numbered.
+  const layer = s('g', {});
+  dots.forEach((d, n) => !oddAt.has(n) && layer.append(d));
+  for (const at of oddAt.keys()) layer.append(dots[at]!);
+  svg.append(layer);
+  // Numbers that would sit on each other move down a line.
+  const placed: [number, number][] = [];
+  for (const [at, k] of oddAt) {
+    const x = Math.min(W - 8, X(xs[at]!) + 6);
+    let y = Y(ys[at]!) - 6;
+    while (placed.some(([px, py]) => Math.abs(px - x) < 12 && Math.abs(py - y) < 10)) y += 10;
+    placed.push([x, y]);
+    svg.append(s('text', { class: 'oddnum', x: x.toFixed(1), y: y.toFixed(1) }, String(k + 1)));
+  }
+  const names = q.measures.map((c) => meanings(c)?.title ?? c);
+  const words = (w: readonly number[]) => {
+    const top = w.map((x, k) => [x, k] as const).sort((a, b) => Math.abs(b[0]) - Math.abs(a[0])).slice(0, 3).filter(([x]) => Math.abs(x) >= 0.2);
+    const more = top.filter(([x]) => x > 0).map(([, k]) => names[k]!);
+    const less = top.filter(([x]) => x < 0).map(([, k]) => names[k]!);
+    return [more.length ? `more ${listed(more)}` : '', less.length ? `less ${listed(less)}` : ''].filter(Boolean).join(', ') || 'a mix of the measures';
+  };
+  const axes = h('p', { class: 'foot iso-axes' }, `→ ${words(pca.components[0])} (${pct(pca.explained[0])} of the spread) · ↑ ${words(pca.components[1])} (${pct(pca.explained[1])})`);
+  const status = h('p', { class: 'iso-status', 'aria-live': 'polite' }, `Each dot is one of ${fmtInt(q.sample.length)} sampled rows. Play to watch the forest pick out the odd ones, or tap a dot to watch it cut that row out.`);
+  const picked = h('ol', { class: 'iso-picked' });
+  // How many cuts a row takes, on average over the forest: the number its score comes from.
+  const cutsOf = (at: number) => forest.trees.reduce((t, tree) => t + pathLength(tree.root, q.matrix[at]!), 0) / forest.trees.length;
+  const typicalRow = q.scores.map((x, n) => [x, n] as const).sort((a, b) => a[0] - b[0])[Math.floor(q.scores.length / 2)]![1];
+  const ordinary = cutsOf(typicalRow);
+  let token = 0;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const wait = (ms: number, t: number) => new Promise<boolean>((done) => window.setTimeout(() => done(t === token && svg.isConnected), reduce ? 0 : ms));
+  const resetDots = () => dots.forEach((d, n) => d.setAttribute('class', oddAt.has(n) ? 'dot odd' : 'dot'));
+  const cutText = (c: Cut) => {
+    const name = q.measures[c.feature]!;
+    const p = meanings(name);
+    return `${p?.title ?? name} ${c.side === 'below' ? 'under' : 'at least'} ${inUnit(fmtNum(c.split), c.split, p)}`;
+  };
+  const isolate = async (at: number, t: number): Promise<boolean> => {
+    // A tree that takes a typical number of cuts for this row: the median of the forest's.
+    const lengths = forest.trees.map((_, k) => [k, isolationPath(forest, k, q.matrix, q.matrix[at]!).length] as const).sort((a, b) => a[1] - b[1]);
+    const tree = lengths[Math.floor(lengths.length / 2)]![0];
+    const members = new Set(forest.trees[tree]!.members);
+    const cuts = isolationPath(forest, tree, q.matrix, q.matrix[at]!);
+    dots.forEach((d, n) => d.setAttribute('class', n === at ? 'dot target' : members.has(n) ? 'dot member' : 'dot away'));
+    status.textContent = `Tree ${tree + 1} of ${forest.trees.length} looks at ${members.size} rows picked at random${members.has(at) ? ', this one among them' : ''}, and cuts at random.`;
+    if (!(await wait(900, t))) return false;
+    for (const [k, c] of cuts.entries()) {
+      const left = new Set(c.left);
+      for (const n of members) if (n !== at && !left.has(n)) dots[n]!.setAttribute('class', 'dot away');
+      const others = c.left.filter((n) => n !== at).length;
+      status.textContent = `Cut ${k + 1}: ${cutText(c)}. ${others ? `${plural(others, 'row')} still with it.` : 'It stands alone.'}`;
+      if (!(await wait(700, t))) return false;
+    }
+    const others = (cuts.at(-1)?.left ?? [...members]).filter((n) => n !== at).length;
+    // Odd or ordinary by its score over the whole forest, not by this one tree.
+    const verdict = (q.scores[at] ?? 0) >= 0.6 ? `odd: about ${cutsOf(at).toFixed(1)} cuts across the forest, where an ordinary row takes ${ordinary.toFixed(1)}` : `an ordinary row: about ${cutsOf(at).toFixed(1)} cuts across the forest`;
+    status.textContent = others ? `After ${plural(cuts.length, 'cut')} it shares the tree's last leaf with ${plural(others, 'row')}; ${verdict}.` : `Alone after ${plural(cuts.length, 'cut')}; ${verdict}.`;
+    return true;
+  };
+  const describe = (o: Quality['odd'][number]) => {
+    const why = o.why.slice(0, 2).map((u) => `${meanings(u.column)?.title ?? u.column} ${inUnit(fmtNum(u.value), u.value, meanings(u.column))}`);
+    return why.length ? why.join(', ') : 'an unusual mix of values';
+  };
+  const play = h('button', { type: 'button', class: 'run' }, q.odd.length ? 'Play: pick out the odd rows' : 'Play');
+  const stop = () => {
+    token++;
+    resetDots();
+    play.textContent = 'Play again';
+  };
+  play.addEventListener('click', async () => {
+    if (play.dataset.on) return (delete play.dataset.on, stop());
+    const t = ++token;
+    play.dataset.on = '1';
+    play.textContent = 'Stop';
+    picked.replaceChildren();
+    for (const [k, o] of q.odd.entries()) {
+      if (!(await isolate(o.at, t))) return;
+      picked.append(h('li', {}, h('button', { type: 'button', class: 'pick', onclick: () => openOdd(k) }, h('b', {}, String(k + 1)), ` ${describe(o)}`, h('span', { class: 'pick-n' }, `${cutsOf(o.at).toFixed(1)} cuts`))));
+      if (!(await wait(500, t))) return;
+    }
+    delete play.dataset.on;
+    resetDots();
+    play.textContent = 'Play again';
+    const avg = q.odd.length ? q.odd.reduce((a, o) => a + cutsOf(o.at), 0) / q.odd.length : 0;
+    status.textContent = q.odd.length
+      ? `Picked out ${plural(q.odd.length, 'row')}: alone after about ${avg.toFixed(1)} cuts on average, where an ordinary row takes ${ordinary.toFixed(1)}. Tap one to open its card.`
+      : `None stands out: every row takes about as many cuts as an ordinary one (${ordinary.toFixed(1)}).`;
+  });
+  svg.addEventListener('click', (e) => {
+    const m = svg.getScreenCTM();
+    if (!m) return;
+    const pt = svg.createSVGPoint();
+    pt.x = (e as MouseEvent).clientX;
+    pt.y = (e as MouseEvent).clientY;
+    const at = pt.matrixTransform(m.inverse());
+    let best = -1;
+    let near = 16 ** 2;
+    pca.points.forEach((_, n) => {
+      const d = (X(xs[n]!) - at.x) ** 2 + (Y(ys[n]!) - at.y) ** 2;
+      if (d < near) [near, best] = [d, n];
+    });
+    if (best < 0) return;
+    delete play.dataset.on;
+    play.textContent = 'Play';
+    void isolate(best, ++token);
+  });
+  return h('div', { class: 'quality-part iso' },
+    h('p', { class: 'eyebrow' }, 'Isolation forest'),
+    h('p', { class: 'foot' }, `100 trees, each cutting ${forest.size} rows picked at random on random measures at random points. An odd row stands alone after few cuts; an ordinary one takes about ${ordinary.toFixed(1)}. Rows are drawn on their two principal components, from ${listed(names)}.`),
+    h('div', { class: 'isowrap' }, svg),
+    axes,
+    status,
+    h('div', { class: 'row' }, play),
+    picked);
+}
+
+// ------------------------------------------------------------------ drift across loads
+
+/** How each column moved from one load to the next, a cell a day: steady, moved or shifted, from the loads' samples. */
+function acrossLoads(of: string, who: string, columns: readonly string[], meanings: Meanings): HTMLElement {
+  const note = h('p', { class: 'foot xl-note', 'aria-live': 'polite' }, 'Tap a cell to see what moved.');
+  const cells = new Map<string, HTMLElement>();
+  const head = h('tr', {}, h('th', { scope: 'col' }, ''), ...loads.list.map((l) => h('th', { scope: 'col' }, h('span', {}, weekday(l.day)), h('span', { class: 'xl-date' }, String(dateOf(l.day).getUTCDate())))));
+  const body = columns.map((c) =>
+    h('tr', {},
+      h('th', { scope: 'row' }, meanings(c)?.title ?? c),
+      ...loads.list.map((l, k) => {
+        const cell = h('td', {}, h('button', { type: 'button', class: `xl ${k === 0 ? 'first' : 'wait'}`, 'aria-label': `${meanings(c)?.title ?? c}, ${dayLabel(l.day)}: ${k === 0 ? 'the first load' : 'not compared yet'}` }));
+        cells.set(`${c}|${k}`, cell.firstElementChild as HTMLElement);
+        return cell;
+      })));
+  const grid = h('div', { class: 'xl-scroll' }, h('table', { class: 'xl-grid' }, h('thead', {}, head), h('tbody', {}, ...body)));
+  const ran = loads.list.map((_, k) => runOfLoad(k));
+  const compared = ran.filter((r, k) => r && k > 0 && ran[k - 1]).length;
+  const box = fold('across', [h('span', { class: 'eyebrow' }, 'Across loads'), h('span', { class: 'fold-sum' }, compared ? `${plural(compared, 'day')} compared with the day before` : 'run more loads to compare')],
+    h('p', { class: 'foot' }, 'Each column, each day against the day before (a time by its time of day): steady under a PSI of 0.1, moved to 0.25, shifted above. Days not run yet are blank.'),
+    grid,
+    note);
+  void (async () => {
+    for (let k = 1; k < loads.list.length; k++) {
+      const [now, before] = [ran[k], ran[k - 1]];
+      if (!now || !before) continue;
+      const d = await driftsBetween(of, now, before, who, true);
+      if (!box.isConnected && k > 1) return;
+      for (const c of columns) {
+        const cell = cells.get(`${c}|${k}`)!;
+        const x = d?.get(c);
+        if (!x) continue;
+        const label = `${meanings(c)?.title ?? c}, ${weekday(loads.list[k - 1]!.day)} to ${dayLabel(loads.list[k]!.day)}: ${x.level}, PSI ${x.psi.toFixed(2)}${x.note ? `: ${x.note}` : ''}`;
+        cell.className = `xl ${x.level}`;
+        cell.setAttribute('aria-label', label);
+        cell.onclick = () => (note.textContent = label);
+      }
+    }
+  })();
+  return h('div', { class: 'quality-part' }, box);
 }
 
 /**
@@ -1559,9 +1824,9 @@ function addFilterBox(stepId: string, picked: readonly Suggestion[]): void {
   const next = insertAfter(doc, stepId, box);
   // Arranged by hand: it sits beside the step rather than wherever the automatic layout would put it.
   if (Object.keys(doc.layout ?? {}).length) {
-    const before = gridLayout(doc, state.collapsed);
+    const before = gridLayout(canvasDoc(doc), state.collapsed);
     const slot = besideSlot(before, before.cards.get(stepId)!, id);
-    next.layout = { ...pinLayout(doc, state.collapsed), [id]: [slot.x, slot.y] };
+    next.layout = { ...pinLayout(canvasDoc(doc), state.collapsed), [id]: [slot.x, slot.y] };
   }
   const issues = validateDocument(next);
   if (issues.length) {
@@ -1626,6 +1891,7 @@ function loadFlow(): void {
 
 async function renderSheet(): Promise<void> {
   if (state.section) return renderSectionSheet();
+  if (state.selected && profileOf(state.selected)) return renderProfileSheet(state.selected);
   const sheet = $('sheet');
   const id = state.selected;
   if (!id) {
@@ -1653,8 +1919,8 @@ async function renderSheet(): Promise<void> {
 
   // What it changed comes first: it is what a person opening a step most often wants to know.
   const changed = h('div', { class: 'change' }, h('p', { class: 'eyebrow' }, 'What changed'), h('p', { class: 'foot' }, n ? 'Working it out…' : 'Run the flow to see what this step changes.'));
-  const quality = h('div', { class: 'quality' }, h('p', { class: 'eyebrow' }, 'Columns'), h('p', { class: 'foot' }, n ? 'Working out what they hold…' : 'Run the flow to see what its columns hold.'));
-  body.append(changed, quality);
+  const pointer = profilePointer(id);
+  body.append(changed, ...(pointer ? [pointer] : []));
   const io = inOut(id);
   if (io) body.append(io);
   const seenBy = accessPanel(id);
@@ -1740,16 +2006,79 @@ async function renderSheet(): Promise<void> {
   };
   await showPreview();
   if (state.selected !== id) return;
-  try {
-    const panel = await qualityPanel(id, who);
-    if (state.selected !== id) return;
-    if (panel) quality.replaceWith(panel);
-    else quality.remove();
-  } catch (e) {
-    quality.lastElementChild!.textContent = message(e);
-  } finally {
-    seenBy?.count();
+  seenBy?.count();
+}
+
+/** A step's pointer to its profile boxes, or, for the owner, a way to add one. */
+function profilePointer(id: string): HTMLElement | null {
+  const mine = profiles().filter((p) => p.of === id);
+  if (!mine.length && !isOwner()) return null;
+  const box = h('div', { class: 'quality-part profile-pointer' }, h('p', { class: 'eyebrow' }, 'Profile'));
+  if (mine.length) {
+    box.append(h('p', { class: 'foot', style: 'margin:0' }, 'What its rows hold, the rows an isolation forest finds odd, how they move from one load to the next, and checks worth adding: in its profile box.'),
+      h('div', { class: 'row' }, ...mine.map((p) => h('button', { class: 'btn show', type: 'button', onclick: () => select(p.id) }, `Open ${p.id}`))));
+  } else {
+    box.append(h('p', { class: 'foot', style: 'margin:0' }, 'A profile box beside this step would show what its rows hold: its columns, the rows an isolation forest finds odd, how they move from one load to the next, and checks worth adding. It changes no data.'),
+      h('div', { class: 'row' }, h('button', { class: 'btn show', type: 'button', onclick: () => addProfile(id) }, 'Profile this step')));
   }
+  return box;
+}
+
+/** A profile box's sheet: what the step's rows hold, as the person it shows them to reads them. */
+async function renderProfileSheet(id: string): Promise<void> {
+  const p = profileOf(id)!;
+  const sheet = $('sheet');
+  const who = state.previewAs ?? state.viewer;
+  const body = h('div', { class: 'sheet-body' });
+  sheet.setAttribute('aria-label', 'Profile');
+  sheet.replaceChildren(
+    h('div', { class: 'sheet-head' }, h('div', { style: 'flex:1;min-width:0' }, h('p', { class: 'eyebrow' }, `PROFILE · OF ${p.of.toUpperCase()}`), h('h2', {}, id)), h('button', { class: 'close', type: 'button', 'aria-label': 'Close', onclick: () => select(null) }, '×')),
+    body,
+  );
+  sheet.hidden = false;
+  body.append(h('p', { class: 'lede' }, p.description ?? `What ${p.of}'s rows hold.`));
+  const panel = h('div', { class: 'quality' }, h('p', { class: 'foot' }, latest() ? 'Working out what the rows hold…' : 'Run the flow to see what the rows hold.'));
+  body.append(panel, h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => select(p.of) }, `Open ${p.of}`), isOwner() ? h('button', { class: 'btn danger', type: 'button', onclick: () => removeProfile(id) }, 'Take this box out') : null));
+  if (!latest() || !state.engine) return;
+  try {
+    await useLookups(who);
+    const built = await profilePanel(p.of, who, () => state.selected === id);
+    if (state.selected !== id) return;
+    panel.replaceWith(built ?? h('p', { class: 'status bad' }, `Closed to ${personName(who)}.`));
+  } catch (e) {
+    panel.textContent = message(e);
+  }
+}
+
+/** A profile box beside a step, in its section: the flow's data is untouched, so nothing runs again. */
+function addProfile(of: string): void {
+  if (!isOwner()) return;
+  const doc = state.doc;
+  const taken = new Set([...doc.sources, ...doc.steps, ...profiles(), ...(doc.groups ?? [])].map((x) => x.id.toLowerCase()));
+  const base = `${of.slice(0, 54)}_profile`;
+  let id = base;
+  for (let n = 2; taken.has(id.toLowerCase()); n++) id = `${base}_${n}`;
+  const next: FlowDocument = { ...doc, profiles: [...profiles(), { id, of, description: `What ${of}'s rows hold: its columns, the rows an isolation forest finds odd, and how they move from one load to the next.` }] };
+  if (Object.keys(doc.layout ?? {}).length) {
+    const before = gridLayout(canvasDoc(doc), state.collapsed);
+    const slot = besideSlot(before, before.cards.get(of)!, id);
+    next.layout = { ...pinLayout(canvasDoc(doc), state.collapsed), [id]: [slot.x, slot.y] };
+  }
+  const issues = validateDocument(next);
+  if (issues.length) return setStatus(`The profile couldn't be added: ${issues[0]!.path}: ${issues[0]!.message}.`, true);
+  state.doc = next;
+  saveFlow();
+  saveArrangement();
+  select(id);
+}
+
+function removeProfile(id: string): void {
+  if (!isOwner()) return;
+  const { [id]: _gone, ...layout } = state.doc.layout ?? {};
+  state.doc = { ...state.doc, profiles: profiles().filter((p) => p.id !== id), layout };
+  saveFlow();
+  saveArrangement();
+  select(null);
 }
 
 /** Where an input's rows come from, or where an output's go: the flow's two ends, said plainly. */
@@ -2153,6 +2482,7 @@ function editor(st: StepDef): HTMLElement {
       break;
     case 'expectations':
       st.rules.forEach((r, k) => fields.push({ label: `${r.name} · ${r.onFail}`, value: r.check, set: (x, v) => x.kind === 'expectations' && (x.rules[k]!.check = v) }));
+      fields.push({ label: 'most it may drop, as a share (0.1 is 10%; empty for no limit)', value: st.maxDropped === undefined ? '' : String(st.maxDropped), set: (x, v) => x.kind === 'expectations' && (v.trim() === '' ? delete x.maxDropped : (x.maxDropped = Number(v.trim()))) });
       break;
     case 'select':
     case 'join':
@@ -2418,20 +2748,67 @@ async function renderResults(): Promise<void> {
     const we = readDataset('weather_effect');
     $('effect-panel').hidden = !we;
     if (!we) return;
-    const effect = await engine.query(`SELECT borough, condition, hours, trips_per_hour, vs_dry FROM (${we}) WHERE condition <> 'dry' ORDER BY borough, condition`);
-    const dry = await engine.query(`SELECT borough, hours, trips_per_hour FROM (${we}) WHERE condition = 'dry'`);
+    // A day's load has each hour once: a wet hour has no dry one at its time of day to set against. With daily
+    // loads, weather's effect is measured over every load run so far, the step's own SQL over their rows together.
+    let from = we;
+    let empty = 'Not enough wet or snowy hours, with trips, to compare with dry ones.';
+    const sub = $('effect-sub');
+    sub.textContent = 'Trips per hour in each kind of weather, against dry hours at the same hour of day.';
+    if (loads.list.length > 1) {
+      const across = await effectAcrossLoads(state.viewer);
+      const view = access('weather_effect');
+      const read = across && view ? wrapRead(view, across.sql) : null;
+      if (read && across) {
+        from = read;
+        const span = across.days.length === 1 ? dayLabel(across.days[0]!) : `${dayLabel(across.days[0]!)} to ${dayLabel(across.days.at(-1)!)}`;
+        sub.textContent = `Over the ${plural(across.days.length, 'load')} run so far (${span}): trips per hour in each kind of weather, against dry hours at the same hour of day on the other days.`;
+        empty = across.days.length < 2
+          ? 'A day’s load has each hour once, so a wet hour has no dry one at its time of day to set against. Run more loads: each brings other days’ hours.'
+          : `These ${across.days.length} days have too few wet or snowy hours, with enough trips, to compare: the week’s storm comes on Saturday and Sunday.`;
+      }
+    }
+    const effect = await engine.query(`SELECT borough, condition, hours, trips_per_hour, vs_dry FROM (${from}) WHERE condition <> 'dry' ORDER BY borough, condition`);
+    const dry = await engine.query(`SELECT borough, hours, trips_per_hour FROM (${from}) WHERE condition = 'dry'`);
     const width = Math.min(720, Math.max(300, $('effect-chart').clientWidth || 340));
-    $('effect-chart').replaceChildren(effectChart(effect.rows as [string, string, number, number, number][], dry.rows as [string, number, number][], width));
+    $('effect-chart').replaceChildren(effectChart(effect.rows as [string, string, number, number, number][], dry.rows as [string, number, number][], width, empty));
   } catch (e) {
     $('effect-chart').replaceChildren(h('p', { class: 'foot' }, message(e)));
   }
 }
 
+/**
+ * Weather's effect over every load run so far, as a person reads it: weather_effect's own SQL (from the latest plan,
+ * parameters filled in) with its input bound to the rows of that input from each load run on the same flow, together.
+ */
+async function effectAcrossLoads(who: string): Promise<{ sql: string; days: string[] } | null> {
+  const run = latest();
+  if (!run) return null;
+  const insp = await inspect(run);
+  const at = insp.index.get('weather_effect');
+  const node = at === undefined ? undefined : insp.plan.nodes[at];
+  if (!node || node.op !== 'sql' || node.names.length !== 1) return null;
+  const input = node.names[0]!;
+  const parts: string[] = [];
+  const days: string[] = [];
+  // Only loads run on this same flow: their rows mean the same.
+  for (const [k, l] of loads.list.entries()) {
+    const r = runOfLoad(k);
+    if (!r || r.result.manifest.flow.hash !== run.result.manifest.flow.hash) continue;
+    const ri = await inspect(r);
+    const i = ri.index.get(input);
+    const read = i === undefined ? null : readIn(ri, i, who);
+    if (!read) continue;
+    parts.push(read);
+    days.push(l.day);
+  }
+  return parts.length ? { sql: emitSqlOver(node.sql, [[input, emitUnionAll(parts)]]), days } : null;
+}
+
 /** Horizontal bars per borough and condition: trips per hour against dry hours at the same hour of day (1.0). */
-function effectChart(rows: [string, string, number, number, number][], dry: [string, number, number][], width: number): HTMLElement {
+function effectChart(rows: [string, string, number, number, number][], dry: [string, number, number][], width: number, empty: string): HTMLElement {
   const busy = new Set(dry.filter(([, , perHour]) => perHour >= 3).map(([b]) => b));
   const shown = rows.filter(([b, , hours]) => busy.has(b) && hours >= 4);
-  if (shown.length === 0) return h('p', { class: 'foot' }, 'Not enough trips per hour in the sample to compare.');
+  if (shown.length === 0) return h('p', { class: 'foot effect-empty' }, empty);
   // Drawn at the width it is shown, so its labels stay at their real size on a phone.
   const left = Math.max(118, Math.round(width * 0.3));
   const right = 48;
@@ -2463,7 +2840,7 @@ function effectChart(rows: [string, string, number, number, number][], dry: [str
     svg.append(s('text', { class: 'axis', x: x(t), y: 12, 'text-anchor': 'middle' }, t === 1 ? 'dry = 1' : String(t)));
   }
   svg.append(...marks);
-  return h('div', {}, svg, h('p', { class: 'foot' }, 'A 100,000-trip sample is about 3% of the month, so only boroughs with at least 3 trips in a dry hour are shown. Weather by Open-Meteo.com (CC BY 4.0); trips from the NYC TLC.'));
+  return h('div', {}, svg, h('p', { class: 'foot' }, 'Only boroughs with at least 3 trips in a dry hour are shown, and conditions with 4 hours or more. Weather by Open-Meteo.com (CC BY 4.0); trips from the NYC TLC.'));
 }
 
 // ------------------------------------------------------------------ policies
@@ -2773,6 +3150,190 @@ async function submitAction(action: string, params: Record<string, string | numb
 
 // ------------------------------------------------------------------ runs
 
+// ------------------------------------------------------------------ daily loads
+
+// The trips come a day at a time, as a feed would bring them: each load is one day's file (the data branch's
+// loads/), put in the engine as the trips source, and the flow runs on it. A load run before reruns at no cost: the
+// same rows give the same keys, so every step is reused. Each load is compared with the one before: its rows, the
+// share its checks dropped (an unusual share is marked once four loads have run), and, in the profile box, how each
+// column moved.
+
+interface Load {
+  day: string;
+  file: string;
+  rows: number;
+  sha256: string;
+  note?: string;
+}
+const loads = {
+  list: [] as Load[],
+  /** The load the flow ran on last, by place in the list. */
+  at: -1,
+  bytes: new Map<number, Uint8Array>(),
+  playing: false,
+  /** How far the loads' source moved from the load before, as each person reads it: its most moved column. */
+  drift: new Map<string, Drift['level']>(),
+  measuring: new Map<string, Promise<void>>(),
+};
+/** The source the loads feed: the one the example reads trips.parquet into. */
+const loadSource = (): string | undefined => {
+  const table = EXAMPLE_SOURCES.find((x) => x.file === 'trips.parquet')?.table;
+  return state.doc.sources.find((x) => x.table === table)?.id;
+};
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dateOf = (day: string) => new Date(`${day}T12:00:00Z`);
+const weekday = (day: string) => WEEKDAYS[dateOf(day).getUTCDay()]!;
+const dayLabel = (day: string) => `${weekday(day)} ${dateOf(day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`;
+/** The latest run on a load. */
+const runOfLoad = (k: number) => state.runs.find((r) => r.load === k);
+const driftKey = (k: number, who = state.viewer) => `${k}|${who}`;
+
+/** What a load's run says of it: its trips, and the share of them its first checks dropped. */
+function loadStats(r: RunRecord): { rows: number; dropped: number | null } | null {
+  const src = loadSource();
+  const m = r.result.manifest;
+  const input = m.nodes.find((n) => n.origin === src);
+  if (!src || !input) return null;
+  const checker = state.doc.steps.find((x) => x.kind === 'expectations' && x.inputs.includes(src));
+  const e = checker ? m.nodes.find((n) => n.origin === checker.id)?.expectations : undefined;
+  return { rows: Number(input.rows ?? 0), dropped: e && e.rows ? e.dropped / e.rows : null };
+}
+
+/** The loads whose checks dropped an unusual share: more than 3.5 robust deviations from the median, once four have run. */
+function unusualLoads(): Set<number> {
+  const shares = loads.list.map((_, k) => {
+    const r = runOfLoad(k);
+    return r ? (loadStats(r)?.dropped ?? null) : null;
+  });
+  const known = shares.filter((x): x is number => x !== null).sort((a, b) => a - b);
+  const out = new Set<number>();
+  if (known.length < 4) return out;
+  const med = quantile(known, 0.5);
+  const spread = quantile(known.map((x) => Math.abs(x - med)).sort((a, b) => a - b), 0.5) * 1.4826;
+  shares.forEach((x, k) => x !== null && spread > 0 && Math.abs(x - med) / spread > 3.5 && out.add(k));
+  return out;
+}
+
+/** The load now, in a sentence: its day, its trips against the day before, what its checks dropped. */
+function loadSummary(): string {
+  const k = loads.at;
+  const l = loads.list[k];
+  if (!l) return '';
+  const r = runOfLoad(k);
+  const st = r ? loadStats(r) : null;
+  const prev = k > 0 ? runOfLoad(k - 1) : undefined;
+  const before = prev ? loadStats(prev) : null;
+  const yesterday = k > 0 ? weekday(loads.list[k - 1]!.day) : '';
+  const parts = [`Load ${k + 1} of ${loads.list.length}: ${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}, ${fmtInt(l.rows)} trips`];
+  if (st && before) parts.push(`${pct(Math.abs(st.rows - before.rows) / Math.max(1, before.rows))} ${st.rows >= before.rows ? 'more' : 'fewer'} than ${yesterday}`);
+  if (st?.dropped != null) parts.push(`its checks dropped ${pct(st.dropped)}${before?.dropped != null ? ` (${yesterday} ${pct(before.dropped)})` : ''}${unusualLoads().has(k) ? ', an unusual share this week' : ''}`);
+  const level = loads.drift.get(driftKey(k));
+  if (level) parts.push(level === 'steady' ? 'every column steady since the day before' : `columns ${level} since the day before: the profile box says which`);
+  return `${parts.join(' · ')}.`;
+}
+
+function renderLoads(): void {
+  const box = $('loads');
+  if (loads.list.length < 2) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const odd = unusualLoads();
+  const busy = state.running || !state.engine;
+  const chips = loads.list.map((l, k) => {
+    const r = runOfLoad(k);
+    const st = r ? loadStats(r) : null;
+    const level = loads.drift.get(driftKey(k));
+    const label = `${dayLabel(l.day)}: ${fmtInt(l.rows)} trips${st?.dropped != null ? `, its checks dropped ${pct(st.dropped)}` : r ? '' : ', not run yet'}${odd.has(k) ? ', an unusual share' : ''}${level ? `, ${level} since the day before` : ''}`;
+    return h('button', { type: 'button', class: ['load', k === loads.at ? 'at' : '', r ? 'ran' : '', odd.has(k) ? 'unusual' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
+      h('span', { class: 'ld-day' }, weekday(l.day)),
+      h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
+      h('span', { class: 'ld-stat' }, st?.dropped != null ? pct(st.dropped) : fmtCompact(l.rows)),
+      h('span', { class: `ld-dot ${level ?? 'none'}`, 'aria-hidden': 'true' }));
+  });
+  const last = loads.at >= loads.list.length - 1;
+  const play = h('button', { type: 'button', class: 'btn small', 'aria-pressed': String(loads.playing), disabled: busy && !loads.playing, onclick: () => void playLoads() }, loads.playing ? 'Pause' : last ? 'Play from Day 1 ▶' : 'Play the rest ▶');
+  const next = h('button', { type: 'button', class: 'btn small', disabled: busy || loads.playing || last, onclick: () => void useLoad(loads.at + 1) }, 'Next load ›');
+  const first = loads.list[0]!.day;
+  const end = loads.list.at(-1)!.day;
+  box.replaceChildren(
+    h('div', { class: 'loads-head' }, h('p', { class: 'eyebrow' }, `Daily loads · ${dayLabel(first).slice(4)} to ${dayLabel(end).slice(4)}, ${first.slice(0, 4)}`), h('div', { class: 'loads-act' }, play, next)),
+    h('div', { class: 'loads-row', role: 'group', 'aria-label': 'Daily loads: tap one to run the flow on it' }, ...chips),
+    h('p', { class: 'loads-now', 'aria-live': 'polite' }, loadSummary()),
+  );
+}
+
+/** Run the flow on a load: its day's file in the engine as the trips source, then a run. */
+async function useLoad(k: number): Promise<void> {
+  const engine = state.engine;
+  const l = loads.list[k];
+  if (!engine || !l || state.running) return;
+  let bytes = loads.bytes.get(k);
+  if (!bytes) {
+    setStatus(`Fetching ${dayLabel(l.day)}: ${fmtInt(l.rows)} trips…`);
+    bytes = await loadFile(l.file);
+    loads.bytes.set(k, bytes);
+  }
+  await registerFile(engine, 'trips.parquet', bytes);
+  loads.at = k;
+  renderLoads();
+  await run();
+  renderLoads();
+  if (!loads.playing) void measureLoad(k);
+}
+
+/** How far a load's source moved from the load before, for its chip and its profile card: its most moved column. */
+function measureLoad(k: number): Promise<void> {
+  const key = driftKey(k);
+  const src = loadSource();
+  const now = runOfLoad(k);
+  const before = k > 0 ? runOfLoad(k - 1) : undefined;
+  if (!src || !now || !before || loads.drift.has(key) || !visible(src)) return Promise.resolve();
+  let p = loads.measuring.get(key);
+  if (!p) {
+    const order: Drift['level'][] = ['steady', 'moved', 'shifted'];
+    p = driftsBetween(src, now, before, state.viewer, true)
+      .then((d) => {
+        if (d?.size) loads.drift.set(key, [...d.values()].reduce<Drift['level']>((w, x) => (order.indexOf(x.level) > order.indexOf(w) ? x.level : w), 'steady'));
+        renderLoads();
+        renderCanvas();
+      })
+      .catch(() => undefined)
+      .finally(() => loads.measuring.delete(key));
+    loads.measuring.set(key, p);
+  }
+  return p;
+}
+
+/** Play the loads one after another, each measured against the one before as it lands; tap again to pause. */
+async function playLoads(): Promise<void> {
+  if (loads.playing) {
+    loads.playing = false;
+    renderLoads();
+    return;
+  }
+  loads.playing = true;
+  const from = loads.at >= loads.list.length - 1 ? 0 : loads.at + 1;
+  renderLoads();
+  for (let k = from; k < loads.list.length && loads.playing; k++) {
+    await useLoad(k);
+    if (state.failed) break;
+    await measureLoad(k);
+  }
+  loads.playing = false;
+  renderLoads();
+}
+
+/** A profile box's card: what it found in the load, against the load before. */
+function profileLine(p: ProfileDef): CardLine {
+  if (!nodeOf(p.of)) return { text: state.running ? 'running…' : 'columns, odd rows, drift', tone: 'same' };
+  const level = p.of === loadSource() ? loads.drift.get(driftKey(loads.at)) : undefined;
+  if (!level) return { text: loads.list.length > 1 && loads.at === 0 ? 'the first load: open it' : 'columns, odd rows, drift', tone: 'same' };
+  const since = weekday(loads.list[loads.at - 1]!.day);
+  return level === 'steady' ? { text: `steady since ${since}`, tone: 'same' } : { text: `${level} since ${since}`, tone: 'drop', badge: level };
+}
+
 function renderRuns(): void {
   const list = $('runs-list');
   if (state.runs.length === 0) {
@@ -2788,7 +3349,7 @@ function renderRuns(): void {
       const count = (status: string) => nodes.filter((n) => n.status === status).length;
       const li = h('li', { class: 'panel' });
       li.append(
-        h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Run ${r.result.run}`), h('span', { class: 'pill' }, `${count('built')} built`), h('span', { class: 'pill' }, `${count('reused')} reused`), h('span', { class: 'pill' }, `${count('folded')} folded`), h('span', { class: 'foot num' }, `${fmtMs(r.ms)} · ${r.at.toLocaleTimeString()}`)),
+        h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Run ${r.result.run}`), r.load !== undefined && loads.list[r.load] ? h('span', { class: 'pill load-pill' }, dayLabel(loads.list[r.load]!.day)) : null, h('span', { class: 'pill' }, `${count('built')} built`), h('span', { class: 'pill' }, `${count('reused')} reused`), h('span', { class: 'pill' }, `${count('folded')} folded`), h('span', { class: 'foot num' }, `${fmtMs(r.ms)} · ${r.at.toLocaleTimeString()}`)),
         h('p', { class: 'hash' }, `manifest ${r.result.hash}`),
         h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => void verify(r) }, 'Verify'), owner ? h('button', { class: 'btn', type: 'button', onclick: () => void sign(r) }, r.signed ? 'Signed' : 'Sign') : null),
       );
@@ -2840,12 +3401,13 @@ async function run(): Promise<void> {
   try {
     const result = await runFlow(engine, state.doc, { smaltdb: SMALTDB });
     const ms = performance.now() - t;
-    state.runs.unshift({ result, ms, at: new Date() });
+    state.runs.unshift({ result, ms, at: new Date(), ...(loads.at >= 0 && loads.list.length > 1 ? { load: loads.at } : {}) });
     await learnColumns();
     const count = (status: string) => result.manifest.nodes.filter((n) => n.status === status && (isOwner() || visible(n.origin))).length;
     void computeChanges();
     await refreshEdits();
-    setStatus(`Run ${result.run} took ${fmtMs(ms)}: ${count('built')} built, ${count('reused')} reused, ${count('folded')} folded${engine.mode === 'page' ? ' (the engine runs in the page here)' : ''}.`);
+    const day = loads.list.length > 1 && loads.list[loads.at] ? `${dayLabel(loads.list[loads.at]!.day)}: ` : '';
+    setStatus(`${day}Run ${result.run} took ${fmtMs(ms)}: ${count('built')} built, ${count('reused')} reused, ${count('folded')} folded${engine.mode === 'page' ? ' (the engine runs in the page here)' : ''}.`);
   } catch (e) {
     const msg = message(e);
     const origin = /^([A-Za-z][A-Za-z0-9_]*): /.exec(msg)?.[1];
@@ -2922,14 +3484,22 @@ async function start(): Promise<void> {
   try {
     setStatus('Starting the engine…');
     const engine = await connect();
-    setStatus('Loading 100,000 trips, the zones and the weather…');
-    const files = await Promise.all(EXAMPLE_SOURCES.map(async (src) => [src, await loadFile(src.file)] as const));
+    // The daily loads the data has, if any: the flow starts on the first.
+    const index = (await fetch('data/loads.json').then((r) => (r.ok ? r.json() : null)).catch(() => null)) as { loads?: Load[] } | null;
+    loads.list = index?.loads ?? [];
+    const first = loads.list[0];
+    setStatus(first ? `Loading ${dayLabel(first.day)}: ${fmtInt(first.rows)} trips, the zones and the weather…` : 'Loading the trips, the zones and the weather…');
+    const files = await Promise.all(EXAMPLE_SOURCES.map(async (src) => [src, await loadFile(src.file === 'trips.parquet' && first ? first.file : src.file)] as const));
     for (const [src, bytes] of files) {
       await registerFile(engine, src.file, bytes);
       await engine.exec(src.ddl);
+      if (src.file === 'trips.parquet' && first) loads.bytes.set(0, bytes);
     }
+    if (first) loads.at = 0;
     state.engine = engine;
+    renderLoads();
     await run();
+    renderLoads();
   } catch (e) {
     state.failed = { message: `The engine couldn't start: ${message(e)}` };
     setStatus(state.failed.message, true);

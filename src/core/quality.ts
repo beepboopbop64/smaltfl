@@ -75,6 +75,17 @@ export function numbersOf(kind: Kind, values: readonly unknown[]): number[] {
   return values.map((v) => (kind === 'time' ? asTime(v) : isNumber(v) ? v : NaN)).filter((v) => !Number.isNaN(v));
 }
 
+/** A time's minutes since midnight as the record writes it, or null: to compare days by the time of day, not the date. */
+export function minuteOfDay(v: unknown): number | null {
+  const t = asTime(v);
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+
+/** Minutes since midnight as a clock: 14:58. */
+export const clockText = (minutes: number) => `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(Math.floor(minutes % 60)).padStart(2, '0')}`;
+
 /**
  * A column's profile from its exact facts and a sample of its values. Numbers are codes when they are ids (by name)
  * or take a dozen values or fewer; text is a time when nine in ten of its values read as one, a category when it
@@ -140,7 +151,14 @@ export function random(seed: number): () => number {
 /** The average path length of an unsuccessful search in a binary search tree of n points: the forest's yardstick. */
 const avgPath = (n: number) => (n > 2 ? 2 * (Math.log(n - 1) + 0.5772156649) - (2 * (n - 1)) / n : n === 2 ? 1 : 0);
 
-type Tree = { f: number; split: number; left: Tree; right: Tree } | { size: number };
+/** An isolation tree: a split on feature `f` at `split` (lower values go left), or a leaf of the points left. */
+export type Tree = { f: number; split: number; left: Tree; right: Tree } | { size: number };
+
+/** A forest's trees, each with the subsample of row positions it was grown on, and that subsample's size. */
+export interface Forest {
+  trees: { root: Tree; members: number[] }[];
+  size: number;
+}
 
 /**
  * Isolation forest scores (Liu, Ting and Zhou, 2008): each tree splits a random subsample on a random feature at a
@@ -149,10 +167,15 @@ type Tree = { f: number; split: number; left: Tree; right: Tree } | { size: numb
  * are seeded, so the same data always gets the same scores.
  */
 export function isolationForest(data: readonly (readonly number[])[], options: { trees?: number; size?: number; seed?: number } = {}): number[] {
+  const forest = growForest(data, options);
+  return forest ? data.map((x) => scoreOf(forest, x)) : data.map(() => 0.5);
+}
+
+/** The trees an isolation forest grows on `data`, or null when there is too little to split (under 3 rows, or no columns). */
+export function growForest(data: readonly (readonly number[])[], options: { trees?: number; size?: number; seed?: number } = {}): Forest | null {
   const n = data.length;
-  if (n === 0) return [];
-  const dims = data[0]!.length;
-  if (dims === 0 || n < 3) return data.map(() => 0.5);
+  const dims = data[0]?.length ?? 0;
+  if (dims === 0 || n < 3) return null;
   const trees = options.trees ?? 100;
   const size = Math.min(options.size ?? 256, n);
   const limit = Math.ceil(Math.log2(size));
@@ -178,7 +201,7 @@ export function isolationForest(data: readonly (readonly number[])[], options: {
     }
     return { size: idx.length };
   };
-  const forest: Tree[] = [];
+  const forest: Forest = { trees: [], size };
   const all = Array.from({ length: n }, (_, i) => i);
   for (let t = 0; t < trees; t++) {
     // A subsample without replacement: the first `size` places of a partial shuffle.
@@ -186,22 +209,130 @@ export function isolationForest(data: readonly (readonly number[])[], options: {
       const j = i + Math.floor(rnd() * (n - i));
       [all[i], all[j]] = [all[j]!, all[i]!];
     }
-    forest.push(grow(all.slice(0, size), 0));
+    const members = all.slice(0, size);
+    forest.trees.push({ root: grow(members, 0), members });
   }
-  const norm = avgPath(size);
-  return data.map((x) => {
-    let total = 0;
-    for (const tree of forest) {
-      let node = tree;
-      let depth = 0;
-      while ('f' in node) {
-        node = x[node.f]! < node.split ? node.left : node.right;
-        depth++;
-      }
-      total += depth + avgPath(node.size);
+  return forest;
+}
+
+/** How many splits a tree takes to set a point apart: the splits on its way to a leaf, plus a leaf's expected rest. */
+export function pathLength(tree: Tree, x: readonly number[]): number {
+  let node = tree;
+  let depth = 0;
+  while ('f' in node) {
+    node = x[node.f]! < node.split ? node.left : node.right;
+    depth++;
+  }
+  return depth + avgPath(node.size);
+}
+
+/** A point's score in a forest: 2 to the minus its average path length over the forest's yardstick. */
+export function scoreOf(forest: Forest, x: readonly number[]): number {
+  let total = 0;
+  for (const t of forest.trees) total += pathLength(t.root, x);
+  return 2 ** (-(total / forest.trees.length) / avgPath(forest.size));
+}
+
+/** One split on a point's way down a tree, and the tree's rows still beside it after it. */
+export interface Cut {
+  feature: number;
+  split: number;
+  /** Which side the point goes: 'below' the split, or 'at or above' it. */
+  side: 'below' | 'above';
+  /** Row positions of the tree's subsample on the point's side after this cut. */
+  left: number[];
+}
+
+/**
+ * The cuts a tree makes on a point's way down, each with the rows of the tree's subsample still on the point's side:
+ * the forest at work, one tree at a time. The last cut leaves the point alone, or with the few rows a leaf keeps.
+ */
+export function isolationPath(forest: Forest, tree: number, data: readonly (readonly number[])[], x: readonly number[]): Cut[] {
+  const t = forest.trees[tree]!;
+  let node = t.root;
+  let left = t.members;
+  const cuts: Cut[] = [];
+  while ('f' in node) {
+    const below = x[node.f]! < node.split;
+    const { f, split } = node;
+    left = left.filter((i) => data[i]![f]! < split === below);
+    cuts.push({ feature: f, split, side: below ? 'below' : 'above', left });
+    node = below ? node.left : node.right;
+  }
+  return cuts;
+}
+
+// ------------------------------------------------------------------ a picture of the rows: principal components
+
+/** Two directions across the rows, and where each row lies along them. */
+export interface Projection {
+  /** Each row's place along the components. */
+  points: [number, number][];
+  /** Each component's weight on each column (unit length, its largest weight positive). */
+  components: [number[], number[]];
+  /** The share of the rows' spread each component carries. */
+  explained: [number, number];
+}
+
+/**
+ * The rows' two principal components, for a picture where far rows look far. Each column is centred on its median
+ * and scaled by its spread (1.4826 times the median absolute deviation, else its standard deviation), so dollars
+ * don't outweigh miles and one extreme row doesn't set the scale. The directions are found on values capped at six
+ * spreads, so a few extreme rows don't choose them; every row is then placed along them uncapped. Power iteration
+ * with deflation, from a fixed start: the same rows always give the same picture.
+ */
+export function principalComponents(data: readonly (readonly number[])[]): Projection | null {
+  const n = data.length;
+  const dims = data[0]?.length ?? 0;
+  if (n < 3 || dims === 0) return null;
+  const centre: number[] = [];
+  const spread: number[] = [];
+  for (let k = 0; k < dims; k++) {
+    const col = data.map((r) => r[k]!).sort((a, b) => a - b);
+    const med = quantile(col, 0.5);
+    const mad = quantile(col.map((v) => Math.abs(v - med)).sort((a, b) => a - b), 0.5) * 1.4826;
+    const mean = col.reduce((a, b) => a + b, 0) / n;
+    const sd = Math.sqrt(col.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1));
+    centre.push(med);
+    spread.push(mad > 0 ? mad : sd > 0 ? sd : 1);
+  }
+  const z = data.map((r) => r.map((v, k) => (v - centre[k]!) / spread[k]!));
+  const capped = z.map((r) => r.map((v) => Math.max(-6, Math.min(6, v))));
+  const means = Array.from({ length: dims }, (_, k) => capped.reduce((a, r) => a + r[k]!, 0) / n);
+  const cov = Array.from({ length: dims }, (_, a) => Array.from({ length: dims }, (_, b) => capped.reduce((t, r) => t + (r[a]! - means[a]!) * (r[b]! - means[b]!), 0) / Math.max(1, n - 1)));
+  const trace = cov.reduce((t, row, k) => t + row[k]!, 0);
+  const found: number[][] = [];
+  const shares: number[] = [];
+  for (let c = 0; c < 2; c++) {
+    let v = Array.from({ length: dims }, (_, k) => 1 / Math.sqrt(dims) + (k + 1) * 1e-3);
+    let lambda = 0;
+    for (let it = 0; it < 500; it++) {
+      const w = cov.map((row) => row.reduce((t, x, k) => t + x * v[k]!, 0));
+      const norm = Math.hypot(...w);
+      if (norm < 1e-12) break;
+      const next = w.map((x) => x / norm);
+      const moved = next.reduce((t, x, k) => t + Math.abs(x - v[k]!), 0);
+      v = next;
+      lambda = norm;
+      if (moved < 1e-10) break;
     }
-    return 2 ** (-(total / forest.length) / norm);
-  });
+    // One orientation: the largest weight positive.
+    const big = v.reduce((b, x, k) => (Math.abs(x) > Math.abs(v[b]!) ? k : b), 0);
+    if (v[big]! < 0) v = v.map((x) => -x);
+    found.push(v);
+    shares.push(trace > 0 ? lambda / trace : 0);
+    // Deflate: take this direction's spread out before looking for the next.
+    for (let a = 0; a < dims; a++) {
+      const row = cov[a]!;
+      for (let b = 0; b < dims; b++) row[b] = row[b]! - lambda * v[a]! * v[b]!;
+    }
+  }
+  const [u, w] = found as [number[], number[]];
+  return {
+    points: z.map((r) => [r.reduce((t, x, k) => t + (x - means[k]!) * u[k]!, 0), r.reduce((t, x, k) => t + (x - means[k]!) * w[k]!, 0)]),
+    components: [u, w],
+    explained: [shares[0]!, shares[1]!],
+  };
 }
 
 /** Each column's gaps filled with its median, so a missing value is ordinary rather than odd. */

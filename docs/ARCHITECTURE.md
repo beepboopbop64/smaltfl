@@ -350,7 +350,21 @@ Builder and drawn in the family's look. The first concepts are on the design can
   sheet names it; Results, the Ontology and the Policies leave out the outputs, object types, rules, people and
   edits that aren't theirs, and Runs shows the run as far as they can see the flow, without its full record.
   Arranging the canvas stays with the owner.
-- **What the columns hold.** A step's sheet has a card for each column: how full it is, its distinct values, and a
+- **Profile boxes.** What a step's rows hold has a box of its own on the canvas, beside the step in its section,
+  joined to it by a dashed edge: it only looks (the document's `profiles`, display fields, out of the plan, the flow
+  hash and every key). The example has one on the trips input, so each load's shape is in sight as it comes in; a
+  step's sheet opens its profile box, or adds one. A profile box's sheet holds what follows: how the load compares
+  with the one before, the isolation forest at play, the odd rows, the columns, drift across loads, and the checks
+  worth adding.
+- **Daily loads.** The trips come a day at a time: a strip of day chips above the canvas, one per load, with what its
+  checks dropped and a dot for how far it moved from the day before (its most moved column); Next and Play step
+  through them. A load is that day's file put in the engine as the trips source, and a run: a load run before runs
+  again at no cost, its rows giving the same keys. A load whose checks dropped an unusual share (beyond 3.5 robust
+  deviations from the loads' median, once four have run) is marked. Each run records its load, and the Runs view
+  names the day. Weather's effect needs dry hours at the same time of day on other days, which one day's load can't
+  have: it is measured over every load run so far on the same flow, the weather_effect step's own SQL with its input
+  bound to those loads' rows together (`emitSqlOver`, `emitUnionAll`).
+- **What the columns hold.** A profile box has a card for each column: how full it is, its distinct values, and a
   measure's or a time's shape (a histogram from its 1st to its 99th percentile, the median marked, the smallest,
   largest, mean and middle half) or a category's common values. Counts are exact, counted by the engine over every row
   the viewer reads; shapes come from an even sample of up to 2,000 of them. A folded step's rows are copied once into
@@ -366,15 +380,25 @@ Builder and drawn in the family's look. The first concepts are on the design can
   sample, so a card says "already taken care of after this step: trips_valid drops it", that a check before it looked
   and let it pass, or that nothing checks it yet. Only checks the person may read count: on a step open to them, on
   columns they see.
+- **The isolation forest at play.** The sampled rows are drawn on their two principal components
+  (`principalComponents`: each measure centred on its median and scaled by its robust spread, the directions found on
+  values capped at six spreads so a few extreme rows don't choose them, every row then placed uncapped; the axes
+  stretched with asinh so the bulk and the far rows both show, and named by the measures that weigh most). The odd
+  rows are numbered as their cards are. Play has the forest pick them out one by one with its own trees (`growForest`
+  keeps them; the scores are unchanged): for each row, a tree that takes a typical number of cuts for it, whose rows
+  on the other side of each cut fall away (`isolationPath`) until it stands alone, each cut said in the measure's
+  units. A row tapped on the map is cut out the same way, an ordinary one taking many more cuts.
 - **What the columns mean, wherever they show.** A row card labels each column by its title over its name, an amount
   in dollars or its unit, a code with what it stands for, a zone number with the zone's name (read through the
   viewer's policy, so none from a lookup closed to them); a table's header gives the title and unit, with the
   description on hover. A column card says what the column is, decodes its common values, and adds the note. The
   Ontology view lists every column the viewer can read somewhere, grouped by the source it comes from or the steps
   that make it, with its codes, where it is, how a step makes it, and links to its sources.
-- **Drift between runs.** Each column is compared with the same step in the last run that had other rows there (a
-  different key), by the population stability index over the earlier run's deciles, or its values, with missing
-  values a bin of their own: steady under 0.1, moved to 0.25, shifted above, with what moved (a median, a share).
+- **Drift between runs and across loads.** Each column is compared with the day before's load, or, when the flow
+  changed on this load, with its run before (a different key), by the population stability index over the earlier
+  rows' deciles, or its values, with missing values a bin of their own: steady under 0.1, moved to 0.25, shifted
+  above, with what moved (a median, a share). Between days a time is compared by its time of day (`minuteOfDay`):
+  each day's dates are its own. Across loads, a grid has a cell per column and day, each against the day before.
 - **Suggested checks, added as a filter box.** For the columns a step makes itself (an input's, an aggregate's or a SQL
   step's, the ones a formula, join or select adds), and that no check before or after it already judges: an upper
   bound for a far tail, `>= 0` for stray negatives or as a guard, `IS NOT NULL` for a few missing values (columns
