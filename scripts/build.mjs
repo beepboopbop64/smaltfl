@@ -28,6 +28,8 @@ writeFileSync(
     extends: './tsconfig.json',
     compilerOptions: { noEmit: false, declaration: true, emitDeclarationOnly: true, outDir: 'dist', rootDir: 'src', paths: {} },
     include: ['src'],
+    // The app (src/app) is built by build-app.mjs and isn't part of the package.
+    exclude: ['src/app'],
   }),
 );
 try {
