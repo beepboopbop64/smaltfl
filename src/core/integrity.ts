@@ -9,7 +9,10 @@
  *   corrupt       the bytes don't match the list: refused
  *   missing       the file isn't there (a 404): refused
  *   unlisted      the file isn't in the list at all: refused
- *   list          the list itself doesn't match the hash the app was built with, or its entries disagree: refused
+ *   list          the list itself doesn't match the hash loads.json gives for it, or its entries disagree: refused.
+ *                 loads.json is written beside the app when it is built, and served with it: it is not part of app.js,
+ *                 so whoever can change the published files can change both together (only the data branch's own
+ *                 history, checked by an auditor, settles which list is the published one)
  *   not-checked   the file couldn't be fetched (a network error): nothing to judge, and nothing to run on
  */
 export type FileClass = 'same' | 'new' | 'republished' | 'corrupt' | 'missing' | 'unlisted' | 'list' | 'not-checked';
@@ -66,14 +69,14 @@ export function describe(c: FileCheck): { title: string; detail: string } {
     case 'republished':
       return { title: `${name} was republished`, detail: `Its bytes match the data's list${where}, but not what this browser read before (${(c.was ?? '').slice(0, 16)}…, now ${(c.actual ?? '').slice(0, 16)}…): the data was rebuilt, or its source republished it. Worth knowing; nothing is wrong with the bytes.` };
     case 'corrupt':
-      return { title: `${name} isn't the file published`, detail: `Its bytes hash to ${c.actual ?? 'nothing'}, where the data's list${where} gives ${c.expected}. It was fetched again and still didn't match, so it isn't used: the flow keeps its last good run.` };
+      return { title: `${name} isn't the file published`, detail: `Its bytes hash to ${c.actual ?? 'nothing'}, where the data's list${where} gives ${c.expected}. It was fetched again and still didn't match, so it isn't used.` };
     case 'missing':
       return { title: `${name} is missing`, detail: `The data's list${where} names it, and it isn't there. Nothing ran on it.` };
     case 'unlisted':
       return { title: `${name} isn't in the data's list`, detail: `A file the list doesn't name has no hash to check it against, so it isn't used.` };
     case 'list':
       return name === 'MANIFEST.json'
-        ? { title: "The data's list isn't the one this app was built with", detail: `MANIFEST.json hashes to ${c.actual ?? 'nothing'}, where the app expects ${c.expected}: no file can be checked against it, so none is used.` }
+        ? { title: "The data's list isn't the one this app expects", detail: `The list (MANIFEST.json, or the one loads.json names) hashes to ${c.actual ?? 'nothing'}, where this app, as built, expects ${c.expected}: no file can be checked against it, so none is used.` }
         : { title: "The data's list and the app's disagree", detail: `The app expects ${name} to hash to ${c.expected}; the data's list${where} says ${c.actual ?? 'nothing'}. No file can be trusted while they disagree, so none is used.` };
     case 'not-checked':
       return { title: `${name} couldn't be fetched`, detail: 'The network failed before its bytes arrived: nothing to check, and nothing ran on it. Try again.' };

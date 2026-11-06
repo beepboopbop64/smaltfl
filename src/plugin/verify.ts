@@ -9,8 +9,9 @@
  *   consistently.
  * - **rerun:** recomputing every stored node from the run's snapshots, with the same plan, gives the same content
  *   hashes and the same expectation counts. The recomputed rows go to temporary tables, which are dropped after.
- * - **rederive:** the source files the run read are still pinned with the hashes it recorded, and decoding them again
- *   gives the snapshots it read (file); then the rerun.
+ * - **rederive:** the source files the run read are still pinned with the hashes it recorded, each source is still the
+ *   external table over its file, and decoding them again (the engine hashing the bytes it opens) gives the snapshots
+ *   it read (file); then the rerun.
  */
 import type { Database } from 'smaltdb/engine';
 import { canonicalJSON } from '../core/canonical.js';
@@ -28,8 +29,8 @@ import type { VerifyCheck, VerifyLevel, VerifyOptions, VerifyResult } from '../c
 import type { ParamValue } from '../core/sqltext.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 import { hashTable } from './dataset-hash.js';
-import { PINNED_PREFIX, pinned } from './pinned.js';
-import { aborted, countExpectations, RunError } from './runtime.js';
+import { PINNED_PREFIX, pinned, pinnedLocation, takeOpened } from './pinned.js';
+import { aborted, countExpectations, engineVersion, RunError } from './runtime.js';
 import { datasetView, ensureStore, findVersion } from './store.js';
 
 type Json = Parameters<typeof canonicalJSON>[0];
@@ -43,10 +44,16 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
   const manifest = JSON.parse(String(row[0])) as RunManifest;
   const checks: VerifyCheck[] = [];
   const check = (c: VerifyCheck) => checks.push(c);
-  const result = (): VerifyResult => ({ ok: checks.every((c) => c.ok), run: runId, level, format: manifest.smaltflRun ?? 0, engine: { ran: manifest.engine.smaltdb, verified: options.smaltdb }, checks });
+  // The engine that verifies, by its own word where it gives one, not the caller's.
+  const running = engineVersion(db);
+  const verified = running && running !== 'unknown' ? running : options.smaltdb;
+  const result = (): VerifyResult => ({ ok: checks.every((c) => c.ok), run: runId, level, format: manifest.smaltflRun ?? 0, engine: { ran: manifest.engine.smaltdb, verified }, manifest: String(row[1]), checks });
 
   const mh = await manifestHash(manifest);
   check({ node: -1, origin: 'manifest', check: 'stored', ok: mh === row[1], expected: String(row[1]), actual: mh });
+  if (options.manifest !== undefined && options.manifest !== row[1]) {
+    check({ node: -1, origin: 'manifest', check: 'stored', ok: false, expected: options.manifest, actual: String(row[1]), note: `run ${runId} here is another run than the one asked about` });
+  }
   const planRow = db.query('SELECT plan FROM _smaltfl_plans WHERE hash = ?', [manifest.plan]).rows[0];
   if (!planRow) {
     check({ node: -1, origin: 'plan', check: 'stored', ok: false, expected: manifest.plan, actual: null, note: 'the plan is no longer stored' });
@@ -177,11 +184,30 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
           check({ node: m.node, origin: m.origin, check: 'file', ok: false, expected: m.file.sha256, actual: p?.sha256 ?? null, note: p ? 'another file is pinned under that name now: load its day again to re-derive it' : 'the file is no longer pinned here' });
           continue;
         }
+        // The table must still be the external table over that file, or what is decoded below isn't the file.
+        let location: string | null;
+        try {
+          location = pinnedLocation(db, n.table);
+        } catch (e) {
+          check({ node: m.node, origin: m.origin, check: 'file', ok: false, expected: m.file.location, actual: null, note: (e as Error).message });
+          continue;
+        }
+        if (location !== m.file.location) {
+          check({ node: m.node, origin: m.origin, check: 'file', ok: false, expected: m.file.location, actual: location, note: `${n.table} reads ${location ?? 'no pinned file'} now, not the file the run read: decoding it would not decode the run's bytes` });
+          continue;
+        }
         const t = `_smaltfl_verify_${tag}_src${m.node}`;
         db.exec(createTable(t, n.schema!, { temp: true }));
         temps.push(t);
         try {
+          takeOpened();
           await db.runAsync(`INSERT INTO ${q(t)} SELECT * FROM ${q(n.table)}`);
+          // The bytes decoded are the ones the run read, as the engine hashed them when it opened them.
+          const read = takeOpened().find((f) => f.location === m.file!.location);
+          if (!read || read.sha256 !== m.file.sha256 || read.bytes !== m.file.bytes) {
+            check({ node: m.node, origin: m.origin, check: 'file', ok: false, expected: m.file.sha256, actual: read?.sha256 ?? null, note: read ? 'decoding it again read other bytes than the run read' : `decoding it again didn't open ${m.file.location}` });
+            continue;
+          }
           const h = await hashTable(db, t);
           check({ node: m.node, origin: m.origin, check: 'file', ok: h.content === m.content, expected: m.content, actual: h.content, note: `${m.file.location}: ${m.file.bytes} bytes, sha256 ${m.file.sha256}` });
         } catch (e) {

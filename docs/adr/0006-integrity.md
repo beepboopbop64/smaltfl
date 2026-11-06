@@ -37,27 +37,35 @@ cannot rewrite, and give the auditor a bundle they check with their own tools.
 ## Decisions
 
 1. **What is proven, said plainly.** Four levels, never claimed beyond what was checked:
-   - **Intact:** the hashes and signatures check. Against accidents and naive edits only: whoever can rewrite the
-     whole store can rewrite it consistently.
+   - **Intact:** the hashes, keys, links and counts check. Against accidents and naive edits only: whoever can
+     rewrite the whole store can rewrite it consistently.
    - **Recomputed:** every stored dataset was recomputed from the run's snapshots in this session and gave the same
-     hashes.
-   - **Re-derived:** the source files' bytes were decoded again and the result matched the snapshots, then
-     recomputed.
+     hashes and counts.
+   - **Re-derived:** the source files' bytes, still pinned with the hashes the run recorded, were decoded again by the
+     same external table and matched the snapshots, then recomputed. The same engine and decoders do it: it is not an
+     independent decode (an auditor's own rerun is).
    - **Anchored:** the record is consistent with a checkpoint held outside this browser (a downloaded checkpoint, an
-     auditor's copy). Only this level is evidence against someone who controls the browser.
+     auditor's copy). Only this level, or an audit bag checked offline, is evidence against someone who controls the
+     browser.
    Numbers computed live in the page (profiles, odd rows, the news) are not hashed; the stored datasets and the
-   expectation counts are. A finding records the evidence it rests on.
+   expectation counts are. A finding records the evidence it rests on. Where the engine can't start a worker and runs
+   in the page, the page and the engine share one realm: its hashes are then the page's own, and the app says so.
 2. **The first hop is a gate (FIM).** Every data file the app reads (each day's trips, the zones, the weather, the
-   history) is checked against the sha256 the data branch's MANIFEST.json gives for it, and MANIFEST.json itself
-   against the hash `loads.json` carries, before it is used. A file that does not match is refused: the load does not
-   run, the last intact run stays on screen, and the card says why, with what can be done (fetch again, leave the day
-   out, tell the data owner, export for audit, or, the owner only, accept it with a reason). A network error is "not
+   history) is checked against the sha256 and size the data branch's MANIFEST.json gives for it, and MANIFEST.json
+   itself against the hash `loads.json` carries, before it is used. A file that does not match is fetched once more,
+   past any cache, then refused: the load does not run, the last intact run stays on screen, and the card says why,
+   with both hashes and what can be done (fetch again, tell the data owner, export for audit). A network error is "not
    checked", never an alarm. What this record has seen before is the second baseline: a file that changed since this
-   browser last read it, under a list that changed too, is "republished" (amber), not "corrupt" (red).
+   browser last read it, under a list that changed too, is "republished" (amber), not "corrupt" (red). The app is
+   built knowing the list's commit, hash and size, and refuses a `loads.json` that names another: the list, its files
+   and `loads.json` can't be swapped together without rebuilding the app. Only an auditor's check against the data
+   branch proves the list is the data branch's.
 3. **The engine observes the bytes.** The runtime plugin pins each source file inside the engine (`pin`): it hashes
    the bytes there, refuses a mismatch with the expected hash, and serves them through its own source (`smaltfl:`).
-   The run records, for each source node, the file it read: location, sha256 and size, as observed by the engine,
-   not as claimed by the page.
+   A source that reads a pinned file must be the external table over it, one location and nothing else (not a view,
+   not a query, not shadowed by a temporary object), so its rows are the file's: anything else is refused. The run
+   records, for each such source, the file the engine opened for it: location, sha256 and size. A new engine worker
+   gets the pinned files again, checked again.
 4. **A run says everything it depended on (run/1).** The manifest adds the flow's policies and ontology hashes, the
    plugins and versions that decoded and ran it (the engine version checked against the engine itself), each source's
    file, the data branch commit and MANIFEST hash the page loaded from, and the record's head before the run (the
@@ -66,26 +74,38 @@ cannot rewrite, and give the auditor a bundle they check with their own tools.
 5. **verify checks the whole run.** Besides the stored hashes and the recomputation: *coherent* (the manifest agrees
    with the plan it names), *key* (every key recomputes), *published* (each dataset name points at the version the
    run made, through the exact view the runtime writes), *previous* (the run it chains to exists with that hash),
-   *accounting* (rows in and out add up), *flow* (the stored document hashes to the plan's flow hash), and, at the
-   Re-derived level, *file* (the pinned bytes still hash to what the run recorded, and decode to the snapshot).
-6. **One record (log/1).** Runs, verifications, flow edits, profile boxes, ontology edits, actions on findings,
-   integrity events, acceptances, exports and imports go into one append-only record per flow and browser: an RFC
-   9162 Merkle tree, kept in IndexedDB. A correction is a new entry that amends an old one; nothing is edited or
-   deleted. Its head is signed as a checkpoint by this browser's identity (a non-extractable key kept in IndexedDB,
-   per ADR 0002 §1). The record replaces the old data log, whose entries are imported once, verbatim, with their old
-   hashes.
+   *accounting* (rows in and out add up), *flow* (the stored document hashes to the plan's flow hash and translates
+   to the plan), and, at the Re-derived level, *file* (the table still reads the pinned location, and the engine
+   opened exactly the recorded bytes and decoded them to the snapshot). The caller says which manifest it means, and
+   verify fails if the stored one isn't it. The app pins a run's own file again before re-deriving it.
+6. **One record (log/1).** Runs (failed ones too), flow changes, file checks, actions on findings with the evidence
+   they rest on, ontology edits with the policies and ontology in force, verifications, signatures, checks against a
+   kept checkpoint, exports and imports go into one append-only record per flow and browser: an RFC 9162 Merkle tree,
+   kept in IndexedDB, appended one entry at a time. Each run's manifest, plan and flow document are kept with it. A
+   correction is a new entry that amends an old one; nothing is edited or deleted. Its head is signed as a checkpoint
+   by this browser's identity (a non-extractable key kept in IndexedDB, per ADR 0002 §1). The record replaces the old
+   data log, whose entries are imported once, verbatim, with whether their old chain held; the old copy is retired only
+   once the record keeps them for good. An entry the store refuses is counted and shown. Where IndexedDB is missing,
+   blocked or slow to answer, the record is kept for the visit only, and says so.
 7. **Anchoring is the auditor's.** A checkpoint can be downloaded and kept elsewhere; a later record is checked for
-   consistency against it (an RFC 9162 consistency proof). A server, a record branch or a public transparency log can
-   witness checkpoints later.
+   consistency against it (an RFC 9162 consistency proof), by the app or by `node scripts/audit.mjs consistent`. A
+   server, a record branch or a public transparency log can witness checkpoints later.
 8. **The audit bag.** An export is a BagIt 1.0 bag in a ZIP (no compression, no dependency): the record and its
-   checkpoints, the identity card, every manifest, plan and flow document it names, the data branch's MANIFEST.json,
-   an inclusion proof for each published dataset, and a readable account. The source files are left out by default
-   (an auditor gets each from the data branch by its sha256) and included on request. An auditor checks it with
-   `sha256sum -c` and `node scripts/audit.mjs`, from their own checkout, without trusting the browser that made it.
-   It holds everything this browser holds: "owner only" is a convenience until principals are authenticated.
-9. **On the canvas.** Integrity is shown apart from data health: a seal on a card (intact, recomputed, re-derived,
-   or broken) beside its news dot, a chain from each output back to its source bytes, full hashes in groups of four
-   with a copy button, and the record's head on the Runs view.
+   checkpoints, the identity card, every manifest, plan and flow document it names, what the engine holds of this
+   visit's runs, the data branch's MANIFEST.json, an inclusion proof for each dataset of the latest run (against the
+   head the bag names), and a readable account. The source files are left out (an auditor gets each from the data
+   branch by its sha256). An auditor checks it with `sha256sum -c` and `node scripts/audit.mjs check`, from their own
+   checkout, without trusting the browser that made it, bringing what the bag can't vouch for itself: the signer's
+   fingerprint from its owner (`--signer`) and the data branch's list (`--list`, from `git show <Data-Commit>:MANIFEST.json`).
+   It fails a proof for a dataset its run didn't make, a run whose files can't be checked against the list, a run
+   whose plan is missing, and a run whose record head isn't the record's. It holds everything this browser holds:
+   "owner only" is a convenience until principals are authenticated.
+9. **On the canvas.** Integrity is shown apart from data health: a seal on a card beside its news dot. An input is
+   sealed when the file the latest run read is one the data's list publishes; a step, when the latest run was
+   re-derived from its files and every check of that step passed. A refused file or a failed check breaks the seal
+   (a failed check of the whole run breaks every seal); nothing is sealed when the flow changed since the run; and the
+   seal is amber where the engine runs in the page. Each card's Integrity tab traces it back to the files, full hashes
+   in groups of four with a copy button; the Runs view shows the record and its head.
 
 ## Encodings
 
@@ -126,7 +146,9 @@ Retired: the data log's untagged `sha256Hex(JCS(entry))`, read once by the impor
   previous run, a tampered count and a claimed engine version, all of which passed before.
 - The record shows growth that can be proven, and a checkpoint kept elsewhere makes rewriting it detectable. Within
   one browser, it is still a record of one device: a team's shared record waits for a server.
-- Left for later, each with its own decision: the data job's own provenance (upstream fetch records with ETags and
+- Left for later, each with its own decision: leaving a refused day out and an owner's acceptance of a file with a
+  reason; recording profile boxes and policy changes as entries; source files in the bag on request; marking a run
+  made by the in-page engine in its manifest; the data job's own provenance (upstream fetch records with ETags and
   hashes for every month read, a deterministic history file, MANIFEST chained to the previous build, a signed
   attestation, the workflow restricted to the main branch, data branch history kept rather than force-pushed); a
   durable engine (OPFS); row proofs and diffs between loads from kept chunk digests; external witnesses (RFC 3161

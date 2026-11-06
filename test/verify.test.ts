@@ -65,6 +65,33 @@ describe('a pinned source file', () => {
     const later = await verifyRun(db, r.run, { smaltdb: SMALTDB, level: 'rederive' });
     expect(later.checks.find((c) => c.origin === 'zones' && c.check === 'file')).toMatchObject({ ok: false, note: 'another file is pinned under that name now: load its day again to re-derive it' });
   });
+
+  it('is refused when a source reads it through a view, which could drop its rows or add others', async () => {
+    const { db, doc } = await pinnedEngine('zones-d.csv');
+    // The view reads the pinned file, so the engine opens it; but its rows are some of the file's and one of its own.
+    db.exec('CREATE TABLE forged(LocationID INTEGER, Borough TEXT, Zone TEXT, service_zone TEXT)');
+    db.exec("INSERT INTO forged VALUES (999, 'Atlantis', 'Forged', 'Yellow Zone')");
+    db.exec("CREATE VIEW zones_mixed AS SELECT * FROM zones_file WHERE Borough <> 'Manhattan' UNION ALL SELECT * FROM forged");
+    doc.sources[1]!.table = 'zones_mixed';
+    await expect(runFlow(db, doc, { smaltdb: SMALTDB })).rejects.toThrow(/zones_mixed reads the pinned file smaltfl:zones-d\.csv through a view: a source that reads a pinned file must be the external table over it/);
+    // A temporary object of the table's own name hides the external table: refused too.
+    doc.sources[1]!.table = 'zones_file';
+    db.exec('CREATE TEMP VIEW zones_file AS SELECT * FROM zones_mixed');
+    await expect(runFlow(db, doc, { smaltdb: SMALTDB })).rejects.toThrow(/through a temporary object/);
+  });
+
+  it("doesn't re-derive from a table that no longer reads the file the run read", async () => {
+    const { db, doc } = await pinnedEngine('zones-e.csv');
+    const r = await runFlow(db, doc, { smaltdb: SMALTDB });
+    // The same rows, kept in a table: they decode to the snapshot, but they aren't the run's bytes decoded again.
+    await db.execAsync("CREATE EXTERNAL TABLE zones_again(LocationID INTEGER, Borough TEXT, Zone TEXT, service_zone TEXT) WITH (location = 'smaltfl:zones-e.csv', format = 'csv', header = true)");
+    db.exec('CREATE TABLE zones_copy(LocationID INTEGER, Borough TEXT, Zone TEXT, service_zone TEXT)');
+    await db.runAsync('INSERT INTO zones_copy SELECT * FROM zones_again');
+    db.exec('DROP EXTERNAL TABLE zones_file');
+    db.exec('CREATE VIEW zones_file AS SELECT * FROM zones_copy');
+    const v = await verifyRun(db, r.run, { smaltdb: SMALTDB, level: 'rederive' });
+    expect(v.checks.find((c) => c.origin === 'zones' && c.check === 'file')).toMatchObject({ ok: false, actual: null, note: "zones_file reads no pinned file now, not the file the run read: decoding it would not decode the run's bytes" });
+  });
 });
 
 describe('verify, end to end', () => {
@@ -81,6 +108,16 @@ describe('verify, end to end', () => {
     const v = await verifyRun(db, r.run, { smaltdb: SMALTDB, level: 'stored' });
     expect(v.ok).toBe(true);
     expect(new Set(v.checks.map((c) => c.check))).toEqual(new Set(['stored', 'coherent', 'flow', 'key', 'published', 'accounting']));
+    expect(v.manifest).toBe(r.hash);
+  });
+
+  it('fails a run number that names another manifest than the one the caller holds', async () => {
+    const { db, r } = await fresh();
+    expect((await verifyRun(db, r.run, { smaltdb: SMALTDB, level: 'stored', manifest: r.hash })).ok).toBe(true);
+    // Another run's manifest, as a new engine or a rewritten store would give under the same number.
+    const v = await verifyRun(db, r.run, { smaltdb: SMALTDB, level: 'stored', manifest: 'e'.repeat(64) });
+    expect(v.ok).toBe(false);
+    expect(v.checks.filter((c) => !c.ok)).toEqual([{ node: -1, origin: 'manifest', check: 'stored', ok: false, expected: 'e'.repeat(64), actual: r.hash, note: `run ${r.run} here is another run than the one asked about` }]);
   });
 
   it('finds a dataset name pointed at another table', async () => {

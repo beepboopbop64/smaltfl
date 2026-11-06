@@ -37,6 +37,11 @@ match smaltdb's `CLAUDE.md`.
 - `scripts/data/build.py` and `.github/workflows/data.yml`: the scenario's data, fetched on a GitHub runner into the
   `data` branch (`git fetch origin data --depth 1`); `scripts/data/history.ts` measures the history's days there, on
   the runtime (`node scripts/data/history.mjs DAYS_DIR OUT.json`).
+- Integrity (ADR 0006): `src/core/integrity.ts` (a data file against the list), `src/app/fetch-checked.ts`,
+  `src/plugin/pinned.ts` (files hashed and served in the engine), run/1 in `src/core/manifest.ts`, verify's levels in
+  `src/plugin/verify.ts`, the record (`src/core/log.ts`, RFC 9162; `src/app/record.ts`, IndexedDB), the audit bag
+  (`src/core/bag.ts`, `src/core/zip.ts`) and its offline check (`src/core/audit.ts`, `node scripts/audit.mjs check
+  BAG.zip`). A new hash encoding goes in an ADR first, with test vectors.
 
 ## Rules for this repository
 

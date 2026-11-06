@@ -7,9 +7,10 @@
  * engine reads them through the source below, whose validator is the hash, and every open is noted, so the runtime can
  * say which pinned file each snapshot copied.
  */
-import type { OpenedFile, SourceHandler, SourceTarget } from 'smaltdb/engine';
+import type { Database, OpenedFile, SourceHandler, SourceTarget } from 'smaltdb/engine';
 import { sha256Hex } from '../core/hash.js';
 import type { SourceFile } from '../core/manifest.js';
+import { quoteIdent } from '../core/sqltext.js';
 
 export const PINNED_PREFIX = 'smaltfl:';
 
@@ -49,6 +50,25 @@ export async function pin(name: unknown, bytes: unknown, expected: unknown): Pro
 /** The bytes pinned under a name, with their hash, for verify to decode again. */
 export function pinned(name: string): Pinned | undefined {
   return pins.get(name);
+}
+
+/**
+ * The pinned file a source table reads, or null when it reads none. Only an external table whose one location is a
+ * pinned file gives that file's rows and nothing else: a view or a query over it may filter them or add others, and a
+ * temporary object of the same name hides the table. A table that reads a pinned file any other way is refused, so a
+ * run never records a file for rows that aren't all of it, and a re-derivation never decodes anything but the file.
+ */
+export function pinnedLocation(db: Database, table: string): string | null {
+  const sources = db.prepare(`SELECT * FROM ${quoteIdent(table)}`).externalSources;
+  const pinnedOnes = sources.filter((s) => s.location.startsWith(PINNED_PREFIX));
+  if (pinnedOnes.length === 0) return null;
+  const temp = db.query('SELECT 1 FROM sqlite_temp_schema WHERE lower(name) = lower(?)', [table]).rows.length > 0;
+  const type = db.query('SELECT type FROM sqlite_schema WHERE lower(name) = lower(?)', [table]).rows[0]?.[0];
+  if (temp || type !== 'external' || sources.length !== 1) {
+    const how = temp ? 'a temporary object' : type === 'external' ? 'an external table that reads other files too' : `a ${String(type ?? 'query')}`;
+    throw new PinError(`${table} reads the pinned file ${pinnedOnes[0]!.location} through ${how}: a source that reads a pinned file must be the external table over it, so that its rows are the file's and nothing else`);
+  }
+  return pinnedOnes[0]!.location;
 }
 
 /** The pinned files opened since the last call, and forget them. */

@@ -12,8 +12,17 @@ import { canonicalJSON } from '../src/core/canonical.js';
 import { runFlow } from '../src/index.js';
 import { loadFixture, makeTrips, visualFlow } from './fixtures/taxi.js';
 import { openEngine, SMALTDB } from './helpers/engine.js';
+import { installFakeIndexedDB } from './helpers/fake-idb.js';
 
 const enc = new TextEncoder();
+
+/** A run in the record, as the app keeps it: its manifest and its plan by hash, and the run entry naming both. */
+async function keepRun(rec: FlowRecord, db: ReturnType<typeof openEngine>, manifest: { plan: string }, hash: string, run: number) {
+  const blob = await rec.keep('manifest', manifest);
+  const row = db.query('SELECT plan FROM _smaltfl_plans WHERE hash = ?', [manifest.plan]).rows[0];
+  const plan = row ? await rec.keep('plan', JSON.parse(String(row[0]))) : null;
+  return rec.append('run', 'owner', { run, manifest: hash, blob, plan, load: null, outcome: 'ok', files: [] });
+}
 
 /** A flow run, recorded, and a bag of it, as the app's export makes one. */
 async function recorded(flow = `audit-${Math.random().toString(36).slice(2)}`) {
@@ -22,8 +31,7 @@ async function recorded(flow = `audit-${Math.random().toString(36).slice(2)}`) {
   const doc = { ...visualFlow(), id: flow };
   const rec = await FlowRecord.open(flow);
   const r = await runFlow(db, doc, { smaltdb: SMALTDB, log: rec.head() });
-  const blob = await rec.keep('manifest', r.manifest);
-  await rec.append('run', 'owner', { run: r.run, manifest: r.hash, blob, load: null, outcome: 'ok', files: [] });
+  await keepRun(rec, db, r.manifest, r.hash, r.run);
   await rec.append('act', 'ana', { day: '2024-01-07', finding: 'volume', title: 'Fewer trips', act: 'expected', note: 'the snow' });
   return { db, doc, rec, r };
 }
@@ -58,6 +66,26 @@ describe('the record', () => {
     const other = await recorded(rec.flow);
     // Another record of the same flow, signed by another browser's key: a different log.
     expect((await rec.consistentWith(other.rec.latest())).ok).toBe(false);
+  });
+
+  it('keeps appends made close together each in its own place, in IndexedDB too', async () => {
+    const uninstall = installFakeIndexedDB();
+    try {
+      const flow = `idb-${Math.random().toString(36).slice(2)}`;
+      const rec = await FlowRecord.open(flow);
+      expect(rec.durable).toBe(true);
+      // As the app does for a refused file: the check is noted as it is made, and again as the load is refused.
+      const check = { path: 'loads/a.parquet', class: 'corrupt' };
+      await Promise.all([rec.append('file', 'owner', check), rec.append('file', 'owner', check), rec.append('run', 'owner', { outcome: 'failed' })]);
+      expect(rec.entries.map((e) => e.seq)).toEqual([0, 1, 2]);
+      expect(rec.status).toMatchObject({ ok: true, size: 3, signed: 3 });
+      // The next visit reads the same record back from the store, intact.
+      const again = await FlowRecord.open(flow);
+      expect(again.entries.map((e) => [e.seq, e.kind])).toEqual([[0, 'file'], [1, 'file'], [2, 'run']]);
+      expect(again.status).toMatchObject({ ok: true, size: 3, signed: 3 });
+    } finally {
+      uninstall();
+    }
   });
 
   it('finds an entry changed after it was signed', async () => {
@@ -127,5 +155,69 @@ describe('an audit bag', () => {
     const report = await auditBag(await bagOf(rec, r), kept);
     expect(report.ok).toBe(false);
     expect(report.lines.at(-1)!.what).toMatch(/is NOT a continuation of your checkpoint at 2 entries/);
+  });
+
+  it('fails a proof whose dataset or content is not what its run made', async () => {
+    const { rec, r } = await recorded();
+    const [name] = Object.keys(r.manifest.outputs);
+    const bag = await bagOf(rec, r, (payload) => {
+      const f = payload.find((x) => x.path === `proofs/${name}.json`)!;
+      const p = JSON.parse(new TextDecoder().decode(f.bytes)) as { content: string; rows: number };
+      f.bytes = enc.encode(JSON.stringify({ ...p, content: 'f'.repeat(64), rows: 1 }));
+      // A dataset the run never made, with a proof of a real run entry.
+      payload.push({ path: 'proofs/invented.json', bytes: enc.encode(JSON.stringify({ ...p, dataset: 'invented' })) });
+    });
+    const report = await auditBag(bag);
+    expect(report.ok).toBe(false);
+    const failed = report.lines.filter((l) => !l.ok).map((l) => l.what);
+    expect(failed.some((w) => w.startsWith(`${name}: content ffffffffffffffff…`) && /its run made it with content [0-9a-f]{16}…/.test(w))).toBe(true);
+    expect(failed.some((w) => /^invented: .*its run made no dataset named invented/.test(w))).toBe(true);
+  });
+
+  it('fails a run that read files it can check against no data list, or against another one', async () => {
+    const { rec } = await recorded();
+    // A run that says it read a pinned file, under a data list the bag doesn't carry.
+    const file = { location: 'smaltfl:trips.parquet', sha256: 'a'.repeat(64), bytes: 10 };
+    const db = openEngine();
+    loadFixture(db, makeTrips(200));
+    const r = await runFlow(db, { ...visualFlow(), id: rec.flow }, { smaltdb: SMALTDB, data: { commit: 'c'.repeat(40), manifest: 'd'.repeat(64) }, log: rec.head() });
+    const m = { ...r.manifest, nodes: r.manifest.nodes.map((n) => (n.origin === 'trips' ? { ...n, file } : n)) };
+    const hash = await (await import('../src/core/manifest.js')).manifestHash(m);
+    await keepRun(rec, db, m, hash, r.run);
+    const none = await auditBag(await bagOf(rec, r));
+    expect(none.lines.filter((l) => !l.ok).map((l) => l.what)).toEqual([expect.stringMatching(/it read 1 file, and the bag has no data list to check it against/)]);
+    const list = enc.encode(JSON.stringify({ files: [{ path: 'loads/x.parquet', sha256: file.sha256, bytes: file.bytes }] }));
+    const other = await auditBag(await bagOf(rec, r, (payload) => payload.push({ path: 'data/MANIFEST.json', bytes: list })));
+    expect(other.lines.filter((l) => !l.ok).map((l) => l.what)).toEqual([expect.stringMatching(/it read its files under the data list dddddddddddddddd…, not the one in the bag/)]);
+  });
+
+  it('checks the signer and the data list against what the auditor brings', async () => {
+    const { rec, r } = await recorded();
+    const list = enc.encode(JSON.stringify({ files: [] }));
+    const bag = await bagOf(rec, r, (payload) => payload.push({ path: 'data/MANIFEST.json', bytes: list }));
+    const ok = await auditBag(bag, undefined, { signer: rec.identity.card.fingerprint, list });
+    expect(ok.lines.filter((l) => !l.ok)).toEqual([]);
+    const wrong = await auditBag(bag, undefined, { signer: 'e'.repeat(64), list: enc.encode('{"files":[1]}') });
+    expect(wrong.lines.filter((l) => !l.ok).map((l) => l.what)).toEqual([
+      `the card in the bag is ${rec.identity.card.fingerprint}, not the signer you named (${'e'.repeat(64)})`,
+      expect.stringMatching(/^the data's list in the bag is [0-9a-f]{64}, not the one you gave/),
+    ]);
+  });
+
+  it('fails a data list that names a path twice, with two hashes', async () => {
+    const { rec, r } = await recorded();
+    const list = enc.encode(JSON.stringify({ files: [{ path: 'zones.csv', sha256: 'a'.repeat(64), bytes: 1 }, { path: 'zones.csv', sha256: 'b'.repeat(64), bytes: 1 }] }));
+    const report = await auditBag(await bagOf(rec, r, (payload) => payload.push({ path: 'data/MANIFEST.json', bytes: list })));
+    expect(report.lines.filter((l) => !l.ok).map((l) => l.what)).toEqual(["the data's list names zones.csv twice, with two hashes"]);
+  });
+
+  it("fails a run whose record head isn't this record's before it", async () => {
+    const { rec } = await recorded();
+    const db = openEngine();
+    loadFixture(db, makeTrips(200));
+    const r = await runFlow(db, { ...visualFlow(), id: rec.flow }, { smaltdb: SMALTDB, log: { ...rec.head(), root: 'b'.repeat(64) } });
+    await keepRun(rec, db, r.manifest, r.hash, r.run);
+    const report = await auditBag(await bagOf(rec, r));
+    expect(report.lines.filter((l) => !l.ok).map((l) => l.what)).toEqual([expect.stringMatching(/it says it ran after the record stood at 2 entries, root bbbbbbbbbbbbbbbb…, which isn't this record before it/)]);
   });
 });

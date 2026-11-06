@@ -169,14 +169,22 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
 | Flow | The canonical JSON of the document, without display fields | Canonical JSON: sorted keys, no insignificant whitespace, numbers in shortest form |
 | Flow plan | The canonical JSON of the plan a run executed | Stored with the run, so a re-run replays exactly what ran |
 | Step key | Its plan node in canonical form, its inputs' keys, the engine and plugin versions | Merkle-style: a change upstream changes every key downstream. Names and display fields are not in it |
-| Snapshot | A file: its bytes, in 1 MiB chunks, then the chunk hashes. A table: its rows, as a dataset version | Chunked so large files hash as they stream and parts can be checked alone |
+| Source file | The exact bytes the engine reads: plain SHA-256, so it equals `sha256sum` and the data branch's MANIFEST.json (ADR 0006 E1) | Checked by the page against the data's list, then hashed again in the engine as the plugin pins it (`smaltfl:<file>`); a run records the file each snapshot read |
+| Snapshot | A source's rows, as a dataset version | Its key is its content, so the same rows from another file are the same snapshot |
 | Dataset version | Its schema and the multiset of its rows: each row's canonical binary encoding is hashed, and the sorted row hashes are hashed in 1 MiB chunks | Exact: `REAL` values hash by their IEEE-754 bits; `NULL` and each type are tagged. The same rows in any order give the same hash, with no sort in the engine (`src/plugin/dataset-hash.ts`) |
-| Edit | The edit and the previous edit's hash | A hash chain: the action history can't be rewritten unnoticed |
-| Run manifest | The flow and flow plan hashes, parameters, versions, step keys, snapshot and dataset hashes, row counts, expectation results, the policy hash, the previous run | Signed when shared (section 7) |
+| Edit | The edit and the previous edit's hash | A hash chain in the engine; each edit also goes into the record with the policies and ontology hashes in force |
+| Run manifest (run/1) | The flow (with its policies and ontology hashes), the plan, parameters, engine and plugin versions and the code's commit, step keys, the source files read, snapshot and dataset hashes, row counts, expectation results, the data commit and list hash, the record's head, the previous run | The flow document is kept with it; run/0 manifests still verify. Signed when shared (section 7) |
+| Record entry (log/1) | The entry's canonical JSON, as an RFC 9162 leaf; the record's root as the Merkle tree hash of its leaves | One append-only record per flow and browser (`src/core/log.ts`, `src/app/record.ts`): runs, flow changes, file checks, actions on findings, edits, verifications, signatures, exports |
+| Checkpoint | The record's origin, size and root, signed (ECDSA P-256) by this browser's identity | Downloaded and kept elsewhere, it anchors the record: a later record is checked against it with a consistency proof |
+| Audit bag | BagIt 1.0: every file by SHA-256 in its manifests | The record, checkpoints, card, manifests, plans, flow documents, the data's list and a proof per dataset; checked with `sha256sum -c` and `node scripts/audit.mjs` |
 
 - **Algorithm:** SHA-256 through WebCrypto, available in pages, workers and Node, with no dependency.
-- **Verification** has two levels: *check* (signatures, and the hashes of whatever data was shipped) and *re-run*
-  (execute the manifest again from its snapshots, with the same engine version, and compare every dataset hash).
+- **Verification** has three levels (ADR 0006): *stored* (the manifest agrees with its plan, the flow document
+  translates to the plan, every key recomputes, every stored version has its hash, every dataset name shows the version
+  its run made, the previous run is there, rows in and out add up), *rerun* (execute the plan again from its
+  snapshots and compare every dataset hash and count) and *rederive* (decode the pinned source files again to the same
+  snapshots, then rerun). Shown as Intact, Recomputed and Re-derived. Against someone who controls the browser, only a
+  checkpoint kept elsewhere, or an audit bag checked offline, is evidence.
   Re-running on an older engine needs that version's worker build; smaltkit's engine loader, which already loads a
   chosen smaltdb version, is the starting point.
 - **Determinism:** results that can differ between runs of the same plan are pinned for verified runs: row order
@@ -445,6 +453,18 @@ Builder and drawn in the family's look. The first concepts are on the design can
   own, to review. The owner changes the flow; anyone may mark or note. What was done is kept in this browser as a
   hash-chained log (each entry's hash covers the one before), shown on the finding, and an incident on a day shows in
   the history's list of days something was wrong.
+- **Integrity, all the way through (ADR 0006).** Every data file is checked before it is used: build-app reads the
+  data branch at one commit and checks each file against its MANIFEST.json, and the app checks the list's hash and then
+  every file it fetches against it, refusing one that doesn't match (fetched once more first, past any cache): the
+  load doesn't run, the last good run stays on screen, and the sheet says so with both hashes and what can be done.
+  The engine hashes each file again as the plugin pins it, and a run records the file each snapshot read. A card's
+  seal says it is checked back to the bytes it was made from (an input whose file matched the list and was read by
+  the engine; a step whose run was verified), or broken; it sits beside the news dot and is a different thing: data
+  health is whether the numbers are usual, integrity whether they are what they say they are. Each card's Integrity
+  tab traces it back through every step to the files, with each key, content hash and file hash in full (in groups of
+  four, with Copy), and what verify found at each. The Runs view shows the record: intact or where it broke, its
+  size, root and signer, a timeline of what happened in plain sentences, a checkpoint to download and keep elsewhere,
+  a check of the record against one kept elsewhere, and the export for audit.
 - **What the columns hold.** A profile box has a card for each column: how full it is, its distinct values, and a
   measure's or a time's shape (a histogram from its 1st to its 99th percentile, the median marked, the smallest,
   largest, mean and middle half) or a category's common values. Counts are exact, counted by the engine over every row

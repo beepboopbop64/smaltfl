@@ -3,9 +3,15 @@
 //
 //   node scripts/audit.mjs check smaltfl-audit-<flow>-<size>.zip
 //   node scripts/audit.mjs consistent your-checkpoint.json smaltfl-audit-<flow>-<size>.zip
+//
+// A bag carries its own card and data list. To tie it to its signer and to the data branch, bring them yourself:
+//   --signer <fingerprint>   the signer's card fingerprint, from its owner
+//   --list <MANIFEST.json>   the data's list, from git show <Data-Commit>:MANIFEST.json
 import { build } from 'esbuild';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const outfile = 'node_modules/.cache/smaltfl/audit.mjs';
-await build({ entryPoints: ['scripts/audit.ts'], bundle: true, platform: 'node', format: 'esm', target: 'node20', outfile, logLevel: 'warning' });
+// Paths from this script's place, so it runs from any directory.
+const here = (p) => fileURLToPath(new URL(p, import.meta.url));
+const outfile = here('../node_modules/.cache/smaltfl/audit.mjs');
+await build({ entryPoints: [here('./audit.ts')], bundle: true, platform: 'node', format: 'esm', target: 'node20', outfile, logLevel: 'warning' });
 await import(pathToFileURL(outfile).href);

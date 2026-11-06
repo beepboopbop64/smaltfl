@@ -21,7 +21,7 @@ import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 import type { Declared, TableHash } from './dataset-hash.js';
 import { hashTable, tableColumns } from './dataset-hash.js';
-import { PINNED_PREFIX, takeOpened } from './pinned.js';
+import { pinnedLocation, takeOpened } from './pinned.js';
 
 const STATIC: Record<Exclude<Declared, 'ANY'>, ColumnType> = { INTEGER: 'int', REAL: 'real', TEXT: 'text', BLOB: 'blob' };
 import { ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, nameInUse, pointDataset, recordCheck, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
@@ -218,6 +218,8 @@ async function snapshot(db: Database, n: TableNode, env: KeyEnv): Promise<Snapsh
   const copy = `INSERT INTO ${q(stage)} SELECT * FROM ${q(n.table)}`;
   let file: SourceFile | undefined;
   if (st.external) {
+    // The pinned file it reads, if any: only as the external table over it, so the snapshot is that file's rows.
+    const location = engine(n.origin, () => pinnedLocation(db, n.table));
     // One statement copies the rows, so the copy is all or nothing without a transaction around the await.
     engine(n.origin, () => db.exec(createTable(stage, schema)));
     takeOpened();
@@ -227,10 +229,15 @@ async function snapshot(db: Database, n: TableNode, env: KeyEnv): Promise<Snapsh
       db.exec(`DROP TABLE IF EXISTS ${q(stage)}`);
       throw new RunError((e as Error).message, n.origin);
     }
-    // The pinned file the copy read, if it read one: the bytes the engine itself hashed.
-    const read = takeOpened().filter((f) => f.location.startsWith(PINNED_PREFIX));
-    if (read.length > 1) throw new RunError(`read ${read.length} pinned files where a source reads one`, n.origin);
-    file = read[0];
+    // The pinned file the copy read: the bytes the engine itself hashed as it opened them. Files other statements
+    // opened meanwhile (an engine in the page has no request queue) are not this source's.
+    if (location) {
+      file = takeOpened().find((f) => f.location === location);
+      if (!file) {
+        db.exec(`DROP TABLE IF EXISTS ${q(stage)}`);
+        throw new RunError(`the engine didn't open ${location} as it copied it, so there is no hash of what it read`, n.origin);
+      }
+    }
   } else {
     engine(n.origin, () =>
       inTransaction(db, () => {

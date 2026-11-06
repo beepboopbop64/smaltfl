@@ -3,12 +3,13 @@
  * (src/core/log.ts), kept in IndexedDB, its head signed as a checkpoint by this browser's identity.
  *
  * - An append is one IndexedDB transaction, the entry hashed synchronously before it, so a closed tab can't leave half
- *   an entry. The checkpoint is signed after, in a second step: a tail not yet signed says so, it isn't broken.
+ *   an entry; appends run one after another, so each takes the next place. The checkpoint is signed after, in a second
+ *   step: a tail not yet signed says so, it isn't broken.
  * - The identity is a non-extractable ECDSA key, kept in IndexedDB (structured clone keeps a CryptoKey without
  *   exposing it), named "This browser" until the person names it.
  * - Documents, plans and manifests the entries name are kept by hash beside them (blobs), so an export carries them.
- * - Where IndexedDB isn't there (a private window, a blocked store), the record lives in memory and says "kept for this
- *   visit only".
+ * - Where IndexedDB isn't there (a private window, a blocked store, one that doesn't answer within a few seconds), the
+ *   record lives in memory and says "kept for this visit only".
  *
  * What it proves: within this browser, that nothing was changed, put in or taken out since a checkpoint, and against
  * a checkpoint kept elsewhere (downloaded, or an auditor's), that nothing was rewritten at all. It is one device's
@@ -65,11 +66,27 @@ export class FlowRecord {
     private readonly db: IDBDatabase | null,
   ) {}
 
-  /** The record of a flow in this browser: opened (and checked), or begun. */
-  static async open(flow: string): Promise<FlowRecord> {
-    const db = await openDb().catch(() => null);
-    const identity = (db && (await loadIdentity(db).catch(() => null))) || (await createIdentity('This browser'));
-    if (db) await put(db, 'identity', { id: 'self', card: identity.card, privateKey: identity.privateKey }).catch(() => undefined);
+  /**
+   * The record of a flow in this browser: opened (and checked), or begun. `wait` is how long IndexedDB may take to
+   * open (ms) before the record is kept in memory for this visit: a store that never answers must not hold up the page.
+   */
+  static async open(flow: string, options: { wait?: number } = {}): Promise<FlowRecord> {
+    let db = await openDb(options.wait ?? OPEN_WAIT).catch(() => null);
+    let identity: Identity | null = null;
+    if (db) {
+      try {
+        identity = await loadIdentity(db);
+      } catch {
+        // The identity is kept but can't be read now: a new one put in its place would orphan its record for good,
+        // so this visit keeps a record of its own, in memory.
+        db.close();
+        db = null;
+      }
+    }
+    if (!identity) {
+      identity = await createIdentity('This browser');
+      if (db) await put(db, 'identity', { id: 'self', card: identity.card, privateKey: identity.privateKey }).catch(() => undefined);
+    }
     const rec = new FlowRecord(flow, logOrigin(flow, identity.card.fingerprint), identity, db);
     if (db) {
       const rows = (await getAll(db, 'entries', IDBKeyRange.bound([rec.origin, 0], [rec.origin, Number.MAX_SAFE_INTEGER]))) as { entry: LogEntry; leaf: string }[];
@@ -77,10 +94,12 @@ export class FlowRecord {
       rec.entries = rows.map((r) => r.entry);
       rec.leaves = rows.map((r) => r.leaf);
       rec.checkpoints = ((await getAll(db, 'checkpoints', IDBKeyRange.bound([rec.origin, 0], [rec.origin, Number.MAX_SAFE_INTEGER]))) as { envelope: SignedCheckpoint }[]).map((r) => r.envelope);
+      // Persistence is a request, and not awaited: a browser may ask the person first (Firefox does) and settle only
+      // when they answer. The record works without it.
       try {
-        await navigator.storage?.persist?.();
+        void navigator.storage?.persist?.()?.catch(() => undefined);
       } catch {
-        // Persistence is a request; the record works without it.
+        // No storage manager here.
       }
     }
     await rec.check();
@@ -96,8 +115,27 @@ export class FlowRecord {
     return { origin: this.origin, size: this.entries.length, root: rootOf(this.leaves) };
   }
 
-  /** Append an entry, then sign the new head. `as` is the principal the person acts as. */
-  async append(kind: string, as: string, about: JSONValue, reason: string | null = null, amends: number | null = null): Promise<LogEntry> {
+  /**
+   * Append an entry, then sign the new head. `as` is the principal the person acts as. Appends run one at a time, in
+   * the order they were asked for: an entry takes its place only once the one before it is kept, so two appends
+   * close together can't take the same place (and the second overwrite the first in IndexedDB).
+   */
+  append(kind: string, as: string, about: JSONValue, reason: string | null = null, amends: number | null = null): Promise<LogEntry> {
+    const next = this.appending.then(() => this.appendNow(kind, as, about, reason, amends));
+    // An entry that couldn't be kept is counted, so the record says so rather than looking whole.
+    this.appending = next.catch(() => {
+      this.lost++;
+    });
+    return next;
+  }
+
+  /** Entries asked for that couldn't be kept (the store refused them): shown with the record's status. */
+  lost = 0;
+
+  /** The appends asked for so far, in order: the next one waits for them. */
+  private appending: Promise<unknown> = Promise.resolve();
+
+  private async appendNow(kind: string, as: string, about: JSONValue, reason: string | null, amends: number | null): Promise<LogEntry> {
     const entry = entryOf(this.origin, this.entries.length, { kind, by: { card: this.identity.card.fingerprint, as }, about, reason, amends });
     const leaf = entryLeaf(entry);
     if (this.db) await put(this.db, 'entries', { origin: this.origin, seq: entry.seq, entry, leaf });
@@ -116,8 +154,15 @@ export class FlowRecord {
     return hash;
   }
 
+  /** The documents, plans and manifests this record's entries name (by blob, doc or plan), and only those. */
   async blobs(): Promise<{ hash: string; kind: string; json: string }[]> {
-    return this.db ? ((await getAll(this.db, 'blobs')) as { hash: string; kind: string; json: string }[]) : [...this.memoryBlobs.values()];
+    const named = new Set<string>();
+    for (const e of this.entries) {
+      const a = e.about as Record<string, unknown> | null;
+      for (const k of ['blob', 'doc', 'plan']) if (a && typeof a[k] === 'string') named.add(a[k] as string);
+    }
+    const all = this.db ? ((await getAll(this.db, 'blobs')) as { hash: string; kind: string; json: string }[]) : [...this.memoryBlobs.values()];
+    return all.filter((b) => named.has(b.hash));
   }
 
   /** Sign the current head as a checkpoint, and keep it. */
@@ -163,6 +208,8 @@ export class FlowRecord {
     const c = await verifyCheckpoint(envelope);
     if (!c.ok) return { ok: false, size: 0, reason: c.reason };
     if (c.origin !== this.origin) return { ok: false, size: c.size, reason: `it is a checkpoint of ${c.origin}, not of this record (${this.origin})` };
+    // The origin names the signer by 16 hex of its fingerprint only: the whole fingerprint must be this record's.
+    if (c.signer.fingerprint !== this.identity.card.fingerprint) return { ok: false, size: c.size, reason: `it was signed by ${c.signer.fingerprint}, not by this browser (${this.identity.card.fingerprint})` };
     if (c.size > this.entries.length) return { ok: false, size: c.size, reason: `it was signed at ${c.size} entries, and this record has ${this.entries.length}: entries are missing` };
     const proof = consistencyProof(this.leaves, c.size, this.entries.length);
     const ok = c.size === 0 ? true : verifyConsistency(c.size, this.entries.length, c.root, rootOf(this.leaves), proof);
@@ -170,9 +217,8 @@ export class FlowRecord {
   }
 
   /** An inclusion proof for an entry, against the current head: proof that it is in the record. */
-  proofOf(seq: number): { seq: number; size: number; root: string; leaf: string; proof: string[] } {
-    const size = this.entries.length;
-    return { seq, size, root: rootOf(this.leaves), leaf: this.leaves[seq]!, proof: inclusionProof(this.leaves, seq, size) };
+  proofOf(seq: number, size = this.entries.length): { seq: number; size: number; root: string; leaf: string; proof: string[] } {
+    return { seq, size, root: rootOf(this.leaves, size), leaf: this.leaves[seq]!, proof: inclusionProof(this.leaves, seq, size) };
   }
 
   /** The last entry of a kind matching a test, newest first. */
@@ -182,10 +228,28 @@ export class FlowRecord {
   }
 }
 
-function openDb(): Promise<IDBDatabase> {
+/** How long IndexedDB may take to open, in ms: some browsers have been known to leave an open request unanswered. */
+const OPEN_WAIT = 5000;
+
+/** The record's database, or an error when there is none, it is blocked, or it doesn't answer within `wait` ms. */
+function openDb(wait: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') return reject(new Error('no IndexedDB'));
-    const req = indexedDB.open(DB, 1);
+    let settled = false;
+    const settle = (f: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      f();
+    };
+    const timer = setTimeout(() => settle(() => reject(new Error(`IndexedDB didn't answer within ${wait} ms`))), wait);
+    let req: IDBOpenDBRequest;
+    try {
+      req = indexedDB.open(DB, 1);
+    } catch (e) {
+      settle(() => reject(e));
+      return;
+    }
     req.onupgradeneeded = () => {
       const db = req.result;
       db.createObjectStore('entries', { keyPath: ['origin', 'seq'] });
@@ -193,9 +257,10 @@ function openDb(): Promise<IDBDatabase> {
       db.createObjectStore('blobs', { keyPath: 'hash' });
       db.createObjectStore('identity', { keyPath: 'id' });
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-    req.onblocked = () => reject(new Error('the record is open in an older tab'));
+    // A connection that arrives after the record stopped waiting for it is closed, so it holds up no other tab.
+    req.onsuccess = () => (settled ? req.result.close() : settle(() => resolve(req.result)));
+    req.onerror = () => settle(() => reject(req.error));
+    req.onblocked = () => settle(() => reject(new Error('the record is open in an older tab')));
   });
 }
 

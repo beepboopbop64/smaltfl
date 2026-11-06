@@ -26,7 +26,15 @@ async function fetchBytes(path: string, reload: boolean): Promise<{ bytes: Uint8
   const res = await fetch(`data/${path}${binary ? '.txt' : ''}`, reload ? { cache: 'reload' } : {});
   if (!res.ok) return { bytes: null, status: res.status };
   if (!binary) return { bytes: new Uint8Array(await res.arrayBuffer()), status: res.status };
-  const text = atob((await res.text()).trim());
+  const body = new Uint8Array(await res.arrayBuffer());
+  let text: string;
+  try {
+    text = atob(new TextDecoder().decode(body).trim());
+  } catch {
+    // It arrived, and it isn't base64: not a network error but bytes that aren't the file. They are what is hashed,
+    // so the check says what arrived, and refuses it as it would any other bytes that don't match.
+    return { bytes: body, status: res.status };
+  }
   const bytes = new Uint8Array(text.length);
   for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
   return { bytes, status: res.status };

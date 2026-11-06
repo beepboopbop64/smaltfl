@@ -31,13 +31,11 @@ const common = {
   target: 'es2022',
   minify: true,
   legalComments: 'none',
-  define: { __PLUGIN_VERSION__: JSON.stringify(pkg.version), __SMALTDB_VERSION__: JSON.stringify(smaltdb), __SMALTFL_COMMIT__: JSON.stringify(commit) },
+  define: { __PLUGIN_VERSION__: JSON.stringify(pkg.version), __SMALTDB_VERSION__: JSON.stringify(smaltdb), __SMALTFL_COMMIT__: JSON.stringify(commit), __SMALTFL_DATA__: 'null' },
   // Only codecs other than Snappy need it (the example's files are Snappy), and the plugin loads it only then.
   external: ['hyparquet-compressors'],
   logLevel: 'warning',
 };
-await build({ ...common, entryPoints: { app: 'src/app/main.ts', worker: 'src/app/worker.ts', inline: 'src/app/inline.ts' }, outdir: out });
-copyFileSync('src/app/page.html', `${out}/page.html`);
 
 // The artifact host serves text but not Parquet: a Parquet file goes base64-encoded as <name>.txt (src/app/main.ts).
 const put = (name, bytes) => (name.endsWith('.parquet') ? writeFileSync(`${out}/data/${name}.txt`, bytes.toString('base64')) : writeFileSync(`${out}/data/${name}`, bytes));
@@ -47,15 +45,29 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 let data = null;
 let manifestBytes = null;
 let manifest = null;
-try {
-  if (!xs) {
+if (!xs) {
+  try {
     data = git('rev-parse', 'origin/data').toString().trim();
+  } catch {
+    // No data branch here: the fixtures.
+  }
+  // A data branch whose list can't be read fails the build, rather than quietly building from the fixtures.
+  if (data) {
     manifestBytes = git('show', `${data}:MANIFEST.json`);
     manifest = JSON.parse(manifestBytes.toString());
   }
-} catch {
-  // No data branch here: the fixtures.
 }
+if (manifest) {
+  // A path listed twice has two hashes, and the app and an auditor could each take a different one.
+  const paths = manifest.files.map((f) => f.path);
+  const twice = paths.find((p, i) => paths.indexOf(p) !== i);
+  if (twice) throw new Error(`the data branch's MANIFEST.json at ${data} lists ${twice} twice`);
+}
+// The app is built knowing the list it may trust (its commit, hash and size), so a loads.json beside it that names
+// another is refused: the files, the list and loads.json can't be swapped together without rebuilding the app.
+const builtData = manifestBytes ? { commit: data, manifest: sha256(manifestBytes), bytes: manifestBytes.length } : null;
+await build({ ...common, define: { ...common.define, __SMALTFL_DATA__: JSON.stringify(builtData) }, entryPoints: { app: 'src/app/main.ts', worker: 'src/app/worker.ts', inline: 'src/app/inline.ts' }, outdir: out });
+copyFileSync('src/app/page.html', `${out}/page.html`);
 const fromData = (path) => git('show', `${data}:${path}`);
 /** A data file's entry in the published list, checked against the bytes read: the list is what the app trusts. */
 const listed = (path, bytes) => {

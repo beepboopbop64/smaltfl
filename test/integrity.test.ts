@@ -2,7 +2,9 @@
  * File integrity: what a data file is, against the published list and against what this browser saw before.
  */
 import { describe, expect, it } from 'vitest';
-import { classify, describe as say, severityOf, usable } from '../src/core/integrity.js';
+import { fetchChecked, IntegrityError } from '../src/app/fetch-checked.js';
+import { sha256Hex } from '../src/core/hash.js';
+import { classify, describe as say, severityOf, usable, type FileCheck } from '../src/core/integrity.js';
 
 const A = 'a'.repeat(64);
 const B = 'b'.repeat(64);
@@ -33,5 +35,55 @@ describe('classifying a data file', () => {
     expect(c.title).toBe("loads/yellow_tripdata_2024-01-07.parquet isn't the file published");
     expect(c.detail).toContain(`hash to ${B}, where the data's list at data commit f2c12f85e33b gives ${A}`);
     expect(say({ path: 'zones.csv', class: 'same', bytes: 12331, at: '' }).detail).toMatch(/^Its 12 kB hash to the sha256/);
+  });
+});
+
+describe('fetching a data file, checked', () => {
+  const real = globalThis.fetch;
+  /** A server that answers every path with these bodies, in turn. */
+  const serve = (...bodies: (string | Error)[]) => {
+    let i = 0;
+    globalThis.fetch = (async () => {
+      const b = bodies[Math.min(i++, bodies.length - 1)]!;
+      if (b instanceof Error) throw b;
+      return new Response(b, { status: 200 });
+    }) as typeof fetch;
+  };
+  const parquet = new Uint8Array([80, 65, 82, 49, 0, 1, 2, 3, 80, 65, 82, 49]);
+  const b64 = btoa(String.fromCharCode(...parquet));
+  const expected = async () => ({ sha256: await sha256Hex(parquet), bytes: parquet.length });
+
+  it('uses bytes that match, decoded from base64', async () => {
+    serve(b64);
+    try {
+      const got = await fetchChecked('loads/a.parquet', await expected());
+      expect([...got]).toEqual([...parquet]);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
+  it('refuses a body that arrived but is not base64 as bytes that are not the file, not as a network error', async () => {
+    serve(`${b64.slice(0, 4)}!${b64.slice(5)}`);
+    const checks: FileCheck[] = [];
+    try {
+      const e = await fetchChecked('loads/a.parquet', await expected(), { onCheck: (c) => checks.push(c) }).catch((x: unknown) => x);
+      expect(e).toBeInstanceOf(IntegrityError);
+      expect((e as IntegrityError).check.class).toBe('corrupt');
+      expect(checks.map((c) => c.class)).toEqual(['corrupt']);
+      expect(severityOf(checks[0]!.class)).toBe('alert');
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
+  it('says a network error is not checked', async () => {
+    serve(new TypeError('Failed to fetch'));
+    try {
+      const e = await fetchChecked('loads/a.parquet', await expected()).catch((x: unknown) => x);
+      expect((e as IntegrityError).check.class).toBe('not-checked');
+    } finally {
+      globalThis.fetch = real;
+    }
   });
 });

@@ -32,7 +32,7 @@ import { fetchChecked, IntegrityError, type Expected } from './fetch-checked.js'
 import { FlowRecord } from './record.js';
 import { buildBag } from '../core/bag.js';
 import { zip } from '../core/zip.js';
-import type { JSONValue } from '../core/log.js';
+import { parseCheckpoint, type JSONValue } from '../core/log.js';
 import { connect, type Engine } from './engine.js';
 import { besideSlot, edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout, type GridLayout } from './layout.js';
 
@@ -2810,11 +2810,15 @@ async function importLegacyLog(): Promise<void> {
     if (rest.prev !== prev || (await sha256Hex(canonicalJSON(rest as unknown as Parameters<typeof canonicalJSON>[0]))) !== hash) chainOk = false;
     prev = hash;
   }
-  await ledger.append('import', state.viewer, { from: 'the data log (localStorage)', entries: legacy as unknown as JSONValue, legacyHash: prev, chainOk });
+  // Once only: an import of this same chain is already in the record when the old copy couldn't be removed before.
+  const already = ledger.last('import', (e) => (e.about as { legacyHash?: string | null; entries?: unknown[] } | null)?.legacyHash === prev && (e.about as { entries?: unknown[] }).entries?.length === legacy.length);
+  if (!already) await ledger.append('import', state.viewer, { from: 'the data log (localStorage)', entries: legacy as unknown as JSONValue, legacyHash: prev, chainOk });
+  // The old copy is retired only when the record keeps it for good: a record kept for this visit only would lose it.
+  if (!ledger.durable) return;
   try {
     localStorage.removeItem(legacyKey());
   } catch {
-    // It stays; the record already has it, and won't import it twice only if it can be removed.
+    // It stays, and isn't imported twice: the check above finds it.
   }
 }
 
@@ -4223,8 +4227,10 @@ const loads = {
   episodes: [] as Episode[],
   /** The episode the strip shows and a sheet steps through. */
   episode: '',
-  /** The load the flow ran on last, by place in the list. */
+  /** The load shown, by place in the list: the one the flow ran on last, or one whose file was refused. */
   at: -1,
+  /** The load whose file is pinned in the engine as the trips source: what a run reads, whatever is shown. */
+  pinned: -1,
   bytes: new Map<number, Uint8Array>(),
   playing: false,
   /** The week the strip of days shows, by its Monday. */
@@ -4245,7 +4251,7 @@ const noteCheck = (c: FileCheck) => {
   integrity.checks.set(c.path, c);
   // The record keeps every file it hadn't seen, and every one that wasn't as expected; a file seen before, the same,
   // is routine, and the run's manifest records it anyway.
-  if (ledger && c.class !== 'same') void ledger.append('file', state.viewer, c as unknown as JSONValue).catch(() => undefined);
+  if (ledger && c.class !== 'same') void ledger.append('file', state.viewer, c as unknown as JSONValue).then(() => renderRecord(), () => renderRecord());
 };
 /** A data file, fetched and checked against the list; the record's last sight of it makes it same or republished. */
 const checked = (path: string, expected: Expected | undefined) => fetchChecked(path, expected, { commit: integrity.data?.commit ?? null, onCheck: noteCheck, ...(seenOf(path) ? { seen: seenOf(path)! } : {}) });
@@ -4302,7 +4308,16 @@ function loadStats(r: RunRecord): { rows: number; dropped: number | null } | nul
 }
 
 /** A day's verdict from its news: its worst finding, or none without a history. */
-const verdictOf = (day: string): Finding | undefined => (history && historyOpen() && history.file.days.includes(day) ? dayNews(day)[0] : undefined);
+/** A day's verdict: a file refused or republished first, else its news. */
+function verdictOf(day: string): Finding | undefined {
+  const l = loads.list.find((x) => x.day === day);
+  const c = l ? integrity.checks.get(l.file) : undefined;
+  if (c && fileSeverity(c.class) !== 'ok') {
+    const said = describeFile(c);
+    return { key: `integrity:${c.path}`, kind: 'integrity', severity: fileSeverity(c.class), score: 100, title: said.title, detail: said.detail, look: 'integrity', acts: [] };
+  }
+  return history && historyOpen() && history.file.days.includes(day) ? dayNews(day)[0] : undefined;
+}
 const VERDICT_WORD: Record<Severity, string> = { alert: 'something’s wrong', warn: 'unusual', note: 'a normal day', ok: 'a normal day' };
 
 /** The load now, in a sentence: its day, its trips, its verdict and the first thing to know. */
@@ -4416,6 +4431,7 @@ async function runLoad(k: number): Promise<void> {
     refuse(k, e);
     return;
   }
+  loads.pinned = k;
   loads.at = k;
   loads.week = mondayOf(l.day);
   normalView.focus = '';
@@ -4428,8 +4444,9 @@ async function runLoad(k: number): Promise<void> {
 /** A load whose file was refused: it doesn't run, the last good run stays on screen, and every sheet says why. */
 function refuse(k: number, e: unknown): void {
   const l = loads.list[k]!;
+  // A check the fetch made is in the record already; one the engine made (it refused the bytes as it pinned them) isn't.
   const check: FileCheck = e instanceof IntegrityError ? e.check : { path: l.file, class: 'corrupt', expected: l.sha256, actual: null, commit: integrity.data?.commit ?? null, at: new Date().toISOString() };
-  noteCheck(check);
+  if (!(e instanceof IntegrityError)) noteCheck(check);
   const said = describeFile(check);
   loads.at = k;
   loads.week = mondayOf(l.day);
@@ -4739,8 +4756,7 @@ const LEVEL_SAYS: Record<VerifyLevel, string> = {
 
 /** What a run is proven to be, level by level (ADR 0006 §1): what was checked lights up. */
 function levelPills(r: RunRecord): HTMLElement {
-  const v = r.verified;
-  const reached = !v || !v.ok ? 0 : v.level === 'stored' ? 1 : v.level === 'rerun' ? 2 : 3;
+  const reached = levelOf(r);
   const pill = (n: number, label: string, title: string) => h('span', { class: `pill ${reached >= n ? 'ok' : 'off'}`, title }, label);
   return h('div', { class: 'levels', 'aria-label': 'What has been checked' },
     pill(1, 'Intact', 'Its hashes, keys, links and counts check: against accidents and naive edits'),
@@ -4766,8 +4782,18 @@ const PINNED_PREFIX_APP = 'smaltfl:';
 async function verify(r: RunRecord, level: VerifyLevel = 'rerun'): Promise<void> {
   if (!state.engine) return;
   setStatus(`Verifying run ${r.result.run}${level === 'rederive' ? ', decoding its files again' : ''}…`);
+  // A run re-derives from its own bytes: when another day is pinned now, the run's day is fetched, checked and pinned
+  // again for it, and the day pinned now is put back after.
+  const trips = r.result.manifest.nodes.find((n) => n.file?.location === 'smaltfl:trips.parquet')?.file;
+  const runDay = trips ? loads.list.findIndex((l) => l.sha256 === trips.sha256) : -1;
+  const swap = level === 'rederive' && runDay >= 0 && runDay !== loads.pinned;
   try {
-    r.verified = await verifyRun(state.engine, r.result.run, { smaltdb: SMALTDB, level });
+    if (swap) await pinFile(state.engine, 'trips.parquet', loads.bytes.get(runDay) ?? (await checked(loads.list[runDay]!.file, { sha256: loads.list[runDay]!.sha256, bytes: loads.list[runDay]!.bytes ?? -1 })), loads.list[runDay]!.sha256);
+    r.verified = await verifyRun(state.engine, r.result.run, { smaltdb: SMALTDB, level, manifest: r.result.hash });
+    if (swap && loads.pinned >= 0) {
+      const now = loads.list[loads.pinned]!;
+      await pinFile(state.engine, 'trips.parquet', loads.bytes.get(loads.pinned) ?? (await checked(now.file, { sha256: now.sha256, bytes: now.bytes ?? -1 })), now.sha256);
+    }
     const failed = r.verified.checks.filter((c) => !c.ok).map((c) => `${c.origin}:${c.check}`);
     if (ledger) await ledger.append('verify', state.viewer, { run: r.result.run, manifest: r.result.hash, level, ok: r.verified.ok, failed, smaltdb: SMALTDB });
     setStatus(r.verified.ok ? `Run ${r.result.run} ${LEVEL_DONE[level]}.` : `Run ${r.result.run} failed verification: ${failed.slice(0, 3).join(', ')}.`, !r.verified.ok);
@@ -4805,18 +4831,20 @@ async function run(): Promise<void> {
   const t = performance.now();
   try {
     // A load's own month, for the checks that ask which month a trip is in: last year's loads are a year back.
-    const loadDay = loads.list.length > 1 ? loads.list[loads.at]?.day : undefined;
+    const loadDay = loads.list.length > 1 ? loads.list[loads.pinned]?.day : undefined;
     const month: Record<string, string> = state.doc.parameters?.some((x) => x.name === 'month') && loadDay ? { month: loadDay.slice(0, 7) } : {};
     const data = integrity.data ? { commit: integrity.data.commit, manifest: integrity.data.manifest } : null;
     const result = await runFlow(engine, state.doc, { smaltdb: SMALTDB, parameters: month, data, log: recordHead() });
     const ms = performance.now() - t;
-    state.runs.unshift({ result, ms, at: new Date(), ...(loads.at >= 0 && loads.list.length > 1 ? { load: loads.at } : {}) });
+    state.runs.unshift({ result, ms, at: new Date(), ...(loads.pinned >= 0 && loads.list.length > 1 ? { load: loads.pinned } : {}) });
+    // What is shown is what ran: after a refused day, a run on the day still pinned shows that day.
+    if (loads.pinned >= 0) loads.at = loads.pinned;
     await recordRun(result, null);
     await learnColumns();
     const count = (status: string) => result.manifest.nodes.filter((n) => n.status === status && (isOwner() || visible(n.origin))).length;
     void computeChanges();
     await refreshEdits();
-    const day = loads.list.length > 1 && loads.list[loads.at] ? `${dayLabel(loads.list[loads.at]!.day)}: ` : '';
+    const day = loads.list.length > 1 && loads.list[loads.pinned] ? `${dayLabel(loads.list[loads.pinned]!.day)}: ` : '';
     setStatus(`${day}Run ${result.run} took ${fmtMs(ms)}: ${count('built')} built, ${count('reused')} reused, ${count('folded')} folded${engine.mode === 'page' ? ' (the engine runs in the page here)' : ''}.`);
   } catch (e) {
     const msg = message(e);
@@ -4850,11 +4878,15 @@ async function recordRun(result: RunResult | null, error: string | null): Promis
       const doc = await ledger.keep('flow', withoutDisplay(state.doc));
       await ledger.append('flow', state.viewer, { before, after: fh, doc });
     }
-    const load = loads.list[loads.at]?.day ?? null;
+    // The day whose file the engine had pinned: what the run read, whatever day is on screen.
+    const load = loads.list[loads.pinned]?.day ?? null;
     if (result) {
       const blob = await ledger.keep('manifest', result.manifest);
+      // The plan it ran, kept by the record too: a run from an earlier visit still carries it when exported.
+      const planRow = state.engine ? (await state.engine.query(`SELECT plan FROM _smaltfl_plans WHERE hash = '${result.manifest.plan.replace(/[^0-9a-f]/g, '')}'`)).rows[0] : undefined;
+      const plan = planRow ? await ledger.keep('plan', JSON.parse(String(planRow[0]))) : null;
       const files = result.manifest.nodes.filter((n) => n.file).map((n) => ({ source: n.origin, ...n.file! }));
-      await ledger.append('run', state.viewer, { run: result.run, manifest: result.hash, blob, load, outcome: 'ok', files: files as unknown as JSONValue, data: result.manifest.data ?? null });
+      await ledger.append('run', state.viewer, { run: result.run, manifest: result.hash, blob, plan, load, outcome: 'ok', files: files as unknown as JSONValue, data: result.manifest.data ?? null });
     } else await ledger.append('run', state.viewer, { run: null, load, outcome: 'failed', error });
   } catch (e) {
     console.warn(`smaltfl: couldn't record the run: ${message(e)}`);
@@ -4885,24 +4917,66 @@ function integrityNews(id: string): Finding[] {
   return [{ key: `integrity:${check.path}`, kind: 'integrity', severity: sev, score: 100, title: said.title, detail: said.detail, look: 'integrity', table: id, acts: sev === 'alert' ? ['refetch', 'notify', 'export'] : ['expected', 'export'] }];
 }
 
+/** The check of the file a run read: the one whose bytes hashed to what the run's engine recorded. */
+function checkOfRead(sha256: string | undefined): FileCheck | undefined {
+  if (!sha256) return undefined;
+  for (const c of integrity.checks.values()) if (c.actual === sha256 && fileSeverity(c.class) !== 'alert') return c;
+  return undefined;
+}
+
+/** How far a run is proven (ADR 0006 §1), each level by its own checks: 0 none, 1 Intact, 2 Recomputed, 3 Re-derived. */
+function levelOf(r: RunRecord | undefined): number {
+  const v = r?.verified;
+  if (!v) return 0;
+  const ok = (kinds: string[]) => v.checks.filter((c) => kinds.includes(c.check)).every((c) => c.ok);
+  const stored = ok(['stored', 'coherent', 'key', 'published', 'previous', 'accounting', 'flow']);
+  if (!stored) return 0;
+  if (v.level === 'stored') return 1;
+  if (!ok(['rerun', 'expectations'])) return 1;
+  if (v.level === 'rerun') return 2;
+  return ok(['file']) ? 3 : 2;
+}
+
 /**
- * A card's seal (ADR 0006 §9), apart from its news dot: a source whose bytes matched the data's list and were read by
- * the engine, or a step whose latest run was verified, is sealed; a refused file or a failed check breaks the seal.
+ * A card's seal (ADR 0006 §9), apart from its news dot. An input is sealed when the file the latest run read is one
+ * the data's list publishes (its check passed) and the engine recorded reading it; a step, when the latest run was
+ * re-derived from its files and every check of that step passed. A refused file, a failed check of the step, or a
+ * failed check of the whole run breaks the seal. Nothing is sealed when the flow changed since the run, and the seal is
+ * amber where the engine runs in the page (its hashes are then the page's own).
  */
 function sealOf(card: string): 'ok' | 'bad' | 'amber' | null {
   const id = dataOf(card);
+  const r = latest();
+  const v = r?.verified;
+  if (v && !v.ok && v.checks.some((c) => !c.ok && c.node === -1)) return 'bad';
   if (sourceIds().has(id)) {
     const n = integrityNews(id)[0];
     if (n) return n.severity === 'alert' ? 'bad' : 'amber';
-    const path = fileOf(id);
-    const node = latest()?.result.manifest.nodes.find((x) => x.origin === id);
-    return path && integrity.checks.has(path) && node?.file ? 'ok' : null;
+    if (v?.checks.some((c) => c.origin === id && !c.ok)) return 'bad';
+    const node = r?.result.manifest.nodes.find((x) => x.origin === id);
+    if (!node?.file || !checkOfRead(node.file.sha256)) return null;
+    return state.engine?.mode === 'page' ? 'amber' : 'ok';
   }
-  const v = latest()?.verified;
-  if (!v) return null;
+  if (!r || !v || flowChanged(r)) return null;
+  const node = r.result.manifest.nodes.find((x) => x.origin === id);
+  if (!node) return null;
   const mine = v.checks.filter((c) => c.origin === id);
-  if (!mine.length) return v.ok ? 'ok' : null;
-  return mine.every((c) => c.ok) ? 'ok' : 'bad';
+  if (mine.some((c) => !c.ok)) return 'bad';
+  return levelOf(r) === 3 ? (state.engine?.mode === 'page' ? 'amber' : 'ok') : null;
+}
+
+/** Whether the flow on screen is no longer the one the run ran. */
+const flowHashNow = { doc: null as FlowDocument | null, hash: '' };
+function flowChanged(r: RunRecord): boolean {
+  if (flowHashNow.doc !== state.doc) {
+    flowHashNow.doc = state.doc;
+    flowHashNow.hash = '';
+    void flowHash(state.doc).then((h) => {
+      flowHashNow.hash = h;
+      requestCanvas();
+    });
+  }
+  return flowHashNow.hash !== '' && flowHashNow.hash !== r.result.manifest.flow.hash;
 }
 
 async function integrityTab(card: string, id: string, who: string): Promise<HTMLElement> {
@@ -4918,10 +4992,12 @@ async function integrityTab(card: string, id: string, who: string): Promise<HTML
   const checksOf = (origin: string) => v?.checks.filter((c) => c.origin === origin) ?? [];
   box.append(h('div', { class: `verdict ${seal === 'bad' ? 'alert' : seal === 'amber' ? 'warn' : 'ok'}` },
     h('p', { class: 'v-day' }, `Run ${r.result.run}${r.load !== undefined && loads.list[r.load] ? ` · ${dayLabel(loads.list[r.load]!.day)}` : ''}`),
-    h('h3', { class: 'v-head' }, seal === 'bad' ? 'The chain is broken' : seal === 'ok' ? 'Sealed: checked back to the bytes' : seal === 'amber' ? 'Sealed, with a note' : 'Recorded, not yet verified'),
+    h('h3', { class: 'v-head' }, seal === 'bad' ? 'The chain is broken'
+      : sourceIds().has(id) ? (seal === 'ok' ? 'Sealed: the bytes published' : seal === 'amber' ? 'Read, with a note' : 'Recorded, not yet matched to the list')
+      : ['Recorded, not yet verified', 'Intact: every hash, key and link checks', 'Recomputed: the same datasets from the snapshots', 'Sealed: re-derived from the files’ bytes'][levelOf(r)]!),
     h('p', { class: 'v-line' }, sourceIds().has(id)
-      ? `The engine read this input's file after hashing it, and the hash is the one the data's list publishes. Every number below it comes from those rows.`
-      : `Below is every step this one depends on, back to the bytes of the files it read, each with its hash. Verify the run to recompute them; re-derive it to decode the files again.`)),
+      ? (seal === 'ok' ? `The engine read this input's file after hashing it, and the hash is one the data's list publishes. Every number below it comes from those rows.` : state.engine?.mode === 'page' ? 'The engine runs in this page here, so its hashes are the page’s own: a check outside the browser (an audit) is what vouches for them.' : `The file the latest run read, and how it compares with the data's list, are below.`)
+      : `Below is every step this one depends on, back to the bytes of the files it read, each with its hash. Verify the run to recompute them; re-derive it to decode the files again: only that seals it.`)),
     levelPills(r),
     h('div', { class: 'row' },
       h('button', { type: 'button', class: 'btn small', onclick: () => void verify(r, 'rerun') }, 'Verify the run'),
@@ -4929,11 +5005,11 @@ async function integrityTab(card: string, id: string, who: string): Promise<HTML
       ledger ? h('button', { type: 'button', class: 'btn small quiet', onclick: () => void exportAudit() }, 'Export for audit') : null));
   const items = chainNodes.slice().reverse().map((n) => {
     const bad = checksOf(n.origin).some((c) => !c.ok);
-    const fileCheck = n.file ? integrity.checks.get(fileOf(n.origin) ?? '') : undefined;
+    const fileCheck = n.file ? checkOfRead(n.file.sha256) : undefined;
     const lines: Child[] = [];
     if (n.file) {
       lines.push(h('p', { class: 'c-line' }, `Read ${n.file.location.replace('smaltfl:', '')} (${fmtInt(n.file.bytes)} bytes), hashed by the engine:`), h('p', { class: 'c-line' }, 'sha256 ', hash4(n.file.sha256, `${n.origin} file hash`)));
-      if (fileCheck) lines.push(h('p', { class: 'c-line' }, `${describeFile(fileCheck).title}${fileCheck.commit ? `, data commit ${fileCheck.commit.slice(0, 12)}` : ''}.`));
+      lines.push(h('p', { class: `c-line ${fileCheck ? '' : 'bad'}` }, fileCheck ? `${describeFile(fileCheck).title}${fileCheck.commit ? `, data commit ${fileCheck.commit.slice(0, 12)}` : ''}.` : 'Not matched to the data’s list in this visit.'));
     } else if (n.op === 'table') lines.push(h('p', { class: 'c-line' }, 'A table in the database, snapshotted by its rows: no file.'));
     if (n.content) lines.push(h('p', { class: 'c-line' }, `${fmtInt(n.rows ?? 0)} rows, content `, hash4(n.content, `${n.origin} content hash`)));
     else lines.push(h('p', { class: 'c-line' }, 'Folded: computed inside the step that reads it, so it has no version of its own.'));
@@ -4949,6 +5025,9 @@ async function integrityTab(card: string, id: string, who: string): Promise<HTML
 // ------------------------------------------------------------------ the record, on screen
 
 declare const __SMALTFL_COMMIT__: string | undefined;
+declare const __SMALTFL_DATA__: { commit: string; manifest: string; bytes: number } | null | undefined;
+/** The data branch commit and list this page was built with, or null for a build from the fixtures. */
+const BUILT_DATA = typeof __SMALTFL_DATA__ === 'object' ? __SMALTFL_DATA__ : null;
 /** The commit this page was built from (or dev), as a run's manifest records it. */
 const BUILD_COMMIT = typeof __SMALTFL_COMMIT__ === 'string' && __SMALTFL_COMMIT__ !== '' ? __SMALTFL_COMMIT__ : 'dev';
 
@@ -5014,6 +5093,7 @@ function renderRecord(): void {
     h('h2', {}, 'The record'),
     h('div', { class: 'rec-head' }, pill, h('span', {}, `${st.size === 1 ? '1 entry' : `${fmtInt(st.size)} entries`} · signed${st.signed === st.size ? '' : ` to #${st.signed}`} by ${card.name} · ${where}`)),
     st.reason ? h('p', { class: 'status bad' }, st.reason) : '',
+    ledger.lost ? h('p', { class: 'status bad' }, `${ledger.lost === 1 ? 'An entry' : `${ledger.lost} entries`} couldn’t be kept: the browser’s storage refused ${ledger.lost === 1 ? 'it' : 'them'}, so the record is missing what ${ledger.lost === 1 ? 'it' : 'they'} said.`) : '',
     h('p', { class: 'rec-root' }, 'Root: ', hash4(st.root, 'record root'), h('br'), 'Signer: ', hash4(card.fingerprint, 'signer fingerprint')),
     h('p', { class: 'foot' }, 'Only a checkpoint kept outside this browser proves the record wasn’t rewritten: download one now and then, and keep it somewhere else. An auditor’s export carries the record, every manifest it names, and a proof for each dataset.'),
     h('div', { class: 'row' },
@@ -5054,29 +5134,37 @@ async function checkAgainst(file: File | undefined): Promise<void> {
  * are left out: an auditor gets each from the data branch by its sha256.
  */
 async function exportAudit(): Promise<void> {
-  if (!ledger || !state.engine) return;
-  setStatus('Checking the latest run before the export: recomputing it…');
+  if (!ledger) return;
   const r = latest();
-  if (r && !r.verified) await verify(r, 'rerun');
+  if (r && !r.verified && state.engine) {
+    setStatus('Checking the latest run before the export: recomputing it…');
+    await verify(r, 'rerun');
+  }
   await ledger.append('export', state.viewer, { size: ledger.entries.length, root: ledger.head().root });
+  // The record as the bag names it, taken once: every proof below is against this head, whatever is appended after.
   const head = ledger.head();
+  const entries = ledger.entries.slice(0, head.size);
+  const checkpoints = [...ledger.checkpoints];
   const enc = new TextEncoder();
   const json = (v: unknown) => enc.encode(JSON.stringify(v, null, 2) + '\n');
   const payload: { path: string; bytes: Uint8Array }[] = [
-    { path: 'record/entries.jsonl', bytes: enc.encode(ledger.entries.map((e) => canonicalJSON(e as unknown as Parameters<typeof canonicalJSON>[0])).join('\n') + '\n') },
-    { path: 'record/checkpoints.jsonl', bytes: enc.encode(ledger.checkpoints.map((c) => JSON.stringify(c)).join('\n') + '\n') },
+    { path: 'record/entries.jsonl', bytes: enc.encode(entries.map((e) => canonicalJSON(e as unknown as Parameters<typeof canonicalJSON>[0])).join('\n') + '\n') },
+    { path: 'record/checkpoints.jsonl', bytes: enc.encode(checkpoints.filter((c) => parseCheckpoint(c.checkpoint).size <= head.size).map((c) => JSON.stringify(c)).join('\n') + '\n') },
     { path: 'record/card.json', bytes: json(ledger.identity.card) },
   ];
   for (const b of await ledger.blobs()) payload.push({ path: `blobs/${b.kind}-${b.hash}.json`, bytes: enc.encode(b.json + '\n') });
-  for (const [hash, plan] of (await state.engine.query('SELECT hash, plan FROM _smaltfl_plans')).rows) payload.push({ path: `engine/plans/${String(hash)}.json`, bytes: enc.encode(String(plan) + '\n') });
-  for (const [hash, doc] of (await state.engine.query('SELECT hash, doc FROM _smaltfl_flows')).rows) payload.push({ path: `engine/flows/${String(hash)}.json`, bytes: enc.encode(String(doc) + '\n') });
-  for (const [id, hash, manifest] of (await state.engine.query('SELECT id, hash, manifest FROM _smaltfl_runs')).rows) payload.push({ path: `engine/runs/${String(id)}-${String(hash)}.json`, bytes: enc.encode(String(manifest) + '\n') });
+  // What the engine holds of this visit's runs, when it is running (a refused start-up leaves it without one).
+  if (state.engine) {
+    for (const [hash, plan] of (await state.engine.query('SELECT hash, plan FROM _smaltfl_plans')).rows) payload.push({ path: `engine/plans/${String(hash)}.json`, bytes: enc.encode(String(plan) + '\n') });
+    for (const [hash, doc] of (await state.engine.query('SELECT hash, doc FROM _smaltfl_flows')).rows) payload.push({ path: `engine/flows/${String(hash)}.json`, bytes: enc.encode(String(doc) + '\n') });
+    for (const [id, hash, manifest] of (await state.engine.query('SELECT id, hash, manifest FROM _smaltfl_runs')).rows) payload.push({ path: `engine/runs/${String(id)}-${String(hash)}.json`, bytes: enc.encode(String(manifest) + '\n') });
+  }
   if (integrity.manifestBytes) payload.push({ path: 'data/MANIFEST.json', bytes: integrity.manifestBytes });
   if (integrity.data) payload.push({ path: 'data/commit.txt', bytes: enc.encode(`${integrity.data.commit}\n`) });
   // A proof for each dataset of the latest run: its run entry is in the record whose root the bag names.
-  const runEntry = r ? ledger.last('run', (e) => (e.about as { manifest?: string }).manifest === r.result.hash) : undefined;
+  const runEntry = r ? [...entries].reverse().find((e) => e.kind === 'run' && (e.about as { manifest?: string }).manifest === r.result.hash) : undefined;
   if (r && runEntry) {
-    for (const [name, rec] of Object.entries(r.result.manifest.outputs)) payload.push({ path: `proofs/${name}.json`, bytes: json({ dataset: name, ...rec, run: r.result.run, manifest: r.result.hash, entry: runEntry, inclusion: ledger.proofOf(runEntry.seq) }) });
+    for (const [name, rec] of Object.entries(r.result.manifest.outputs)) payload.push({ path: `proofs/${name}.json`, bytes: json({ dataset: name, ...rec, run: r.result.run, manifest: r.result.hash, entry: runEntry, inclusion: ledger.proofOf(runEntry.seq, head.size) }) });
   }
   payload.push({ path: 'README.html', bytes: enc.encode(auditReadme(head, r)) });
   const name = `smaltfl-audit-${state.doc.id}-${head.size}`;
@@ -5171,9 +5259,14 @@ async function start(): Promise<void> {
     // The daily loads the data has, if any: the flow starts on the first.
     type Listed = Omit<Load, 'episode' | 'note'> & { note?: string };
     type Files = Record<string, Expected & { path: string }>;
-    const index = (await fetch('data/loads.json').then((r) => (r.ok ? r.json() : null)).catch(() => null)) as { month?: string; data?: typeof integrity.data; files?: Files; loads?: Listed[]; episodes?: { name: string; about?: string; loads: Listed[] }[]; history?: string } | null;
+    const index = (await fetch('data/loads.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)) as { month?: string; data?: typeof integrity.data; files?: Files; loads?: Listed[]; episodes?: { name: string; about?: string; loads: Listed[] }[]; history?: string } | null;
     integrity.data = index?.data ?? null;
     integrity.files = index?.files ?? {};
+    // The list this app was built with: loads.json must name it. Only an auditor's check against the data branch
+    // proves it is the data branch's; this stops a list, its files and loads.json being swapped together.
+    if (BUILT_DATA && (index?.data?.commit !== BUILT_DATA.commit || index.data.manifest !== BUILT_DATA.manifest)) {
+      throw new IntegrityError({ path: 'MANIFEST.json', class: 'list', expected: BUILT_DATA.manifest, actual: index?.data?.manifest ?? null, commit: BUILT_DATA.commit, at: new Date().toISOString() });
+    }
     // The month, then each incident: an episode of days each. The app names the holidays itself.
     const month = index?.month ? dateOf(`${index.month}-01`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'The loads';
     const tag = (ls: readonly Listed[], episode: string): Load[] => ls.map(({ note: _, ...l }) => {
@@ -5201,6 +5294,7 @@ async function start(): Promise<void> {
       await engine.exec(pinnedDdl(src));
       if (src.file === 'trips.parquet' && first) loads.bytes.set(0, bytes);
     }
+    if (first) loads.pinned = 0;
     if (first) loads.at = 0;
     state.engine = engine;
     renderLoads();

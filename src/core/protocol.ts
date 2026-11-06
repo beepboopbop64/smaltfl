@@ -29,6 +29,12 @@ export type VerifyLevel = 'stored' | 'rerun' | 'rederive';
 
 export interface VerifyOptions extends RunOptions {
   level?: VerifyLevel;
+  /**
+   * The manifest hash the caller holds for the run (from its result, or its record): the run is checked to be that
+   * one, so a run number that now names another manifest (a rewritten store, a new engine) fails rather than
+   * verifies something else under its number.
+   */
+  manifest?: string;
 }
 
 export interface RunResult {
@@ -64,8 +70,10 @@ export interface VerifyResult {
   /** How far it went, and the manifest's format (0: no source files recorded). */
   level: VerifyLevel;
   format: number;
-  /** The engine the run used, and the one that verified it. */
+  /** The engine the run used, and the one that verified it (the engine's own version, where it reports one). */
   engine: { ran: string; verified: string };
+  /** The hash of the manifest that was verified, as stored with the run. */
+  manifest: string;
   checks: VerifyCheck[];
 }
 

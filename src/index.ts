@@ -69,9 +69,12 @@ export async function runFlow(db: PluginCaller, doc: FlowDocument, options: { sm
   return (await db.callPlugin(PLUGIN_NAME, 'run', [plan, { smaltdb: options.smaltdb, context }], { lock: true })) as RunResult;
 }
 
-/** Verify a run: its stored hashes and links; then a recomputation from its snapshots; then, at rederive, its files decoded again. */
-export async function verifyRun(db: PluginCaller, run: number, options: { smaltdb: string; level?: VerifyLevel }): Promise<VerifyResult> {
-  return (await db.callPlugin(PLUGIN_NAME, 'verify', [run, { smaltdb: options.smaltdb, level: options.level ?? 'rerun' }], { lock: true })) as VerifyResult;
+/**
+ * Verify a run: its stored hashes and links; then a recomputation from its snapshots; then, at rederive, its files
+ * decoded again. Give `manifest`, the hash the caller holds for the run, to check that the run is that one.
+ */
+export async function verifyRun(db: PluginCaller, run: number, options: { smaltdb: string; level?: VerifyLevel; manifest?: string }): Promise<VerifyResult> {
+  return (await db.callPlugin(PLUGIN_NAME, 'verify', [run, { smaltdb: options.smaltdb, level: options.level ?? 'rerun', ...(options.manifest !== undefined ? { manifest: options.manifest } : {}) }], { lock: true })) as VerifyResult;
 }
 
 /** Pin a source file's bytes in the engine (served as smaltfl:<name>), refused unless they hash to `sha256` when given. */
