@@ -1869,6 +1869,8 @@ async function renderDrill(card: string): Promise<void> {
   const sheet = $('sheet');
   const id = dataOf(card);
   const tabs = tabsOf(card);
+  // A shield tapped, or a person chosen to view as: who can see it, in About.
+  if (state.sheetFocus === 'access') drill.tab.set(card, 'about');
   let tab = drill.tab.get(card) ?? 'news';
   if (!tabs.includes(tab)) tab = 'news';
   const who = state.previewAs ?? state.viewer;
@@ -1890,7 +1892,10 @@ async function renderDrill(card: string): Promise<void> {
     // The news is known now for a table measured on opening it: its badge on the tab.
     sheet.querySelector('.drill-head')?.replaceWith(drillHead(card, tabs, tab));
     const at = drill.scroll.get(`${card}|${tab}`) ?? 0;
-    if (at) requestAnimationFrame(() => (sheet.scrollTop = at));
+    if (state.sheetFocus === 'access' && tab === 'about') {
+      state.sheetFocus = null;
+      requestAnimationFrame(() => document.getElementById('access')?.scrollIntoView({ block: 'start' }));
+    } else if (at) requestAnimationFrame(() => (sheet.scrollTop = at));
   } catch (e) {
     if (token === drill.token) panel.replaceChildren(h('p', { class: 'status bad' }, message(e)));
   }
@@ -1910,9 +1915,22 @@ function drillHead(card: string, tabs: Tab[], tab: Tab): HTMLElement {
       h('div', { style: 'flex:1;min-width:0' }, h('p', { class: 'eyebrow' }, profileOf(card) ? `PROFILE · OF ${id.toUpperCase()}` : kindLabel(id)), h('h2', {}, card)),
       h('button', { class: 'close', type: 'button', 'aria-label': 'Close', onclick: () => select(null) }, '×')),
     h('div', { class: 'drill-nav', role: 'group', 'aria-label': 'Next to it in the flow, and the day' }, ...ups.map((x) => chip(x, true)), dayPicker() ?? '', ...downs.map((x) => chip(x, false))),
+    stoppedLine(card, tab),
     h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'What to look at' },
       ...tabs.map((t) => h('button', { type: 'button', role: 'tab', id: `drill-tab-${t}`, 'aria-selected': String(t === tab), 'aria-controls': 'drill-panel', onclick: () => openTab(card, t) },
         TAB_LABEL[t], t === 'news' && worst && worst !== 'ok' && count ? h('span', { class: `tab-badge ${worst}`, 'aria-label': `${count} to look at` }, String(count)) : null))));
+}
+
+/** A run that stopped on this load, said from any tab: what stopped it, and whose rows are on screen. */
+function stoppedLine(card: string, tab: Tab): HTMLElement | null {
+  if (!state.failed) return null;
+  const was = latest()?.load;
+  const shown = was !== undefined ? loads.list[was]?.day : undefined;
+  const now = loads.list[loads.at]?.day;
+  return h('p', { class: 'stopped-line', role: 'status' },
+    h('b', {}, state.failed.origin ? `The run stopped at ${state.failed.origin}` : 'The run stopped'),
+    shown && shown !== now ? `: the rows here are still ${dayLabel(shown)}’s. ` : '. ',
+    tab !== 'news' ? h('button', { type: 'button', class: 'linkish', onclick: () => openTab(card, 'news') }, 'Why ›') : null);
 }
 
 /** The day's load, to step through from inside a sheet. */
@@ -2343,6 +2361,18 @@ async function measureTableNews(insp: Inspection, i: number, id: string, who: st
 async function newsTab(card: string, id: string, who: string): Promise<HTMLElement> {
   const box = h('div', { class: 'news-tab' });
   const kind = historyOf(id) ?? (profileOf(card) ? historyOf(profileOf(card)!.of) : null);
+  // The run on this load stopped: a gate held (a check dropping more than it may), and what is on screen is the last
+  // run that finished. The day's news, from the history, still follows.
+  if (state.failed) {
+    const was = latest()?.load;
+    const shown = was !== undefined ? loads.list[was]?.day : undefined;
+    const now = loads.list[loads.at]?.day;
+    box.append(h('div', { class: 'verdict alert stopped' },
+      h('p', { class: 'v-day' }, now ? dayLabel(now) : ''),
+      h('h3', { class: 'v-head' }, state.failed.origin ? `The run stopped at ${state.failed.origin}` : 'The run stopped'),
+      h('p', { class: 'v-line' }, `${state.failed.message}. Nothing after it was built from this load${shown && shown !== now ? `: the rows on screen are still ${dayLabel(shown)}’s` : ''}. It is the flow’s own gate working: a load this far off is held back rather than published.`),
+      state.failed.origin && state.failed.origin !== dataOf(card) ? h('button', { type: 'button', class: 'btn small', onclick: () => select(state.failed!.origin!) }, `Open ${state.failed.origin} ›`) : null));
+  }
   if (!kind) await tableNewsFor(id, who);
   const findings = cardNews(card);
   const day = newsDay();
@@ -2359,7 +2389,7 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     box.append(h('div', { class: `verdict ${sev}` },
       h('p', { class: 'v-day' }, kind && day ? `${dayLabel(day)}${loads.list[loads.at]?.note ? ` · ${loads.list[loads.at]!.note}` : ''}` : kind ? '' : 'From its rows on this run'),
       h('h3', { class: 'v-head' }, head),
-      h('p', { class: 'v-line' }, alerts || warns ? `${alerts ? `${plural(alerts, 'alert')}, ` : ''}${plural(warns, 'unusual thing')}${notes ? `, ${plural(notes, 'note')}` : ''}. The first: ${top.title}.` : (calm ?? top).detail)));
+      h('p', { class: 'v-line' }, alerts || warns ? `${listed([alerts ? plural(alerts, 'alert') : '', warns ? plural(warns, 'unusual thing') : '', notes ? plural(notes, 'note') : ''].filter(Boolean))}. The first: ${top.title}.` : (calm ?? top).detail)));
     if (kind === 'trips' && day) box.append(healthStrip(card, day, findings));
     for (const f of telling) box.append(findingCard(f, card));
   }
