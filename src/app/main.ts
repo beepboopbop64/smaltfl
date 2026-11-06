@@ -9,11 +9,14 @@
 import { registerFile } from '@smaltdb/external/client';
 import exampleDoc from '../../examples/nyc-taxis-weather.smaltfl.json';
 import { EXAMPLE_SOURCES } from '../../examples/sources.js';
+import { dayLastYear, holidayOf, isSpecial, seasonOf } from '../core/calendar.js';
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, takeOut, validateDocument } from '../core/document.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
+import { daysFrom, HistoryRanges, metricKey, type HistoryFile, type Metric } from '../core/history.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
+import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
 import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, signManifest, verifyManifest } from '../core/manifest.js';
@@ -1371,7 +1374,7 @@ function histogram(p: Profile): HTMLElement | null {
 }
 
 /** A column as a card: how full it is, its shape or its common values, how it moved, and what a check would flag. */
-function columnCard(p: Profile, type: string, moved: Drift | undefined, since: string | undefined, flags: string[], meaning?: PropertyType): HTMLElement {
+function columnCard(p: Profile, type: string, moved: Drift | undefined, since: string | undefined, flags: string[], meaning?: PropertyType, normal?: ColumnNormal): HTMLElement {
   const f = p.facts;
   const gaps = f.rows - f.present;
   const plain = fmtOf(p);
@@ -1402,9 +1405,44 @@ function columnCard(p: Profile, type: string, moved: Drift | undefined, since: s
     if (f.distinct > p.top.length) card.append(h('p', { class: 'foot', style: 'margin:0' }, `and ${fmtInt(f.distinct - p.top.length)} more values`));
   }
   if (moved && since !== undefined) card.append(h('p', { class: 'drift' }, h('span', { class: `level-chip ${moved.level}` }, moved.level), ` since ${since}${moved.note ? `: ${moved.note}` : ''} · PSI ${moved.psi.toFixed(2)}`));
+  if (normal) {
+    const chip = (place: Place, words: Record<'above' | 'below', string>) => (place === 'within' ? null : h('span', { class: 'range-chip' }, words[place]));
+    const parts: Child[] = [];
+    // Its values present: the history keeps the share missing, the card says the share filled.
+    const m = normal.missing;
+    // A column never missing a value, and not missing one now: nothing to say.
+    if (m && !(m.range.high === 0 && m.place === 'within')) parts.push(h('span', {}, `${pct(1 - m.range.high)} to ${pct(1 - m.range.low)} filled`, chip(m.place, { above: 'fewer filled', below: 'more filled' })));
+    const md = normal.median;
+    // A measure never below zero has a range that isn't either.
+    const floor = typeof f.min === 'number' && f.min >= 0 ? 0 : -Infinity;
+    const at = (v: number) => (p.kind === 'time' ? clockText(v) : fmt(Math.max(floor, v)));
+    if (md) parts.push(h('span', {}, `median ${at(md.range.low)} to ${at(md.range.high)}${p.kind === 'time' ? ' in the day' : ''}`, chip(md.place, { above: 'higher', below: 'lower' })));
+    if (parts.length) card.append(h('p', { class: 'normal-line' }, h('span', { class: 'nl-label' }, 'Normal for the day'), ...parts));
+  }
   if (meaning?.note) card.append(h('p', { class: 'note' }, meaning.note));
   for (const flag of flags) card.append(h('p', { class: 'colflag' }, flag));
   return card;
+}
+
+/** A column of the day's trips against its normal ranges: its share missing, and its median (a time's in the day). */
+interface ColumnNormal {
+  missing: Judged | null;
+  median: Judged | null;
+}
+
+function columnNormal(p: Profile, q: Quality, day: string): ColumnNormal | undefined {
+  const missing = judgeDay({ of: 'missing', column: p.name }, day, 1 - p.facts.present / Math.max(1, p.facts.rows));
+  let mid: number | undefined;
+  if (p.kind === 'measure') mid = p.quantiles?.p50;
+  else if (p.kind === 'time') {
+    // As the history takes a time's median: the sample's minutes of the day.
+    const k = q.columns.indexOf(p.name);
+    const xs = q.sample.map((r) => minuteOfDay(r[k])).filter((x): x is number => x !== null).sort((a, b) => a - b);
+    mid = xs.length ? quantile(xs, 0.5) : undefined;
+  }
+  // A median that takes only a few amounts from day to day (a surcharge's, a toll's) has no range worth giving.
+  const median = mid === undefined || (history?.medians(p.name) ?? 0) < 20 ? null : judgeDay({ of: 'median', column: p.name }, day, mid);
+  return missing || median ? { missing, median } : undefined;
 }
 
 /** Where a check runs, seen from the step being looked at. */
@@ -1587,6 +1625,8 @@ async function profilePanel(of: string, who: string, current: () => boolean): Pr
   const movedNames = [...drifts.entries()].filter(([, d]) => d.level !== 'steady').map(([c]) => meanings(c)?.title ?? c);
   const summary = [gappy ? `${gappy} with empty values` : 'none empty', since !== undefined ? (movedNames.length ? `${movedNames.length} moved since ${since}` : `all steady since ${since}`) : daily ? (base ? 'the load it is compared with not run yet' : 'nothing here to compare it with') : 'no earlier run with other rows here to measure drift against'];
   const odd = oddRows(q, meanings);
+  // The trips of one of the month's loads: each column against its normal range for the day.
+  const normalDay = daily && of === loadSource() && run.load !== undefined && !loads.list[run.load]!.earlier ? loads.list[run.load]!.day : undefined;
   // A row the map picks out opens its card among the odd rows.
   const openOdd = (k: number) => {
     const d = odd.querySelector('details.fold') as HTMLDetailsElement | null;
@@ -1608,7 +1648,7 @@ async function profilePanel(of: string, who: string, current: () => boolean): Pr
     h('div', { class: 'quality-part' },
       h('p', { class: 'eyebrow' }, `Columns · ${q.profiles.length}`),
       h('p', { class: 'foot' }, `${summary.join(' · ')}. Counts are exact; shapes come from an even sample of ${fmtInt(q.sample.length)} of ${plural(q.rows, 'row')}.`),
-      carousel(q.profiles.map((p) => columnCard(p, types.get(p.name) ?? 'any', drifts.get(p.name), since, flags(p.name), meanings(p.name))), 'column')),
+      carousel(q.profiles.map((p) => columnCard(p, types.get(p.name) ?? 'any', drifts.get(p.name), since, flags(p.name), meanings(p.name), normalDay ? columnNormal(p, q, normalDay) : undefined)), 'column')),
     daily ? acrossLoads(of, who, q.profiles.map((p) => p.name), meanings) : null,
     suggestedChecks(of, q, meanings));
 }
@@ -2898,6 +2938,7 @@ function setViewer(id: string): void {
   if (where === 'policies') void renderPolicies();
   if (where === 'ontology') void renderOntology();
   renderRuns();
+  renderLoads();
   setStatus(isOwner(id) ? 'Viewing as the owner: every row and column.' : `Viewing as ${personName(id)}: every read goes through their rules, and what is closed to them is left out.`);
 }
 
@@ -3233,15 +3274,18 @@ const weekBefore = (k: number): number | undefined => {
   const j = l ? loads.list.findIndex((x) => x.day === dayPlus(l.day, -7)) : -1;
   return j >= 0 ? j : undefined;
 };
-/** A load's day last year: the same holiday, or the same weekday 52 weeks back. */
+/**
+ * A load's day last year: the same holiday, the same day of a holiday's window, or the same weekday 52 weeks back
+ * (src/core/calendar.ts); when that day isn't among the loads, the same weekday 52 weeks back.
+ */
 const lastYear = (k: number): number | undefined => {
   const l = loads.list[k];
   if (!l) return undefined;
-  const year = String(Number(l.day.slice(0, 4)) - 1);
-  const holiday = l.note ? loads.list.findIndex((x) => x.note === l.note && x.day.startsWith(year)) : -1;
-  if (holiday >= 0) return holiday;
-  const j = loads.list.findIndex((x) => x.day === dayPlus(l.day, -364));
-  return j >= 0 ? j : undefined;
+  for (const d of [dayLastYear(l.day), dayPlus(l.day, -364)]) {
+    const j = d ? loads.list.findIndex((x) => x.day === d) : -1;
+    if (j >= 0) return j;
+  }
+  return undefined;
 };
 /**
  * What a load is measured against. A week before, as a rule: the same weekday, so a week's own rhythm isn't taken
@@ -3255,7 +3299,7 @@ function baselineOf(k: number, mode = loads.mode): { j: number; by: 'week' | 'ye
   const y = lastYear(k);
   if (mode === 'year') return y === undefined ? undefined : { j: y, by: 'year' };
   const w = weekBefore(k);
-  if (w !== undefined && !l.note && !loads.list[w]!.note) return { j: w, by: 'week' };
+  if (w !== undefined && !isSpecial(l.day) && !isSpecial(loads.list[w]!.day)) return { j: w, by: 'week' };
   if (y !== undefined) return { j: y, by: 'year' };
   return w === undefined ? undefined : { j: w, by: 'week' };
 }
@@ -3326,11 +3370,15 @@ function loadSummary(): string {
   const before = prev ? loadStats(prev) : null;
   const then = b ? dayLabel(loads.list[b.j]!.day) : '';
   const main = mainLoads();
-  const parts = [`Load ${main.indexOf(k) + 1} of ${main.length}: ${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}, ${fmtInt(l.rows)} trips`];
+  const trips = judgeDay({ of: 'trips' }, l.day, l.rows);
+  const parts = [`Load ${main.indexOf(k) + 1} of ${main.length}: ${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}, ${fmtInt(l.rows)} trips${trips ? `, ${rangeWords(trips, fmtInt)}` : ''}`];
   if (!b) parts.push(loads.mode === 'year' ? 'no day last year here to compare with' : 'nothing a week before or a year before here to compare with');
   else if (loads.failed.has(b.j)) parts.push(`${baselineText(b)}, its baseline, didn't run: ${loads.failed.get(b.j)}`);
-  if (st && before && b) parts.push(`${pct(Math.abs(st.rows - before.rows) / Math.max(1, before.rows))} ${st.rows >= before.rows ? 'more' : 'fewer'} than ${baselineText(b)}`);
-  if (st?.dropped != null) parts.push(`its checks dropped ${pct(st.dropped)}${before?.dropped != null ? ` (${then}: ${pct(before.dropped)})` : ''}${unusualLoads().has(k) ? ', an unusual share' : ''}`);
+  if (st && before && b && !trips) parts.push(`${pct(Math.abs(st.rows - before.rows) / Math.max(1, before.rows))} ${st.rows >= before.rows ? 'more' : 'fewer'} than ${baselineText(b)}`);
+  if (st?.dropped != null) {
+    const dropped = judgeDay({ of: 'dropped' }, l.day, st.dropped);
+    parts.push(`its checks dropped ${pct(st.dropped)}${dropped ? `, ${rangeWords(dropped, pct)}` : `${before?.dropped != null ? ` (${then}: ${pct(before.dropped)})` : ''}${unusualLoads().has(k) ? ', an unusual share' : ''}`}`);
+  }
   const level = loads.drift.get(driftKey(k));
   if (level) parts.push(level === 'steady' ? `every column steady since ${then}` : `columns ${level} since ${then}: the profile box says which`);
   return `${parts.join(' · ')}.`;
@@ -3361,8 +3409,14 @@ function renderLoads(): void {
     const st = r ? loadStats(r) : null;
     const level = loads.drift.get(driftKey(k));
     const b = baselineOf(k);
-    const label = `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: ${fmtInt(l.rows)} trips${st?.dropped != null ? `, its checks dropped ${pct(st.dropped)}` : r ? '' : ', not run yet'}${odd.has(k) ? ', an unusual share' : ''}${level && b ? `, ${level} since ${baselineText(b)}` : ''}`;
-    return h('button', { type: 'button', class: ['load', k === loads.at ? 'at' : '', r ? 'ran' : '', odd.has(k) ? 'unusual' : '', l.note ? 'holiday' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
+    // Its trips against their normal range, known before it runs; what its checks dropped, once it has.
+    const trips = judgeDay({ of: 'trips' }, l.day, l.rows);
+    const dropped = st?.dropped != null ? judgeDay({ of: 'dropped' }, l.day, st.dropped) : null;
+    const unusual = dropped ? dropped.place !== 'within' : odd.has(k);
+    const tripsOff = trips && trips.place !== 'within' ? trips.place : null;
+    const label = `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: ${fmtInt(l.rows)} trips${trips ? `, ${trips.place === 'within' ? 'within' : trips.place} their normal range` : ''}${st?.dropped != null ? `, its checks dropped ${pct(st.dropped)}${dropped ? `, ${dropped.place === 'within' ? 'within' : dropped.place} its normal range` : ''}` : r ? '' : ', not run yet'}${!dropped && odd.has(k) ? ', an unusual share' : ''}${level && b ? `, ${level} since ${baselineText(b)}` : ''}`;
+    return h('button', { type: 'button', class: ['load', k === loads.at ? 'at' : '', r ? 'ran' : '', unusual ? 'unusual' : '', tripsOff ? `trips-${tripsOff}` : '', holidayOf(l.day) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
+      tripsOff ? h('span', { class: 'ld-range', 'aria-hidden': 'true' }, tripsOff === 'above' ? '▲' : '▼') : null,
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
       h('span', { class: 'ld-stat' }, st?.dropped != null ? pct(st.dropped) : fmtCompact(l.rows)),
@@ -3391,9 +3445,10 @@ function renderLoads(): void {
     weekNav,
     h('div', { class: 'loads-row', role: 'group', 'aria-label': `Daily loads, ${weekSpan(shown.days)}: tap one to run the flow on it` }, ...chips),
     h('p', { class: 'loads-now', 'aria-live': 'polite' }, loadSummary()),
-    h('p', { class: 'foot loads-key' }, loads.mode === 'year'
-      ? 'Each day against its day last year: the same holiday, or the same weekday 52 weeks back. The dot: steady, moved or shifted since then; the share: what its checks dropped.'
-      : `Each day against the same day a week before${hasYear ? '; a holiday, or a day a week after one, against its day last year' : ''}. The dot: steady, moved or shifted since then; the share: what its checks dropped.`),
+    normalPanel(shown.monday) ?? '',
+    h('p', { class: 'foot loads-key' }, `${loads.mode === 'year'
+      ? 'Columns: each day against its day last year, the same holiday or the same weekday 52 weeks back.'
+      : `Columns: each day against the same day a week before${hasYear ? '; a holiday, or a day a week after one, against its day last year' : ''}.`} The dot: steady, moved or shifted since then; the share: what its checks dropped${history && historyOpen() ? '; ▲ ▼ trips above or below their normal range, and a share outside its own in amber' : ''}.`),
   );
 }
 
@@ -3447,6 +3502,8 @@ async function runLoad(k: number): Promise<void> {
   if (!l.earlier) {
     loads.week = mondayOf(l.day);
     acrossTurned = false;
+    // The normal ranges explain the load on the canvas again.
+    normalView.focus = '';
   }
   renderLoads();
   await run();
@@ -3507,6 +3564,250 @@ function profileLine(p: ProfileDef): CardLine {
   if (!level || !b) return { text: loads.list.length > 1 && !b ? 'nothing to compare yet: open it' : 'columns, odd rows, drift', tone: 'same' };
   const since = b.by === 'week' ? `last ${weekday(loads.list[b.j]!.day)}` : 'last year';
   return level === 'steady' ? { text: `steady vs ${since}`, tone: 'same' } : { text: `${level} vs ${since}`, tone: 'drop', badge: level };
+}
+
+// ------------------------------------------------------------------ normal ranges
+
+// Each day's numbers against its normal range (src/core/normal.ts): what a day like it would have, from the same
+// weekday in the weeks before and its day last year, each weighted by how well it has been guessing, give or take three
+// typical misses. From the scenario's history (history.json: two years and a quarter of days, each measured as the app
+// measures a load), as the person may read it: only with the trips source open to them, and what the checks drop only
+// while the checks are the ones the history counted.
+
+let history: HistoryRanges | null = null;
+
+/** Whether the person may read the history: the trips source is open to them. */
+function historyOpen(): boolean {
+  const src = loadSource();
+  return !!history && !!src && visible(src);
+}
+
+/**
+ * Whether the trips' checks are still the ones the history counted: the same rules, reading the trips themselves (a
+ * box put in front of them would leave them other rows to count).
+ */
+function checksAsCounted(): boolean {
+  const step = history ? state.doc.steps.find((x) => x.id === history!.file.step) : undefined;
+  return !!history && step?.kind === 'expectations' && step.inputs.length === 1 && step.inputs[0] === loadSource()
+    && history.sameChecks(step.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })));
+}
+
+interface Judged {
+  range: NormalRange;
+  place: Place;
+  value: number;
+}
+
+/** A number's normal ranges, as the person may read them. */
+function rangesOf(m: Metric): NormalRanges | null {
+  if (!history || !historyOpen()) return null;
+  if ((m.of === 'dropped' || m.of === 'rule') && !checksAsCounted()) return null;
+  return history.of(m);
+}
+
+/** A day's number against its normal range; none without one. */
+function judgeDay(m: Metric, day: string, value: number | null | undefined): Judged | null {
+  const ranges = rangesOf(m);
+  if (!ranges || value === null || value === undefined || !Number.isFinite(value)) return null;
+  const range = ranges.at(day);
+  return range ? { range, place: ranges.place(range, value), value } : null;
+}
+
+/** "within its normal range, 73,900 to 88,100". */
+const rangeWords = (j: Judged, fmt: (v: number) => string) => `${j.place === 'within' ? 'within' : j.place} its normal range, ${fmt(j.range.low)} to ${fmt(j.range.high)}`;
+
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+/** "Dec 18". */
+const shortDay = (day: string) => dateOf(day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const pct0 = (x: number) => `${Math.round(x * 100)}%`;
+/** A day in a holiday's window, said: "the day before Thanksgiving", "a day of the holiday season". */
+const seasonPhrase = (name: string) => (/^Day before /.test(name) ? `the d${name.slice(1)}` : name === 'Holiday season' ? 'a day of the holiday season' : `a day of ${name}`);
+/** A day's year, said where a list of short days needs it. */
+const x0 = (day: string) => day.slice(0, 4);
+
+/** A typical miss, said: a count's or a share's as a percentage of it, a level's in its own units. */
+const missText = (scale: NormalRange['scale'], miss: number, fmt: (v: number) => string) => (scale === 'level' ? fmt(miss) : `${(Math.expm1(miss) * 100).toFixed(1)}%`);
+
+/** Three or so round levels between two numbers. */
+function niceTicks(lo: number, hi: number, n: number): number[] {
+  const raw = (hi - lo) / n;
+  if (!(raw > 0)) return [lo];
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((x) => x * mag).find((x) => x >= raw)!;
+  const out: number[] = [];
+  for (let t = Math.ceil(lo / step) * step; t <= hi + step * 1e-9; t += step) out.push(Number(t.toPrecision(12)));
+  return out;
+}
+
+/** The panel's number, and the day it explains: one tapped on the chart, else the load on the canvas. */
+const normalView = { metric: 'trips' as 'trips' | 'dropped', focus: '' };
+const backtests = new Map<string, Backtest>();
+
+/**
+ * Normal ranges, for the week the strip shows and the seven before it: each day's range as a band, its guess as a
+ * line, its number as a dot (out of range in amber), the day explained ringed, and why: each guess, what it was made
+ * from and its weight, and how the ranges held over the year before.
+ */
+function normalPanel(monday: string): HTMLElement | null {
+  if (!history || !historyOpen()) return null;
+  const choices: ('trips' | 'dropped')[] = checksAsCounted() ? ['trips', 'dropped'] : ['trips'];
+  if (!choices.includes(normalView.metric)) normalView.metric = 'trips';
+  const m: Metric = { of: normalView.metric };
+  const ranges = rangesOf(m);
+  if (!ranges) return null;
+  const days = daysFrom(dayPlus(monday, -49), dayPlus(monday, 6));
+  const now = loads.list[loads.at];
+  const focus = days.includes(normalView.focus) ? normalView.focus : now && !now.earlier && days.includes(now.day) ? now.day : monday;
+  const fmt = m.of === 'trips' ? fmtInt : pct;
+  const pick = (d: string) => {
+    normalView.focus = d;
+    renderLoads();
+  };
+  const seg = choices.length > 1
+    ? h('div', { class: 'seg', role: 'group', 'aria-label': 'The normal range of' },
+        ...choices.map((x) => h('button', { type: 'button', 'aria-pressed': String(normalView.metric === x), onclick: () => { normalView.metric = x; renderLoads(); } }, x === 'trips' ? 'Trips' : 'What the checks drop')))
+    : null;
+  const j = now && !now.earlier ? judgeDay({ of: 'trips' }, now.day, now.rows) : null;
+  return fold('normal-ranges', [h('span', { class: 'eyebrow' }, 'Normal ranges'), h('span', { class: 'fold-sum' }, j ? `${dayLabel(now!.day)}'s trips ${j.place === 'within' ? 'within' : j.place} theirs` : 'each day against the weeks before and last year')],
+    h('p', { class: 'foot' }, 'What a day like it would have: the same weekday in the six weeks before and its day last year, each weighted by how well it has been guessing lately, give or take three typical misses. A holiday goes by last year’s. Tap a day for why.'),
+    seg ?? '',
+    bandChart(ranges, days, focus, m.of === 'trips' ? (v) => fmtCompact(v).replace('.0k', 'k') : pct, pick) ?? '',
+    rangeWhy(ranges, days, focus, m, fmt, pick),
+    backtestLine(ranges, m) ?? '');
+}
+
+/** Days as a band chart: the normal range a band, the guess a dashed line, the number a dot. Tap for a day. */
+function bandChart(ranges: NormalRanges, days: readonly string[], focus: string, fmt: (v: number) => string, pick: (day: string) => void): SVGSVGElement | null {
+  const [W, H, L, R, T, B] = [340, 172, 38, 6, 8, 26];
+  const pts = days.map((d) => ({ d, v: ranges.value(d), r: ranges.at(d) }));
+  const all = pts.flatMap((p) => [p.v, p.r?.low, p.r?.high]).filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+  if (!all.length) return null;
+  let [lo, hi] = [Math.min(...all), Math.max(...all)];
+  const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.05 || 1;
+  lo = ranges.scale === 'level' ? lo - pad : Math.max(0, lo - pad);
+  hi += pad;
+  const step = (W - L - R) / pts.length;
+  const X = (i: number) => L + (i + 0.5) * step;
+  const Y = (v: number) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const out = pts.filter((p) => p.v !== null && p.r && ranges.place(p.r, p.v) !== 'within');
+  const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, class: 'bandchart', role: 'img', 'aria-label': `${shortDay(days[0]!)} to ${shortDay(days.at(-1)!)}, each day's number against its normal range: ${out.length ? `${plural(out.length, 'day')} outside it, ${listed(out.map((p) => shortDay(p.d)))}` : 'every day with one within it'}` }) as SVGSVGElement;
+  for (const t of niceTicks(lo, hi, 4)) {
+    svg.append(s('line', { class: 'grid', x1: L, x2: W - R, y1: Y(t).toFixed(1), y2: Y(t).toFixed(1) }), s('text', { class: 'tick', x: L - 4, y: (Y(t) + 3).toFixed(1), 'text-anchor': 'end' }, fmt(t)));
+  }
+  // Weeks: a line before each Monday, every other one named.
+  let named = 0;
+  pts.forEach((p, i) => {
+    if (dateOf(p.d).getUTCDay() !== 1) return;
+    const x = (X(i) - step / 2).toFixed(1);
+    svg.append(s('line', { class: 'week', x1: x, x2: x, y1: T, y2: H - B }));
+    if (named++ % 2 === 0) svg.append(s('text', { class: 'tick', x: (X(i) - step / 2 + 2).toFixed(1), y: H - B + 13 }, shortDay(p.d)));
+  });
+  // The bands, a stretch at a time where days have one; a lone day's as a bar.
+  let stretch: number[] = [];
+  const flush = () => {
+    if (stretch.length === 1) {
+      const r = pts[stretch[0]!]!.r!;
+      svg.append(s('rect', { class: 'band', x: (X(stretch[0]!) - step * 0.35).toFixed(1), width: (step * 0.7).toFixed(1), y: Y(r.high).toFixed(1), height: Math.max(1, Y(r.low) - Y(r.high)).toFixed(1) }));
+    } else if (stretch.length > 1) {
+      const at = (i: number, v: number) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`;
+      svg.append(
+        s('path', { class: 'band', d: `M${stretch.map((i) => at(i, pts[i]!.r!.high)).join('L')}L${[...stretch].reverse().map((i) => at(i, pts[i]!.r!.low)).join('L')}Z` }),
+        s('path', { class: 'expected', d: `M${stretch.map((i) => at(i, pts[i]!.r!.expected)).join('L')}` }));
+    }
+    stretch = [];
+  };
+  pts.forEach((p, i) => (p.r ? stretch.push(i) : flush()));
+  flush();
+  // Holidays marked under the plot, and the days around them lighter.
+  pts.forEach((p, i) => {
+    if (holidayOf(p.d)) svg.append(s('rect', { class: 'hol', x: (X(i) - step * 0.4).toFixed(1), y: H - B + 2, width: (step * 0.8).toFixed(1), height: 3 }));
+    else if (seasonOf(p.d)) svg.append(s('rect', { class: 'hol season', x: (X(i) - step * 0.4).toFixed(1), y: H - B + 2.5, width: (step * 0.8).toFixed(1), height: 2 }));
+  });
+  pts.forEach((p, i) => {
+    if (p.v === null) return;
+    const off = p.r ? ranges.place(p.r, p.v) !== 'within' : false;
+    svg.append(s('circle', { class: ['pt', off ? 'out' : '', p.r ? '' : 'bare', p.d === focus ? 'focus' : ''].filter(Boolean).join(' '), cx: X(i).toFixed(1), cy: Y(p.v).toFixed(1), r: p.d === focus ? 4 : off ? 3.4 : 2.3 }));
+  });
+  // A tap anywhere picks the nearest day: a day's column is narrower than a finger.
+  svg.addEventListener('click', (e) => {
+    const box = svg.getBoundingClientRect();
+    const x = ((e.clientX - box.left) / Math.max(1, box.width)) * W;
+    pick(days[Math.max(0, Math.min(days.length - 1, Math.floor((x - L) / step)))]!);
+  });
+  return svg;
+}
+
+/** Why a day's range is what it is: its guesses, what each was made from, its weight, and the typical miss. */
+function rangeWhy(ranges: NormalRanges, days: readonly string[], day: string, m: Metric, fmt: (v: number) => string, pick: (day: string) => void): HTMLElement {
+  const r = ranges.at(day);
+  const v = ranges.value(day);
+  const what = (x: number) => (m.of === 'trips' ? `${fmt(x)} trips` : `${fmt(x)} of its trips dropped by the checks`);
+  const note = holidayOf(day) ?? seasonOf(day);
+  const k = days.indexOf(day);
+  const nav = h('div', { class: 'why-nav' },
+    h('button', { type: 'button', class: 'btn small', 'aria-label': 'The day before', disabled: k <= 0, onclick: () => pick(days[k - 1]!) }, '‹'),
+    h('span', { class: 'why-day' }, `${dayLabel(day)}${note ? `, ${note}` : ''}`),
+    h('button', { type: 'button', class: 'btn small', 'aria-label': 'The day after', disabled: k >= days.length - 1, onclick: () => pick(days[k + 1]!) }, '›'));
+  const box = h('div', { class: 'range-why', 'aria-live': 'polite' }, nav);
+  if (!r) {
+    box.append(h('p', {}, `${v === null ? 'Not measured' : what(v)}. No normal range: the history doesn’t reach back far enough for one${note ? ', or had no such holiday the year before' : ''}.`));
+    return box;
+  }
+  const place = v === null ? null : ranges.place(r, v);
+  box.append(h('p', {},
+    h('b', {}, v === null ? 'Not measured' : what(v)),
+    place === null ? ': its normal range is ' : place === 'within' ? ', within its normal range: ' : h('b', { class: 'off' }, `, ${place} its normal range: `),
+    `${fmt(r.low)} to ${fmt(r.high)}, around ${fmt(r.expected)}${r.guesses.length > 1 ? ', from two guesses' : r.special ? (holidayOf(day) ? ', from last year’s holiday alone' : `, from last year’s alone: ${seasonPhrase(r.special)}`) : ''}.`));
+  const share = (g: NormalRange['guesses'][number]) => (r.guesses.length > 1 ? ` It counts ${pct0(g.weight)}${g.miss !== null ? `: it missed by ${missText(r.scale, g.miss, fmt)} on a typical day of the six weeks before` : ''}.` : '');
+  const items = r.guesses.map((g) => {
+    if (g.by === 'weeks') return h('li', {}, h('b', {}, fmt(g.value)), ` from the same weekday in the weeks before: the weighted median of ${listed(g.from.map((f) => shortDay(f.day)))}, the latest counting ${pct0(g.from[0]!.weight)}.${share(g)}`);
+    const f = g.from[0]!;
+    const fNote = holidayOf(f.day) ?? seasonOf(f.day);
+    // A share moves by points, a count by a ratio, anything else in its own units.
+    const signed = (x: number) => `${x >= 0 ? '+' : '−'}${r.scale === 'share' ? `${(Math.abs(x) * 100).toFixed(1)} points` : fmt(Math.abs(x))}`;
+    const moves = [
+      g.ratio !== undefined ? `× ${g.ratio.toFixed(2)} as this year’s days compare with last year’s lately` : g.shift !== undefined ? `${signed(g.shift)} as this year’s days compare with last year’s lately` : '',
+      g.weekday ? `${r.scale === 'count' ? `× ${g.weekday.by.toFixed(2)}` : signed(g.weekday.by)} for a ${WEEKDAY_NAMES[g.weekday.to]} against a ${WEEKDAY_NAMES[g.weekday.from]}` : '',
+    ].filter(Boolean);
+    // One day last year, or the same weekday a week either side of it too: their median.
+    const oneYear = g.from.every((x) => x0(x.day) === x0(f.day));
+    const from = g.from.length > 1
+      ? ` from the same weekday last year, ${listed(g.from.map((x) => `${shortDay(x.day)}${oneYear ? '' : `, ${x0(x.day)}`} (${fmt(x.value)})`))}${oneYear ? `, ${x0(f.day)}` : ''}: their median ${fmt(g.base ?? f.value)}`
+      : ` from its day last year, ${dayLabel(f.day)}${fNote ? `, ${fNote}` : ''}: ${fmt(f.value)}`;
+    return h('li', {}, h('b', {}, fmt(g.value)), `${from}${moves.length ? `, ${moves.join(', ')}` : ''}.${share(g)}`);
+  });
+  box.append(h('ul', {}, ...items));
+  const over = r.spreadFrom === 'weeks' ? `over the ${r.over} ordinary days of the six weeks before`
+    : r.spreadFrom === 'holidays' ? `last year’s guess on the ${r.over} holidays of the year before`
+    : `last year’s guess on the ${r.over} ordinary days of the six weeks before, for want of holidays: a rough range`;
+  box.append(h('p', { class: 'foot' }, `The range: the guess give or take three typical misses, a typical miss being ${missText(r.scale, r.spread, fmt)}, ${over}.`));
+  // What the checks drop, rule by rule: each rule's failures against its own range for the day.
+  if (m.of === 'dropped' && history) {
+    const rows = history.file.rules.flatMap((rule) => {
+      const rs = rangesOf({ of: 'rule', name: rule.name });
+      const rr = rs?.at(day);
+      const rv = rs?.value(day) ?? null;
+      // A rule nothing fails, now or on the days before: nothing to say.
+      if (!rs || !rr || rv === null || (rr.high === 0 && rv === 0)) return [];
+      const at = rs.place(rr, rv);
+      return [h('li', {}, h('code', {}, rule.name), `${rule.onFail === 'warn' ? ' (warns)' : ''}: ${pct(rv)}, `, at === 'within' ? 'within' : h('b', { class: 'off' }, at), ` ${pct(rr.low)} to ${pct(rr.high)}`)];
+    });
+    if (rows.length) box.append(h('p', { class: 'foot' }, 'Each rule’s share of the trips it fails, against its own normal range:'), h('ul', { class: 'rule-ranges' }, ...rows));
+  }
+  return box;
+}
+
+/** How the ranges held over the year before the month's loads: each day against its own range. */
+function backtestLine(ranges: NormalRanges, m: Metric): HTMLElement | null {
+  const first = loads.list[mainLoads()[0] ?? -1]?.day;
+  if (!first) return null;
+  const [from, to] = [dayPlus(first, -365), dayPlus(first, -1)];
+  const key = `${metricKey(m)}|${from}`;
+  let b = backtests.get(key);
+  if (!b) backtests.set(key, (b = ranges.backtest(from, to)));
+  if (!b.ordinary.days) return null;
+  const holidays = b.outside.filter((o) => o.range.special).map((o) => `${o.range.special === 'Christmas week' ? shortDay(o.day) : o.range.special} (${o.place})`);
+  return h('p', { class: 'foot' }, `Over the year before, ${shortDay(from)}, ${from.slice(0, 4)} to ${shortDay(to)}, ${to.slice(0, 4)}: ${plural(b.ordinary.outside, 'ordinary day')} of ${fmtInt(b.ordinary.days)} (${pct(b.ordinary.outside / b.ordinary.days)}) fell outside their range, and ${b.special.outside} of ${plural(b.special.days, 'holiday')}${holidays.length ? `: ${listed(holidays.slice(0, 4))}${holidays.length > 4 ? ` and ${holidays.length - 4} more` : ''}` : ''}.`);
 }
 
 function renderRuns(): void {
@@ -3663,8 +3964,15 @@ async function start(): Promise<void> {
     setStatus('Starting the engine…');
     const engine = await connect();
     // The daily loads the data has, if any: the flow starts on the first.
-    const index = (await fetch('data/loads.json').then((r) => (r.ok ? r.json() : null)).catch(() => null)) as { loads?: Load[]; earlier?: Load[] } | null;
-    loads.list = [...(index?.loads ?? []), ...(index?.earlier ?? []).map((l) => ({ ...l, earlier: true }))];
+    const index = (await fetch('data/loads.json').then((r) => (r.ok ? r.json() : null)).catch(() => null)) as { loads?: Load[]; earlier?: Load[]; history?: string } | null;
+    loads.list = [...(index?.loads ?? []), ...(index?.earlier ?? []).map((l) => ({ ...l, earlier: true }))].map((l) => {
+      const { note: _, ...rest } = l;
+      const note = holidayOf(l.day) ?? seasonOf(l.day);
+      return note ? { ...rest, note } : rest;
+    });
+    // Each day's numbers for two years and a quarter, for each load's normal range, when the data has them.
+    const past = index?.history ? ((await fetch(`data/${index.history}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)) as HistoryFile | null) : null;
+    if (past?.format === 'smaltfl-history/1' && past.days.length) history = new HistoryRanges(past);
     const first = loads.list[0];
     setStatus(first ? `Loading ${dayLabel(first.day)}: ${fmtInt(first.rows)} trips, the zones and the weather…` : 'Loading the trips, the zones and the weather…');
     const files = await Promise.all(EXAMPLE_SOURCES.map(async (src) => [src, await loadFile(src.file === 'trips.parquet' && first ? first.file : src.file)] as const));

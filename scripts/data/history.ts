@@ -22,6 +22,7 @@ import { runFlow, type ExpectationsStep, type FlowDocument, type FlowPlan } from
 import { emitColumnFacts, emitRead, emitSample, type EmitContext } from '../../src/core/emit.js';
 import { shapeOf } from '../../src/core/optimize.js';
 import { minuteOfDay, numbersOf, profileColumn, quantile, type Kind } from '../../src/core/quality.js';
+import type { DayError, HistoryFile } from '../../src/core/history.js';
 import { EXAMPLE_SOURCES } from '../../examples/sources.js';
 import example from '../../examples/nyc-taxis-weather.smaltfl.json';
 
@@ -47,29 +48,6 @@ export interface DayNumbers {
   kinds: Kind[];
   /** The columns and their types, the same every day. */
   schema: [string, string][];
-}
-
-/** The history's file: the checks and columns measured, then a row of numbers a day. */
-export interface HistoryFile {
-  format: 'smaltfl-history/1';
-  built: string;
-  flow: string;
-  step: string;
-  /** The checks as published, which the numbers count: the app shows their range only while its checks are these. */
-  rules: { name: string; check: string; onFail: string }[];
-  columns: string[];
-  types: string[];
-  /** Each column's kind on most days. */
-  kinds: Kind[];
-  sample: number;
-  days: string[];
-  rows: number[];
-  dropped: number[];
-  failed: number[][];
-  present: number[][];
-  p50: (number | null)[][];
-  /** Days that couldn't be measured, and why: gaps in the days above. */
-  missing: DayError[];
 }
 
 const doc = example as unknown as FlowDocument;
@@ -132,12 +110,6 @@ async function measure(file: string): Promise<DayNumbers> {
   } finally {
     db.close();
   }
-}
-
-/** A day that couldn't be measured: left out of the history, with why. */
-interface DayError {
-  day: string;
-  error: string;
 }
 
 async function worker(): Promise<void> {

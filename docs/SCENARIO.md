@@ -61,7 +61,18 @@ day, every trip picked up that day (local time, as the records give it), from 67
 before: a day against the day before would take a week's own rhythm, a Saturday's missing rush hour or a Sunday's
 lighter traffic, for a change. A holiday is compared with the same holiday last year, and so is a day a week after
 one, against its own weekday last year: `loads/` also has January 2023, a day a file, cast to 2024's columns (the
-TLC's 2023 files name `airport_fee` in lower case and keep a count as a double). The month shows the differences a daily feed has: New Year's Day drops 8.6% of its
+TLC's 2023 files name `airport_fee` in lower case and keep a count as a double). Each day is also judged against its
+normal range, from the history: `history.json` has each day's numbers from October 2021 to January 2024 (853 days,
+every month's file split by pickup date and cast to 2024's columns, as the loads are), measured on the runner the way
+the app measures a load: trips, the rows the trip checks drop and each rule's failures, and each column's values
+present and median. The history has the TLC's own gaps in it: September 18, 2022 and September 22 to 24, 2023 have
+4,229 to 5,732 trips where a day has about a hundred thousand (what is left of them nearly all without a passenger
+count), and the week of November 14, 2022 is about a fifth short every day. Over 2023, 12 of its 329 ordinary days
+fell outside their normal range for trips (the gap among them, the US Open's final weekend, the Fridays before the
+Memorial Day and July 4th weekends) and none of its 36 holidays and days around them; January 2024 has one day
+outside, the snow of Sunday the 7th. New Year's Day's checks drop a share above its normal range (8.6%, against 3.4%
+to 7.5%): more zero-distance trips than a day like it has (5.3%, against 1.3% to 4.4%), more without a passenger count
+(13%, against 2.6% to 8.9%), and a median pickup at 11:59 where a day like it has one between 14:02 and 16:03. The month shows the differences a daily feed has: New Year's Day drops 8.6% of its
 trips at the checks (every other day 3.6 to 5.3%), with 13% of its trips Flex Fare trips and so no passenger count,
 and its pickups earlier in the day, the small hours after midnight busy; Monday the 8th, measured against it, shifts
 back (a median pickup time of day of 15:21 against 11:59, its passenger counts, rate codes and payment types shifted

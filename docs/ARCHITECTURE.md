@@ -285,7 +285,8 @@ plugin, and the app built as a static site.
 
 ```
 src/
-  core/       flow model, validation, compiler, hashes, lineage, policies, ontology, packages
+  core/       flow model, validation, compiler, hashes, lineage, policies, ontology, packages; data quality (profiles,
+              odd rows, drift), the holiday calendar and each day's normal range
   plugin/     the runtime plugin (engine worker)
   worker.ts   the app's worker entry
   app/        the UI
@@ -367,11 +368,39 @@ Builder and drawn in the family's look. The first concepts are on the design can
   `month` parameter, and are not stepped through. Next and Play step through the month's own, and a day whose
   baseline hasn't run runs that one first. A load is that day's file
   put in the engine as the trips source, and a run: a load run before runs again at no cost, its rows giving the
-  same keys. A load whose checks dropped an unusual share (beyond 3.5 robust deviations from the loads' median, once
-  four have run) is marked. Each run records its load, and the Runs view
+  same keys. A load whose trips are outside their normal range is marked ▲ or ▼ (known before it runs), and one whose
+  checks dropped a share outside its own is marked in amber; with no history, a share beyond 3.5 robust deviations
+  from the loads' median, once four have run. Each run records its load, and the Runs view
   names the day. Weather's effect needs dry hours at the same time of day on other days, which one day's load can't
   have: it is measured over every load run so far on the same flow, the weather_effect step's own SQL with its input
   bound to those loads' rows together (`emitSqlOver`, `emitUnionAll`).
+- **Normal ranges.** Each day's numbers are judged against what a day like it would have (`src/core/normal.ts`), from
+  the days before it alone, the way data-observability tools set an expected range for a daily metric and forecasting
+  practice combines guesses rather than picking one. Two guesses. The weeks before: the same weekday over the six
+  weeks before, holidays and the days around them left out, the latest counting most and each two places back half as
+  much, so that no one day weighs more than a third: their weighted median, which no one odd day can make. Last year:
+  the same weekday 52 weeks back and a week either side (their median, so one odd week last year doesn't make the
+  guess), moved by how this year's days compared with last year's over the six weeks before (the median of their
+  ratios, day by day). Each guess is weighted by how well it guessed the ordinary days of the six weeks before, in
+  inverse proportion to its squared typical miss (Bates and Granger's combination), neither counting less than a fifth.
+  The range is the guess give or take three typical misses of that combined guess over the same days (a typical miss:
+  1.4826 times the median absolute miss, a standard deviation a few odd days don't inflate). Holidays, and the days in
+  a window around one that are no ordinary days either (`src/core/calendar.ts`: the holiday season from December 23 to
+  January 3, the week of July 4th, the day before Thanksgiving and its weekend, the weekends before Memorial Day and
+  Labor Day, as Prophet gives a holiday a window), go by last year's own day alone: the same holiday, or the same day
+  of the window on the same weekday, moved by the year's ratio and, for a holiday on a date that fell on another
+  weekday, by how the two weekdays compare lately; give or take three of that guess's typical misses on the holidays
+  of the year before. Counts are guessed on a log scale, shares on a logit scale, medians as they are. The numbers come
+  from the scenario's history (`history.json`, by `scripts/data/history.ts`: two years and a quarter of days, each
+  measured as the app measures a load: the trip checks run on the runtime, the trips profiled with exact counts and a
+  median from an even sample of 2,000 rows). The loads box has a band chart of the week shown and the seven before it,
+  each day's range a band, its guess a dashed line, its number a dot (amber outside its range), holidays marked under
+  it, and why a day's range is what it is: each guess, the days it came from, its weight and its typical miss, and for
+  what the checks drop, each rule's share against its own range; and how the ranges held over the year before the
+  month. A column card in the profile box gives the column's normal share filled and, for a measure or a time whose
+  median varies from day to day, its normal median (a time's in the day). As the person may read it: only with the
+  trips source open to them, and a range for what the checks drop only while the checks are the ones the history
+  counted, reading the trips themselves.
 - **What the columns hold.** A profile box has a card for each column: how full it is, its distinct values, and a
   measure's or a time's shape (a histogram from its 1st to its 99th percentile, the median marked, the smallest,
   largest, mean and middle half) or a category's common values. Counts are exact, counted by the engine over every row

@@ -1,7 +1,8 @@
 // Builds the app into dist/app: page.html (the page's content; the artifact host adds the document skeleton),
 // app.js (the page), worker.js (the engine worker), inline.js (the engine in the page, for browsers without the
-// worker), and data/ (the example's files: from the data branch when it has been fetched, the week's daily loads,
-// listed in data/loads.json; else the XS fixtures, as one load).
+// worker), and data/ (the example's files: from the data branch when it has been fetched, the month's daily loads and
+// the same month's a year before, listed in data/loads.json, and the history each day's normal range comes from,
+// data/history.json; else the XS fixtures, as one load).
 //
 //   node scripts/build-app.mjs            the daily loads from origin/data, or the 10k fixtures
 //   node scripts/build-app.mjs --xs       the 10k fixtures
@@ -40,14 +41,6 @@ try {
   // No data branch here: the fixtures.
 }
 const days = manifest?.loads?.days ?? [];
-// A few days the trips are known to differ on: holidays.
-const NOTES = { '01-01': "New Year's Day", '07-04': 'Independence Day', '12-25': 'Christmas Day' };
-const noteOf = (day) => {
-  const d = new Date(`${day}T12:00:00Z`);
-  // Martin Luther King Jr. Day: January's third Monday.
-  if (d.getUTCMonth() === 0 && d.getUTCDay() === 1 && d.getUTCDate() >= 15 && d.getUTCDate() <= 21) return 'Martin Luther King Jr. Day';
-  return NOTES[day.slice(5)];
-};
 if (days.length) {
   put('zones.csv', fromData('tlc/taxi_zone_lookup.csv'));
   put('weather.csv', fromData(`weather/open-meteo_${manifest.month}.csv`));
@@ -56,15 +49,18 @@ if (days.length) {
     const path = `loads/yellow_tripdata_${day}.parquet`;
     const entry = manifest.files.find((f) => f.path === path);
     put(path, fromData(path));
-    const note = noteOf(day);
-    return { day, file: path, rows: entry.rows, sha256: entry.sha256, ...(note ? { note } : {}), ...(earlier ? { earlier: true } : {}) };
+    // The app names the holidays itself (src/core/calendar.ts).
+    return { day, file: path, rows: entry.rows, sha256: entry.sha256, ...(earlier ? { earlier: true } : {}) };
   };
   const list = days.map((day) => entryOf(day, false));
   // The same month a year before: loads to compare with, not to step through.
   const earlier = (manifest.loads.earlier ?? []).map((day) => entryOf(day, true));
-  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ month: manifest.month, built: manifest.built, loads: list, earlier }, null, 2) + '\n');
+  // Each day's numbers, for each load's normal range: a data branch built before the history has none.
+  const history = manifest.history ? fromData('history.json') : null;
+  if (history) put('history.json', history);
+  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ month: manifest.month, built: manifest.built, loads: list, earlier, ...(history ? { history: 'history.json' } : {}) }, null, 2) + '\n');
   const trips = (ls) => ls.reduce((n, l) => n + l.rows, 0).toLocaleString('en-US');
-  console.log(`built ${out} with ${list.length} daily loads from origin/data (${trips(list)} trips), and ${earlier.length} from a year before (${trips(earlier)})`);
+  console.log(`built ${out} with ${list.length} daily loads from origin/data (${trips(list)} trips), and ${earlier.length} from a year before (${trips(earlier)})${history ? `, and the history from ${manifest.history.from} to ${manifest.history.to}` : ''}`);
 } else {
   for (const name of ['trips.parquet', 'zones.csv', 'weather.csv']) put(name, readFileSync(`fixtures/xs/${name}`));
   console.log(`built ${out} with data from fixtures/xs (10,000 trips)`);

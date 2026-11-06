@@ -370,6 +370,31 @@ th.hit, td.hit { background: var(--warn-wash); }
 .compare-label { font-size: 13px; color: var(--ink-2); }
 .compare .seg button { min-height: 34px; }
 .load.holiday::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: 3px; height: 3px; border-radius: 2px; background: var(--violet, var(--smalt)); opacity: 0.7; }
+.ld-range { position: absolute; top: 4px; left: 5px; font-size: 9px; line-height: 1; color: var(--warn); }
+/* Normal ranges: each day's range a band, its guess a dashed line, its number a dot; out of range in amber. */
+.bandchart { display: block; width: 100%; height: auto; touch-action: manipulation; cursor: pointer; }
+.bandchart .grid { stroke: var(--line); stroke-width: 1; }
+.bandchart .week { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; }
+.bandchart .tick { font-family: var(--mono); font-size: 9px; fill: var(--muted); }
+.bandchart .band { fill: var(--smalt); opacity: 0.16; }
+.bandchart .expected { fill: none; stroke: var(--smalt); stroke-width: 1.2; stroke-dasharray: 3 2; opacity: 0.85; }
+.bandchart .pt { fill: var(--ink-2); }
+.bandchart .pt.bare { fill: var(--muted); opacity: 0.55; }
+.bandchart .pt.out { fill: var(--warn); stroke: var(--surface); stroke-width: 1; }
+.bandchart .pt.focus { stroke: var(--smalt); stroke-width: 2.2; }
+.bandchart .hol { fill: var(--violet, var(--smalt)); opacity: 0.7; }
+.bandchart .hol.season { opacity: 0.3; }
+.load.holiday.season::after { opacity: 0.3; }
+.range-why { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.range-why p { margin: 0; }
+.range-why .off { color: var(--warn); }
+.range-why ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.why-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.why-nav .btn { min-width: 44px; font-size: 18px; line-height: 1; }
+.why-day { font-weight: 600; color: var(--ink); text-align: center; }
+.range-chip { margin-left: 6px; font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 999px; background: var(--warn-wash); color: var(--warn); }
+.normal-line { margin: 0; font-size: 12.5px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.nl-label { width: 100%; font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .week-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .week-nav .btn { min-width: 44px; font-size: 18px; line-height: 1; }
 .week-at { font-size: 13px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; text-align: center; }
@@ -525,7 +550,7 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
 
 <main>
   <section class="view" id="view-flow" aria-label="Flow">
-    <p class="lede" id="lede">January 2024's NYC yellow-taxi trips from the TLC's records, one load a day as a feed would bring them: each load checked, joined to its zones and to each borough's hourly weather, all run in this browser. Step through the loads; each card says what its step did to the rows, and the profile box beside the input shows what each load holds and how it moved from the same day a week before.</p>
+    <p class="lede" id="lede">January 2024's NYC yellow-taxi trips from the TLC's records, one load a day as a feed would bring them: each load checked, joined to its zones and to each borough's hourly weather, all run in this browser. Step through the loads: each is judged against its normal range, from two years of days before it (the same weekday in the weeks before, and its day last year); each card says what its step did to the rows, and the profile box beside the input shows what each load holds and how it moved from the same day a week before.</p>
     <ul class="legend" aria-label="Legend">
       <li><span class="port-key in" aria-hidden="true"></span>input: data the flow reads</li>
       <li><span class="port-key out" aria-hidden="true"></span>output: a dataset it publishes</li>

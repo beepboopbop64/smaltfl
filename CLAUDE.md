@@ -35,7 +35,8 @@ match smaltdb's `CLAUDE.md`.
   `inline.ts`), `layout.ts` (where cards sit), `page.html` (the page's content). `npm run build:app` writes `dist/app`.
 - `examples/`: flow documents and their sources; `fixtures/xs/`: real tier XS data for the tests.
 - `scripts/data/build.py` and `.github/workflows/data.yml`: the scenario's data, fetched on a GitHub runner into the
-  `data` branch (`git fetch origin data --depth 1`).
+  `data` branch (`git fetch origin data --depth 1`); `scripts/data/history.ts` measures the history's days there, on
+  the runtime (`node scripts/data/history.mjs DAYS_DIR OUT.json`).
 
 ## Rules for this repository
 
