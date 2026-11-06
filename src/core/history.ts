@@ -77,19 +77,34 @@ export type Metric =
   | { of: 'dropped' }
   | { of: 'rule'; name: string }
   | { of: 'missing'; column: string }
-  | { of: 'median'; column: string };
+  | { of: 'median'; column: string }
+  /** The share of the day's rows with a coded column's value (the value as JSON). */
+  | { of: 'value'; column: string; value: string }
+  /** A measure's or a time's quantile: its place in QUANTILES. */
+  | { of: 'quantile'; column: string; q: number };
 
-export const metricKey = (m: Metric) => (m.of === 'trips' || m.of === 'dropped' ? m.of : m.of === 'rule' ? `rule:${m.name}` : `${m.of}:${m.column}`);
+/** The quantiles the history keeps of a measure or a time, in order. */
+export const QUANTILES = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
 
-const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level' };
+export const metricKey = (m: Metric) =>
+  m.of === 'trips' || m.of === 'dropped' ? m.of
+  : m.of === 'rule' ? `rule:${m.name}`
+  : m.of === 'value' ? `value:${m.column}=${m.value}`
+  : m.of === 'quantile' ? `quantile:${m.column}@${m.q}`
+  : `${m.of}:${m.column}`;
+
+const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level', value: 'share', quantile: 'level' };
 
 /** A metric's days, from the history's first to its last, null where a day wasn't measured; none for a name it lacks. */
 export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
   const from = h.days[0];
   if (!from) return null;
   const rule = m.of === 'rule' ? h.rules.findIndex((r) => r.name === m.name) : -1;
-  const column = m.of === 'missing' || m.of === 'median' ? h.columns.indexOf(m.column) : -1;
-  if ((m.of === 'rule' && rule < 0) || ((m.of === 'missing' || m.of === 'median') && column < 0)) return null;
+  const column = m.of === 'missing' || m.of === 'median' || m.of === 'quantile' ? h.columns.indexOf(m.column) : -1;
+  if ((m.of === 'rule' && rule < 0) || ((m.of === 'missing' || m.of === 'median' || m.of === 'quantile') && column < 0)) return null;
+  const counted = m.of === 'value' ? h.values?.[m.column] : undefined;
+  const place = counted && m.of === 'value' ? counted.values.indexOf(m.value) : -1;
+  if (m.of === 'value' && (!counted?.counts || place < 0)) return null;
   const values = new Array<number | null>(daysBetween(from, h.days.at(-1)!) + 1).fill(null);
   h.days.forEach((day, k) => {
     const rows = h.rows[k]!;
@@ -98,6 +113,8 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
       : m.of === 'dropped' ? (rows ? h.dropped[k]! / rows : null)
       : m.of === 'rule' ? (rows ? h.failed[k]![rule]! / rows : null)
       : m.of === 'missing' ? (rows ? 1 - h.present[k]![column]! / rows : null)
+      : m.of === 'value' ? (rows ? counted!.counts![k]![place]! / rows : null)
+      : m.of === 'quantile' ? (h.quantiles?.[k]?.[column]?.[m.q] ?? null)
       : h.p50[k]![column]!;
     values[daysBetween(from, day)] = v;
   });
@@ -108,16 +125,19 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
 export class HistoryRanges {
   readonly file: HistoryFile;
   private readonly made = new Map<string, NormalRanges | null>();
+  private readonly skip: ReadonlySet<string>;
 
-  constructor(file: HistoryFile) {
+  /** With `skip`, days left out of what a normal day is learned from (an incident's). */
+  constructor(file: HistoryFile, options: { skip?: ReadonlySet<string> } = {}) {
     this.file = file;
+    this.skip = options.skip ?? new Set();
   }
 
   of(m: Metric): NormalRanges | null {
     const key = metricKey(m);
     if (!this.made.has(key)) {
       const s = seriesOf(this.file, m);
-      this.made.set(key, s ? new NormalRanges(s, SCALES[m.of]) : null);
+      this.made.set(key, s ? new NormalRanges(s, SCALES[m.of], { skip: this.skip }) : null);
     }
     return this.made.get(key)!;
   }

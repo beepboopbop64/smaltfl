@@ -57,29 +57,37 @@ What makes this data a good test:
 
 The app runs on January 2024 a day at a time, as a feed would bring it: the data branch's `loads/` has one file a
 day, every trip picked up that day (local time, as the records give it), from 67,543 trips on Sunday the 7th to
-110,515 on Saturday the 27th. Each load is the `trips` source for one run, and is compared with the same day a week
-before: a day against the day before would take a week's own rhythm, a Saturday's missing rush hour or a Sunday's
-lighter traffic, for a change. A holiday is compared with the same holiday last year, and so is a day a week after
-one, against its own weekday last year: `loads/` also has January 2023, a day a file, cast to 2024's columns (the
-TLC's 2023 files name `airport_fee` in lower case and keep a count as a double). Each day is also judged against its
-normal range, from the history: `history.json` has each day's numbers from October 2021 to January 2024 (853 days,
-every month's file split by pickup date and cast to 2024's columns, as the loads are), measured on the runner the way
-the app measures a load: trips, the rows the trip checks drop and each rule's failures, and each column's values
-present and median. The history has the TLC's own gaps in it: September 18, 2022 and September 22 to 24, 2023 have
-4,229 to 5,732 trips where a day has about a hundred thousand (what is left of them nearly all without a passenger
-count), and the week of November 14, 2022 is about a fifth short every day. Over 2023, 12 of its 329 ordinary days
-fell outside their normal range for trips (the gap among them, the US Open's final weekend, the Fridays before the
-Memorial Day and July 4th weekends) and none of its 36 holidays and days around them; January 2024 has one day
-outside, the snow of Sunday the 7th. New Year's Day's checks drop a share above its normal range (8.6%, against 3.4%
-to 7.5%): more zero-distance trips than a day like it has (5.3%, against 1.3% to 4.4%), more without a passenger count
-(13%, against 2.6% to 8.9%), and a median pickup at 11:59 where a day like it has one between 14:02 and 16:03. The month shows the differences a daily feed has: New Year's Day drops 8.6% of its
-trips at the checks (every other day 3.6 to 5.3%), with 13% of its trips Flex Fare trips and so no passenger count,
-and its pickups earlier in the day, the small hours after midnight busy; Monday the 8th, measured against it, shifts
-back (a median pickup time of day of 15:21 against 11:59, its passenger counts, rate codes and payment types shifted
-or moved too), while Saturday the 13th, against Saturday the 6th, is steady in every column, where against the Friday
-before it its extras would have shifted; the storm of the 6th and 7th brings the first week's only wet and snowy hours
-in number; and Martin Luther King Jr. Day, Monday the 15th, has fewer trips than the Monday before it. The first week
-has nothing a week before it.
+110,515 on Saturday the 27th. It also has the days of three real incidents in the TLC's records, a few ordinary days
+either side of each, in 2024's columns as the history's days are: the records stopping at about one in the afternoon
+of Thursday 21 September 2023 and holding about five thousand trips a day, nearly all without a passenger count,
+until Monday; the same at three on Saturday 17 September 2022, with 4,229 trips on the Sunday; and the week of
+14 November 2022, about a quarter short every day because one of the two vendors' trips are missing (VendorID 1:
+two trips on the Monday, where a day like it has about 34,000).
+
+Each day is judged against its normal range, from the history: `history.json` has each day's numbers from October
+2021 to January 2024 (853 days, every month's file split by pickup date and cast to 2024's columns, as the loads
+are), measured on the runner the way the app measures a load: trips, the rows the trip checks drop and each rule's
+failures, each column's values present, median and quantiles, every row of the coded columns (vendor, passengers,
+rate code, store and forward, payment type, the surcharges) counted value by value and in pairs, the zones, and the
+trips by pickup hour; with each day's weather in the city and each month's file's own columns. Over 2023, 15 of its
+329 ordinary days fell outside their normal range for trips (the September gap among them, the Friday of the US
+Open's final weekend, the Fridays before the Memorial Day and July 4th weekends) and none of its 36 holidays and days
+around them. A day whose trips are far from its weekday's in the weeks before (the gaps of September 2022 and 2023)
+is judged, but not learned from: without that, September 2023's Sundays went by a last year that held 4,229 trips.
+
+The news (`src/core/news.ts`) tells each day's story from it. Over every day from January 2023 to January 2024 (396
+days), 357 have nothing unusual to tell, 33 something unusual, and 6 something wrong: the September 2023 gap (the
+trips stopping at 13:00 on the 21st, then three days with almost no data), and two days in November 2023 when the
+surcharges' shares were far from a day like it's (on the 7th, the $2.50 surcharge on 16.4% of trips where a day like it
+has 26.1% to 31.5%; on the 14th, no surcharge on 36.9% where it has 45.1% to 52.4%).
+Unusual are, for instance, the airport fee going from $1.25 to $1.75 in April 2023 (a value gone, another's share up,
+for the first few days, then a change that has lasted), the snow of Sunday 7 January 2024 (fewer trips than a day
+like it), and New Year's Day 2024, whose checks drop 8.6% of its trips where a day like it drops 3.9% to 8.2%. What
+kept the alarms down, from a first pass with an alert on 141 of those days: last year's guess left out where it
+misses days like the one judged far more than the weeks' (the TLC's surcharges changed in December 2022, so last
+year's Saturdays had no $1 surcharge to speak of), a holiday not judged by a last year that has moved too far,
+a share needing to move two points and four typical misses to be unusual, a change that has lasted told once as a
+note from the day it began, and a quantile's shift only where it moves rather than jumps.
 
 ## 3. The flows
 

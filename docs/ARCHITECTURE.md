@@ -286,7 +286,7 @@ plugin, and the app built as a static site.
 ```
 src/
   core/       flow model, validation, compiler, hashes, lineage, policies, ontology, packages; data quality (profiles,
-              odd rows, drift), the holiday calendar and each day's normal range
+              odd rows, drift), the holiday calendar, each day's normal range, and the news (a day's, a table's)
   plugin/     the runtime plugin (engine worker)
   worker.ts   the app's worker entry
   app/        the UI
@@ -351,29 +351,24 @@ Builder and drawn in the family's look. The first concepts are on the design can
   sheet names it; Results, the Ontology and the Policies leave out the outputs, object types, rules, people and
   edits that aren't theirs, and Runs shows the run as far as they can see the flow, without its full record.
   Arranging the canvas stays with the owner.
-- **Profile boxes.** What a step's rows hold has a box of its own on the canvas, beside the step in its section,
-  joined to it by a dashed edge: it only looks (the document's `profiles`, display fields, out of the plan, the flow
-  hash and every key). The example has one on the trips input, so each load's shape is in sight as it comes in; a
-  step's sheet opens its profile box, or adds one. A profile box's sheet holds what follows: how the load compares
-  with the one before, the isolation forest at play, the odd rows, the columns, drift across loads, and the checks
-  worth adding.
+- **Profile boxes.** What a table's rows hold has a box of its own on the canvas, beside it in its section, joined to
+  it by a dashed edge: it only looks (the document's `profiles`, display fields, out of the plan, the flow hash and
+  every key). The example has one on each input, the trips, the zones and the weather, so each load's story is in
+  sight as it comes in; a step's About tab adds one. A profile box's sheet is its table's, with the news of all of it
+  (for the trips, their checks' news too). Its card says the news at a glance: a normal day, something wrong, how many
+  unusual things, or a note.
 - **Daily loads.** The trips come a day at a time: a strip of day chips above the canvas, a week at a time with the
-  weeks to turn through, each with what its checks dropped and a dot for how far it moved from the load it is
-  compared with (its most moved column). A day is measured against the same weekday a week earlier, not the day
-  before, so a weekend's or a weekday's own rhythm isn't taken for a change; but a holiday, a day a week after one,
-  and a day with no week before here are measured against their day last year: the same holiday (New Year's Day
-  against New Year's Day, Martin Luther King Jr. Day against last year's, on its own date), else the same weekday 52
-  weeks back. A switch compares every day with last year. Last year's loads are the same month a year before, cast to
-  this month's columns by the data script; they run to be compared with, each with its own month as the flow's
-  `month` parameter, and are not stepped through. Next and Play step through the month's own, and a day whose
-  baseline hasn't run runs that one first. A load is that day's file
-  put in the engine as the trips source, and a run: a load run before runs again at no cost, its rows giving the
-  same keys. A load whose trips are outside their normal range is marked ▲ or ▼ (known before it runs), and one whose
-  checks dropped a share outside its own is marked in amber; with no history, a share beyond 3.5 robust deviations
-  from the loads' median, once four have run. Each run records its load, and the Runs view
-  names the day. Weather's effect needs dry hours at the same time of day on other days, which one day's load can't
-  have: it is measured over every load run so far on the same flow, the weather_effect step's own SQL with its input
-  bound to those loads' rows together (`emitSqlOver`, `emitUnionAll`).
+  weeks to turn through, each with what its checks dropped and a dot for its news (red for something wrong, amber for
+  something unusual), and a word for it. Besides the month, the loads hold three real incidents in the TLC's records,
+  each with a few ordinary days either side, chosen above the strip: the records stopping part way through Thursday
+  21 September 2023 and holding almost nothing until Monday, the same on 17 and 18 September 2022, and a week in
+  November 2022 a quarter short every day; each runs with its own month as the flow's `month` parameter. Next and Play
+  step through them. A load is that day's file put in the engine as the trips source, and a run: a load run before
+  runs again at no cost, its rows giving the same keys. A load whose trips are outside their normal range is marked
+  (known before it runs). Each run records its load, and the Runs view names the day. Weather's effect needs dry hours
+  at the same time of day on other days, which one day's load can't have: it is measured over every load run so far
+  on the same flow, the weather_effect step's own SQL with its input bound to those loads' rows together
+  (`emitSqlOver`, `emitUnionAll`).
 - **Normal ranges.** Each day's numbers are judged against what a day like it would have (`src/core/normal.ts`), from
   the days before it alone, the way data-observability tools set an expected range for a daily metric and forecasting
   practice combines guesses rather than picking one. Two guesses. The weeks before: the same weekday over the six
@@ -384,23 +379,72 @@ Builder and drawn in the family's look. The first concepts are on the design can
   ratios, day by day). Each guess is weighted by how well it guessed the ordinary days of the six weeks before, in
   inverse proportion to its squared typical miss (Bates and Granger's combination), neither counting less than a fifth.
   The range is the guess give or take three typical misses of that combined guess over the same days (a typical miss:
-  1.4826 times the median absolute miss, a standard deviation a few odd days don't inflate). Holidays, and the days in
+  1.4826 times the median absolute miss, a standard deviation a few odd days don't inflate). A guess's typical miss is
+  the larger of its miss over every day and over the same weekday's, and a guess that misses by more than three times
+  the other's is left out: last year's, when a rule changed since (the TLC's surcharges in December 2022, after which
+  last year's Saturdays had next to no $1 surcharge). A count far from its weekday's in the three weeks before it (half
+  again, or a third less) is judged but not learned from, as observability tools leave the anomalies they find out of
+  what they learn: a feed that stopped last September doesn't lower this September's range. Holidays, and the days in
   a window around one that are no ordinary days either (`src/core/calendar.ts`: the holiday season from December 23 to
   January 3, the week of July 4th, the day before Thanksgiving and its weekend, the weekends before Memorial Day and
   Labor Day, as Prophet gives a holiday a window), go by last year's own day alone: the same holiday, or the same day
   of the window on the same weekday, moved by the year's ratio and, for a holiday on a date that fell on another
   weekday, by how the two weekdays compare lately; give or take three of that guess's typical misses on the holidays
-  of the year before. Counts are guessed on a log scale, shares on a logit scale, medians as they are. The numbers come
+  of the year before; and not at all when last year's guess is broken, or the number has moved by half or more on its
+  scale since last year (what a holiday had then, so moved, says little of what it has now). The weekday move is a
+  count's alone: a holiday Monday has a Monday's trips, more or less, but no rush hour. Counts are guessed on a log
+  scale, shares on a logit scale, medians as they are. The numbers come
   from the scenario's history (`history.json`, by `scripts/data/history.ts`: two years and a quarter of days, each
   measured as the app measures a load: the trip checks run on the runtime, the trips profiled with exact counts and a
-  median from an even sample of 2,000 rows). The loads box has a band chart of the week shown and the seven before it,
-  each day's range a band, its guess a dashed line, its number a dot (amber outside its range), holidays marked under
-  it, and why a day's range is what it is: each guess, the days it came from, its weight and its typical miss, and for
-  what the checks drop, each rule's share against its own range; and how the ranges held over the year before the
-  month. A column card in the profile box gives the column's normal share filled and, for a measure or a time whose
-  median varies from day to day, its normal median (a time's in the day). As the person may read it: only with the
+  median and quantiles from an even sample of 2,000 rows, every row of the coded columns counted). A sheet's History
+  tab has a band chart of the week shown and the seven before it, each day's range a band, its guess a dashed line,
+  its number a dot (amber outside its range), holidays marked under it, and why a day's range is what it is: each
+  guess, the days it came from, its weight and its typical miss, and for what the checks drop, each rule's share
+  against its own range; and how the ranges held over the year before the month. A column's story gives its normal
+  share filled and, for a measure or a time whose median varies from day to day, its normal median (a time's in the
+  day). As the person may read it: only with the
   trips source open to them, and a range for what the checks drop only while the checks are the ones the history
   counted, reading the trips themselves.
+- **The sheet: a table's story in tabs.** A card's sheet tells the story of its data in the same few tabs on every
+  card, the news first (as Palantir's data health puts a dataset's checks first, and Alteryx's and Trifacta's profiles
+  put a column's distribution and quality on top of it): News, what is out of the ordinary, each finding with its
+  evidence, where to look for more, and what can be done; Data, its rows, each column's distribution and how full it
+  is on top of it, as a spreadsheet's data explorer has them, a header opening the column; Columns, one to a line,
+  each opening in place on its story (what it is, its shape, its normal share filled and median, the findings about
+  it, the checks worth adding); Dropped, for a step that drops rows, what it dropped and why, each rule against a day
+  like it; Odd rows, for a table big enough to have them; History, for the numbers the history follows, any of them
+  day by day against its normal range (a finding's own a tap away); and About, what the step is, its settings, who can
+  see it and what the engine runs. Above the tabs, what it reads and what reads it, a tap away, and the day's load, to
+  step through without closing the sheet; the News tab carries a count of what to look at. A card keeps its tab and
+  its place in each tab. On a phone the sheet takes the screen, its head staying in sight.
+- **The news.** What is out of the ordinary about a load (`src/core/news.ts`), the kinds data-observability tools
+  watch a table for, judged against each number's normal range: the amount of data (a normal amount for the day or
+  not; all but blank; the trips stopping part way through the day or starting late, hour by hour against how a day
+  like it shares out its trips; with where the change is, the coded value that accounts for most of it), the values
+  (one usually there gone, one's share unusual, a value or a combination of two never seen in the history, as Monte
+  Carlo's new-values monitor has it, on enough rows to matter), completeness (a column missing more values than it
+  does), shape (a measure's or a time's quantiles moved), what the checks drop and each rule's share, the file's own
+  columns changing from one month to the next, and the weather, as context. False alarms are kept down three ways: a
+  number has to be outside its normal range; it has to matter (enough rows, a big enough change: `MATERIAL`, a share
+  moving a fifth of its smaller side at least, and two points and four typical misses to be unusual rather than worth
+  knowing); a change that has lasted (outside today's range on most of the week before, or the same weekday twice
+  running) is told as a note from the day it began, not as news every day, until the range learns it or it is marked
+  expected; and findings that are likely one thing seen through several columns (the same number of trips missing a
+  passenger count, a rate code and a surcharge) are told once. Calibrated on the history's days from January 2023 to
+  January 2024: 357 of 396 with nothing unusual, 33 something unusual, 6 something wrong (from 141 alerts before). A table the history doesn't follow (a lookup, a step) is told from its own rows on the
+  day's run (`tableNewsOf`): a key a join reads it by repeating, rows a join finds no match for, placeholder values
+  that stand for no value (a lookup's Unknown and N/A) with the steps that leave them out, and empty values in an
+  input's columns or in the ones a step adds. Each finding is something wrong (alert), unusual (warn), worth knowing
+  (note) or normal, says the published datasets built from its rows when it matters, and where its band comes from.
+  A day with nothing to tell says so.
+- **What can be done about a finding.** Each finding offers what fits it, as Datadog's annotations, Anomalo's alerts
+  and Monte Carlo's incidents do: mark it expected, with why (kept, but quiet, and the next person sees the note);
+  open an incident, and resolve it with what it was, which leaves the day out of what the normal ranges learn from;
+  tell whoever publishes the input, a note ready to send or copy; add a check that flags rows like these from now on,
+  a warning rule in a watch box beside the table (made the first time); or set the rows aside in a dataset of their
+  own, to review. The owner changes the flow; anyone may mark or note. What was done is kept in this browser as a
+  hash-chained log (each entry's hash covers the one before), shown on the finding, and an incident on a day shows in
+  the history's list of days something was wrong.
 - **What the columns hold.** A profile box has a card for each column: how full it is, its distinct values, and a
   measure's or a time's shape (a histogram from its 1st to its 99th percentile, the median marked, the smallest,
   largest, mean and middle half) or a category's common values. Counts are exact, counted by the engine over every row
@@ -431,12 +475,6 @@ Builder and drawn in the family's look. The first concepts are on the design can
   description on hover. A column card says what the column is, decodes its common values, and adds the note. The
   Ontology view lists every column the viewer can read somewhere, grouped by the source it comes from or the steps
   that make it, with its codes, where it is, how a step makes it, and links to its sources.
-- **Drift between runs and across loads.** Each column is compared with the load the day is measured against (a
-  week before, or last year), or, when the flow changed on this load, with its run before (a different key), by the
-  population stability index over the earlier rows' deciles, or its values, with missing values a bin of their own:
-  steady under 0.1, moved to 0.25, shifted above, with what moved (a median, a share). Between days a time is
-  compared by its time of day (`minuteOfDay`): each day's dates are its own. Across loads, a grid has a cell per
-  column and day, a week at a time, each day against its baseline.
 - **Suggested checks, added as a filter box.** For the columns a step makes itself (an input's, an aggregate's or a SQL
   step's, the ones a formula, join or select adds), and that no check before or after it already judges: an upper
   bound for a far tail, `>= 0` for stray negatives or as a guard, `IS NOT NULL` for a few missing values (columns

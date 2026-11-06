@@ -1119,7 +1119,17 @@
     {
       "id": "trips_profile",
       "of": "trips",
-      "description": "What each load of trips holds: its columns, the rows an isolation forest finds odd, how it moved from the same day a week before, and checks worth adding. It only looks: no data changes here."
+      "description": "What each load of trips holds, and whether it is a normal day: its news against the history (the amount, the hours, the values and combinations, what the checks drop), each column's distribution, the rows an isolation forest finds odd, and checks worth adding. It only looks: no data changes here."
+    },
+    {
+      "id": "zones_profile",
+      "of": "zones",
+      "description": "What the zone lookup holds: each zone's id once, the zones that are placeholders, and the trips that find no zone. It only looks: no data changes here."
+    },
+    {
+      "id": "weather_profile",
+      "of": "weather",
+      "description": "What the weather holds: each district's hours on record, and the day's rain, snow and temperatures in the city's history. It only looks: no data changes here."
     }
   ],
   "layout": {}

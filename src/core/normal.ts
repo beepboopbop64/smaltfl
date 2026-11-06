@@ -11,9 +11,14 @@
  *   one odd week last year doesn't make the guess), moved by how this year's days compared with last year's over the
  *   six weeks before (the median of their ratios, day by day). A holiday, or a day in a holiday's window
  *   (calendar.ts), goes by its own day last year: the same holiday, or the same day of the window; one on a date that
- *   fell on another weekday last year is moved too by how the two weekdays compare over the weeks before.
+ *   fell on another weekday last year is moved too, for a count, by how the two weekdays compare over the weeks
+ *   before (a share's or a level's is not: a holiday Monday has no rush hour). Last year's guess has to carry over: one
+ *   that misses the ordinary days before by more than three times the weeks' guess does can't judge a holiday.
  * - Together: each guess weighted by how well it did over the six weeks before, as Bates and Granger combine
- *   forecasts (in inverse proportion to its squared typical miss), neither counting less than a fifth, since weights
+ *   forecasts (in inverse proportion to its squared typical miss, the larger of its miss over every day and over the
+ *   same weekday's, so a guess that does well on weekdays and badly on Saturdays counts for Saturdays as it does
+ *   there); a guess that misses by more than three times the other's is left out (a rule or a habit changed since last
+ *   year, as the TLC's surcharges did in December 2022); else neither counts less than a fifth, since weights
  *   measured over a few weeks are rough. A holiday, or a day around one, has last year's guess alone.
  * - The range: the guess, give or take three typical misses of that combined guess over the six weeks before (the
  *   typical miss: 1.4826 times the median absolute miss, a standard deviation that a few odd days don't inflate). A
@@ -96,6 +101,8 @@ export interface NormalOptions {
   window?: number;
   /** Typical misses each way. */
   z?: number;
+  /** Days left out of what a normal day is learned from: an incident's, say. A day left out still has its own range. */
+  skip?: ReadonlySet<string>;
 }
 
 const EPS = 1e-4;
@@ -121,6 +128,9 @@ function weightedMedian(xs: readonly { v: number; w: number }[]): number {
 
 /** A typical miss: 1.4826 times the median absolute miss, a standard deviation for normal misses. */
 const typical = (misses: readonly number[]) => 1.4826 * median(misses.map(Math.abs));
+/** A guess is broken when it misses by more than three times the other's typical miss, and by a twentieth or more on
+ * the guessing scale (a twentieth of a count, roughly; on a share's logit, of its odds). */
+const broken = (miss: number, other: number) => miss > 3 * other && miss - other >= 0.05;
 
 interface Inner {
   /** The guess on the guessing scale. */
@@ -145,11 +155,34 @@ export class NormalRanges {
   private readonly yearAt = new Map<number, Inner | null>();
   private readonly ratioAt = new Map<number, number | null>();
   private readonly rangeAt = new Map<number, NormalRange | null>();
+  private readonly outliers = new Map<number, boolean>();
 
   constructor(series: DailySeries, scale: Scale, options: NormalOptions = {}) {
     this.series = series;
     this.scale = scale;
-    this.o = { weeks: 6, back: 10, half: 2, window: 42, z: 3, ...options };
+    this.o = { weeks: 6, back: 10, half: 2, window: 42, z: 3, skip: new Set(), ...options };
+  }
+
+  /** A day not learned from: a holiday or one around it, or one left out. */
+  private excluded(k: number): boolean {
+    return this.special(k) || (this.o.skip.size > 0 && this.o.skip.has(this.date(k))) || this.outlier(k);
+  }
+
+  /**
+   * A count far from the same weekday's over the three weeks before it (half as much again, or a third less: a feed
+   * that stopped, part way or all day): not learned from, as data-observability tools leave the anomalies they find
+   * out of what they learn. Its own day is judged as any other.
+   */
+  private outlier(k: number): boolean {
+    if (this.scale !== 'count') return false;
+    let out = this.outliers.get(k);
+    if (out === undefined) {
+      const v = this.val(k);
+      const before = [k - 7, k - 14, k - 21].filter((j) => !this.special(j)).flatMap((j) => (this.val(j) === null ? [] : [this.fwd(this.val(j)!)]));
+      out = v !== null && before.length >= 2 && Math.abs(this.fwd(v) - median(before)) > Math.log(1.5);
+      this.outliers.set(k, out);
+    }
+    return out;
   }
 
   private date(k: number): string {
@@ -212,7 +245,7 @@ export class NormalRanges {
     // likelier to be right, and no one day weighs more than a third, so one odd day never makes the median.
     for (let w = 1; w <= this.o.back && from.length < this.o.weeks; w++) {
       const j = k - 7 * w;
-      const v = this.special(j) ? null : this.val(j);
+      const v = this.excluded(j) ? null : this.val(j);
       if (v !== null) from.push({ day: this.date(j), value: v, weight: 0.5 ** (from.length / this.o.half), x: this.fwd(v) });
     }
     let out: Inner | null = null;
@@ -231,7 +264,7 @@ export class NormalRanges {
     const diffs: number[] = [];
     for (let i = 1; i <= this.o.window; i++) {
       const [j, c] = [k - i, k - i - 364];
-      if (this.special(j) || this.special(c)) continue;
+      if (this.excluded(j) || this.excluded(c)) continue;
       const [a, b] = [this.val(j), this.val(c)];
       if (a !== null && b !== null) diffs.push(this.fwd(a) - this.fwd(b));
     }
@@ -249,14 +282,16 @@ export class NormalRanges {
     if (this.yearAt.has(k)) return this.yearAt.get(k)!;
     let out: Inner | null = null;
     const c = this.special(k) ? this.lastYear(k) : null;
-    const days = this.special(k) ? (c === null ? [] : [c]) : [k - 364, k - 371, k - 357].filter((j) => !this.special(j));
+    const days = this.special(k) ? (c === null ? [] : [c]) : [k - 364, k - 371, k - 357].filter((j) => !this.excluded(j));
     const known = days.filter((j) => this.val(j) !== null);
     const r = known.length ? this.ratio(k) : null;
     if (known.length && r !== null) {
       const b = median(known.map((j) => this.fwd(this.val(j)!)));
       const from = known.sort((x, y) => x - y).map((j) => ({ day: this.date(j), value: this.val(j)!, weight: 1 / known.length }));
-      // A day on last year's weekday, the latest before this one: the two weekdays as the weeks before have them.
-      const back = (this.weekday(k) - this.weekday(known[0]!) + 7) % 7;
+      // A day on last year's weekday, the latest before this one: the two weekdays as the weeks before have them. Only
+      // for a count: how many trips a weekday brings carries over to a holiday on it, but not what they are made of (a
+      // holiday Monday has no rush hour, and no rush-hour surcharge).
+      const back = this.scale === 'count' ? (this.weekday(k) - this.weekday(known[0]!) + 7) % 7 : 0;
       const [here, there] = back ? [this.weeks(k), this.weeks(k - back)] : [null, null];
       if (!back) out = { g: b + r, from, b, r };
       else if (here && there) {
@@ -269,14 +304,26 @@ export class NormalRanges {
   }
 
   /** Each ordinary day of the window before a day: its number, and what each guess said of it. */
-  private misses(k: number): { x: number; w: number | null; y: number | null }[] {
-    const out: { x: number; w: number | null; y: number | null }[] = [];
+  private misses(k: number): { i: number; x: number; w: number | null; y: number | null }[] {
+    const out: { i: number; x: number; w: number | null; y: number | null }[] = [];
     for (let i = 1; i <= this.o.window; i++) {
       const j = k - i;
-      const v = this.special(j) ? null : this.val(j);
-      if (v !== null) out.push({ x: this.fwd(v), w: this.weeks(j)?.g ?? null, y: this.year(j)?.g ?? null });
+      const v = this.excluded(j) ? null : this.val(j);
+      if (v !== null) out.push({ i, x: this.fwd(v), w: this.weeks(j)?.g ?? null, y: this.year(j)?.g ?? null });
     }
     return out;
+  }
+
+  /**
+   * How a guess misses days like this one: the larger of its typical miss over the window's ordinary days and over
+   * those on the same weekday. A guess can do well on weekdays and badly on Saturdays, as last year's does when a
+   * weekend surcharge has come in since; a typical miss over every day would hide it.
+   */
+  private missOf(ms: ReturnType<NormalRanges['misses']>, pick: (m: { w: number | null; y: number | null }) => number | null): number | null {
+    const all = ms.flatMap((m) => (pick(m) === null ? [] : [m.x - pick(m)!]));
+    if (all.length < Math.ceil(this.o.window / 4)) return null;
+    const same = ms.flatMap((m) => (m.i % 7 !== 0 || pick(m) === null ? [] : [m.x - pick(m)!]));
+    return same.length >= 3 ? Math.max(typical(all), typical(same)) : typical(all);
   }
 
   private guess(by: 'weeks' | 'year', inner: Inner, weight: number, miss: number | null): Guess {
@@ -312,11 +359,20 @@ export class NormalRanges {
     const Y = this.year(k);
     if (special) {
       if (!Y) return null;
+      // Last year's guess has to carry over: one that misses the ordinary days before by far more than the weeks'
+      // guess does (a rule or a habit changed since last year) can't judge a holiday either.
+      const ms = this.misses(k);
+      const [sW, sY] = [this.missOf(ms, (m) => m.w), this.missOf(ms, (m) => m.y)];
+      if (sW !== null && sY !== null && broken(sY, sW)) return null;
+      // Nor when the number has moved far since last year (by half on the guessing scale: two thirds more or less of
+      // a count): what a holiday had then, so moved, says little of what it has now (the TLC's $2.50 meant one
+      // surcharge in 2022 and another in 2023).
+      if (Math.abs(Y.r ?? 0) > 0.5) return null;
       // How well last year's guess did on the holidays of the year before.
       const misses: number[] = [];
       for (let i = 1; i <= 365; i++) {
         const j = k - i;
-        if (!this.special(j)) continue;
+        if (!this.special(j) || this.o.skip.has(this.date(j))) continue;
         const [v, y] = [this.val(j), this.year(j)];
         if (v !== null && y) misses.push(this.fwd(v) - y.g);
       }
@@ -333,14 +389,14 @@ export class NormalRanges {
     const W = this.weeks(k);
     if (!W && !Y) return null;
     const ms = this.misses(k);
-    const eW = W ? ms.flatMap((m) => (m.w === null ? [] : [m.x - m.w])) : [];
-    const eY = Y ? ms.flatMap((m) => (m.y === null ? [] : [m.x - m.y])) : [];
-    const sW = eW.length >= least ? typical(eW) : null;
-    const sY = eY.length >= least ? typical(eY) : null;
+    const sW = W ? this.missOf(ms, (m) => m.w) : null;
+    const sY = Y ? this.missOf(ms, (m) => m.y) : null;
     let wW: number;
     if (W && Y && sW !== null && sY !== null) {
       const bg = sW === 0 && sY === 0 ? 0.5 : sW === 0 ? 1 : sY === 0 ? 0 : 1 / sW ** 2 / (1 / sW ** 2 + 1 / sY ** 2);
-      wW = Math.min(0.8, Math.max(0.2, bg));
+      // A guess that misses days like this one by far more than the other is left out; else neither counts less
+      // than a fifth.
+      wW = broken(sY, sW) ? 1 : broken(sW, sY) ? 0 : Math.min(0.8, Math.max(0.2, bg));
     } else if (W && sW !== null) wW = 1;
     else if (Y && sY !== null) wW = 0;
     else return null;
@@ -351,6 +407,13 @@ export class NormalRanges {
     if (eC.length < least) return null;
     const guesses = [...(W && wW > 0 ? [this.guess('weeks', W, wW, sW)] : []), ...(Y && wY > 0 ? [this.guess('year', Y, wY, sY)] : [])];
     return this.range(k, centre, typical(eC), guesses, eC.length, 'weeks');
+  }
+
+  /** How far a number is from the day's guess, in typical misses on the guessing scale: what ranks a finding. */
+  distance(range: NormalRange, value: number): number {
+    const x = this.fwd(value);
+    if (range.spread === 0) return x === range.centre ? 0 : Math.sign(x - range.centre) * Infinity;
+    return (x - range.centre) / range.spread;
   }
 
   /** Where a number falls against the day's range: on the guessing scale, so a share of none is a share of none. */

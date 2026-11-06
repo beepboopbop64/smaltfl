@@ -1,8 +1,8 @@
 // Builds the app into dist/app: page.html (the page's content; the artifact host adds the document skeleton),
 // app.js (the page), worker.js (the engine worker), inline.js (the engine in the page, for browsers without the
 // worker), and data/ (the example's files: from the data branch when it has been fetched, the month's daily loads and
-// the same month's a year before, listed in data/loads.json, and the history each day's normal range comes from,
-// data/history.json; else the XS fixtures, as one load).
+// the days of a few real incidents, listed in data/loads.json, and the history each day's normal range and news come
+// from, data/history.json; else the XS fixtures, as one load).
 //
 //   node scripts/build-app.mjs            the daily loads from origin/data, or the 10k fixtures
 //   node scripts/build-app.mjs --xs       the 10k fixtures
@@ -46,23 +46,22 @@ if (days.length) {
   // The weather of every load's day when the data has it, else the month's.
   put('weather.csv', fromData(manifest.loads.weather ?? `weather/open-meteo_${manifest.month}.csv`));
   mkdirSync(`${out}/data/loads`, { recursive: true });
-  const entryOf = (day, earlier) => {
+  const entryOf = (day) => {
     const path = `loads/yellow_tripdata_${day}.parquet`;
     const entry = manifest.files.find((f) => f.path === path);
     put(path, fromData(path));
     // The app names the holidays itself (src/core/calendar.ts).
-    return { day, file: path, rows: entry.rows, sha256: entry.sha256, ...(earlier ? { earlier: true } : {}) };
+    return { day, file: path, rows: entry.rows, sha256: entry.sha256 };
   };
-  const list = days.map((day) => entryOf(day, false));
+  const list = days.map(entryOf);
   // Real incidents in the records, a few days each, to step through as the month is.
-  const episodes = (manifest.loads.episodes ?? []).map((e) => ({ name: e.name, about: e.about, loads: e.days.map((day) => entryOf(day, false)) }));
-  const earlier = (manifest.loads.earlier ?? []).map((day) => entryOf(day, true));
+  const episodes = (manifest.loads.episodes ?? []).map((e) => ({ name: e.name, about: e.about, loads: e.days.map(entryOf) }));
   // Each day's numbers, for each load's normal range: a data branch built before the history has none.
   const history = manifest.history ? fromData('history.json') : null;
   if (history) put('history.json', history);
-  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ month: manifest.month, built: manifest.built, loads: list, episodes, earlier, ...(history ? { history: 'history.json' } : {}) }, null, 2) + '\n');
+  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ month: manifest.month, built: manifest.built, loads: list, episodes, ...(history ? { history: 'history.json' } : {}) }, null, 2) + '\n');
   const trips = (ls) => ls.reduce((n, l) => n + l.rows, 0).toLocaleString('en-US');
-  console.log(`built ${out} with ${list.length} daily loads from origin/data (${trips(list)} trips), ${episodes.map((e) => `${e.loads.length} of ${e.name}`).join(', ') || 'no episodes'}${earlier.length ? `, ${earlier.length} from a year before (${trips(earlier)})` : ''}${history ? `, and the history from ${manifest.history.from} to ${manifest.history.to}` : ''}`);
+  console.log(`built ${out} with ${list.length} daily loads from origin/data (${trips(list)} trips), ${episodes.map((e) => `${e.loads.length} of ${e.name}`).join(', ') || 'no episodes'}${history ? `, and the history from ${manifest.history.from} to ${manifest.history.to}` : ''}`);
 } else {
   for (const name of ['trips.parquet', 'zones.csv', 'weather.csv']) put(name, readFileSync(`fixtures/xs/${name}`));
   console.log(`built ${out} with data from fixtures/xs (10,000 trips)`);
