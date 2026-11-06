@@ -10,7 +10,8 @@ import { hashOf, hex, unhex, utf8 } from './hash.js';
 import type { KeyEnv } from './keys.js';
 import type { FailAction, FlowPlan, PlanNode } from './plan.js';
 
-export const MANIFEST_FORMAT = 0;
+/** run/1 (ADR 0006): run/0 and the source files read, the flow's policies and ontology, the build, the data and the record. */
+export const MANIFEST_FORMAT = 1;
 
 export interface ExpectationResult {
   /** Rows the expectation read. */
@@ -31,6 +32,15 @@ export interface ManifestNode {
   content?: string;
   rows?: number;
   expectations?: ExpectationResult;
+  /** A source read from a pinned file: the file, as the engine observed it (run/1). */
+  file?: SourceFile;
+}
+
+/** A file a source read (E1): its location, and the SHA-256 and size of the exact bytes the engine decoded. */
+export interface SourceFile {
+  location: string;
+  sha256: string;
+  bytes: number;
 }
 
 export interface DatasetRecord {
@@ -40,20 +50,31 @@ export interface DatasetRecord {
 }
 
 export interface RunManifest {
-  smaltflRun: typeof MANIFEST_FORMAT;
-  flow: { id: string; hash: string };
+  smaltflRun: 0 | 1;
+  /** run/1 adds the hashes of the flow's policies and ontology (E5). */
+  flow: { id: string; hash: string; policies?: string; ontology?: string };
   /** The hash of the typed flow plan that ran (stored with the run). */
   plan: string;
   parameters: Record<string, string | number | null>;
   engine: KeyEnv;
   nodes: ManifestNode[];
   outputs: Record<string, DatasetRecord>;
+  /** run/1: the code that ran it: smaltfl's commit (or dev) and every plugin in the engine, with its version. */
+  build?: { smaltfl: string; plugins: [string, string][] };
+  /** run/1, the caller's claims: the data branch commit and MANIFEST.json hash it loaded from, and its record's head. */
+  data?: { commit: string; manifest: string } | null;
+  log?: { origin: string; size: number; root: string } | null;
   /** The previous run of this flow in the same database, by manifest hash. */
   previous: string | null;
 }
 
 export const planHash = (plan: FlowPlan): Promise<string> => hashOf('plan/0', plan);
-export const manifestHash = (manifest: RunManifest): Promise<string> => hashOf('run/0', manifest);
+/** A manifest's hash, by its own format: run/0 manifests made before run/1 still verify. */
+export const manifestKind = (manifest: RunManifest): string => (manifest.smaltflRun === 1 ? 'run/1' : 'run/0');
+export const manifestHash = (manifest: RunManifest): Promise<string> => hashOf(manifestKind(manifest), manifest);
+/** E5: what the flow lets whom see, and what its objects are, each by itself. */
+export const policiesHash = (policies: unknown): Promise<string> => hashOf('policies/0', policies ?? null);
+export const ontologyHash = (ontology: unknown): Promise<string> => hashOf('ontology/0', ontology ?? null);
 
 // ------------------------------------------------------------------ identity cards
 
@@ -96,7 +117,7 @@ export interface SignedManifest {
   signature: string;
 }
 
-const signedBytes = (manifest: RunManifest) => utf8(`smaltfl/run/0\n${canonicalJSON(manifest)}`);
+const signedBytes = (manifest: RunManifest) => utf8(`smaltfl/${manifestKind(manifest)}\n${canonicalJSON(manifest)}`);
 
 export async function signManifest(manifest: RunManifest, identity: Identity): Promise<SignedManifest> {
   const sig = await crypto.subtle.sign(SIGN, identity.privateKey, signedBytes(manifest));

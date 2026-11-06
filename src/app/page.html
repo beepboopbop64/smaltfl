@@ -246,10 +246,34 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .tabs button[aria-selected="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--smalt); }
 .tab-badge { font-family: var(--mono); font-size: 10.5px; min-width: 16px; padding: 0 5px; border-radius: 999px; color: var(--surface); background: var(--warn); line-height: 16px; text-align: center; }
 .tab-badge.alert { background: var(--bad); }
+.record .rec-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; }
+.record .rec-root { font-family: var(--mono); font-size: 12px; word-break: break-all; color: var(--ink-2); margin: 4px 0 8px; }
+.record .timeline { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
+.record .timeline li { display: grid; grid-template-columns: 3.2em 1fr; gap: 2px 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+.record .timeline .seq { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+.record .timeline .when { grid-column: 2; color: var(--muted); font-size: 12px; }
+.hash4 { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.seal { pointer-events: none; }
+.seal circle { stroke: var(--surface); stroke-width: 1.5; }
+.seal.ok circle { fill: var(--ok); } .seal.bad circle { fill: var(--bad); } .seal.amber circle { fill: var(--warn); } .seal.grey circle { fill: var(--muted); }
+.seal path { fill: none; stroke: var(--surface); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.chain { list-style: none; margin: 0; padding: 0; }
+.chain > li { border-left: 3px solid var(--line); padding: 4px 0 10px 12px; margin-left: 6px; position: relative; }
+.chain > li::before { content: ''; position: absolute; left: -7.5px; top: 9px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--ok); }
+.chain > li.bad::before { border-color: var(--bad); background: var(--bad); }
+.chain > li.unchecked::before { border-color: var(--muted); }
+.chain .c-what { font-weight: 600; margin: 0; }
+.chain .c-line { margin: 2px 0 0; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.verdict .v-line, .finding .f-detail, .stopped-line { overflow-wrap: anywhere; }
+.chain .c-line.bad { color: var(--bad); font-weight: 600; }
+.levels { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.levels .pill.off { opacity: 0.45; }
 .stopped-line { margin: 6px 0 0; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--bad) 12%, var(--surface)); color: var(--ink); font-size: 13px; }
 .stopped-line .linkish { background: none; border: 0; padding: 0; color: var(--bad); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .f-from { font-size: 11.5px; color: var(--muted); margin: 2px 0 0; }
 .f-affects { font-size: 12.5px; color: var(--muted); margin: 6px 0 0; }
+.seal-key { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; }
+.seal-key circle { fill: var(--ok); } .seal-key path { fill: none; stroke: var(--surface); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .dot-key { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 3px; vertical-align: -1px; }
 .dot-key.warn { background: var(--warn); } .dot-key.alert { background: var(--bad); margin-right: 6px; }
 .health-dot { stroke: var(--surface); stroke-width: 2; pointer-events: none; }
@@ -681,6 +705,7 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
       <li><span class="swatch drop"></span>rows a step left out</li>
       <li><svg class="shield-key" viewBox="0 0 12 14" aria-hidden="true"><path d="M6 0 L12 2.5 V7 C12 10.5 9.5 13 6 14 C2.5 13 0 10.5 0 7 V2.5 Z"/></svg>a rule limits who sees it: tap for who</li>
       <li><span class="dot-key warn" aria-hidden="true"></span><span class="dot-key alert" aria-hidden="true"></span>news: something unusual, or wrong</li>
+      <li><svg class="seal-key" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6"/><path d="M 4.2 7 L 6.2 9.2 L 10 4.6"/></svg>sealed: checked back to the bytes it was made from</li>
     </ul>
     <div id="loads" class="loads" hidden></div>
     <div id="canvas" tabindex="0" aria-label="The flow canvas. Arrow keys move around, plus and minus zoom."></div>
@@ -716,7 +741,8 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
   </section>
 
   <section class="view" id="view-runs" aria-label="Runs" hidden>
-    <p class="lede">Every run records the hash of its flow, its plan, its inputs and every dataset it stored. Verify a run to check those hashes and recompute it from its snapshots; sign it with a key this browser makes.</p>
+    <p class="lede">Every run records, by hash, the flow and the plan it ran, the files it read (as the engine saw their bytes), every dataset it stored, and the data's list it came from. Everything that happens to the flow goes into one record, signed by this browser, that an auditor can check without trusting it. Verify a run to check its hashes, recompute it, or decode its files again.</p>
+    <div class="panel record" id="record"></div>
     <ul class="runs" id="runs-list"></ul>
   </section>
 </main>

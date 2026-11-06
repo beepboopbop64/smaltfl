@@ -9,6 +9,7 @@
  *   _smaltfl_sources(source, watch, content, …)        each source table's last snapshot, and its watch
  *   _smaltfl_checks(key, result)                       expectation counts, by the expectation's key
  *   _smaltfl_edits(seq, action, object, …, prev, hash)  actions' edits and refusals, in a hash chain
+ *   _smaltfl_flows(hash, doc)                          flow documents runs were translated from, by flow hash
  */
 import type { Database } from 'smaltdb/engine';
 import type { ExpectationResult } from '../core/manifest.js';
@@ -21,6 +22,7 @@ export function ensureStore(db: Database): void {
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_runs(id INTEGER PRIMARY KEY, flow TEXT NOT NULL, hash TEXT NOT NULL, manifest TEXT NOT NULL, started TEXT NOT NULL, finished TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_sources(source TEXT PRIMARY KEY, watch TEXT NOT NULL, content TEXT NOT NULL, rows INTEGER NOT NULL, schema TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_checks(key TEXT PRIMARY KEY, result TEXT NOT NULL)');
+  db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_flows(hash TEXT PRIMARY KEY, doc TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_edits(seq INTEGER PRIMARY KEY, action TEXT NOT NULL, object_type TEXT NOT NULL, object TEXT NOT NULL, params TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, outcome TEXT NOT NULL, reason TEXT NOT NULL, prev TEXT, hash TEXT NOT NULL)');
 }
 
@@ -64,9 +66,12 @@ export function nameInUse(db: Database, name: string): { type: string; ours: boo
 /** Point a dataset's name at a version. Runs inside the caller's transaction. */
 export function pointDataset(db: Database, name: string, key: string, table: string, run: number): void {
   db.exec(`DROP VIEW IF EXISTS ${q(name)}`);
-  db.exec(`CREATE VIEW ${q(name)} AS SELECT * FROM ${q(table)}`);
+  db.exec(datasetView(name, table));
   db.run('INSERT INTO _smaltfl_datasets(name, key, run) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET key = excluded.key, run = excluded.run', [name, key, run]);
 }
+
+/** The exact statement that makes a dataset's name show a version: verify compares the stored view with it. */
+export const datasetView = (name: string, table: string): string => `CREATE VIEW ${q(name)} AS SELECT * FROM ${q(table)}`;
 
 /** Run `work` in one transaction: committed if it returns, rolled back if it throws. Synchronous, so no await can split it. */
 export function inTransaction<T>(db: Database, work: () => T): T {

@@ -10,8 +10,10 @@ import { createTable, emitExpectCounts, emitSelect } from '../core/emit.js';
 import { hex, sha256Hex } from '../core/hash.js';
 import type { KeyEnv } from '../core/keys.js';
 import { nodeKey } from '../core/keys.js';
-import type { DatasetRecord, ExpectationResult, ManifestNode, RunManifest } from '../core/manifest.js';
-import { MANIFEST_FORMAT, manifestHash, planHash } from '../core/manifest.js';
+import { withoutDisplay, type FlowDocument } from '../core/document.js';
+import type { DatasetRecord, ExpectationResult, ManifestNode, RunManifest, SourceFile } from '../core/manifest.js';
+import { MANIFEST_FORMAT, manifestHash, ontologyHash, planHash, policiesHash } from '../core/manifest.js';
+import { flowHash } from '../core/plan.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, ColumnType, ExpectNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
 import { validatePlan } from '../core/plan.js';
@@ -19,6 +21,7 @@ import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 import type { Declared, TableHash } from './dataset-hash.js';
 import { hashTable, tableColumns } from './dataset-hash.js';
+import { PINNED_PREFIX, takeOpened } from './pinned.js';
 
 const STATIC: Record<Exclude<Declared, 'ANY'>, ColumnType> = { INTEGER: 'int', REAL: 'real', TEXT: 'text', BLOB: 'blob' };
 import { ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, nameInUse, pointDataset, recordCheck, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
@@ -33,12 +36,36 @@ export class RunError extends Error {
   }
 }
 
-export async function runPlan(db: Database, input: unknown, options: RunOptions, version: string, signal?: AbortSignal): Promise<RunResult> {
+/** The engine's own version: what a run records, whatever its caller says (ADR 0006 §4). */
+export function engineVersion(db: Database): string {
+  return String(db.query('SELECT smaltdb_version()').rows[0]?.[0] ?? '');
+}
+
+/** The plugins in the engine, with their versions, sorted: the code that decoded and ran a run. */
+export function pluginsOf(db: Database): [string, string][] {
+  const list = (db as Database & { plugins?: readonly { name: string; version: string }[] }).plugins ?? [];
+  return list.map((p): [string, string] => [p.name, p.version]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+export async function runPlan(db: Database, input: unknown, options: RunOptions, version: string, signal?: AbortSignal, commit = 'dev'): Promise<RunResult> {
   validatePlan(input);
   if (typeof options?.smaltdb !== 'string' || options.smaltdb === '') throw new RunError('a run needs the engine version: { smaltdb: "0.9.0" }');
+  // An engine built from its sources (as in this repo's tests) reports 'unknown': there is nothing to check against.
+  const actual = engineVersion(db);
+  if (actual && actual !== 'unknown' && actual !== options.smaltdb) throw new RunError(`the engine is smaltdb ${actual}, not the ${options.smaltdb} the run was asked to record`);
   const plan = structuredClone(input) as FlowPlan;
   const env: KeyEnv = { smaltdb: options.smaltdb, smaltfl: version };
   ensureStore(db);
+  // The flow document, when given, must be the one the plan was translated from: it is kept with the run.
+  const context = options.context ?? {};
+  let doc: string | null = null;
+  let flow: RunManifest['flow'] = plan.flow;
+  if (context.doc !== undefined) {
+    const d = context.doc as FlowDocument;
+    if ((await flowHash(d)) !== plan.flow.hash) throw new RunError("the flow document doesn't hash to the plan's flow hash: it isn't the document the plan was made from");
+    doc = canonicalJSON(withoutDisplay(d) as Parameters<typeof canonicalJSON>[0]);
+    flow = { ...plan.flow, policies: await policiesHash(d.policies), ontology: await ontologyHash(d.ontology) };
+  }
   const started = new Date().toISOString();
   for (const o of plan.outputs) {
     const used = nameInUse(db, o.name);
@@ -63,7 +90,7 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     n.schema = snap.schema;
     keys.set(i, snap.key);
     tables.set(i, snap.table);
-    record(i, snap.reused ? 'reused' : 'built', { content: snap.content, rows: snap.rows });
+    record(i, snap.reused ? 'reused' : 'built', { content: snap.content, rows: snap.rows, ...(snap.file ? { file: snap.file } : {}) });
   }
 
   // 2. Types: every node's output columns, with everything folded onto the snapshots.
@@ -132,19 +159,23 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   const previous = db.query('SELECT hash FROM _smaltfl_runs WHERE flow = ? ORDER BY id DESC LIMIT 1', [plan.flow.id]).rows[0]?.[0];
   const manifest: RunManifest = {
     smaltflRun: MANIFEST_FORMAT,
-    flow: plan.flow,
+    flow,
     plan: typed,
     parameters: plan.parameters,
     engine: env,
+    build: { smaltfl: commit, plugins: pluginsOf(db) },
     nodes: needed.map((i) => records.get(i)!),
     outputs,
+    data: context.data ?? null,
+    log: context.log ?? null,
     previous: typeof previous === 'string' ? previous : null,
   };
   const hash = await manifestHash(manifest);
 
-  // 6. The plan, the run and the dataset names, together.
+  // 6. The plan, the document, the run and the dataset names, together.
   const run = inTransaction(db, () => {
     db.run('INSERT INTO _smaltfl_plans(hash, plan) VALUES (?, ?) ON CONFLICT(hash) DO NOTHING', [typed, canonicalJSON(plan)]);
+    if (doc !== null) db.run('INSERT INTO _smaltfl_flows(hash, doc) VALUES (?, ?) ON CONFLICT(hash) DO NOTHING', [plan.flow.hash, doc]);
     const r = db.run('INSERT INTO _smaltfl_runs(flow, hash, manifest, started, finished) VALUES (?, ?, ?, ?, ?)', [plan.flow.id, hash, canonicalJSON(manifest), started, new Date().toISOString()]);
     const id = Number(r.lastInsertRowid);
     for (const o of plan.outputs) pointDataset(db, o.name, keys.get(o.node)!, tables.get(o.node)!, id);
@@ -160,6 +191,8 @@ interface Snapshot {
   rows: number;
   schema: Column[];
   reused: boolean;
+  /** The pinned file it read, as the engine saw it. */
+  file?: SourceFile;
 }
 
 /**
@@ -183,15 +216,21 @@ async function snapshot(db: Database, n: TableNode, env: KeyEnv): Promise<Snapsh
   }
   const stage = `_smaltfl_stage_${hex(crypto.getRandomValues(new Uint8Array(8)))}`;
   const copy = `INSERT INTO ${q(stage)} SELECT * FROM ${q(n.table)}`;
+  let file: SourceFile | undefined;
   if (st.external) {
     // One statement copies the rows, so the copy is all or nothing without a transaction around the await.
     engine(n.origin, () => db.exec(createTable(stage, schema)));
+    takeOpened();
     try {
       await db.runAsync(copy);
     } catch (e) {
       db.exec(`DROP TABLE IF EXISTS ${q(stage)}`);
       throw new RunError((e as Error).message, n.origin);
     }
+    // The pinned file the copy read, if it read one: the bytes the engine itself hashed.
+    const read = takeOpened().filter((f) => f.location.startsWith(PINNED_PREFIX));
+    if (read.length > 1) throw new RunError(`read ${read.length} pinned files where a source reads one`, n.origin);
+    file = read[0];
   } else {
     engine(n.origin, () =>
       inTransaction(db, () => {
@@ -216,7 +255,7 @@ async function snapshot(db: Database, n: TableNode, env: KeyEnv): Promise<Snapsh
       db.exec(`DROP TABLE ${q(stage)}`);
       if (watched) recordSnapshot(db, n.table, seen);
     });
-    return { key, table: existing.table, content: existing.content, rows: existing.rows, schema, reused: true };
+    return { key, table: existing.table, content: existing.content, rows: existing.rows, schema, reused: true, ...(file ? { file } : {}) };
   }
   const table = versionTable(key);
   inTransaction(db, () => {
@@ -225,7 +264,7 @@ async function snapshot(db: Database, n: TableNode, env: KeyEnv): Promise<Snapsh
     recordVersion(db, { key, table, content: h.content, rows: h.rows });
     if (watched) recordSnapshot(db, n.table, seen);
   });
-  return { key, table, content: h.content, rows: h.rows, schema, reused: false };
+  return { key, table, content: h.content, rows: h.rows, schema, reused: false, ...(file ? { file } : {}) };
 }
 
 /**

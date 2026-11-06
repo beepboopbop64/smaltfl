@@ -8,8 +8,27 @@ import type { RunManifest } from './manifest.js';
 export const PLUGIN_NAME = 'smaltfl';
 
 export interface RunOptions {
-  /** The smaltdb version the engine runs (keys depend on it). */
+  /** The smaltdb version the engine runs (keys depend on it): checked against the engine's own. */
   smaltdb: string;
+  /**
+   * What the run depended on that the plan does not say (ADR 0006): the flow document, which must hash to the plan's
+   * flow hash and is stored with the run; and, as the caller's claims, the data branch commit and MANIFEST.json hash
+   * it loaded from, and the head of its record before the run.
+   */
+  context?: RunContext;
+}
+
+export interface RunContext {
+  doc?: unknown;
+  data?: { commit: string; manifest: string } | null;
+  log?: { origin: string; size: number; root: string } | null;
+}
+
+/** How far verify goes (ADR 0006 §1): the stored hashes; then a recomputation; then decoding the source files again. */
+export type VerifyLevel = 'stored' | 'rerun' | 'rederive';
+
+export interface VerifyOptions extends RunOptions {
+  level?: VerifyLevel;
 }
 
 export interface RunResult {
@@ -24,8 +43,15 @@ export interface VerifyCheck {
   /** The plan node checked, or -1 for the manifest and the plan themselves. */
   node: number;
   origin: string;
-  /** stored: the data kept now still has its recorded hash; rerun: recomputing it from the snapshots gives it again. */
-  check: 'stored' | 'rerun' | 'expectations';
+  /**
+   * stored: the data kept now still has its recorded hash; rerun: recomputing it from the snapshots gives it again;
+   * expectations: recounting the checks gives the same counts; coherent: the manifest agrees with the plan it names;
+   * key: the key recomputes; published: the dataset name shows the version the run made; previous: the run it chains
+   * to is there with that hash; accounting: rows in and out add up; flow: the stored document hashes to the plan's
+   * flow hash and translates to the plan; file: the source file the run read still has its hash and decodes to the
+   * snapshot.
+   */
+  check: 'stored' | 'rerun' | 'expectations' | 'coherent' | 'key' | 'published' | 'previous' | 'accounting' | 'flow' | 'file';
   ok: boolean;
   expected?: string;
   actual?: string | null;
@@ -35,6 +61,9 @@ export interface VerifyCheck {
 export interface VerifyResult {
   ok: boolean;
   run: number;
+  /** How far it went, and the manifest's format (0: no source files recorded). */
+  level: VerifyLevel;
+  format: number;
   /** The engine the run used, and the one that verified it. */
   engine: { ran: string; verified: string };
   checks: VerifyCheck[];

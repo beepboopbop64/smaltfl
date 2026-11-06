@@ -10,6 +10,12 @@ export interface ExampleSource {
   ddl: string;
 }
 
+/**
+ * The same table, read from a file pinned in the engine by the smaltfl plugin (`pin`, ADR 0006 §3): the engine hashes
+ * the bytes, refuses a mismatch, and records which file each run read. The app reads its sources this way.
+ */
+export const pinnedDdl = (src: ExampleSource): string => src.ddl.replace(`'file:${src.file}'`, `'smaltfl:${src.file}'`);
+
 export const EXAMPLE_SOURCES: ExampleSource[] = [
   { file: 'trips.parquet', table: 'trips_file', ddl: "CREATE EXTERNAL TABLE trips_file WITH (location = 'file:trips.parquet', format = 'parquet')" },
   {

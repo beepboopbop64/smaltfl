@@ -279,14 +279,21 @@ describe('verifying a run', () => {
     expect(kinds).toEqual([
       'manifest:stored',
       'plan:stored',
+      'manifest:coherent',
+      'flow:flow',
+      'keys:key',
       'trips:stored',
       'zones:stored',
       'zone_hour:stored',
       'borough_hour:stored',
+      'borough_hour:published',
+      'zone_hour:published',
+      'trips_valid:accounting',
       'trips_valid:expectations',
       'zone_hour:rerun',
       'borough_hour:rerun',
     ]);
+    expect([v.level, v.format]).toEqual(['rerun', 1]);
     expect(db.query("SELECT count(*) FROM sqlite_temp_schema WHERE name LIKE '_smaltfl_verify%'").rows[0]![0]).toBe(0);
   });
 

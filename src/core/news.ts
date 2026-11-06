@@ -19,13 +19,13 @@ import { clockText } from './quality.js';
 
 export type Severity = 'alert' | 'warn' | 'note' | 'ok';
 /** Where a finding's details are: the tabs of a drill-down. */
-export type Look = 'news' | 'rows' | 'columns' | 'dropped' | 'odd' | 'history';
+export type Look = 'news' | 'rows' | 'columns' | 'dropped' | 'odd' | 'history' | 'integrity';
 /** What can be done about a finding. */
-export type Act = 'expected' | 'incident' | 'notify' | 'rule' | 'quarantine';
+export type Act = 'expected' | 'incident' | 'notify' | 'rule' | 'quarantine' | 'refetch' | 'export';
 
 export interface Finding {
   key: string;
-  kind: 'volume' | 'hours' | 'gone' | 'share' | 'new' | 'pair' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'key' | 'unmatched' | 'placeholder' | 'empty';
+  kind: 'volume' | 'hours' | 'gone' | 'share' | 'new' | 'pair' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
   severity: Severity;
   /** How far out, in typical misses (capped): what ranks findings of a severity. */
   score: number;

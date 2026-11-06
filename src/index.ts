@@ -5,7 +5,7 @@
  */
 import type { FlowDocument } from './core/document.js';
 import { translate } from './core/plan.js';
-import type { PluginCaller, RunResult, VerifyResult } from './core/protocol.js';
+import type { PluginCaller, RunContext, RunResult, VerifyLevel, VerifyResult } from './core/protocol.js';
 import { PLUGIN_NAME } from './core/protocol.js';
 import type { ParamValue } from './core/sqltext.js';
 
@@ -55,16 +55,26 @@ export type { ActionCheck, ActionRule, ColumnRule, Group, Policies, Principal, R
 export type { ActRequest, ActionType, Edit, LinkType, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
 export { meaningOf, propertyOf } from './core/ontology.js';
 export { PLUGIN_NAME } from './core/protocol.js';
-export type { PluginCaller, RunOptions, RunResult, VerifyCheck, VerifyResult } from './core/protocol.js';
+export type { PluginCaller, RunContext, RunOptions, RunResult, VerifyCheck, VerifyLevel, VerifyOptions, VerifyResult } from './core/protocol.js';
 export type { ParamType, ParamValue } from './core/sqltext.js';
 
-/** Translate a flow document and run its plan in the engine that `db` reaches (which needs the smaltfl plugin). */
-export async function runFlow(db: PluginCaller, doc: FlowDocument, options: { smaltdb: string; parameters?: Readonly<Record<string, ParamValue>> }): Promise<RunResult> {
+/**
+ * Translate a flow document and run its plan in the engine that `db` reaches (which needs the smaltfl plugin). The
+ * document goes with the plan: the plugin checks that it hashes to the plan's flow hash, and keeps it with the run.
+ * `data` and `log` are recorded in the manifest as the caller's claims (ADR 0006 §4).
+ */
+export async function runFlow(db: PluginCaller, doc: FlowDocument, options: { smaltdb: string; parameters?: Readonly<Record<string, ParamValue>>; data?: RunContext['data']; log?: RunContext['log'] }): Promise<RunResult> {
   const plan = await translate(doc, options.parameters ?? {});
-  return (await db.callPlugin(PLUGIN_NAME, 'run', [plan, { smaltdb: options.smaltdb }], { lock: true })) as RunResult;
+  const context: RunContext = { doc, data: options.data ?? null, log: options.log ?? null };
+  return (await db.callPlugin(PLUGIN_NAME, 'run', [plan, { smaltdb: options.smaltdb, context }], { lock: true })) as RunResult;
 }
 
-/** Verify a run: its stored hashes, then a recomputation from its snapshots. */
-export async function verifyRun(db: PluginCaller, run: number, options: { smaltdb: string }): Promise<VerifyResult> {
-  return (await db.callPlugin(PLUGIN_NAME, 'verify', [run, { smaltdb: options.smaltdb }], { lock: true })) as VerifyResult;
+/** Verify a run: its stored hashes and links; then a recomputation from its snapshots; then, at rederive, its files decoded again. */
+export async function verifyRun(db: PluginCaller, run: number, options: { smaltdb: string; level?: VerifyLevel }): Promise<VerifyResult> {
+  return (await db.callPlugin(PLUGIN_NAME, 'verify', [run, { smaltdb: options.smaltdb, level: options.level ?? 'rerun' }], { lock: true })) as VerifyResult;
+}
+
+/** Pin a source file's bytes in the engine (served as smaltfl:<name>), refused unless they hash to `sha256` when given. */
+export async function pinFile(db: PluginCaller, name: string, bytes: Uint8Array | null, sha256?: string): Promise<{ name: string; sha256: string; bytes: number }> {
+  return (await db.callPlugin(PLUGIN_NAME, 'pin', [name, bytes, sha256 ?? null], { lock: true })) as { name: string; sha256: string; bytes: number };
 }
