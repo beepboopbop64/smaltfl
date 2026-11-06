@@ -76,5 +76,7 @@ export async function verifyRun(db: PluginCaller, run: number, options: { smaltd
 
 /** Pin a source file's bytes in the engine (served as smaltfl:<name>), refused unless they hash to `sha256` when given. */
 export async function pinFile(db: PluginCaller, name: string, bytes: Uint8Array | null, sha256?: string): Promise<{ name: string; sha256: string; bytes: number }> {
-  return (await db.callPlugin(PLUGIN_NAME, 'pin', [name, bytes, sha256 ?? null], { lock: true })) as { name: string; sha256: string; bytes: number };
+  // A pinned file lives in the engine worker: a new worker (another tab taking over a shared database) gets it again,
+  // checked again, from the client's replay of this call.
+  return (await db.callPlugin(PLUGIN_NAME, 'pin', [name, bytes, sha256 ?? null], { lock: true, replay: `smaltfl-pin:${name}`, dropReplay: bytes === null })) as { name: string; sha256: string; bytes: number };
 }

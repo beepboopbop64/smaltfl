@@ -74,5 +74,5 @@ export interface VerifyResult {
  * A run writes, so through the client it holds the database's lock (`lock: true`), as `exec` does.
  */
 export interface PluginCaller {
-  callPlugin(plugin: string, method: string, args: unknown[], options?: { lock?: boolean; signal?: AbortSignal }): Promise<unknown>;
+  callPlugin(plugin: string, method: string, args: unknown[], options?: { lock?: boolean; replay?: string; dropReplay?: boolean; signal?: AbortSignal }): Promise<unknown>;
 }

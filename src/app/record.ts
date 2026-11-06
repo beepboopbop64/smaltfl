@@ -54,6 +54,8 @@ export class FlowRecord {
   leaves: string[] = [];
   checkpoints: SignedCheckpoint[] = [];
   status: RecordStatus | null = null;
+  /** Checkpoints already checked, by body, signature and signer: each is checked once, not on every append. */
+  private readonly checked = new Map<string, { origin: string; size: number; root: string; signer: IdentityCard } | null>();
   /** Blobs kept for this visit only, where there is no IndexedDB. */
   private readonly memoryBlobs = new Map<string, { hash: string; kind: string; json: string }>();
   private constructor(
@@ -133,8 +135,14 @@ export class FlowRecord {
     const good: { size: number; root: string; origin: string }[] = [];
     let signer: IdentityCard | null = null;
     for (const env of this.checkpoints) {
-      const c = await verifyCheckpoint(env, this.identity.card);
-      if (c.ok && c.origin === this.origin) {
+      // By everything the signature covers and the key that made it, so a body swapped under an old signature is checked.
+      const id = `${env.checkpoint}\u0000${env.signature}\u0000${canonicalJSON(env.signer as unknown as Parameters<typeof canonicalJSON>[0])}`;
+      if (!this.checked.has(id)) {
+        const c = await verifyCheckpoint(env, this.identity.card);
+        this.checked.set(id, c.ok && c.origin === this.origin ? { origin: c.origin, size: c.size, root: c.root, signer: c.signer } : null);
+      }
+      const c = this.checked.get(id);
+      if (c) {
         good.push({ origin: c.origin, size: c.size, root: c.root });
         signer = c.signer;
       }
