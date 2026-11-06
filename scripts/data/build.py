@@ -1,10 +1,10 @@
 """
 Builds the scenario's data (docs/SCENARIO.md §2) for the repository's `data` branch: the NYC TLC yellow taxi trips
 for one month, the TLC zone lookup, Open-Meteo hourly weather for one point per district, the samples the tests and
-the benchmarks use, and the month's days as daily loads, the way a feed would bring them, for the app, with the same
-month a year before as daily loads too, to compare each day with its day last year; and the history, each day's numbers
-for the two years and a quarter before the month's end (history.json, by scripts/data/history.mjs), for each day's
-normal range. .github/workflows/data.yml runs it, because a GitHub runner can reach the data hosts and this project's
+the benchmarks use, and the month's days as daily loads, the way a feed would bring them, for the app, with the days of
+a few real incidents in the TLC's records as loads too (EPISODES); and the history, each day's numbers for the two
+years and a quarter before the month's end (history.json, by scripts/data/history.mjs), with each day's weather and
+each month's file's own columns, for each day's normal range and its news. .github/workflows/data.yml runs it, because a GitHub runner can reach the data hosts and this project's
 cloud sessions can't yet. Every file's size and SHA-256 are in MANIFEST.json.
 
     python scripts/data/build.py OUT [MONTH [WORK]]
@@ -35,6 +35,13 @@ WORK = Path(sys.argv[3]) if len(sys.argv) > 3 else OUT.parent / 'work'
 # for its day last year, six weeks back for the weeks before, and six weeks more for how well each of those guessed,
 # so a year's days, the year before the month, each have all they need.
 HISTORY_MONTHS = 28
+# Days to step through besides the month: real incidents in the TLC's records, as a feed would have brought them, with a
+# few ordinary days either side. Found in the history: the trips stop part way through a day, then all but stop.
+EPISODES = [
+    ('September 2023', '2023-09-18', '2023-09-26', 'The records stop part way through Thursday the 21st, and hold almost no trips from Friday to Sunday.'),
+    ('September 2022', '2022-09-14', '2022-09-20', 'The records stop part way through Saturday the 17th, and hold almost no trips on Sunday.'),
+    ('November 2022', '2022-11-12', '2022-11-21', 'A week with about a quarter fewer trips than the weeks around it, every day.'),
+]
 TLC = 'https://d37ci6vzurychx.cloudfront.net'
 WEATHER = 'https://archive-api.open-meteo.com/v1/archive'
 # One point per district (ADR 0002 §2): the centre of each borough, and Newark airport. Names as the zone lookup has them.
@@ -79,19 +86,28 @@ def main() -> None:
     write(trips_path, get(f'{TLC}/trip-data/yellow_tripdata_{MONTH}.parquet'))
     write(OUT / 'tlc' / 'taxi_zone_lookup.csv', get(f'{TLC}/misc/taxi_zone_lookup.csv'))
 
-    # Hourly weather, in New York local time (as the trip times are), one CSV row per district and hour.
-    lines = ['borough,time,' + ','.join(HOURLY)]
+    # Hourly weather, in New York local time (as the trip times are), one row per district and hour, for the whole
+    # history: the month's file (the tests' and the benchmarks'), the loads' days (the app's), and each day's in the city.
+    y0, m0 = divmod(year * 12 + (month - 1) - (HISTORY_MONTHS - 1), 12)
+    history_from = datetime(y0, m0 + 1, 1)
+    hours: dict[str, dict[str, list[str]]] = {}
     for borough, (lat, lon) in POINTS.items():
         query = urllib.parse.urlencode({
-            'latitude': lat, 'longitude': lon, 'start_date': first.date().isoformat(),
+            'latitude': lat, 'longitude': lon, 'start_date': history_from.date().isoformat(),
             'end_date': (after - timedelta(days=1)).date().isoformat(), 'hourly': ','.join(HOURLY), 'timezone': 'America/New_York',
         })
         hourly = json.loads(get(f'{WEATHER}?{query}'))['hourly']
-        for k, t in enumerate(hourly['time']):
-            values = ['' if hourly[v][k] is None else str(hourly[v][k]) for v in HOURLY]
-            lines.append(','.join([borough, t, *values]))
+        hours[borough] = {t: ['' if hourly[v][k] is None else str(hourly[v][k]) for v in HOURLY] for k, t in enumerate(hourly['time'])}
         time.sleep(1)  # Open-Meteo's free API asks for a gentle rate
-    write(OUT / 'weather' / f'open-meteo_{MONTH}.csv', ('\n'.join(lines) + '\n').encode())
+
+    def weather_csv(days: set[str]) -> bytes:
+        lines = ['borough,time,' + ','.join(HOURLY)]
+        for borough, by_time in hours.items():
+            lines += [','.join([borough, t, *v]) for t, v in by_time.items() if t[:10] in days]
+        return ('\n'.join(lines) + '\n').encode()
+
+    month_days = {(first + timedelta(days=d)).date().isoformat() for d in range((after - first).days)}
+    write(OUT / 'weather' / f'open-meteo_{MONTH}.csv', weather_csv(month_days))
 
     # Samples, all seeded: 10k (tier XS: test fixtures), 100k (the app on a phone), the first week (tier S).
     table = pq.read_table(trips_path)
@@ -150,16 +166,13 @@ def main() -> None:
                 columns.append(c.cast(f.type, safe=False))
         return pa.Table.from_arrays(columns, schema=table.schema)
 
-    # The same month a year before, in this month's columns.
-    earlier = datetime(year - 1, month, 1)
-    earlier_after = datetime(year - 1 + month // 12, month % 12 + 1, 1)
-    earlier_month = earlier.strftime('%Y-%m')
-    earlier_path = OUT / 'tlc' / f'yellow_tripdata_{earlier_month}.parquet'
-    write(earlier_path, get(f'{TLC}/trip-data/yellow_tripdata_{earlier_month}.parquet'))
-    before = pq.read_table(earlier_path)
-    print(f'{earlier_path.name}: {before.num_rows:,} rows; schema: {before.schema}', flush=True)
-    earlier_days = daily(aligned(before), earlier, earlier_after)
-    del before
+    # The episodes' days, among the history's: copied into loads/ as each month's file is split below.
+    episode_days = {}
+    for name, lo, hi, _ in EPISODES:
+        d0 = datetime.fromisoformat(lo)
+        episode_days[name] = [(d0 + timedelta(days=d)).date().isoformat() for d in range((datetime.fromisoformat(hi) - d0).days + 1)]
+    wanted = {d for days in episode_days.values() for d in days}
+    schemas = []
 
     # The history: every day of the month and the 27 before it, a file a day in WORK (not published), in this month's
     # columns; then each day's numbers, measured the way the app measures a load (scripts/data/history.ts).
@@ -173,13 +186,49 @@ def main() -> None:
         if not path.exists():
             path = WORK / 'tlc' / f'yellow_tripdata_{name}.parquet'
             write(path, get(f'{TLC}/trip-data/yellow_tripdata_{name}.parquet'))
-        t = aligned(pq.read_table(path))
+        raw = pq.read_table(path)
+        schemas.append({'month': name, 'columns': [[f.name, str(f.type)] for f in raw.schema]})
+        t = aligned(raw)
+        del raw
         n = len(daily(t, lo, hi, days_dir, say=False))
         print(f'history: {name}, {t.num_rows:,} trips in {n} daily files', flush=True)
+        for day in sorted(wanted):
+            if day.startswith(name):
+                shutil.copyfile(days_dir / f'yellow_tripdata_{day}.parquet', OUT / 'loads' / f'yellow_tripdata_{day}.parquet')
         if path.is_relative_to(WORK):
             path.unlink()
     subprocess.run(['node', 'scripts/data/history.mjs', str(days_dir), str(OUT / 'history.json')], check=True)
     history = json.loads((OUT / 'history.json').read_text())
+    # Each month's file's own columns, and each day's weather in the city: hours on record per district, Manhattan's
+    # rain, snow and temperatures.
+    history['schemas'] = schemas
+    boroughs = list(POINTS)
+    col = {v: i for i, v in enumerate(HOURLY)}
+
+    def num(x: str) -> float | None:
+        return float(x) if x != '' else None
+
+    weather = {'boroughs': boroughs, 'hours': [], 'precip': [], 'snow': [], 'tmin': [], 'tmax': []}
+    by_day = {b: {} for b in boroughs}
+    for b in boroughs:
+        for t, v in hours[b].items():
+            by_day[b].setdefault(t[:10], []).append(v)
+    for day in history['days']:
+        weather['hours'].append([sum(1 for v in by_day[b].get(day, []) if v[col['temperature_2m']] != '') for b in boroughs])
+        m = by_day['Manhattan'].get(day, [])
+        temps = [num(v[col['temperature_2m']]) for v in m if v[col['temperature_2m']] != '']
+        rain = [num(v[col['precipitation']]) for v in m if v[col['precipitation']] != '']
+        snow = [num(v[col['snowfall']]) for v in m if v[col['snowfall']] != '']
+        weather['precip'].append(round(sum(rain), 1) if rain else None)
+        weather['snow'].append(round(sum(snow), 2) if snow else None)
+        weather['tmin'].append(min(temps) if temps else None)
+        weather['tmax'].append(max(temps) if temps else None)
+    history['weather'] = weather
+    (OUT / 'history.json').write_text(json.dumps(history, separators=(',', ':')) + '\n')
+    load_set = set(load_days) | wanted
+    # The loads' days and the day either side, for the weather step's hour shift.
+    near = {(datetime.fromisoformat(d) + timedelta(days=k)).date().isoformat() for d in load_set for k in (-1, 0, 1)}
+    write(OUT / 'weather' / 'open-meteo_loads.csv', weather_csv(near))
 
     files = []
     for p in sorted(OUT.rglob('*')):
@@ -197,14 +246,18 @@ def main() -> None:
         'month': MONTH,
         'sources': {
             'trips': f'{TLC}/trip-data/yellow_tripdata_{MONTH}.parquet',
-            'trips_earlier': f'{TLC}/trip-data/yellow_tripdata_{earlier_month}.parquet',
             'history': f'{TLC}/trip-data/yellow_tripdata_YYYY-MM.parquet, {history["days"][0][:7]} to {MONTH}',
             'zones': f'{TLC}/misc/taxi_zone_lookup.csv',
             'weather': f'{WEATHER} (hourly {",".join(HOURLY)}; America/New_York; points: {json.dumps(POINTS)})',
         },
         'samples': {'seed': SEED, 'method': 'random.Random(seed).sample over row positions, kept in file order'},
-        'loads': {'days': load_days, 'earlier': earlier_days, 'method': "every trip picked up on the day (tpep_pickup_datetime, local time), in file order; the earlier month's in this month's columns"},
-        'history': {'from': history['days'][0], 'to': history['days'][-1], 'days': len(history['days']), 'method': "each day's trips as a daily load, measured by scripts/data/history.ts: the example's trip checks run on the runtime, and the trips profiled as the app's profile box does (exact counts, a median from an even sample of 2,000 rows)"},
+        'loads': {
+            'days': load_days,
+            'episodes': [{'name': name, 'about': about, 'days': episode_days[name]} for name, _, _, about in EPISODES],
+            'weather': 'weather/open-meteo_loads.csv',
+            'method': "every trip picked up on the day (tpep_pickup_datetime, local time), in file order; an episode's days in the month's columns",
+        },
+        'history': {'from': history['days'][0], 'to': history['days'][-1], 'days': len(history['days']), 'method': "each day's trips as a daily load, measured by scripts/data/history.ts: the example's trip checks run on the runtime; the trips profiled as the app's profile box does (exact counts, a median and quantiles from an even sample of 2,000 rows); every row of the coded columns counted, value by value and in pairs, and of the zones; the trips by pickup hour; each day's weather and each month's file's own columns from this script"},
         'schema': {f.name: str(f.type) for f in table.schema},
         'files': files,
     }
@@ -220,9 +273,10 @@ by hand. Each run replaces this branch with one new commit. Sizes, row counts an
 | `tlc/yellow_tripdata_{MONTH}.parquet` | NYC TLC yellow taxi trip records, {MONTH} |
 | `tlc/taxi_zone_lookup.csv` | The TLC taxi zone lookup |
 | `weather/open-meteo_{MONTH}.csv` | Hourly weather for one point per district, New York local time |
+| `weather/open-meteo_loads.csv` | The same, for the loads' days and the day either side (the app) |
 | `samples/` | Seeded samples: 10k rows (test fixtures), 100k, and the month's first week |
-| `loads/` | Daily loads: every trip picked up on each day of the month, and of the same month a year before (in this month's columns), one file a day (the app) |
-| `history.json` | Each day's numbers from {history['days'][0]} to {history['days'][-1]}: trips, what the trip checks drop (each rule's failures), and each column's values present and median, for each day's normal range (the app) |
+| `loads/` | Daily loads: every trip picked up on each day of the month, and on the days of a few real incidents (in this month's columns), one file a day (the app) |
+| `history.json` | Each day's numbers from {history['days'][0]} to {history['days'][-1]}: trips, what the trip checks drop (each rule's failures), each column's values present, median and quantiles, the coded columns' values alone and in pairs and the zones (when each was first and last seen), the trips by hour, the weather, and each month's file's own columns, for each day's normal range and its news (the app) |
 
 **Sources and terms.** Trip records and the zone lookup are published by the NYC Taxi and Limousine Commission
 (nyc.gov/tlc) under the NYC Open Data terms of use. Weather data by [Open-Meteo.com](https://open-meteo.com/),

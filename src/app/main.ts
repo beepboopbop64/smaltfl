@@ -14,7 +14,7 @@ import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, takeOut, validateDocument } from '../core/document.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
-import { daysFrom, HistoryRanges, metricKey, type HistoryFile, type Metric } from '../core/history.js';
+import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, type Metric } from '../core/history.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
@@ -3972,7 +3972,7 @@ async function start(): Promise<void> {
     });
     // Each day's numbers for two years and a quarter, for each load's normal range, when the data has them.
     const past = index?.history ? ((await fetch(`data/${index.history}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)) as HistoryFile | null) : null;
-    if (past?.format === 'smaltfl-history/1' && past.days.length) history = new HistoryRanges(past);
+    if (past?.format === HISTORY_FORMAT && past.days.length) history = new HistoryRanges(past);
     const first = loads.list[0];
     setStatus(first ? `Loading ${dayLabel(first.day)}: ${fmtInt(first.rows)} trips, the zones and the weather…` : 'Loading the trips, the zones and the weather…');
     const files = await Promise.all(EXAMPLE_SOURCES.map(async (src) => [src, await loadFile(src.file === 'trips.parquet' && first ? first.file : src.file)] as const));

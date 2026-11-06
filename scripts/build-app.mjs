@@ -43,7 +43,8 @@ try {
 const days = manifest?.loads?.days ?? [];
 if (days.length) {
   put('zones.csv', fromData('tlc/taxi_zone_lookup.csv'));
-  put('weather.csv', fromData(`weather/open-meteo_${manifest.month}.csv`));
+  // The weather of every load's day when the data has it, else the month's.
+  put('weather.csv', fromData(manifest.loads.weather ?? `weather/open-meteo_${manifest.month}.csv`));
   mkdirSync(`${out}/data/loads`, { recursive: true });
   const entryOf = (day, earlier) => {
     const path = `loads/yellow_tripdata_${day}.parquet`;
@@ -53,14 +54,15 @@ if (days.length) {
     return { day, file: path, rows: entry.rows, sha256: entry.sha256, ...(earlier ? { earlier: true } : {}) };
   };
   const list = days.map((day) => entryOf(day, false));
-  // The same month a year before: loads to compare with, not to step through.
+  // Real incidents in the records, a few days each, to step through as the month is.
+  const episodes = (manifest.loads.episodes ?? []).map((e) => ({ name: e.name, about: e.about, loads: e.days.map((day) => entryOf(day, false)) }));
   const earlier = (manifest.loads.earlier ?? []).map((day) => entryOf(day, true));
   // Each day's numbers, for each load's normal range: a data branch built before the history has none.
   const history = manifest.history ? fromData('history.json') : null;
   if (history) put('history.json', history);
-  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ month: manifest.month, built: manifest.built, loads: list, earlier, ...(history ? { history: 'history.json' } : {}) }, null, 2) + '\n');
+  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ month: manifest.month, built: manifest.built, loads: list, episodes, earlier, ...(history ? { history: 'history.json' } : {}) }, null, 2) + '\n');
   const trips = (ls) => ls.reduce((n, l) => n + l.rows, 0).toLocaleString('en-US');
-  console.log(`built ${out} with ${list.length} daily loads from origin/data (${trips(list)} trips), and ${earlier.length} from a year before (${trips(earlier)})${history ? `, and the history from ${manifest.history.from} to ${manifest.history.to}` : ''}`);
+  console.log(`built ${out} with ${list.length} daily loads from origin/data (${trips(list)} trips), ${episodes.map((e) => `${e.loads.length} of ${e.name}`).join(', ') || 'no episodes'}${earlier.length ? `, ${earlier.length} from a year before (${trips(earlier)})` : ''}${history ? `, and the history from ${manifest.history.from} to ${manifest.history.to}` : ''}`);
 } else {
   for (const name of ['trips.parquet', 'zones.csv', 'weather.csv']) put(name, readFileSync(`fixtures/xs/${name}`));
   console.log(`built ${out} with data from fixtures/xs (10,000 trips)`);

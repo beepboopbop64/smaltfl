@@ -42,8 +42,8 @@ export type { ColumnFacts, Cut, Drift, Forest, Judge, Kind, Profile, Projection,
 export { dayLastYear, holidayOf, holidaysOf, isSpecial, seasonOf } from './core/calendar.js';
 export { NormalRanges } from './core/normal.js';
 export type { Backtest, DailySeries, Guess, NormalOptions, NormalRange, Place, Scale } from './core/normal.js';
-export { HistoryRanges, metricKey, seriesOf } from './core/history.js';
-export type { DayError, HistoryFile, Metric } from './core/history.js';
+export { HISTORY_FORMAT, HistoryRanges, metricKey, seriesOf } from './core/history.js';
+export type { DayError, HistoryFile, Metric, ValueHistory } from './core/history.js';
 export { nodeKey } from './core/keys.js';
 export type { KeyEnv } from './core/keys.js';
 export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, signManifest, verifyManifest } from './core/manifest.js';

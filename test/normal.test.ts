@@ -191,11 +191,13 @@ describe('normal ranges', () => {
 describe('the history', () => {
   // Three days, the middle one not measured.
   const file: HistoryFile = {
-    format: 'smaltfl-history/1', built: '2024-02-01T00:00:00Z', flow: 'f', step: 'trips_valid',
+    format: 'smaltfl-history/2', built: '2024-02-01T00:00:00Z', flow: 'f', step: 'trips_valid',
     rules: [{ name: 'fare', check: 'fare_amount >= 0', onFail: 'drop' }, { name: 'passengers', check: 'passenger_count IS NOT NULL', onFail: 'warn' }],
     columns: ['fare_amount', 'passenger_count'], types: ['real', 'int'], kinds: ['measure', 'code'], sample: 2000,
     days: ['2024-01-01', '2024-01-03'], rows: [100, 200], dropped: [5, 4], failed: [[5, 10], [4, 40]], present: [[100, 90], [200, 160]], p50: [[12.5, 1], [13, 1]],
     missing: [{ day: '2024-01-02', error: 'unreadable' }],
+    quantiles: [[[1, 5, 8, 12.5, 18, 30, 60], null], [[1, 5, 8, 13, 18, 30, 60], null]], hours: [new Array(24).fill(4), new Array(24).fill(8)], warmup: 0,
+    values: {}, pairs: {},
   };
 
   it('gives each number a day, with a gap for a day not measured', () => {

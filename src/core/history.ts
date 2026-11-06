@@ -13,9 +13,28 @@ export interface DayError {
   error: string;
 }
 
+export const HISTORY_FORMAT = 'smaltfl-history/2';
+
+/**
+ * A column's values (or a pair of columns' values) over the history: each value as JSON (a pair's as a JSON array),
+ * in order of rows; the day each was first and last seen (as places in `days`), the days it was seen and its rows in
+ * all; and the days that brought a value never seen before, with the rows they had of it, once the first `warmup`
+ * days are past (at first, every value is new).
+ */
+export interface ValueHistory {
+  values: string[];
+  first: number[];
+  last: number[];
+  days: number[];
+  rows: number[];
+  fresh: [day: number, rows: number][];
+  /** Each day's rows with each value, for a column of a handful of values. */
+  counts?: number[][];
+}
+
 /** The history's file: the checks and columns measured, then a row of numbers a day, in order. */
 export interface HistoryFile {
-  format: 'smaltfl-history/1';
+  format: typeof HISTORY_FORMAT;
   built: string;
   flow: string;
   /** The checks step whose counts these are, and its rules as published. */
@@ -37,6 +56,19 @@ export interface HistoryFile {
   p50: (number | null)[][];
   /** Days that couldn't be measured, and why: gaps in `days`. */
   missing: DayError[];
+  /** Each day's quantiles of each measure or time (p01, p10, p25, p50, p75, p90, p99; a time's in minutes of the day). */
+  quantiles: (number[] | null)[][];
+  /** Each day's trips by pickup hour. */
+  hours: number[][];
+  /** Days at the start before a value counts as never seen. */
+  warmup: number;
+  /** The coded and zone columns' values, and the coded columns' pairs (`a|b`). */
+  values: Record<string, ValueHistory>;
+  pairs: Record<string, ValueHistory>;
+  /** The trips file's own columns, month by month, before they were cast to the month's (scripts/data/build.py). */
+  schemas?: { month: string; columns: [string, string][] }[];
+  /** Each day's weather in the city (scripts/data/build.py): hours on record per borough, rain and snow, the temperatures. */
+  weather?: { boroughs: string[]; hours: number[][]; precip: (number | null)[]; snow: (number | null)[]; tmin: (number | null)[]; tmax: (number | null)[] };
 }
 
 /** A number the history keeps a day of. */
