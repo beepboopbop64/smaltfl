@@ -20,5 +20,5 @@
       "smaltdb-src/*": ["./node_modules/smaltdb/src/*"]
     }
   },
-  "include": ["src", "test", "bench", "examples"]
+  "include": ["src", "test", "bench", "examples", "scripts"]
 }

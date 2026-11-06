@@ -2,7 +2,8 @@ name: Data
 
 # Downloads the scenario's data (scripts/data/build.py) and publishes it as the `data` branch: one commit, replaced on
 # every run. It runs on GitHub's runners because they can reach the data hosts. It runs when the script or this file
-# changes, or on demand.
+# changes, or on demand. The history (each day's numbers for two years and a quarter) is measured on the runtime, in
+# Node, so the job installs the project as CI does.
 on:
   push:
     paths:
@@ -22,11 +23,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .cache/packed/*.tgz
+            .cache/packed/*-files
+          key: packed-${{ hashFiles('packed.json') }}
+      - run: node scripts/fetch-packed.mjs
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install pyarrow==18.1.0
-      - run: python scripts/data/build.py out "${{ github.event.inputs.month || '2024-01' }}"
+      - run: python scripts/data/build.py out "${{ github.event.inputs.month || '2024-01' }}" work
       - name: Publish the data branch
         working-directory: out
         env:
