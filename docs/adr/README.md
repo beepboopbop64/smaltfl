@@ -11,3 +11,4 @@ records start from the answers to the questions in [../OPEN_QUESTIONS.md](../OPE
 | [0004](0004-the-flow-plan.md) | The flow plan: people say what, the machine decides how | accepted |
 | [0005](0005-licence.md) | The licence | accepted |
 | [0006](0006-integrity.md) | Integrity from source bytes to the record | accepted |
+| [0007](0007-repository-home.md) | The repository moves to stenhoor/smaltfl | accepted |

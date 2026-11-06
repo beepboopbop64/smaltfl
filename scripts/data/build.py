@@ -60,7 +60,7 @@ SEED = 2024
 def get(url: str, attempts: int = 5) -> bytes:
     for i in range(attempts):
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'smaltfl-data/1 (+https://github.com/beepboopbop64/smaltfl)'})
+            req = urllib.request.Request(url, headers={'User-Agent': 'smaltfl-data/1 (+https://github.com/stenhoor/smaltfl)'})
             with urllib.request.urlopen(req, timeout=300) as r:
                 return r.read()
         except Exception as e:  # noqa: BLE001 - retried, then raised

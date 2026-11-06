@@ -76,7 +76,7 @@ research behind the proposals is in [research/ecosystem-survey.md](research/ecos
 | Q-17 | Run history | Every run has a manifest with the hashes of its code, inputs and outputs (ADR 0001 §8) | decided |
 | Q-19 | Versioning | Flows in Git; datasets versioned by content hash, with retention (Q-33) | decided |
 | Q-20 | Collaboration | Single user; flows and data can be shared under policy | decided |
-| Q-21 | Repository home | `beepboopbop64/smaltfl` for now | decided |
+| Q-21 | Repository home | `stenhoor/smaltfl`, moved from `beepboopbop64/smaltfl` (ADR 0007) | decided |
 | Q-23 | A canvas kit in smaltkit? | Not now: it stays in this repository | decided |
 | Q-24 | Changes in other smalt repositories | Not for now; discussed with stenhoor first | decided |
 | Q-25 | Name | `smaltfl`, said "smalt-flow" | decided |

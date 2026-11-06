@@ -11,13 +11,13 @@
     "reproducibility"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/beepboopbop64/smaltfl#readme",
+  "homepage": "https://github.com/stenhoor/smaltfl#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/beepboopbop64/smaltfl.git"
+    "url": "git+https://github.com/stenhoor/smaltfl.git"
   },
   "bugs": {
-    "url": "https://github.com/beepboopbop64/smaltfl/issues"
+    "url": "https://github.com/stenhoor/smaltfl/issues"
   },
   "type": "module",
   "sideEffects": false,
