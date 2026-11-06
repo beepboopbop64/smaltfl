@@ -2402,6 +2402,7 @@ function findingCard(f: Finding, card: string): HTMLElement {
     affects(f, card),
     done.length ? h('ul', { class: 'f-log' }, ...done.map((e) => h('li', {}, logText(e)))) : null,
     h('div', { class: 'f-acts' },
+      f.because ? h('button', { type: 'button', class: 'btn small quiet', onclick: () => document.getElementById(`finding-${f.because}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }) }, 'What it follows from ›') : null,
       look ? h('button', { type: 'button', class: 'btn small', onclick: () => (look === 'history' && f.metric && historyView.set(card, metricKey(f.metric)), openTab(card, look, f.columns?.[0])) }, `See ${TAB_LABEL[look].toLowerCase()} ›`) : null,
       look !== 'history' && f.metric && tabs.includes('history') ? h('button', { type: 'button', class: 'btn small quiet', onclick: () => (historyView.set(card, metricKey(f.metric!)), openTab(card, 'history')) }, 'Day by day ›') : null,
       ...f.acts.map((a) => actButton(a, f, card))));
@@ -2658,7 +2659,13 @@ function weatherHistory(day: string): HTMLElement {
 function incidentsList(): HTMLElement {
   const days = alertDays();
   const opened = dataLog.entries.filter((e) => e.act === 'incident');
-  const items = days.slice(0, 12).map(({ day, title }) => {
+  // The days with an incident opened on them first, whether or not the news calls them wrong; then the newest.
+  const marked = [...new Set(opened.map((e) => e.day))].sort().reverse();
+  const shown = [
+    ...marked.map((day) => days.find((d) => d.day === day) ?? { day, title: dataLog.entries.find((e) => e.act === 'incident' && e.day === day)?.title ?? 'an incident opened' }),
+    ...days.filter((d) => !marked.includes(d.day)),
+  ];
+  const items = shown.slice(0, Math.max(12, marked.length)).map(({ day, title }) => {
     const k = loads.list.findIndex((l) => l.day === day);
     const mine = opened.filter((e) => e.day === day);
     const resolved = dataLog.entries.some((e) => e.act === 'resolved' && e.day === day);

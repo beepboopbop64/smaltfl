@@ -46,6 +46,8 @@ export interface Finding {
   table?: string;
   /** A change that has lasted: the first day of it. */
   lasting?: string;
+  /** The finding it likely follows from (a feed that stopped): its key. */
+  because?: string;
 }
 
 /** How a column and a value are said: a column's title, and a code with what it stands for. */
@@ -314,6 +316,16 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     if (gaps.length) out.push({ key: 'weather-gaps', kind: 'weather', severity: 'note', score: 1, title: `The weather has hours missing`, detail: `${listed(gaps)}: fewer than 24 hours on record.`, look: 'history', acts: ['notify'] });
   }
 
+  // A feed that stopped (all but blank, or stopping part way) skews everything else the day holds: the mix of values,
+  // the shapes, what the checks drop. Those are told as what follows from it, not as news of their own.
+  const cause = out.find((f) => f.kind === 'hours' || (f.kind === 'volume' && f.value !== undefined && !!f.range && f.value < MATERIAL.blank * f.range.expected));
+  if (cause) {
+    const because = cause.kind === 'hours' ? `the trips stopping or starting late (${cause.title.charAt(0).toLowerCase()}${cause.title.slice(1)})` : 'a day all but blank';
+    for (const [i, f] of out.entries()) {
+      if (f === cause || f.kind === 'volume' || f.kind === 'hours' || f.kind === 'weather' || f.kind === 'schema' || (f.severity !== 'alert' && f.severity !== 'warn')) continue;
+      out[i] = { ...f, severity: 'note', score: f.score / 10, detail: `Likely from ${because}: the rows the day has are not a whole day's. ${f.detail}`, because: cause.key };
+    }
+  }
   const told = together(out, rows, names);
   told.sort((a, b) => RANK[a.severity] - RANK[b.severity] || b.score - a.score);
   if (!told.some((f) => f.severity === 'alert' || f.severity === 'warn')) {

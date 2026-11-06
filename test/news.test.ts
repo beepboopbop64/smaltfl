@@ -154,11 +154,15 @@ describe('a day’s news from its history', () => {
     expect(news[0]!.title).toMatch(/^Almost no data: [\d,]+ trips$/);
   });
 
-  it('finds the hour the trips stop', () => {
-    const news = newsOf(new HistoryRanges(historyWith({ '2023-10-11': { stopAt: 13 } })), '2023-10-11', vendorNames);
+  it('finds the hour the trips stop, and tells what follows from it as such', () => {
+    const news = newsOf(new HistoryRanges(historyWith({ '2023-10-11': { stopAt: 13, vendorShare: 0.5 } })), '2023-10-11', vendorNames);
     const hours = news.find((f) => f.kind === 'hours')!;
     expect(hours.severity).toBe('alert');
     expect(hours.title).toBe('The trips stop at 13:00');
+    // The vendors' mix is off too, but as a result of the morning alone: a note that says so, not news of its own.
+    const mix = news.find((f) => f.key === 'share:VendorID=1')!;
+    expect(mix).toMatchObject({ severity: 'note', because: 'hours' });
+    expect(mix.detail).toMatch(/^Likely from the trips stopping or starting late \(the trips stop at 13:00\): the rows the day has are not a whole day's\./);
   });
 
   it('says where a shortfall is: the vendor whose trips are gone', () => {
