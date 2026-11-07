@@ -438,8 +438,21 @@ Builder and drawn in the family's look. The first concepts are on the design can
   knowing); a change that has lasted (outside today's range on most of the week before, or the same weekday twice
   running) is told as a note from the day it began, not as news every day, until the range learns it or it is marked
   expected; and findings that are likely one thing seen through several columns (the same number of trips missing a
-  passenger count, a rate code and a surcharge) are told once. Calibrated on the history's days from January 2023 to
-  January 2024: 357 of 396 with nothing unusual, 33 something unusual, 6 something wrong (from 141 alerts before). A table the history doesn't follow (a lookup, a step) is told from its own rows on the
+  passenger count, a rate code and a surcharge) are told once. A share or a level is told only a typical miss past its
+  range's edge. Calibrated on the history's days from January 2023 to January 2024: 363 of 396 with nothing unusual,
+  27 something unusual, 6 something wrong (from 141 alerts before).
+- **The story, drawn** (ADR 0008). `src/core/story.ts` tells a day's news as one cause, a population or a time: the
+  hour the trips fall, or a split (the part of the trips with one coded value that held while everything else moved,
+  or vanished or surged while the rest held: on Fri Sep 22, 2023 the Flex Fare trips arrived as usual and every other
+  trip almost stopped), or an amount, or a held gate drawn with the rows it dropped against a usual day's. Every finding
+  is sorted by what the cause explains (absorbed, follows, same day, standalone; new values, pairs, schema and
+  integrity never fold), with the episode it belongs to ("Day 2 · since Thu 13:00") and the words a screen shows, short
+  enough to count. `src/app/viz.ts` draws it: split rows, hour bars over a usual day's, the gate, day strips, dumbbells,
+  quantile strips, a waterfall, composition bars, the episode's hours, as SVG with aria-labels. The News tab is one
+  cause card (a head that carries the number, one visual, the gate, what it reaches, what follows folded, one verb), a
+  health row, at most two more stories and counted rows; a tap opens a detail that is visual too; the method is written
+  once, behind (i). The story is computed per viewer, and the canvas, the loads strip, the badges and the header read
+  it. A table the history doesn't follow (a lookup, a step) is told from its own rows on the
   day's run (`tableNewsOf`): a key a join reads it by repeating, rows a join finds no match for, placeholder values
   that stand for no value (a lookup's Unknown and N/A) with the steps that leave them out, and empty values in an
   input's columns or in the ones a step adds. Each finding is something wrong (alert), unusual (warn), worth knowing

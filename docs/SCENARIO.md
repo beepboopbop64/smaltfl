@@ -75,9 +75,10 @@ Open's final weekend, the Fridays before the Memorial Day and July 4th weekends)
 around them. A day whose trips are far from its weekday's in the weeks before (the gaps of September 2022 and 2023)
 is judged, but not learned from: without that, September 2023's Sundays went by a last year that held 4,229 trips.
 
-The news (`src/core/news.ts`) tells each day's story from it. Over every day from January 2023 to January 2024 (396
-days), 357 have nothing unusual to tell, 33 something unusual, and 6 something wrong: the September 2023 gap (the
-trips stopping at 13:00 on the 21st, then three days with almost no data), and two days in November 2023 when the
+The news (`src/core/news.ts`) finds what is out of the ordinary and the story (`src/core/story.ts`, ADR 0008) tells
+what it adds up to. Over every day from January 2023 to January 2024 (396 days), 363 have nothing unusual to tell (238
+calm, 125 with notes only), 27 something unusual, and 6 something wrong: the September 2023 gap (the trips falling 95%
+at 13:00 on the 21st, then three days when only the Flex Fare trips arrived), and two days in November 2023 when the
 surcharges' shares were far from a day like it's (on the 7th, the $2.50 surcharge on 16.4% of trips where a day like it
 has 26.1% to 31.5%; on the 14th, no surcharge on 36.9% where it has 45.1% to 52.4%).
 Unusual are, for instance, the airport fee going from $1.25 to $1.75 in April 2023 (a value gone, another's share up,

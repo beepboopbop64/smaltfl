@@ -1879,6 +1879,8 @@ const drill = {
   scroll: new Map<string, number>(),
   /** The column a card's Columns tab has open. */
   column: new Map<string, string>(),
+  /** Cards whose Data tab shows only the rows with a blank. */
+  blanks: new Map<string, boolean>(),
   token: 0,
 };
 
@@ -2134,7 +2136,10 @@ async function dataTab(card: string, id: string, who: string): Promise<HTMLEleme
   if (typeof nv === 'string') return h('p', { class: 'foot' }, nv);
   const { insp, i, read, columns } = nv;
   const meanings = meaningsOf(id);
-  const r = await state.engine!.query(`SELECT * FROM (\n${read}\n) LIMIT 50`);
+  // All rows, or only those with a blank (ADR 0008: the rows that matter a tap away, not a paragraph about them).
+  const blanks = drill.blanks.get(card) === true;
+  const where = blanks && columns.length ? ` WHERE ${columns.map((c) => `${columnSql(c)} IS NULL`).join(' OR ')}` : '';
+  const r = await state.engine!.query(`SELECT * FROM (\n${read}\n)${where} LIMIT 50`);
   const total = (await rowsAs(insp, i, who)) ?? 0;
   const fresh = new Set((state.changes.get(id)?.added ?? []).map((c) => c.toLowerCase()));
   const heads = new Map<string, HTMLElement>();
@@ -2156,7 +2161,9 @@ async function dataTab(card: string, id: string, who: string): Promise<HTMLEleme
   const grid = h('div', { class: 'grid-wrap' }, h('table', { class: 'data grid' },
     h('thead', {}, h('tr', {}, h('th', { class: 'rownum', scope: 'col' }, '#'), ...r.columns.map(head))),
     h('tbody', {}, ...r.rows.map((row, k) => h('tr', {}, h('th', { class: 'rownum', scope: 'row' }, String(k + 1)), ...row.map((v, j) => cell(v, r.columns[j]!)))))));
-  const lead = h('p', { class: 'foot' }, `The first ${fmtInt(r.rows.length)} of ${plural(total, 'row')}. Above each column: how full it is and its distribution, over every row (counts) and an even sample (shapes). Tap a column for its values.`);
+  const lead = h('div', { class: 'vf-pick', role: 'group', 'aria-label': 'Which rows' },
+    h('button', { type: 'button', class: 'vf-pick-chip', 'aria-pressed': String(!blanks), onclick: () => (drill.blanks.delete(card), void renderSheet()) }, `First ${fmtInt(r.rows.length)} of ${fmtInt(total)}`),
+    h('button', { type: 'button', class: 'vf-pick-chip', 'aria-pressed': String(blanks), onclick: () => (drill.blanks.set(card, true), void renderSheet()) }, 'With blanks'));
   // The distributions arrive once the rows have been looked into: the grid shows straight away.
   void qualityOf(insp, i, who).then((q) => {
     if (!q) return;

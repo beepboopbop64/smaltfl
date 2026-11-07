@@ -102,6 +102,18 @@ describe('what never folds', () => {
   });
 });
 
+describe('what a viewer may see', () => {
+  it('tells nothing from a column the viewer’s policy removes: no finding, no split', () => {
+    const open = story({ [DAY]: { vendorGone: true } });
+    expect(open.split?.column).toBe('VendorID');
+    const closed = story({ [DAY]: { vendorGone: true } }, DAY, { hidden: new Set(['vendorid']) });
+    expect(closed.split).toBeNull();
+    expect(closed.findings.some((f) => f.columns?.includes('VendorID'))).toBe(false);
+    // The amount is still the viewer's to see: told as the day's cause, without the part they can't.
+    expect(closed.head).toMatch(/^Fewer trips: [\d,]+ \(−\d+%\)$/);
+  });
+});
+
 describe('days in a row', () => {
   it('says which day of an episode it is, and since when', () => {
     const next = plusDays(DAY, 1);

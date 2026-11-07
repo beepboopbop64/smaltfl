@@ -37,6 +37,9 @@ match smaltdb's `CLAUDE.md`.
 - `scripts/data/build.py` and `.github/workflows/data.yml`: the scenario's data, fetched on a GitHub runner into the
   `data` branch (`git fetch origin data --depth 1`); `scripts/data/history.ts` measures the history's days there, on
   the runtime (`node scripts/data/history.mjs DAYS_DIR OUT.json`).
+- The day's news (ADR 0008): `src/core/news.ts` finds what is out of the ordinary, `src/core/story.ts` tells it as one
+  cause with what follows from it, `src/app/viz.ts` draws it (SVG strings, tested in Node). Words at a glance are
+  budgeted (`glanceStrings`, `wordsIn`); a new kind of finding gets its visual there too.
 - Integrity (ADR 0006): `src/core/integrity.ts` (a data file against the list), `src/app/fetch-checked.ts`,
   `src/plugin/pinned.ts` (files hashed and served in the engine), run/1 in `src/core/manifest.ts`, verify's levels in
   `src/plugin/verify.ts`, the record (`src/core/log.ts`, RFC 9162; `src/app/record.ts`, IndexedDB), the audit bag
