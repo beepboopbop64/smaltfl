@@ -277,7 +277,9 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .dot-key { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 3px; vertical-align: -1px; }
 .dot-key.warn { background: var(--warn); } .dot-key.alert { background: var(--bad); margin-right: 6px; }
 .health-dot { stroke: var(--surface); stroke-width: 2; pointer-events: none; }
-.health-dot.alert { fill: var(--bad); } .health-dot.warn { fill: var(--warn); } .health-dot.note { fill: var(--muted); }
+.card.card.not-published .box { fill: url(#viz-hatch); }
+.card.card.from-alert .box { stroke: var(--bad); stroke-width: 1.8; }
+.health-dot.alert { fill: var(--bad); } .health-dot.warn { fill: var(--warn-wash); stroke: var(--warn); stroke-width: 1.8; stroke-linejoin: round; } .health-dot.note { fill: var(--muted); }
 .tab-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding-top: 14px; }
 .skeleton { height: 110px; border-radius: 10px; background: linear-gradient(90deg, var(--sunk), var(--row-alt), var(--sunk)); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; }
 .skeleton.short { height: 48px; }
@@ -514,6 +516,9 @@ th.hit, td.hit { background: var(--warn-wash); }
 .hash4-short { font-family: var(--mono); font-size: 12px; border: 0; background: var(--sunk); color: var(--ink); border-radius: 6px; padding: 2px 6px; cursor: pointer; }
 .hash4-full { display: block; margin-top: 4px; }
 .c-line.muted { color: var(--muted); font-size: 12px; }
+.bandchart .wx-caret { fill: var(--ink); } .bandchart .wx-after { fill: var(--surface); opacity: 0.55; pointer-events: none; }
+.vf-key .k-rain { background: var(--smalt); opacity: 0.45; } .vf-key .k-snow { background: var(--teal-fill); }
+.vf-key .k-caret { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid var(--ink); border-radius: 0; }
 .vf-hashes { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 13px; color: var(--ink-2); }
 .vf-hashes code { font-family: var(--mono); color: var(--ink); background: var(--sunk); padding: 1px 6px; border-radius: 5px; }
 .vf-ne { font-size: 18px; color: var(--bad); font-weight: 700; }

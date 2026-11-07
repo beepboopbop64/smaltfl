@@ -510,17 +510,35 @@ function summarize(c: Change): CardLine | null {
 
 function cardLine(id: string): CardLine {
   const plain = (text: string): CardLine => ({ text, tone: 'same' });
-  if (state.failed?.origin === id) return plain('failed: tap for why');
+  if (state.failed?.origin === id) return plain(steps().get(id)?.kind === 'expectations' && !state.failed.file ? 'held: tap for why' : 'failed: tap for why');
+  // An output the held run didn't build, or one built from a day with something wrong upstream (ADR 0008).
+  const out = outputState(id);
+  if (out === 'stale') return plain('not published');
+  if (out === 'alert') return plain('built from an alert');
   const view = access(id);
   if (view && !view.open) return plain(`closed to ${personName(state.viewer)}`);
   const n = nodeOf(id);
   if (!n) return plain(state.running ? 'running…' : (steps().get(id)?.description ?? state.doc.sources.find((src) => src.id === id)?.description ?? ''));
+  // The day's trips on a day the checks held or a file was refused: today's count, not the last run's.
+  const today = loads.list[loads.at];
+  if (state.failed && id === loadSource() && today) return plain(`${fmtInt(today.rows)} rows today`);
   const c = state.changes.get(id);
   const said = c ? summarize(c) : null;
   if (said) return said;
   if (n.status === 'folded') return plain('folded, no copy kept');
   // The run's row count is everyone's; a viewer whose rules filter this node sees their own once it is counted.
   return plain(view?.where ? n.status : `${n.status} · ${plural(n.rows ?? 0, 'row')}`);
+}
+
+/** An output on the day: not published (its run was held or refused upstream), built from a day with something wrong
+ * upstream, or neither. */
+function outputState(id: string): 'stale' | 'alert' | null {
+  if (!isOutput(id) || !latest()) return null;
+  const src = loadSource();
+  if (!src || !downstreamOf(src).includes(id)) return null;
+  if (state.failed) return 'stale';
+  const day = newsDay();
+  return day && storyFor(day)?.severity === 'alert' ? 'alert' : null;
 }
 
 // ------------------------------------------------------------------ the canvas
@@ -1116,7 +1134,15 @@ function renderCanvas(): void {
       g.append(seal);
     }
     // Its news at a glance: a dot by the name, red for something wrong, amber for something unusual; a note, none.
-    if (extra.health === 'alert' || extra.health === 'warn') g.append(s('circle', { class: `health-dot ${extra.health}`, cx: x + cardW - 14, cy: y + 15, r: 5 }));
+    // The card's mark by shape (ADR 0008): a filled hexagon for something wrong, an outlined triangle for unusual. The
+    // class stays health-dot so tests and tools find it.
+    if (extra.health === 'alert' || extra.health === 'warn') {
+      const cx = x + cardW - 14;
+      const cy = y + 15;
+      g.append(extra.health === 'alert'
+        ? s('path', { class: 'health-dot alert', d: `M${cx} ${cy - 6.5}l5.6 3.25v6.5L${cx} ${cy + 6.5}l-5.6 -3.25v-6.5z` })
+        : s('path', { class: 'health-dot warn', d: `M${cx} ${cy - 6}l6 10.5h-12z` }));
+    }
     g.append(s('text', { class: 'kind', x: x + 12, y: y + 18 }, fit(kind, Math.floor(chars * 1.15))));
     g.append(s('text', { class: 'name', x: x + 12, y: y + 36 }, fit(name, chars)));
     g.append(s('text', { class: 'what', x: x + 12, y: y + 53 }, fit(line.text, Math.floor(chars * 1.12) - (extra.shield ? 1 : 0))));
@@ -1172,6 +1198,8 @@ function renderCanvas(): void {
     const readable = access(id);
     const classes = [sourceIds().has(id) ? 'source' : steps().get(id)?.dataset ? 'dataset' : 'step'];
     if (state.failed?.origin === id) classes.push('failed');
+    const os = outputState(id);
+    if (os) classes.push(os === 'stale' ? 'not-published' : 'from-alert');
     else if (readable && !readable.open) classes.push('closed');
     else if (n) classes.push(n.status);
     if (state.selected === id) classes.push('selected');
@@ -3187,11 +3215,16 @@ function weatherHistory(day: string): HTMLElement {
     const hgt = (rain / max) * H;
     svg.append(s('rect', { class: `wx${snow >= 1 ? ' snow' : ''}${days[i] === day ? ' focus' : ''}`, x: (i * step + 0.5).toFixed(1), y: (H - hgt).toFixed(1), width: Math.max(1, step - 1).toFixed(1), height: Math.max(rain ? 1 : 0, hgt).toFixed(1) }));
   });
+  // The day marked under the axis, and the days after it lighter: it is the day on screen, not the last one.
+  const fi = days.indexOf(day);
+  if (fi >= 0) svg.append(s('path', { class: 'wx-caret', d: `M${(fi * step + step / 2 - 4).toFixed(1)} ${H + 9}l4 -6 4 6z` }));
+  days.forEach((d, i) => d > day && svg.append(s('rect', { class: 'wx-after', x: (i * step).toFixed(1), y: 0, width: step.toFixed(1), height: H })));
   svg.append(s('text', { class: 'tick', x: 2, y: 10 }, `${max.toFixed(0)} mm`), s('text', { class: 'tick', x: 2, y: H + B - 3 }, shortDay(days[0]!)), s('text', { class: 'tick', x: W - 2, y: H + B - 3, 'text-anchor': 'end' }, shortDay(days.at(-1)!)));
   const k = history!.file.days.indexOf(day);
   const short = w.boroughs.filter((_, b) => (w.hours[k]?.[b] ?? 0) < 24);
   return h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, 'Rain and snow, day by day'), svg,
-    h('p', { class: 'foot' }, `${dayLabel(day)}: ${(w.precip[k] ?? 0).toFixed(1)} mm${(w.snow[k] ?? 0) >= 0.1 ? `, ${(w.snow[k] ?? 0).toFixed(1)} cm of it snow` : ''}, ${w.tmin[k]?.toFixed(0)} to ${w.tmax[k]?.toFixed(0)} °C in Manhattan. ${short.length ? `Hours missing for ${listed(short)}.` : `Every hour on record for all ${w.boroughs.length} districts.`} Snowy days in blue.`));
+    h('div', { class: 'vf-key', 'aria-hidden': 'true' }, h('span', {}, h('i', { class: 'k-rain' }), 'rain'), h('span', {}, h('i', { class: 'k-snow' }), 'snow'), h('span', {}, h('i', { class: 'k-caret' }), dayLabel(day).replace(/, \d{4}$/, ''))),
+    h('p', { class: 'foot' }, `${(w.precip[k] ?? 0).toFixed(1)} mm${(w.snow[k] ?? 0) >= 0.1 ? ` · ${(w.snow[k] ?? 0).toFixed(1)} cm snow` : ''} · ${w.tmin[k]?.toFixed(0)} to ${w.tmax[k]?.toFixed(0)} °C${short.length ? ` · hours missing: ${listed(short)}` : ''}`));
 }
 
 /** The days in the history with something wrong, newest first: each a tap from its load when it has one. */
@@ -5045,6 +5078,10 @@ async function playLoads(): Promise<void> {
 /** A profile box's card: its step's news for the day, in a few words. */
 function profileLine(p: ProfileDef): CardLine {
   if (!nodeOf(p.of)) return { text: state.running ? 'running…' : 'the data’s story', tone: 'same' };
+  // The trips' profile says the day's head, as its story tells it (ADR 0008): one line, no count of findings.
+  const sday = historyOf(p.of) === 'trips' ? newsDay() : undefined;
+  const story = sday ? storyFor(sday) : null;
+  if (story) return { text: story.head.length > 30 ? `${story.head.slice(0, 28)}…` : story.head, tone: story.severity === 'alert' || story.severity === 'warn' ? 'drop' : 'same' };
   const all = cardNews(p.id);
   const news = all.filter((f) => f.severity !== 'ok');
   const top = news[0];
