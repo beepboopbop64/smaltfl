@@ -3,10 +3,10 @@
  * says what, with its evidence, where to look, and what can be done; a day or a table with nothing to tell says so.
  */
 import { describe, expect, it } from 'vitest';
-import { holidayOf, plusDays, seasonOf } from '../src/core/calendar.js';
-import { HistoryRanges, type HistoryFile, type ValueHistory } from '../src/core/history.js';
-import { isPlaceholder, newsOf, schemaChanges, tableNewsOf, type TableFacts } from '../src/core/news.js';
-import { random } from '../src/core/quality.js';
+import { plusDays } from '../src/core/calendar.js';
+import { HistoryRanges } from '../src/core/history.js';
+import { isPlaceholder, newsOf, schemaChanges, shareWords, tableNewsOf, type TableFacts } from '../src/core/news.js';
+import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
 const names = { column: (c: string) => c, value: (_c: string, v: unknown) => String(v) };
 
@@ -91,91 +91,64 @@ describe('a table’s news from its own rows', () => {
   });
 });
 
-// Two years and a quarter of made-up days whose pattern is known: weekends busy, holidays light, two vendors (70% and
-// 30% of the trips), the trips spread over the day as a city's are, a few percent dropped; and on chosen days, trouble.
-const DAYS: string[] = [];
-for (let d = '2021-10-01'; d <= '2024-01-31'; d = plusDays(d, 1)) DAYS.push(d);
-const WEEKDAY = [0.9, 0.85, 0.95, 1, 1.05, 1.08, 1.1];
-const HOUR = Array.from({ length: 24 }, (_, h) => 0.3 + Math.max(0, Math.sin(((h - 5) / 19) * Math.PI)));
-const HOURS = HOUR.reduce((a, b) => a + b, 0);
-const gauss = (rnd: () => number) => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd());
-
-interface Trouble { blank?: boolean; stopAt?: number; vendorGone?: boolean; vendorShare?: number; newValue?: boolean; snow?: number }
-function historyWith(trouble: Record<string, Trouble> = {}): HistoryFile {
-  const rnd = random(11);
-  const rows: number[] = [];
-  const hours: number[][] = [];
-  const counts: number[][] = [];
-  for (const day of DAYS) {
-    const t = trouble[day] ?? {};
-    const wd = WEEKDAY[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
-    let n = Math.round(100_000 * wd * (holidayOf(day) ? 0.7 : seasonOf(day) ? 0.8 : 1) * Math.exp(0.03 * gauss(rnd)));
-    let byHour = HOUR.map((x) => Math.round((n * x) / HOURS));
-    if (t.blank) byHour = byHour.map((x) => Math.round(x * 0.03));
-    if (t.stopAt !== undefined) byHour = byHour.map((x, h) => (h >= t.stopAt! ? Math.round(x * 0.02) : x));
-    const share1 = t.vendorShare ?? 0.3 + 0.005 * gauss(rnd);
-    let v1 = Math.round((t.blank || t.stopAt !== undefined ? byHour.reduce((a, b) => a + b, 0) : n) * share1);
-    let v2 = (t.blank || t.stopAt !== undefined ? byHour.reduce((a, b) => a + b, 0) : n) - v1;
-    if (t.vendorGone) (v1 = 0, (byHour = byHour.map((x) => Math.round(x * 0.7))), (v2 = byHour.reduce((a, b) => a + b, 0)));
-    n = v1 + v2;
-    rows.push(n);
-    hours.push(byHour);
-    counts.push([v2, v1, t.newValue ? 500 : 0]);
-  }
-  const k = (d: string) => DAYS.indexOf(d);
-  const newDay = Object.entries(trouble).find(([, t]) => t.newValue)?.[0];
-  const vendors: ValueHistory = {
-    values: ['2', '1', '6'], first: [0, 0, newDay ? k(newDay) : DAYS.length], last: [DAYS.length - 1, DAYS.length - 1, newDay ? k(newDay) : -1],
-    days: [DAYS.length, DAYS.length, newDay ? 1 : 0], rows: [0, 0, newDay ? 500 : 0], fresh: newDay ? [[k(newDay), 500]] : [], counts,
-  };
-  const snow = DAYS.map((d) => trouble[d]?.snow ?? 0);
-  return {
-    format: 'smaltfl-history/2', built: '2024-02-01T00:00:00Z', flow: 'f', step: 'trips_valid',
-    rules: [{ name: 'fare', check: 'fare_amount >= 0', onFail: 'drop' }],
-    columns: ['VendorID'], types: ['int'], kinds: ['code'], sample: 2000,
-    days: DAYS, rows, dropped: rows.map((n) => Math.round(n * 0.04)), failed: rows.map((n) => [Math.round(n * 0.04)]), present: rows.map((n) => [n]), p50: rows.map(() => [2]),
-    missing: [], quantiles: rows.map(() => [null]), hours, warmup: 28, values: { VendorID: vendors }, pairs: {},
-    weather: { boroughs: ['Manhattan'], hours: DAYS.map(() => [24]), precip: snow.map((x) => x * 1.2), snow, tmin: DAYS.map(() => -2), tmax: DAYS.map(() => 4) },
-  };
-}
-const vendorNames = { column: (c: string) => (c === 'VendorID' ? 'vendor' : c), value: (_c: string, v: unknown) => String(v) };
-
 describe('a day’s news from its history', () => {
   it('says an ordinary day is one, with its trips against their range', () => {
     const news = newsOf(new HistoryRanges(historyWith()), '2023-10-11', vendorNames);
     expect(news[0]!.kind).toBe('calm');
     expect(news.filter((f) => f.severity === 'alert' || f.severity === 'warn')).toEqual([]);
-    expect(news[0]!.detail).toMatch(/^[\d,]+ trips, a normal amount for a day like it \([\d,]+ to [\d,]+\); every value, column and check as a day like it has them\.$/);
+    expect(news[0]!.detail).toMatch(/^[\d,]+ trips, normal for a day like it \([\d,]+ to [\d,]+\)\.$/);
   });
 
-  it('calls a day all but blank a feed that stopped', () => {
+  it('calls a day all but blank something wrong, in a title that carries the number', () => {
     const news = newsOf(new HistoryRanges(historyWith({ '2023-10-11': { blank: true } })), '2023-10-11', vendorNames);
     expect(news[0]).toMatchObject({ kind: 'volume', severity: 'alert', acts: ['incident', 'notify', 'expected'] });
-    expect(news[0]!.title).toMatch(/^Almost no data: [\d,]+ trips$/);
+    expect(news[0]!.title).toMatch(/^Almost no trips: [\d,]+$/);
+    expect(news[0]!.detail).toMatch(/^A day like it has [\d,]+ to [\d,]+\.$/);
   });
 
-  it('finds the hour the trips stop, and tells what follows from it as such', () => {
+  it('finds the hour the trips fall, and keeps the hours for their bars', () => {
     const news = newsOf(new HistoryRanges(historyWith({ '2023-10-11': { stopAt: 13, vendorShare: 0.5 } })), '2023-10-11', vendorNames);
     const hours = news.find((f) => f.kind === 'hours')!;
     expect(hours.severity).toBe('alert');
-    expect(hours.title).toBe('The trips stop at 13:00');
-    // The vendors' mix is off too, but as a result of the morning alone: a note that says so, not news of its own.
-    const mix = news.find((f) => f.key === 'share:VendorID=1')!;
-    expect(mix).toMatchObject({ severity: 'note', because: 'hours' });
-    expect(mix.detail).toMatch(/^Likely from the trips stopping or starting late \(the trips stop at 13:00\): the rows the day has are not a whole day's\./);
+    // Pickup times, not arrival times: the trips fall to a trickle, they don't end.
+    expect(hours.title).toMatch(/^Trips fall 9\d% at 13:00$/);
+    expect(hours.hours).toMatchObject({ from: 13, to: 23 });
+    expect(hours.hours!.got).toHaveLength(24);
+    expect(hours.hours!.usual[14]).toBeGreaterThan(20 * hours.hours!.got[14]!);
+    // What follows from it is the story's to tell (story.test.ts): newsOf no longer folds.
+    expect(news.find((f) => f.key === 'share:VendorID=1')?.because).toBeUndefined();
   });
 
-  it('says where a shortfall is: the vendor whose trips are gone', () => {
+  it('says a value usually there is gone, by name, with its usual share', () => {
     const news = newsOf(new HistoryRanges(historyWith({ '2023-10-11': { vendorGone: true } })), '2023-10-11', vendorNames);
-    const volume = news.find((f) => f.kind === 'volume')!;
-    expect(volume.severity).toBe('alert');
-    expect(volume.detail).toMatch(/Where it is: vendor 1, 0 trips where a day like it has about [\d,]+: nearly all of the change\.$/);
-    expect(news.find((f) => f.kind === 'gone')).toMatchObject({ title: 'No trips with vendor 1', severity: 'alert' });
+    expect(news.find((f) => f.kind === 'volume')!.severity).toBe('alert');
+    expect(news.find((f) => f.kind === 'gone')).toMatchObject({ title: 'Vendor 1: none', severity: 'alert' });
+    expect(news.find((f) => f.kind === 'gone')!.detail).toMatch(/^Usually on \d+–\d+% of trips; none today\.$/);
   });
 
   it('tells a value never seen before, after the history’s first weeks', () => {
     const news = newsOf(new HistoryRanges(historyWith({ '2023-10-11': { newValue: true } })), '2023-10-11', vendorNames);
-    expect(news.find((f) => f.kind === 'new')).toMatchObject({ severity: 'warn', title: 'A vendor never seen before', rows: 500, acts: ['expected', 'quarantine', 'rule', 'notify'] });
+    expect(news.find((f) => f.kind === 'new')).toMatchObject({ severity: 'warn', title: 'New vendor: 6 · 500 trips', rows: 500, acts: ['expected', 'quarantine', 'rule', 'notify'] });
+  });
+
+  it('keeps titles short: the number in them, and no paragraph after', () => {
+    const h = new HistoryRanges(historyWith({ '2023-10-11': { stopAt: 13, vendorShare: 0.5 }, '2023-10-12': { vendorGone: true }, '2023-10-13': { newValue: true } }));
+    for (const day of ['2023-10-11', '2023-10-12', '2023-10-13']) {
+      for (const f of newsOf(h, day, vendorNames)) {
+        expect(f.title.split(/\s+/).length, f.title).toBeLessThanOrEqual(8);
+        expect(f.detail.split(/\s+/).length, f.detail).toBeLessThanOrEqual(20);
+        expect(f.title + f.detail).not.toMatch(/The band|because|caused by|feed stopped|disappeared/);
+      }
+    }
+  });
+
+  it('says a share outside its range with the decimals that keep it off the edge', () => {
+    expect(shareWords(0.002, 0.75, 0.8)).toEqual({ value: '0.2%', range: '75–80%' });
+    expect(shareWords(0.0001, 0.115, 0.134)).toEqual({ value: '0.01%', range: '12–13%' });
+    // Today just past the edge: never printed as the edge itself.
+    const w = shareWords(0.8012, 0.75, 0.8);
+    expect(w.value).not.toBe('80%');
+    expect(shareWords(0, 0.006, 0.006).range).toBe('0.6%');
   });
 
   it('tells a change once it has lasted as a note, from the day it began', () => {
@@ -188,7 +161,8 @@ describe('a day’s news from its history', () => {
     const later = newsOf(h, '2023-10-12', vendorNames).find((f) => f.key === 'share:VendorID=1')!;
     expect(later.severity).toBe('note');
     expect(later.lasting).toBe('2023-10-02');
-    expect(later.title).toBe('Since Oct 2: vendor 1 on 15.0% of trips');
+    // Its first day is for the chart to show, not the title to say (ADR 0008).
+    expect(later.title).toBe('Vendor 1: 15% (usually 27–32%)');
   });
 
   it('gives the weather as context: snow is worth knowing, a dry day is normal', () => {

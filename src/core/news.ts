@@ -48,12 +48,18 @@ export interface Finding {
   lasting?: string;
   /** The finding it likely follows from (a feed that stopped): its key. */
   because?: string;
+  /** Trips by pickup hour today and on a day like it, and the hours short of trips (an hours finding): for its bars. */
+  hours?: { got: number[]; usual: number[]; from: number; to: number };
+  /** The findings told together as one (the same trips seen through several columns): each with its own numbers. */
+  members?: { column: string; value: string; label: string; share: number; range: NormalRange; rows: number }[];
 }
 
 /** How a column and a value are said: a column's title, and a code with what it stands for. */
 export interface Names {
   column(c: string): string;
   value(c: string, v: unknown): string;
+  /** A value said on its own, for short titles: what a code stands for ("Credit card"), or the value ("$2.50"). */
+  label?(c: string, v: unknown): string;
 }
 
 /** How much a finding must matter to be told. */
@@ -84,6 +90,20 @@ export const MATERIAL = {
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
 const pct = (x: number) => `${(x * 100).toFixed(x < 0.001 && x > 0 ? 2 : 1)}%`;
+/** A share and its usual range, said with as few decimals as keep a share outside its range from reading as its edge:
+ * "0.2% (usually 75–80%)". */
+export function shareWords(value: number, low: number, high: number): { value: string; range: string } {
+  const at = (x: number, d: number) => (x * 100).toFixed(d);
+  const base = (x: number) => (x >= 0.1 ? 0 : x >= 0.001 ? 1 : 2);
+  const outside = value < low || value > high;
+  let d = value === 0 ? 0 : base(value);
+  let dr = base(low > 0 ? low : high);
+  while (dr < 3 && low < high && at(low, dr) === at(high, dr)) dr++;
+  while (d < 3 && ((outside && (at(value, d) === at(low, dr) || at(value, d) === at(high, dr))) || (value > 0 && Number(at(value, d)) === 0))) d++;
+  const lo = at(low, dr);
+  const hi = at(high, dr);
+  return { value: `${at(value, d)}%`, range: lo === hi ? `${lo}%` : `${lo}–${hi}%` };
+}
 const cap = (d: number) => (Number.isFinite(d) ? Math.min(99, Math.abs(d)) : 99);
 const parse = (key: string): unknown => {
   try {
@@ -94,9 +114,6 @@ const parse = (key: string): unknown => {
 };
 const listed = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-/** "Dec 23". */
-const shortDate = (day: string) => `${MONTHS[Number(day.slice(5, 7)) - 1]} ${Number(day.slice(8, 10))}`;
 
 /** A day's findings, most important first; `checks` says whether the flow's checks are the ones the history counted. */
 export function newsOf(h: HistoryRanges, day: string, names: Names, options: { checks?: boolean } = {}): Finding[] {
@@ -105,6 +122,11 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   if (k < 0) return [];
   const rows = file.rows[k]!;
   const out: Finding[] = [];
+  // A value in a short title: its meaning when that is short ("Credit card"), else its own value ("N", "$2.50").
+  const label = (column: string, key: string) => {
+    const said = (names.label ?? names.value)(column, parse(key));
+    return said.split(/\s+/).length <= 3 ? said : String(parse(key));
+  };
   const judged = (m: Metric): { ranges: NormalRanges; range: NormalRange; value: number; d: number } | null => {
     const ranges = h.of(m);
     const range = ranges?.at(day);
@@ -112,7 +134,10 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     if (!ranges || !range || value === null) return null;
     return { ranges, range, value, d: ranges.distance(range, value) };
   };
-  const outside = (j: { ranges: NormalRanges; range: NormalRange; value: number }) => j.ranges.place(j.range, j.value) !== 'within';
+  // Outside its range, and for a share or a level a typical miss past its edge, so a number hugging the edge isn't told
+  // as news (ADR 0008). Counts are told from the edge: a day's trips are judged against their own wide range.
+  const outside = (j: { ranges: NormalRanges; range: NormalRange; value: number }) =>
+    j.ranges.place(j.range, j.value) !== 'within' && (j.range.scale === 'count' || Math.abs(j.ranges.distance(j.range, j.value)) >= j.range.z + 1);
   // A change that has lasted: the days before were outside today's range the same way, most of the week before or the
   // same weekday twice running (a weekend surcharge). Told as a note from the first day it was, not as news every
   // day: the range learns it within weeks, or it is marked expected.
@@ -139,45 +164,23 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   const quiet = (f: Finding, j: Parameters<typeof lasting>[0]): Finding => {
     const since = lasting(j);
     if (!since) return f;
-    return { ...f, severity: 'note', score: f.score / 10, title: `Since ${shortDate(since)}: ${f.title.charAt(0).toLowerCase()}${f.title.slice(1)}`, detail: `${f.detail} It has been so on most days since ${shortDate(since)}: a change that has lasted. If it is the new normal, mark it expected; the range learns it within a few weeks.`, lasting: since };
+    // Told as a note, without its first day in words: which day a change began is for its chart to show (ADR 0008).
+    return { ...f, severity: 'note', score: f.score / 10, lasting: since };
   };
 
-  // Volume: the day's trips against what a day like it has; all but blank; the hours it stops or starts. Where the
-  // change is: the coded value that accounts for most of it, against what a day like it has of that value.
+  // Volume: the day's trips against what a day like it has; all but blank; the hours it stops or starts.
   const trips = judged({ of: 'trips' });
   if (trips) {
     const { range, value } = trips;
-    const like = `a day like it has ${fmtInt(range.low)} to ${fmtInt(range.high)}`;
-    const where = (): string => {
-      const change = value - range.expected;
-      const overall = change / range.expected;
-      let best: { column: string; key: string; delta: number; expected: number; actual: number } | null = null;
-      for (const [column, vh] of Object.entries(file.values ?? {})) {
-        if (!vh.counts) continue;
-        vh.values.forEach((key, i) => {
-          const share = h.of({ of: 'value', column, value: key })?.at(day)?.expected;
-          if (share === undefined) return;
-          const expected = share * range.expected;
-          const actual = vh.counts![k]![i] ?? 0;
-          const delta = actual - expected;
-          // A segment hit out of proportion (a vendor's trips gone), not one nearly every trip has (a surcharge).
-          if (expected <= 0 || Math.abs(delta / expected) < 1.5 * Math.abs(overall)) return;
-          if (Math.sign(delta) === Math.sign(change) && (!best || Math.abs(delta) > Math.abs(best.delta))) best = { column, key, delta, expected, actual };
-        });
-      }
-      const b = best as { column: string; key: string; delta: number; expected: number; actual: number } | null;
-      if (!b || Math.abs(b.delta) < 0.4 * Math.abs(change)) return '';
-      const part = Math.min(1, Math.abs(b.delta / change));
-      return ` Where it is: ${names.column(b.column)} ${names.value(b.column, parse(b.key))}, ${fmtInt(b.actual)} trips where a day like it has about ${fmtInt(b.expected)}: ${part > 0.9 ? 'nearly all' : part > 0.6 ? 'most' : 'much'} of the change.`;
-    };
+    const like = `A day like it has ${fmtInt(range.low)} to ${fmtInt(range.high)}.`;
     if (value < MATERIAL.blank * range.expected) {
-      out.push({ key: 'volume', kind: 'volume', severity: 'alert', score: 99, title: `Almost no data: ${fmtInt(value)} trips`, detail: `${sentence(like)}. A day this empty is a feed that stopped, not a quiet day.${where()}`, look: 'history', metric: { of: 'trips' }, value, range, rows: value, acts: ['incident', 'notify', 'expected'] });
+      out.push({ key: 'volume', kind: 'volume', severity: 'alert', score: 99, title: `Almost no trips: ${fmtInt(value)}`, detail: like, look: 'history', metric: { of: 'trips' }, value, range, rows: value, acts: ['incident', 'notify', 'expected'] });
     } else if (outside(trips)) {
       const more = value > range.expected;
       out.push({
         key: 'volume', kind: 'volume', severity: cap(trips.d) >= 6 ? 'alert' : 'warn', score: cap(trips.d),
-        title: `${more ? 'More' : 'Fewer'} trips than a day like it: ${fmtInt(value)}`,
-        detail: `${sentence(like)}, around ${fmtInt(range.expected)}: ${pct(Math.abs(value / range.expected - 1))} ${more ? 'more' : 'fewer'}.${where()}`,
+        title: `${more ? 'More' : 'Fewer'} trips: ${fmtInt(value)} (${more ? '+' : '−'}${Math.round(Math.abs(value / range.expected - 1) * 100)}%)`,
+        detail: like,
         look: 'history', metric: { of: 'trips' }, value, range, rows: value, acts: ['expected', 'incident', 'notify'],
       });
     }
@@ -196,12 +199,12 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       const delta = j.value - j.range.expected;
       if (Math.abs(delta) < MATERIAL.share || Math.abs(delta) * rows < MATERIAL.rows) return;
       if (Math.abs(delta) < MATERIAL.shareRelative * Math.min(j.range.expected, 1 - j.range.expected)) return;
-      const said = names.value(column, parse(key));
-      const like = `a day like it has ${pct(j.range.low)} to ${pct(j.range.high)}`;
+      const said = label(column, key);
+      const w = shareWords(j.value, j.range.low, j.range.high);
       if (j.value === 0) {
-        out.push(quiet({ key: `gone:${column}=${key}`, kind: 'gone', severity: j.range.expected >= 0.2 ? 'alert' : 'warn', score: cap(j.d), title: `No trips with ${names.column(column)} ${said}`, detail: `It is usually there: ${like} of trips with it.`, look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(-delta * rows), acts: ['incident', 'notify', 'expected'] }, j));
+        out.push(quiet({ key: `gone:${column}=${key}`, kind: 'gone', severity: j.range.expected >= 0.2 ? 'alert' : 'warn', score: cap(j.d), title: `${sentence(names.column(column))} ${said}: none`, detail: `Usually on ${w.range} of trips; none today.`, look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(-delta * rows), acts: ['incident', 'notify', 'expected'] }, j));
       } else {
-        out.push(quiet({ key: `share:${column}=${key}`, kind: key === 'null' ? 'missing' : 'share', severity: shareSeverity(delta, j), score: cap(j.d), title: key === 'null' ? `${names.column(column)} missing on ${pct(j.value)} of trips` : `${sentence(names.column(column))} ${said} on ${pct(j.value)} of trips`, detail: `${sentence(like)}: ${fmtInt(Math.abs(delta) * rows)} trips ${delta > 0 ? 'more' : 'fewer'} than usual.`, look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j));
+        out.push(quiet({ key: `share:${column}=${key}`, kind: key === 'null' ? 'missing' : 'share', severity: shareSeverity(delta, j), score: cap(j.d), title: key === 'null' ? `${sentence(names.column(column))} blank: ${w.value} (usually ${w.range})` : `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: `${fmtInt(Math.abs(delta) * rows)} trips ${delta > 0 ? 'more' : 'fewer'} than a day like it.`, look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j));
       }
     });
   }
@@ -215,7 +218,8 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     if (Math.abs(delta) < MATERIAL.share || Math.abs(delta) * rows < MATERIAL.rows) return;
     if (Math.abs(delta) < MATERIAL.shareRelative * Math.min(j.range.expected, 1 - j.range.expected)) return;
     void c;
-    out.push(quiet({ key: `missing:${column}`, kind: 'missing', severity: shareSeverity(delta, j), score: cap(j.d), title: `${sentence(names.column(column))} missing on ${pct(j.value)} of trips`, detail: `A day like it has it missing on ${pct(j.range.low)} to ${pct(j.range.high)}: ${fmtInt(Math.abs(delta) * rows)} trips ${delta > 0 ? 'more' : 'fewer'} without it.`, look: 'columns', columns: [column], values: ['null'], metric: { of: 'missing', column }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j));
+    const w = shareWords(j.value, j.range.low, j.range.high);
+    out.push(quiet({ key: `missing:${column}`, kind: 'missing', severity: shareSeverity(delta, j), score: cap(j.d), title: `${sentence(names.column(column))} blank: ${w.value} (usually ${w.range})`, detail: `${fmtInt(Math.abs(delta) * rows)} trips ${delta > 0 ? 'more' : 'fewer'} without it than a day like it.`, look: 'columns', columns: [column], values: ['null'], metric: { of: 'missing', column }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j));
   });
 
   // Values and combinations never seen before.
@@ -225,7 +229,7 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     const n = fresh.rows ?? vh.fresh.find(([d]) => d === k)?.[1] ?? 0;
     if (n < MATERIAL.newRows && n < MATERIAL.newShare * rows) continue;
     const said = fresh.keys.slice(0, 5).map((key) => names.value(column, parse(key)));
-    out.push({ key: `new:${column}`, kind: 'new', severity: n >= 100 || n >= 0.001 * rows ? 'warn' : 'note', score: Math.min(99, n / Math.max(1, rows) * 1000), title: `${fresh.keys.length === 1 ? 'A' : fresh.keys.length} ${names.column(column)} never seen before`, detail: `${listed(said)}${fresh.keys.length > 5 ? ` and ${fresh.keys.length - 5} more` : ''}, on ${fmtInt(n)} trips: in ${daysSeen(file, k)} days of history, none had ${fresh.keys.length === 1 ? 'it' : 'them'}.`, look: 'columns', columns: [column], values: fresh.keys, rows: n, acts: ['expected', 'quarantine', 'rule', 'notify'] });
+    out.push({ key: `new:${column}`, kind: 'new', severity: n >= 100 || n >= 0.001 * rows ? 'warn' : 'note', score: Math.min(99, n / Math.max(1, rows) * 1000), title: fresh.keys.length === 1 ? `New ${names.column(column)}: ${label(column, fresh.keys[0]!)} · ${fmtInt(n)} trips` : `New ${names.column(column)} values: ${fresh.keys.length} · ${fmtInt(n)} trips`, detail: `${listed(said)}${fresh.keys.length > 5 ? ` and ${fresh.keys.length - 5} more` : ''}: never in ${daysSeen(file, k)} days of history.`, look: 'columns', columns: [column], values: fresh.keys, rows: n, acts: ['expected', 'quarantine', 'rule', 'notify'] });
   }
   for (const [pair, vh] of Object.entries(file.pairs ?? {})) {
     const fresh = newOn(vh, k);
@@ -244,7 +248,7 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       const [x, y] = parse(key) as [unknown, unknown];
       return `${names.column(a)} ${names.value(a, x)} with ${names.column(b)} ${names.value(b, y)}`;
     });
-    out.push({ key: `pair:${pair}`, kind: 'pair', severity: n >= 100 || n >= 0.001 * rows ? 'warn' : 'note', score: Math.min(99, n / Math.max(1, rows) * 1000), title: `A combination never seen before`, detail: `${sentence(listed(said))}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}, on ${fmtInt(n)} trips: in ${daysSeen(file, k)} days of history, never together.`, look: 'columns', columns: [a, b], values: keys, rows: n, acts: ['expected', 'quarantine', 'rule', 'notify'] });
+    out.push({ key: `pair:${pair}`, kind: 'pair', severity: n >= 100 || n >= 0.001 * rows ? 'warn' : 'note', score: Math.min(99, n / Math.max(1, rows) * 1000), title: `New pair: ${names.column(a)} with ${names.column(b)} · ${fmtInt(n)} trips`, detail: `${sentence(listed(said))}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}: never together in ${daysSeen(file, k)} days.`, look: 'columns', columns: [a, b], values: keys, rows: n, acts: ['expected', 'quarantine', 'rule', 'notify'] });
   }
 
   // Shape: a measure's or a time's bottom tenth, median or top tenth moved.
@@ -272,25 +276,26 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     const { q, j } = best;
     const up = j.value > j.range.expected;
     const at = (v: number) => (time ? clockText(v) : String(Number(v.toPrecision(3))));
-    const which = q === 3 ? 'the median' : q === 5 ? 'the top tenth starts at' : 'the bottom tenth ends at';
+    const which = q === 3 ? 'Half of them are under' : q === 5 ? 'The top tenth starts at' : 'The bottom tenth ends at';
+    // A time's quantile is said as what it is: "90% before 12:54", never "they end by" (10% come later).
     const title = time
-      ? `${sentence(names.column(column))} ${up ? 'later' : 'earlier'} in the day than usual`
-      : `${sentence(names.column(column))} ${up ? 'higher' : 'lower'} than usual${q === 5 ? ' at the top' : q === 1 ? ' at the bottom' : ''}`;
+      ? `${sentence(names.column(column))}: ${q === 3 ? 'half' : q === 5 ? '90%' : '10%'} before ${at(j.value)} (usually ${at(j.range.low)}–${at(j.range.high)})`
+      : `${sentence(names.column(column))}: ${up ? 'higher' : 'lower'} ${q === 5 ? 'at the top' : q === 1 ? 'at the bottom' : 'in the middle'}`;
     const far = time ? Math.abs(j.value - j.range.expected) >= 3 * MATERIAL.minutes : Math.abs(j.value - j.range.expected) >= 3 * MATERIAL.relative * Math.abs(j.range.expected);
-    out.push(quiet({ key: `shape:${column}`, kind: 'shape', severity: far && q === 3 && Math.abs(j.d) >= 6 ? 'warn' : 'note', score: cap(j.d), title, detail: `${sentence(which)} ${at(j.value)}, where a day like it has ${at(j.range.low)} to ${at(j.range.high)} (the ${Math.round(QUANTILES[q]! * 100)}th percentile, in a sample of the trips).`, look: 'columns', columns: [column], metric: { of: 'quantile', column, q }, value: j.value, range: j.range, acts: ['expected', 'rule'] }, j));
+    out.push(quiet({ key: `shape:${column}`, kind: 'shape', severity: far && q === 3 && Math.abs(j.d) >= 6 ? 'warn' : 'note', score: cap(j.d), title, detail: `${time ? `${Math.round(QUANTILES[q]! * 100)}% of them come before ${at(j.value)}` : `${which} ${at(j.value)}`}; a day like it has ${at(j.range.low)}–${at(j.range.high)}.`, look: 'columns', columns: [column], metric: { of: 'quantile', column, q }, value: j.value, range: j.range, acts: ['expected', 'rule'] }, j));
   });
 
   // What the checks drop, and which rules drop more or less than usual.
   if (options.checks !== false) {
     const dropped = judged({ of: 'dropped' });
     const rules = file.rules.map((r) => ({ r, j: judged({ of: 'rule', name: r.name }) })).filter((x) => x.j && outside(x.j) && Math.abs(x.j.value - x.j.range.expected) * rows >= MATERIAL.rows);
-    const ruleWords = rules.map(({ r, j }) => `${r.name} ${pct(j!.value)} (usually ${pct(j!.range.low)} to ${pct(j!.range.high)})`);
+    const ruleWords = rules.map(({ r, j }) => `${r.name} ${shareWords(j!.value, j!.range.low, j!.range.high).value}`);
     if (dropped && outside(dropped) && Math.abs(dropped.value - dropped.range.expected) * rows >= MATERIAL.rows) {
       const more = dropped.value > dropped.range.expected;
-      out.push(quiet({ key: 'dropped', kind: 'dropped', severity: dropped.value >= 2 * dropped.range.expected && dropped.value >= 0.1 ? 'alert' : 'warn', score: cap(dropped.d), title: `The checks dropped ${more ? 'more' : 'less'} than usual: ${pct(dropped.value)}`, detail: `A day like it drops ${pct(dropped.range.low)} to ${pct(dropped.range.high)} of its trips.${ruleWords.length ? ` By rule: ${listed(ruleWords)}.` : ''}`, look: 'dropped', metric: { of: 'dropped' }, value: dropped.value, range: dropped.range, rows: Math.round(dropped.value * rows), acts: ['quarantine', 'rule', 'notify', 'expected'] }, dropped));
+      out.push(quiet({ key: 'dropped', kind: 'dropped', severity: dropped.value >= 2 * dropped.range.expected && dropped.value >= 0.1 ? 'alert' : 'warn', score: cap(dropped.d), title: `Checks dropped ${shareWords(dropped.value, dropped.range.low, dropped.range.high).value} (usually ${shareWords(dropped.value, dropped.range.low, dropped.range.high).range})`, detail: `${more ? 'More' : 'Less'} than a day like it drops${ruleWords.length ? `; by rule, ${listed(ruleWords)}` : ''}.`, look: 'dropped', metric: { of: 'dropped' }, value: dropped.value, range: dropped.range, rows: Math.round(dropped.value * rows), acts: ['quarantine', 'rule', 'notify', 'expected'] }, dropped));
     } else {
       for (const { r, j } of rules) {
-        out.push({ key: `rule:${r.name}`, kind: 'rule', severity: 'note', score: cap(j!.d), title: `The ${r.name} rule ${r.onFail === 'warn' ? 'flagged' : 'dropped'} ${j!.value > j!.range.expected ? 'more' : 'fewer'} trips than usual: ${pct(j!.value)}`, detail: `A day like it has ${pct(j!.range.low)} to ${pct(j!.range.high)} failing it.`, look: 'dropped', metric: { of: 'rule', name: r.name }, value: j!.value, range: j!.range, acts: ['quarantine', 'rule', 'expected'] });
+        out.push({ key: `rule:${r.name}`, kind: 'rule', severity: 'note', score: cap(j!.d), title: `${sentence(r.name)} rule: ${shareWords(j!.value, j!.range.low, j!.range.high).value} ${r.onFail === 'warn' ? 'flagged' : 'fail'} (usually ${shareWords(j!.value, j!.range.low, j!.range.high).range})`, detail: `${j!.value > j!.range.expected ? 'More' : 'Fewer'} trips than a day like it ${r.onFail === 'warn' ? 'flagged' : 'dropped'} by it.`, look: 'dropped', metric: { of: 'rule', name: r.name }, value: j!.value, range: j!.range, acts: ['quarantine', 'rule', 'expected'] });
       }
     }
   }
@@ -300,7 +305,7 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   const sm = file.schemas?.findIndex((x) => x.month === month) ?? -1;
   if (file.schemas && sm > 0 && day.endsWith('-01')) {
     const changes = schemaChanges(file.schemas[sm - 1]!.columns, file.schemas[sm]!.columns);
-    if (changes.length) out.push({ key: 'schema', kind: 'schema', severity: 'note', score: changes.length, title: `This month's file came with its columns changed`, detail: `${sentence(listed(changes))}. The loads are cast to the month's columns, so the flow reads them as before.`, look: 'columns', acts: ['expected', 'notify'] });
+    if (changes.length) out.push({ key: 'schema', kind: 'schema', severity: 'note', score: changes.length, title: `Columns changed: ${schemaCount(changes)}`, detail: `${sentence(listed(changes))}. The loads are cast to the month's columns.`, look: 'columns', acts: ['expected', 'notify'] });
   }
 
   // The weather, as context.
@@ -316,21 +321,13 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     if (gaps.length) out.push({ key: 'weather-gaps', kind: 'weather', severity: 'note', score: 1, title: `The weather has hours missing`, detail: `${listed(gaps)}: fewer than 24 hours on record.`, look: 'history', acts: ['notify'] });
   }
 
-  // A feed that stopped (all but blank, or stopping part way) skews everything else the day holds: the mix of values,
-  // the shapes, what the checks drop. Those are told as what follows from it, not as news of their own.
-  const cause = out.find((f) => f.kind === 'hours' || (f.kind === 'volume' && f.value !== undefined && !!f.range && f.value < MATERIAL.blank * f.range.expected));
-  if (cause) {
-    const because = cause.kind === 'hours' ? `the trips stopping or starting late (${cause.title.charAt(0).toLowerCase()}${cause.title.slice(1)})` : 'a day all but blank';
-    for (const [i, f] of out.entries()) {
-      if (f === cause || f.kind === 'volume' || f.kind === 'hours' || f.kind === 'weather' || f.kind === 'schema' || (f.severity !== 'alert' && f.severity !== 'warn')) continue;
-      out[i] = { ...f, severity: 'note', score: f.score / 10, detail: `Likely from ${because}: the rows the day has are not a whole day's. ${f.detail}`, because: cause.key };
-    }
-  }
+  // What follows from what (a feed that stopped skews the mix of values, the shapes, what the checks drop) is the
+  // story's to tell: storyOf (story.ts) sorts these findings by what the day's cause explains.
   const told = together(out, rows, names);
   told.sort((a, b) => RANK[a.severity] - RANK[b.severity] || b.score - a.score);
   if (!told.some((f) => f.severity === 'alert' || f.severity === 'warn')) {
     const note = holidayOf(day) ?? seasonOf(day);
-    told.unshift({ key: 'calm', kind: 'calm', severity: 'ok', score: 0, title: 'Nothing out of the ordinary', detail: `${trips ? `${fmtInt(trips.value)} trips, a normal amount for ${note ? `${note}` : 'a day like it'} (${fmtInt(trips.range.low)} to ${fmtInt(trips.range.high)}); ` : ''}every value, column and check as a day like it has them.`, look: 'history', metric: trips ? { of: 'trips' } : undefined, value: trips?.value, range: trips?.range, acts: [] });
+    told.unshift({ key: 'calm', kind: 'calm', severity: 'ok', score: 0, title: 'Nothing out of the ordinary', detail: trips ? `${fmtInt(trips.value)} trips, normal for ${note ?? 'a day like it'} (${fmtInt(trips.range.low)} to ${fmtInt(trips.range.high)}).` : 'Every value, column and check as a day like it has them.', look: 'history', metric: trips ? { of: 'trips' } : undefined, value: trips?.value, range: trips?.range, acts: [] });
   }
   return told;
 }
@@ -426,9 +423,14 @@ const daysSeen = (file: { days: string[] }, k: number) => fmtInt(k);
  * or more in a row. What a day like it has in an hour: its expected trips, shared out as the same weekday's ordinary
  * days of the six weeks before share theirs (their median share, hour by hour).
  */
-function hoursShort(h: HistoryRanges, k: number, expected: number): Finding | null {
+/**
+ * Trips by pickup hour on a day like this one: its expected trips, shared out as the same weekday's ordinary days of
+ * the six weeks before share theirs (their median share, hour by hour). Null with too few such days.
+ */
+export function usualHours(h: HistoryRanges, k: number, expected: number): number[] | null {
   const file = h.file;
-  const day = file.days[k]!;
+  const day = file.days[k];
+  if (!day) return null;
   const shares: number[][] = Array.from({ length: 24 }, () => []);
   for (let w = 1; w <= 10 && shares[0]!.length < 6; w++) {
     const d = plusDays(day, -7 * w);
@@ -436,9 +438,15 @@ function hoursShort(h: HistoryRanges, k: number, expected: number): Finding | nu
     if (j < 0 || holidayOf(d) || seasonOf(d) || !file.rows[j] || !file.hours?.[j]) continue;
     file.hours[j]!.forEach((n, hr) => shares[hr]!.push(n / file.rows[j]!));
   }
-  if (shares[0]!.length < 3 || !file.hours?.[k]) return null;
+  if (shares[0]!.length < 3) return null;
   const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1]!;
-  const want = shares.map((xs) => median(xs) * expected);
+  return shares.map((xs) => median(xs) * expected);
+}
+
+export function hoursShort(h: HistoryRanges, k: number, expected: number): Finding | null {
+  const file = h.file;
+  const want = usualHours(h, k, expected);
+  if (!want || !file.hours?.[k]) return null;
   const got = file.hours[k]!;
   const short = got.map((n, hr) => want[hr]! >= MATERIAL.hourRows && n < MATERIAL.hourShare * want[hr]!);
   // The longest run of short hours.
@@ -456,11 +464,14 @@ function hoursShort(h: HistoryRanges, k: number, expected: number): Finding | nu
   const had = got.slice(a, b + 1).reduce((t, n) => t + n, 0);
   const usual = want.slice(a, b + 1).reduce((t, n) => t + n, 0);
   const span = b === 23 ? `from ${clockText(a * 60)} on` : a === 0 ? `until ${clockText((b + 1) * 60)}` : `from ${clockText(a * 60)} to ${clockText((b + 1) * 60)}`;
+  // Pickup times, not arrival times: the trips fall to a trickle, they don't end (Sep 21, 2023: 3,679 after 13:00).
+  const fall = Math.round((1 - had / Math.max(1, usual)) * 100);
   return {
     key: 'hours', kind: 'hours', severity: 'alert', score: 50 + (b - a),
-    title: b === 23 ? `The trips stop at ${clockText(a * 60)}` : a === 0 ? `The trips start late, at ${clockText((b + 1) * 60)}` : `A gap in the trips, ${clockText(a * 60)} to ${clockText((b + 1) * 60)}`,
-    detail: `${fmtInt(had)} trips ${span}, where a day like it has about ${fmtInt(usual)}: the data stopped arriving, or stopped being recorded.`,
+    title: b === 23 ? `Trips fall ${fall}% at ${clockText(a * 60)}` : a === 0 ? `Trips start late, at ${clockText((b + 1) * 60)}` : `Gap in trips, ${clockText(a * 60)}–${clockText((b + 1) * 60)}`,
+    detail: `${fmtInt(had)} trips ${span}, where a day like it has about ${fmtInt(usual)}.`,
     look: 'history', rows: Math.round(usual - had), acts: ['incident', 'notify', 'expected'],
+    hours: { got: [...got], usual: want.map((x) => Math.round(x)), from: a, to: b },
   };
 }
 
@@ -479,6 +490,13 @@ export function schemaChanges(before: readonly [string, string][], after: readon
   }
   for (const [key, [n]] of was) if (!now.has(key)) out.push(`${n} is gone`);
   return out;
+}
+
+/** Schema changes counted, for a short title: "1 added, 4 retyped". */
+function schemaCount(changes: readonly string[]): string {
+  const n = (re: RegExp) => changes.filter((c) => re.test(c)).length;
+  const parts = [[n(/ is new /), 'added'], [n(/ is gone$/), 'removed'], [n(/ is now [^,]+, not /), 'retyped'], [n(/ is now [^ ,]+$/), 'renamed']] as const;
+  return parts.filter(([k]) => k > 0).map(([k, w]) => `${k} ${w}`).join(', ') || `${changes.length} changes`;
 }
 
 /**
@@ -507,14 +525,16 @@ function together(findings: Finding[], rows: number, names: Names): Finding[] {
     const all = [f, ...same];
     const parts = all.map((g) => (g.values?.[0] === 'null' ? `no ${names.column(g.columns![0]!)}` : `${names.column(g.columns![0]!)} ${names.value(g.columns![0]!, parse(g.values![0]!))}`));
     const lead = all.reduce((a, b) => (b.score > a.score ? b : a));
+    const blank = all.every((g) => g.values?.[0] === 'null');
     out.push({
       ...lead,
       key: `together:${all.map((g) => g.key).sort().join(',')}`,
       severity: all.some((g) => g.severity === 'alert') ? 'alert' : lead.severity,
-      title: `${fmtInt(f.rows!)} trips ${up ? 'more' : 'fewer'} than usual with ${listed(parts)}`,
-      detail: `They moved by about the same number of trips, likely the same ones. ${lead.detail}`,
+      title: `${all.length} ${blank ? 'columns blank' : 'values move'} together · ${fmtInt(f.rows!)} trips ${up ? 'more' : 'fewer'}`,
+      detail: `${sentence(listed(parts))}: the same trips, likely.`,
       columns: all.flatMap((g) => g.columns ?? []),
       values: all.flatMap((g) => g.values ?? []),
+      members: all.map((g) => ({ column: g.columns![0]!, value: g.values![0]!, label: g.values?.[0] === 'null' ? 'blank' : (names.label ?? names.value)(g.columns![0]!, parse(g.values![0]!)), share: g.value!, range: g.range!, rows: g.rows! })),
     });
   }
   void rows;
