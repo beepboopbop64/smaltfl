@@ -487,6 +487,49 @@ export function microDot({ today, low, high, gone, w = 72 }: { today: number; lo
   return `${s}</svg>`;
 }
 
+/**
+ * A value far beyond everything else: the column's usual spread (its 1st to 99th percentile) as a box on the left, a
+ * break, and the far value as a dot at the right end, labelled. The break says the scale isn't to size.
+ */
+export function farStrip({ lowLabel, highLabel, valueLabel, aria, w = 334, below = false }: { lowLabel: string; highLabel: string; valueLabel: string; aria: string; w?: number; below?: boolean }): string {
+  const h = 40;
+  const y = 20;
+  const box = below ? [w * 0.42, w - 6] : [6, w * 0.58];
+  const dot = below ? 10 : w - 10;
+  const brk = below ? w * 0.27 : w * 0.73;
+  let s = open(w, h, aria);
+  s += `<line class="base" x1="0" x2="${f1(brk - 6)}" y1="${y}" y2="${y}"/><line class="base" x1="${f1(brk + 6)}" x2="${w}" y1="${y}" y2="${y}"/>`;
+  s += `<path class="joint" d="M${f1(brk - 6)} ${y + 6}l4 -12M${f1(brk + 2)} ${y + 6}l4 -12"/>`;
+  s += `<rect class="ghost-2" x="${f1(box[0]!)}" y="${y - 6}" width="${f1(box[1]! - box[0]!)}" height="12" rx="3"/>`;
+  s += `<text x="${f1(box[0]!)}" y="${h - 1}" class="tick" aria-hidden="true">${esc(lowLabel)}</text><text x="${f1(box[1]!)}" y="${h - 1}" text-anchor="end" class="tick" aria-hidden="true">${esc(highLabel)}</text>`;
+  s += `<circle class="dot dot-alert" cx="${f1(dot)}" cy="${y}" r="5.5"/><text x="${f1(dot)}" y="${y - 10}" text-anchor="${below ? 'start' : 'end'}" class="lbl-b">${esc(valueLabel)}</text>`;
+  return `${s}</svg>`;
+}
+
+/**
+ * A chain of links, left to right (the data's list → the file's bytes → the load → the outputs), each a node; the link
+ * that broke is cut, its two ends labelled, and the nodes after it hatched: not built from these bytes.
+ */
+export function chain({ nodes, broken, w = 334, aria }: { nodes: readonly string[]; broken: number; w?: number; aria: string }): string {
+  const h = 52;
+  const n = nodes.length;
+  const nw = Math.min(72, (w - (n - 1) * 14) / n);
+  const gap = (w - n * nw) / Math.max(1, n - 1);
+  let s = open(w, h, aria);
+  nodes.forEach((label, i) => {
+    const x = i * (nw + gap);
+    const after = i > broken;
+    s += `<rect class="${after ? 'hatch-box' : 'node'}" x="${f1(x)}" y="8" width="${f1(nw)}" height="28" rx="6"/><text x="${f1(x + nw / 2)}" y="26" text-anchor="middle" class="mono">${esc(label)}</text>`;
+    if (i < n - 1) {
+      const x1 = x + nw;
+      const x2 = x1 + gap;
+      if (i === broken) s += `<line class="edge-t" x1="${f1(x1)}" x2="${f1(x1 + gap / 2 - 4)}" y1="22" y2="22"/><line class="edge-t" x1="${f1(x1 + gap / 2 + 4)}" x2="${f1(x2)}" y1="22" y2="22"/><path class="gone-x" d="M${f1(x1 + gap / 2 - 4)} 16l8 12M${f1(x1 + gap / 2 + 4)} 16l-8 12"/>`;
+      else s += `<line class="${i > broken ? 'joint' : 'base'}" x1="${f1(x1)}" x2="${f1(x2)}" y1="22" y2="22"/>`;
+    }
+  });
+  return `${s}</svg>`;
+}
+
 /** A load's micro bar for the loads strip: its trips against its own usual range, on the strip's one scale. */
 export function stripBar({ v, low, high, ymax, sev }: { v: number; low: number | null; high: number | null; ymax: number; sev?: 'alert' | 'warn' | null }): string {
   const H = 26;

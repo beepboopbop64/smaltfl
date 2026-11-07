@@ -112,6 +112,8 @@ export interface StoryOptions {
   acknowledged?: ReadonlySet<string>;
   /** Columns the viewer's policy removes: no finding, split or prediction is told from them. */
   hidden?: ReadonlySet<string>;
+  /** Whether to look at the days before for an episode or a recovery (default true; a calendar of every day skips it). */
+  episode?: boolean;
 }
 
 export const ACT_VERB: Record<Act, string> = {
@@ -418,7 +420,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
 
   // The episode: the days before with a cause of something wrong, back to its first.
   let episode: Story['episode'] = null;
-  const badToday = k >= 0 && severity === 'alert' && caused;
+  const badToday = k >= 0 && severity === 'alert' && caused && o.episode !== false;
   const before = (from: string) => {
     let first = from;
     let hour: number | null = null;
@@ -437,7 +439,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   if (badToday) {
     const b = before(day);
     if (b.days > 0) episode = { days: b.days + 1, since: b.first, hour: b.hour };
-  } else if (k >= 0 && !o.refused && severity !== 'alert' && severity !== 'warn') {
+  } else if (k >= 0 && !o.refused && severity !== 'alert' && severity !== 'warn' && o.episode !== false) {
     const yesterday = plusDays(day, -1);
     if (badDay(h, yesterday, names, hidden)) {
       const b = before(yesterday);
