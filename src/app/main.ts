@@ -19,7 +19,7 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, dayMid, dayShort, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
-import { afterLine, decidedLines, decisionDrawing, goLabel, pauseLines, ribbonOf, sheetText, type SheetText } from '../core/decision.js';
+import { afterLine, decidedLines, decisionDrawing, goLabel, heldLine, pauseLines, ribbonOf, sheetText, type SheetText } from '../core/decision.js';
 import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, stagedKeys, standingFor, type DecideAbout, type HistoryRef, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { CELL_KINDS, CELL_NAMES, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
@@ -3798,7 +3798,7 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     box.append(h('div', { class: 'verdict alert stopped' },
       h('p', { class: 'v-day' }, now ? dayLabel(now) : ''),
       h('h3', { class: 'v-head' }, glyphEl(PAUSE_MARK[pauseOf(own)!.state], 16), own.result.holds.every((x) => x.by === 'unjudged') ? 'Held: not judged' : 'Held'),
-      h('p', { class: 'v-line' }, own.result.holds.map((x) => `${x.origin}: ${x.said}`).join('; '))),
+      h('p', { class: 'v-line' }, own.result.holds.map((x) => heldLine(x, !!history)).join('; '))),
       row.reach, row.verb ? h('div', { class: 'vf-acts' }, row.verb) : '');
   }
   // The run on this load stopped: a gate held (a check dropping more than it may), so nothing after it was built from

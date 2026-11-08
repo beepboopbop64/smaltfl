@@ -8,11 +8,13 @@
  *   gives readers the day's own rows, what it lacks against a usual day drawn absent; Don't publish keeps the day they
  *   see now, another day's rows, hatched; nothing published yet is absent. Every row is on one scale.
  * - The sheet's words (`sheetText`, `sheetWords`): at most 45 at a glance, whichever button label shows.
- * - The cause card's row (`pauseLines`): what its outputs wait for, or what became of them, and its one verb.
+ * - The cause card's row (`pauseLines`): what its outputs wait for, or what became of them, and its one verb; and the
+ *   held card's line (`heldLine`), what held a day with no story to tell it.
  * - An episode's days once it is over (`afterLine`), and the paused days by month (`ribbonOf`, `decidedLines`).
  */
 import { dayMid, dayShort, type PauseState } from './days.js';
 import type { HistoryRanges } from './history.js';
+import type { Hold } from './hold.js';
 import type { DecideOption } from './policy.js';
 import { wordsIn, type Story } from './story.js';
 
@@ -206,6 +208,16 @@ export function sheetWords(t: SheetText): number {
   const fixed = [t.title, t.status ?? '', ...t.scopes, ...t.options.flatMap((x) => [x.label, x.number]), t.part ?? '', ...t.ticks, ...t.chips, t.hash];
   const button = t.denied ? wordsIn(t.denied) : Math.max(...t.go.map(wordsIn));
   return fixed.reduce((n, x) => n + wordsIn(x), 0) + button;
+}
+
+/**
+ * What held a run, said for a person, as the held card's line says it ("trips: no history to judge it by"): a source
+ * the page made no claim for is one it had no history to judge by, or whose history doesn't have the day. The
+ * plugin's own words ("no claim for trips") stay in the record and in verify's line, where they are evidence.
+ */
+export function heldLine(x: Pick<Hold, 'by' | 'origin' | 'said'>, history: boolean): string {
+  if (x.by === 'unjudged' && /^no claim for /.test(x.said)) return `${x.origin}: ${history ? 'the history doesn’t have this day' : 'no history to judge it by'}`;
+  return `${x.origin}: ${x.said}`;
 }
 
 /**

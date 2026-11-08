@@ -4,7 +4,7 @@
  * within their budgets.
  */
 import { describe, expect, it } from 'vitest';
-import { afterLabel, afterLine, decidedLines, decisionDrawing, goLabel, pauseLines, ribbonOf, sheetText, sheetWords, waitedLabel, type SheetIn } from '../src/core/decision.js';
+import { afterLabel, afterLine, decidedLines, decisionDrawing, goLabel, heldLine, pauseLines, ribbonOf, sheetText, sheetWords, waitedLabel, type SheetIn } from '../src/core/decision.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
 import { storyOf, wordsIn } from '../src/core/story.js';
@@ -126,6 +126,15 @@ describe('the cause card’s pause row, the day after an episode, and the record
       const l = pauseLines({ ...base, state: s, may, who: 'Owner', at: '09:40', under: s === 'dont' ? 'Fri' : null });
       expect(wordsIn(l.reach) + (l.verb ? wordsIn(l.verb) : 0)).toBeLessThanOrEqual(6);
     }
+  });
+
+  it('says what held a day with no story plainly: no history to judge it by, or none for the day; any other hold in its own words', () => {
+    const unjudged = { by: 'unjudged', origin: 'trips', said: 'no claim for trips' } as const;
+    expect(heldLine(unjudged, false)).toBe('trips: no history to judge it by');
+    expect(heldLine(unjudged, true)).toBe('trips: the history doesn’t have this day');
+    // A claim that came but didn't match is evidence: said as the plugin says it.
+    expect(heldLine({ by: 'unjudged', origin: 'trips', said: 'the claim is of 2023-09-20, the run of 2023-09-21' }, true)).toBe('trips: the claim is of 2023-09-20, the run of 2023-09-21');
+    expect(heldLine({ by: 'checks', origin: 'trips_valid', said: '45.67% dropped, more than 10%' }, true)).toBe('trips_valid: 45.67% dropped, more than 10%');
   });
 
   it('says what became of an episode’s days the day after it, what still waits first', () => {
