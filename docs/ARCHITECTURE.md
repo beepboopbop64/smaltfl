@@ -201,6 +201,25 @@ same inputs and keys is released again by the same decision, recorded as citing 
 publish closes each held day after it until one publishes. A flow without a `publish` block runs as before, and its
 gate still throws.
 
+**Filling a held day** ([ADR 0009 amendment 1](adr/0009-paused-not-published.md)). A flow that may be filled has a
+`fill` step on its watched source (the example's `trips_filled`): on a day nothing fills it passes the rows through
+with a `filled_from` column, null, and every output it reaches must carry the mark (`max(filled_from)`, and the rows
+filled), or the run is refused. The checks and the history count the source through it (`sourceOf`). When a held day
+is short and its story names a missing part (hours from a time, a part that vanished, the rest where a part held),
+`src/core/fill.ts` offers two remedies: a fill from a good day near it (the watch's rule first, the same weekday or the
+nearest day, before or after, within four weeks, judged with nothing wrong of it, never a day the flow's calendar
+marks unless the held day is one, a file the data lists), or the part that arrived alone. A remedy is a derived
+document (`repairDocument`: the fill step's `missing` and `from`, and the donor as a second input), run *staged*: every
+output held, its versions kept and hashed, its donor's claim judged as a watched source's is. The app
+(`src/app/fills.ts`) pins the donor's file only when a fill needs it, checked against the data's list, stages the
+derived run when the option is picked, and records it as a derived run with its document. A decision to fill names
+the repair and the derived run's keys; its release (`src/plugin/release.ts`) checks the derived run against the held
+run it repairs (the same day and snapshot, the document that run's repaired, the donor's file and claim, nothing
+holding it but its day's story and its being derived) and keeps what each name showed before it
+(`_smaltfl_repairs`), so a better donor replaces a fill, and a withdrawal (Q-61) points each name back. A fill may
+stand until a day passes (Q-64): each later held day is filled by the same rule from its own good day, decided under
+it. After a reload the decision is applied again from its repair.
+
 **Runs** are recorded as manifests (section 6), with the flow plan they ran stored by its hash. Cancellation uses the
 client's `AbortSignal`; progress is reported per step. Previews run a segment up to the chosen step, with a `LIMIT`.
 
@@ -216,7 +235,7 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
 | Dataset version | Its schema and the multiset of its rows: each row's canonical binary encoding is hashed, and the sorted row hashes are hashed in 1 MiB chunks | Exact: `REAL` values hash by their IEEE-754 bits; `NULL` and each type are tagged. The same rows in any order give the same hash, with no sort in the engine (`src/plugin/dataset-hash.ts`) |
 | Edit | The edit and the previous edit's hash | A hash chain in the engine; each edit also goes into the record with the policies and ontology hashes in force |
 | Run manifest (run/1) | The flow (with its policies and ontology hashes), the plan, parameters, engine and plugin versions and the code's commit, step keys, the source files read, snapshot and dataset hashes, row counts, expectation results, the data commit and list hash, the record's head, the previous run | The flow document is kept with it; run/0 manifests still verify. Signed when shared (section 7) |
-| Record entry (log/1) | The entry's canonical JSON, as an RFC 9162 leaf; the record's root as the Merkle tree hash of its leaves | One append-only record per flow and browser (`src/core/log.ts`, `src/app/record.ts`): runs (`ok`, `failed`, or `held` with what held them, what waits and the staged keys), decisions on held days, releases, flow changes, file checks, actions on findings, edits, verifications, signatures, exports |
+| Record entry (log/1) | The entry's canonical JSON, as an RFC 9162 leaf; the record's root as the Merkle tree hash of its leaves | One append-only record per flow and browser (`src/core/log.ts`, `src/app/record.ts`): runs (`ok`, `failed`, `held` with what held them, what waits and the staged keys, or `derived` with the held run it repairs, the repair and its document), decisions on held days (with a remedy's repair and derived run), releases (with `from`, `repair`, `filled`, or `withdraws`), flow changes, file checks, actions on findings, edits, verifications, signatures, exports |
 | Checkpoint | The record's origin, size and root, signed (ECDSA P-256) by this browser's identity | Downloaded and kept elsewhere, it anchors the record: a later record is checked against it with a consistency proof |
 | Audit bag | BagIt 1.0: every file by SHA-256 in its manifests | The record, checkpoints, card, manifests, plans, flow documents, the data's list, what each dataset name shows and the engine's releases, and a proof per dataset as published (by its run's entry, or by the release that published it); checked with `sha256sum -c` and `node scripts/audit.mjs` |
 
@@ -234,6 +253,12 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
   `audit.mjs check` checks held runs as it checks the others, and fails a decision whose actor the stored policies
   don't allow, or that came under a standing decision that no longer stood; a release that cites no earlier decision,
   or whose keys aren't its run's and its decision's; and a held output the engine shows with no release.
+  A run released with a repair (ADR 0009 amendment 1 S11) gets a *repair* check: its stored derived document rebuilds
+  from the held run's document and the repair, its donor node read the repair's file, and its watched source is the
+  held run's snapshot; *held* accepts that release. The audit checks a derived run against its held run (document,
+  snapshot, donor file, day and claim), its decision's repair and keys, its release (by the derived run's inputs, so a
+  decision applied again in a new engine holds), a replacement that moved a name back past a later day, and a
+  withdrawal, with what the engine kept (`engine/repairs.json` in the bag).
   Re-running on an older engine needs that version's worker build; smaltkit's engine loader, which already loads a
   chosen smaltdb version, is the starting point.
 - **Determinism:** results that can differ between runs of the same plan are pinned for verified runs: row order
@@ -343,11 +368,13 @@ plugin, and the app built as a static site.
 ```
 src/
   core/       flow model, validation, compiler, hashes, lineage, policies, ontology, packages; data quality (profiles,
-              odd rows, drift), the holiday calendar, each day's normal range, the news (a day's, a table's), and what
-              holds a run and what became of a held day
-  plugin/     the runtime plugin (engine worker): running and holding a plan, releasing a held run, verifying
+              odd rows, drift), the holiday calendar, each day's normal range, the news (a day's, a table's), what
+              holds a run and what became of a held day, and filling one (fill.ts: what is missing, the donor, the
+              derived document, a day's versions)
+  plugin/     the runtime plugin (engine worker): running and holding a plan, staging a derived run, releasing a
+              held or derived run and withdrawing a fill, verifying
   worker.ts   the app's worker entry
-  app/        the UI
+  app/        the UI; fills.ts pins a donor and stages, decides and releases a fill
 test/         vitest on the in-process engine and through the worker protocol; Playwright end-to-end tests with the app
 bench/        scenario benchmarks (SCENARIO.md §7); results in bench/results/
 fixtures/     tier XS data with its hashes

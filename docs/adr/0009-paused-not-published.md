@@ -1022,8 +1022,22 @@ ADR 0008's rules apply: shape first, words budgeted.
 - **A derived document** is a flow document, hashed by flow/1. **A filled version** is a dataset, hashed by
   dataset/0; `filled_from` is a column like any other.
 - **The record.** New `about` fields and option values are data.
-- **The store.** Its tables are not hashed. `_smaltfl_repairs` and `_smaltfl_withdrawals` are new; `_smaltfl_holds`
-  gains the hold kinds `derived` and `donor`.
+- **The store.** Its tables are not hashed. `_smaltfl_repairs` (each release of a remedy: its run, the held run it
+  repairs, the repair, and `before`, the key and run each name showed before it), `_smaltfl_withdrawals` (each
+  withdrawal and the release it takes back) and `_smaltfl_derived` (each derived run: the held run, its holds, its
+  donors as judged, the rows filled) are new; `_smaltfl_holds` gains the hold kinds `derived` and `donor`.
+- **The fill node** carries `to`, the run's day (the period parameter's value, or the watch's own period's), so the
+  day a donor's rows are shifted to is part of the node's key: a fill of another day never shares a key.
+- **The options.** `DecisionOption` is the full list (`asis`, `dont`, `fill`, `complete`; `accept` with Accept);
+  `DecideOption` stays slice 1's two, for the code that takes only those.
+- **A withdrawal (Q-61)** is a `decide` entry with option `dont` that amends the fill's decision, then a `release`
+  entry citing it with `withdraws` (the seq of the fill's release) and `outputs` the names as they now show; the
+  plugin's input names the fill's derived run, its keys and its engine release by number. It is refused when a later
+  day is current, and when nothing was published before the fill. A refill readers have isn't withdrawn in this slice
+  (the plugin would bring the earlier fill back): the sheet offers Keep only over a first fill.
+- **Applied again.** After a reload a remedy's decision is applied again from its repair: the derived run made again
+  in the new engine has the same inputs and keys as the one the decision names, and its release cites the same
+  decision. The audit checks it by those inputs, as it checks a day published as is again (§10).
 - **Content vectors, pinned by the first implementation commit** (test/plan.test.ts), as this ADR's were:
   1. This ADR's test vector document with a base fill step on `trips`: the plan as `translate` makes it, and its
      plan/1 hash.
@@ -1034,6 +1048,19 @@ ADR 0008's rules apply: shape first, words budgeted.
      vector. The keys of zone_list, districts and weather_hourly equal the old ones; every key from trips_filled down
      differs. When the example moves to the general form (ADR 0010 §13), its plan/2 vector replaces this one.
   5. This ADR's `fc700fdf…`, `32609b0f…` and `292c423f…`, unchanged.
+
+  The values pinned (test/plan.test.ts):
+
+  | # | Vector | Value |
+  |---|---|---|
+  | 1 | plan/1 hash | `4ec48299…` |
+  | 2 | flow/1, plan/1, fill node key | `d5b55a25…`, `05c117f8…`, `597ca2cd…` |
+  | 3 | flow/1, plan/1, fill node key | `34bb7cfb…`, `1f0dccb4…`, `8e220625…` |
+  | 4 | the example as it ships (step A10), with ADR 0010's nouns and Vendor's name and role | `0749ab06d7d6e78fff14b5ff23d4f8641ac315b70764b16881b367ed13074170` (`d145cfde…` without them) |
+  | 5 | unchanged | `fc700fdf…`, `32609b0f…`, `292c423f…` |
+
+  The example taken back out of its fill step (test/helpers/example.ts `exampleUnfilled`) keeps `7d7236ea…`, which
+  shows the step added nothing else.
 
 ### Consequences (amendment 1)
 

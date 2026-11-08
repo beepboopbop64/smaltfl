@@ -51,6 +51,10 @@ match smaltdb's `CLAUDE.md`.
   decision says; verify's *held* check and `src/core/audit.ts` check both; `src/core/decision.ts` and
   `src/app/viz.ts` `decisionRow` draw and word the decision. The days `wrong` and `short` hold on the history are a
   test vector (`test/hold-real.test.ts`): a story change that moves them is a decision, not a fix.
+- Filling a paused day (ADR 0009 amendment 1): the `fill` step marks every row with `filled_from`; `src/core/fill.ts`
+  says what is missing, the donor and the derived document; `src/app/fills.ts` pins a donor and stages the derived
+  run; the plugin releases it (`stage`, `release.ts`) and withdraws it (Q-61). ◧ filled, ◐ the part alone, stipple for
+  another day's rows inside the day (`viz.ts`). The donor table (`test/fill-real.test.ts`) is a test vector too.
 - Any dataset (ADR 0010): `src/core/calendar.ts` takes the flow's calendar (`us-nyc/1`, `us/1`, `none`); format 3 and
   plan/2 say how a watched source is judged (`WatchDef`, `WatchPlan`); `judgeOf` and `flowNames` (news.ts) read the
   watch's settings, the ontology's marks (`bad`, `newValues`, `after`) and its nouns; a day with nothing to compare
