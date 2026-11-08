@@ -110,10 +110,9 @@ describe('the cause, as a time', () => {
   it('leads with the hour the trips fall, and folds what follows from it', () => {
     const s = story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } });
     expect(s.hero).toBe('hours');
-    // Where the fall applies, and the rate the trips fell to, in the head; that they go on, and how many fewer came, on
-    // the chart.
-    expect(s.head).toMatch(/^Trips fall to ~[\d,]+\/h from 13:00$/);
-    expect(s.head.match(/~[\d,]+\/h/)![0]).toBe(s.hoursLabels!.floor.replace(/^still /, ''));
+    // Where the fall applies, and that the trips fell to a trickle (2% of usual, some every hour), in the head; the
+    // trickle's rate, and how many fewer came, on the chart.
+    expect(s.head).toBe('Trips fall to trickle from 13:00');
     expect(s.hours).toMatchObject({ from: 13, to: 23 });
     expect(s.hoursLabels).toMatchObject({ cut: '13:00', ghost: 'usual Wednesday' });
     expect(s.hoursLabels!.floor).toMatch(/^still ~[\d,]+\/h$/);
@@ -123,6 +122,11 @@ describe('the cause, as a time', () => {
     // The day's own change sits on the amount line, since the head's fall is the hours', named as the whole day's.
     expect(s.labels.amount).toEqual([expect.stringMatching(/ trips$/), expect.stringMatching(/^whole day −\d+%$/), expect.stringMatching(/^usual /)]);
     expect(s.primary).toBe('incident');
+    // A fall to a fifth of usual is no trickle: the head says the rate the trips fell to, the chart's own.
+    const fifth = story({ [DAY]: { stopAt: 13, keep: 0.2, vendorShare: 0.5 } });
+    expect(fifth.hero).toBe('hours');
+    expect(fifth.head).toMatch(/^Trips fall to ~[\d,]+\/h from 13:00$/);
+    expect(fifth.head.match(/~[\d,]+\/h/)![0]).toBe(fifth.hoursLabels!.floor.replace(/^still /, ''));
     // The vendors' mix moved with it, within what the cause moved: folded as the same day's, told as a note.
     const mix = s.findings.find((f) => f.key === 'share:VendorID=1')!;
     expect(['follows', 'sameDay', 'absorbed']).toContain(mix.tier);

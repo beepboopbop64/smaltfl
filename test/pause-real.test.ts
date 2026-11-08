@@ -63,9 +63,9 @@ describe.skipIf(!has)('the owner’s example, held through the engine on the rea
 
     // Thu 21: the story says the trips fall 95% from 13:00. Built, checked and stored; nothing published.
     const thu = await runDay('2023-09-21');
-    expect(thu.claim).toMatchObject({ state: 'wrong', below: true, head: 'Trips fall to ~330/h from 13:00', rows: 41_939 });
+    expect(thu.claim).toMatchObject({ state: 'wrong', below: true, head: 'Trips fall to trickle from 13:00', rows: 41_939 });
     expect(thu.r.manifest.nodes.find((n) => n.origin === 'trips')).toMatchObject({ rows: 41_939, file: { sha256: loads.get('2023-09-21')!.sha256 } });
-    expect(thu.r.holds.map((x) => [x.by, x.origin, x.said])).toEqual([['story', 'trips', 'Trips fall to ~330/h from 13:00']]);
+    expect(thu.r.holds.map((x) => [x.by, x.origin, x.said])).toEqual([['story', 'trips', 'Trips fall to trickle from 13:00']]);
     expect(thu.r.published).toEqual([]);
     // The zones and the weather reuse their keys: only the outputs built from the trips wait (ADR 0009 §4).
     expect(thu.r.waiting).toEqual(['borough_hour', 'weather_effect', 'zone_hour']);

@@ -720,15 +720,24 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const calmHead = holiday ? `Normal for ${SHORT_HOLIDAY[holiday] ?? holiday}` : season ? `Normal for ${(SHORT_HOLIDAY[season] ?? season).replace(/^Holiday season$/, 'the holidays')}` : `A normal ${weekdayOf(day)}`;
   const pctShort = (x: number) => `${Math.round(x * 100)}%`;
   // The trips an hour after a fall that runs to the day's end: they fall to a trickle and don't stop (Thu Sep 21, 2023
-  // kept ~330 an hour), which the head says so the fall can't read as the file cut off.
+  // kept ~330 an hour), which the chart's zoom says ("still ~330/h").
   const perHour = hoursF?.hours ? (() => {
     const { got, from, to } = hoursF.hours;
     const per = got.slice(from, to + 1).reduce((a, b) => a + b, 0) / Math.max(1, to - from + 1);
     return per >= 100 ? Number(per.toPrecision(2)) : Math.round(per);
   })() : null;
+  // A trickle: trips came in every one of those hours, and under a tenth of a usual day's (Sep 21: 3,679 of ~80k). The
+  // head says it in a word, so the fall reads as most trips falling away and the rest still coming, never as the file
+  // cut off (with the rate in the head, "Trips fall to ~330/h", the cliff still read as the file cut off); the rate
+  // itself is on the zoom. A fall to more than that is headed by its rate.
+  const trickle = hoursF?.hours ? (() => {
+    const { got, usual, from, to } = hoursF.hours;
+    const hours = got.slice(from, to + 1);
+    return hours.every((n) => n > 0) && hours.reduce((a, b) => a + b, 0) < 0.1 * usual.slice(from, to + 1).reduce((a, b) => a + b, 0);
+  })() : false;
   let head: string;
   if (o.refused) head = 'File refused: bytes don’t match';
-  else if (hero === 'hours' && hoursF) head = hoursF.hours && hoursF.hours.to === 23 && perHour !== null ? `Trips fall to ~${fmtInt(perHour)}/h from ${clock(hoursF.hours.from)}` : hoursF.title;
+  else if (hero === 'hours' && hoursF) head = hoursF.hours && hoursF.hours.to === 23 && perHour !== null ? (trickle ? `Trips fall to trickle from ${clock(hoursF.hours.from)}` : `Trips fall to ~${fmtInt(perHour)}/h from ${clock(hoursF.hours.from)}`) : hoursF.title;
   else if (hero === 'split' && split) {
     const restRatio = split.rest.today / Math.max(1, split.rest.usual);
     const partRatio = split.part.today / Math.max(1, split.part.usual);

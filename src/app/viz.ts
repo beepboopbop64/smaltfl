@@ -136,24 +136,29 @@ export function splitRows({ rows, w = 334, aria }: { rows: SplitRow[]; w?: numbe
  * Trips by pickup hour: 24 columns, today's count (ink) over the usual count that hour (ghost). In the short hours
  * (`cut` to `to`) the trips that came are one dark ribbon, never under 5 px; above it, up to the usual count, the trips
  * missing are one wash with a dashed edge that stops 3 px short of the trickle (never a dashed line along the
- * baseline, which would read as nothing), counted on the chart (`missingLabel`, "~77k fewer"). A rule marks the first
- * short hour, and the ghost is labelled. Given the trickle's rate (`floorLabel`, "still ~330/h"), its hours are drawn
- * again under the axis, zoomed (`trickleZoom`), so a trickle reads as trips still coming every hour and not as the end
- * of the file; without trips to zoom, the rate sits on a bracket above the ribbon. When the hours before the fall ran
- * well off a usual day's, a bracket over them says by how much (`beforeLabel`, "~8k above usual"), so the trips
- * missing from the fall and the whole day's change can both be read true.
+ * baseline, which would read as nothing), counted on the chart (`missingLabel`, "~77k fewer"). The wash's edge marks
+ * the first short hour, with a short mark under its label (`cutLabel`; a rule through the plot read as the file cut
+ * there), and the ghost is labelled. Given the trickle's rate (`floorLabel`, "still ~330/h"), its hours are drawn again
+ * under the axis, in their own columns and zoomed (`trickleZoom`), so the hours after the fall still hold a bar each
+ * and read as trips still coming, not as the end of the file; without trips to zoom, or room for the rate beside them,
+ * the rate sits on a bracket above the ribbon. When the hours before the fall ran well off a usual day's, a bracket over
+ * them says by how much (`beforeLabel`, "~8k above usual"), so the trips missing from the fall and the whole day's
+ * change can both be read true.
  */
 export function hourBars(o: { got: readonly number[]; usual: readonly number[]; w?: number; barsH?: number; cut?: number; to?: number; cutLabel?: string; floorLabel?: string; missingLabel?: string; ghostLabel?: string; beforeLabel?: string | null; aria: string; pick?: number }): string {
   const w = o.w ?? 334;
   const barsH = o.barsH ?? 64;
   const top = 16;
   const base = top + barsH;
-  // The trickle zoomed under the chart, when its rate is given and trips came: its own wedge, panel and hour ticks.
-  const zoomed = o.cut !== undefined && o.to !== undefined && o.to > o.cut && !!o.floorLabel && sum(o.got.slice(o.cut, o.to + 1)) > 0;
-  const ZOOM = { wedgeTop: base + 18, top: base + 30, h: 26 };
-  const zb = ZOOM.top + ZOOM.h;
-  const h = zoomed ? zb + 15 : base + 16;
   const cw = w / 24;
+  // The trickle zoomed under the chart, in its own hours' columns, when its rate is given, trips came, and its label
+  // has room beside it: the panel hangs under the axis, and the hour ticks move under the panel.
+  const zoomed = o.cut !== undefined && o.to !== undefined && o.to > o.cut && !!o.floorLabel && sum(o.got.slice(o.cut, o.to + 1)) > 0 && o.cut * cw >= o.floorLabel.length * 6.6 + 10;
+  // Its bars 6 px under the axis and 4 px under the panel's top, so they never read as hanging from the ribbon.
+  const ZOOM = { top: base + 10, h: 30 };
+  const zb = ZOOM.top + ZOOM.h;
+  const tickY = zoomed ? zb + 13 : base + 13;
+  const h = tickY + 3;
   const bw = cw - 2.5;
   const ymax = Math.max(1, ...o.usual, ...o.got) * 1.04;
   const y = (v: number) => (v / ymax) * barsH;
@@ -191,7 +196,9 @@ export function hourBars(o: { got: readonly number[]; usual: readonly number[]; 
   s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
   if (o.cut !== undefined) {
     const cx = o.cut * cw;
-    s += `<line class="cut-bad" x1="${f1(cx)}" x2="${f1(cx)}" y1="${top - 3}" y2="${base}"/>`;
+    // The first short hour: a full-height rule read as the file cut there, so where the wash's edge marks the hour it
+    // is a short mark under its label.
+    s += `<line class="cut-bad" x1="${f1(cx)}" x2="${f1(cx)}" y1="${top - 3}" y2="${o.to !== undefined ? top + 3 : base}"/>`;
     if (o.cutLabel) s += `<text x="${f1(cx - 4)}" y="${top - 5}" text-anchor="end" class="lbl-bad">${esc(o.cutLabel)}</text>`;
     const end = o.to ?? 23;
     let trickle = 0;
@@ -223,48 +230,39 @@ export function hourBars(o: { got: readonly number[]; usual: readonly number[]; 
     const px = o.pick * cw + cw / 2;
     s += `<path class="pick" d="M${f1(px - 4)} ${base + 7}l4 -4 4 4z"/>`;
   }
-  for (const t of [0, 6, 12, 18, 24]) s += `<text x="${f1(t * cw)}" y="${base + 13}" text-anchor="${t === 0 ? 'start' : t === 24 ? 'end' : 'middle'}" class="tick" aria-hidden="true">${t}</text>`;
-  if (zoomed) s += trickleZoom(o.got, o.cut!, o.to!, o.floorLabel!, { w, cw, ...ZOOM });
+  for (const t of [0, 6, 12, 18, 24]) s += `<text x="${f1(t * cw)}" y="${tickY}" text-anchor="${t === 0 ? 'start' : t === 24 ? 'end' : 'middle'}" class="tick" aria-hidden="true">${t}</text>`;
+  if (zoomed) s += trickleZoom(o.got, o.cut!, o.to!, o.floorLabel!, { cw, ...ZOOM });
   return `${s}</svg>`;
 }
 
 /**
  * The short hours' trips drawn again under the hour chart, on their own scale from 0 (ADR 0008 §6): at the chart's
- * scale a trickle of ~330 an hour against a usual ~9k is under 3 px and reads as the end of the file, so its hours are
- * widened into a panel joined to their span on the axis by the wedge the gate's zoom uses, each hour a bar, with a
- * solid line at their mean labelled with it ("still ~330/h"): the label's number is the line's value, and the line
- * gives the zoom its scale.
+ * scale a trickle of ~330 an hour against a usual ~9k is under 3 px and reads as the end of the file. The panel hangs
+ * under the axis in the short hours' own columns, so each of those hours keeps a bar under the wash that says how many
+ * fewer came, and the axis's hours, under the panel, are its hours too (a panel widened under a wedge read as a range
+ * slider and went unread). A solid line at their mean is labelled with it, beside the panel ("still ~330/h"): the
+ * label's number is the line's value, and the line gives the zoom its scale.
  */
-function trickleZoom(got: readonly number[], cut: number, to: number, label: string, g: { w: number; cw: number; wedgeTop: number; top: number; h: number }): string {
+function trickleZoom(got: readonly number[], cut: number, to: number, label: string, g: { cw: number; top: number; h: number }): string {
   const hours = got.slice(cut, to + 1);
   const mean = sum(hours) / hours.length;
   const zmax = niceMax(Math.max(1, ...hours) * 1.02);
   const zy = (v: number) => (v / zmax) * g.h;
   const zb = g.top + g.h;
-  // The label sits left of the panel, on its line; the panel takes the rest of the width, never under half of it.
-  const labelW = label.length * 6.6 + 8;
-  const x0 = Math.min(g.w / 2, labelW);
-  const zcw = (g.w - x0) / hours.length;
   const a = cut * g.cw;
   const b = (to + 1) * g.cw;
   let s = `<g class="zoom">`;
-  s += `<path class="zoom-wedge" d="M${f1(a)} ${g.wedgeTop}H${f1(b)}L${g.w} ${g.top}H${f1(x0)}Z"/>`;
-  s += `<path class="zoom-edge" d="M${f1(a + 0.5)} ${g.wedgeTop}L${f1(x0 + 0.5)} ${g.top}M${f1(b - 0.5)} ${g.wedgeTop}L${f1(g.w - 0.5)} ${g.top}"/>`;
-  s += `<rect class="zoom-panel" x="${f1(x0)}" y="${g.top}" width="${f1(g.w - x0)}" height="${g.h}"/>`;
+  s += `<rect class="zoom-panel" x="${f1(a + 0.75)}" y="${g.top - 4}" width="${f1(b - a - 1.5)}" height="${g.h + 4}" rx="2"/>`;
   // The mean's line behind the bars, so the bars stay whole.
   const my = f1(zb - zy(mean));
-  s += `<line class="level" x1="${f1(x0 - 4)}" x2="${g.w}" y1="${my}" y2="${my}"/>`;
-  // Each hour a bar, 3 px at least (a mark for a non-zero number is never under 3 px).
-  const bw = Math.min(zcw * 0.56, 16);
+  s += `<line class="level" x1="${f1(a - 4)}" x2="${f1(b)}" y1="${my}" y2="${my}"/>`;
+  // Each hour a bar in its own column, 3 px at least (a mark for a non-zero number is never under 3 px).
   hours.forEach((n, i) => {
     if (n <= 0) return;
-    s += `<path class="ink-strong zoom-bar" d="${colPath(x0 + i * zcw + (zcw - bw) / 2, zb, bw, Math.max(3, zy(n)), 1.5)}"/>`;
+    s += `<path class="ink-strong zoom-bar" d="${colPath(a + i * g.cw + 2, zb, g.cw - 4, Math.max(3, zy(n)), 1.5)}"/>`;
   });
-  s += `<line class="base" x1="${f1(x0)}" x2="${g.w}" y1="${zb + 0.5}" y2="${zb + 0.5}"/>`;
-  s += `<text x="${f1(x0 - 7)}" y="${f1(zb - zy(mean) + 4)}" text-anchor="end" class="lbl-b">${esc(label)}</text>`;
-  // Its hours at its ends, and at 18 when it has room: the same clock as the axis above.
-  const ticks = [cut, ...((18 - cut) * zcw >= 24 && (to + 1 - 18) * zcw >= 24 ? [18] : []), to + 1];
-  for (const t of ticks) s += `<text x="${f1(x0 + (t - cut) * zcw)}" y="${zb + 12}" text-anchor="${t === cut ? 'start' : t === to + 1 ? 'end' : 'middle'}" class="tick" aria-hidden="true">${t}</text>`;
+  s += `<line class="base" x1="${f1(a + 0.75)}" x2="${f1(b - 0.75)}" y1="${zb + 0.5}" y2="${zb + 0.5}"/>`;
+  s += `<text x="${f1(a - 7)}" y="${f1(zb - zy(mean) + 4)}" text-anchor="end" class="lbl-b">${esc(label)}</text>`;
   return `${s}</g>`;
 }
 

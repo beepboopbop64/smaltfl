@@ -41,7 +41,7 @@ describe('the news’s charts', () => {
     expect(widths[0]).toBeGreaterThan(0);
   });
 
-  it('draws the hours after a fall as a trickle still coming, the trips missing as missing, and zooms the trickle under the axis', () => {
+  it('draws the hours after a fall as a trickle still coming, the trips missing as missing, and zooms the trickle under its own hours', () => {
     const got = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 40));
     const svg = hourBars({ got, usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~40/h', missingLabel: '~55k fewer', ghostLabel: 'usual Thursday', aria: 'Trips by hour: they fall 99% from 13:00' });
     // The short hours' trips are one unbroken dark ribbon, 5 px at least each hour though 40 of 5,000 is under 1 px:
@@ -60,30 +60,52 @@ describe('the news’s charts', () => {
     expect(svg).not.toMatch(/class="absent"/);
     // How many fewer came, in words on the wash ("fewer", never "missing", which read as the file cut off).
     expect(svg).toContain('~55k fewer');
-    // The trickle zoomed under the axis: its eleven hours again, each a bar on the zoom's own scale from 0, under a
-    // wedge from their span on the axis (13:00 to 24:00), with their mean a solid line labelled with the rate, so the
-    // trickle reads as trips still coming every hour; no bracket over the ribbon then.
+    // The first short hour is marked by the wash's edge and a short mark under its label, never a rule through the plot
+    // (which read as the file cut there).
+    const cutMark = svg.match(/<line class="cut-bad" x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)" y2="([\d.]+)"\/>/)!;
+    expect(Number(cutMark[2]) - Number(cutMark[1])).toBeLessThanOrEqual(6);
+    expect(Number(cutMark[2])).toBeLessThan(base - 40);
+    // The trickle zoomed under the axis, in its own hours' columns (13:00 to 24:00): its eleven hours again, each a bar
+    // on the zoom's own scale from 0 under the hour it counts, with their mean a solid line labelled with the rate, so
+    // the hours after the fall each keep a bar and read as trips still coming; no wedge (a panel widened under one read
+    // as a range slider), and no bracket over the ribbon.
     expect(svg.match(/class="brace"/g)).toBeNull();
     const zoom = svg.slice(svg.indexOf('<g class="zoom">'));
     expect(zoom).not.toBe(svg);
+    expect(zoom).not.toContain('zoom-wedge');
     const cw = 334 / 24;
-    const wedge = zoom.match(/<path class="zoom-wedge" d="M([\d.]+) ([\d.]+)H([\d.]+)L/)!;
-    expect([Number(wedge[1]), Number(wedge[3])]).toEqual([Math.round(13 * cw * 10) / 10, 334]);
-    expect(Number(wedge[2])).toBeGreaterThan(base + 13);
-    const bars = [...zoom.matchAll(/<path class="ink-strong zoom-bar" d="M[\d.]+ ([\d.]+)V([\d.]+)/g)].map((m) => Number(m[1]) - Number(m[2]) + 1.5);
+    const panel = zoom.match(/<rect class="zoom-panel" x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/)!.slice(1).map(Number);
+    expect(panel[0]).toBeCloseTo(13 * cw + 0.75, 0);
+    expect(panel[0]! + panel[2]!).toBeCloseTo(334 - 0.75, 0);
+    // Apart from the axis, and its bars 4 px under its top (its scale is the rest), so they never hang from the ribbon.
+    expect(panel[1]).toBeGreaterThanOrEqual(base + 5);
+    const zh = panel[3]! - 4;
+    const zb = Number(zoom.match(/<line class="base" x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)"/)![1]) - 0.5;
+    expect(zb).toBeCloseTo(panel[1]! + panel[3]!, 5);
+    const bars = [...zoom.matchAll(/<path class="ink-strong zoom-bar" d="M([\d.]+) ([\d.]+)V([\d.]+)Q[^H]*H([\d.]+)/g)].map((m) => ({ x0: Number(m[1]), h: Number(m[2]) - Number(m[3]) + 1.5, x1: Number(m[4]) + 1.5 }));
     expect(bars).toHaveLength(11);
-    const zb = Number(zoom.match(/<line class="base" x1="[\d.]+" x2="334" y1="([\d.]+)"/)![1]) - 0.5;
+    // Each bar inside the column of the hour it counts, as the hours above.
+    bars.forEach((b, i) => {
+      expect(b.x0).toBeGreaterThanOrEqual((13 + i) * cw);
+      expect(b.x1).toBeLessThanOrEqual((14 + i) * cw);
+    });
     const level = Number(zoom.match(/<line class="level" [^>]*y1="([\d.]+)"/)![1]);
-    // Every hour 40 of a zoom to niceMax(40.8) = 50: each bar, and the mean's line, at 40/50 of the zoom's 26 px.
-    for (const b of bars) expect(b).toBeCloseTo((40 / 50) * 26, 0);
-    expect(zb - level).toBeCloseTo((40 / 50) * 26, 0);
+    // Every hour 40 of a zoom to niceMax(40.8) = 50: each bar, and the mean's line, at 40/50 of the zoom's height.
+    for (const b of bars) expect(b.h).toBeCloseTo((40 / 50) * zh, 0);
+    expect(zb - level).toBeCloseTo((40 / 50) * zh, 0);
     const label = zoom.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="end" class="lbl-b">still ~40\/h<\/text>/)!;
     expect(Number(label[2]) - 4).toBeCloseTo(level, 0);
-    expect(zoom).toMatch(/class="tick" aria-hidden="true">13<\/text>/);
-    expect(zoom).toMatch(/class="tick" aria-hidden="true">24<\/text>/);
-    // The chart grows to hold the zoom, its axis's ticks where they were.
-    expect(Number(svg.match(/height="([\d.]+)"/)![1])).toBeGreaterThan(zb + 12);
-    expect(svg).toContain(`y="${base + 13}" text-anchor="middle" class="tick" aria-hidden="true">18</text>`);
+    expect(Number(label[1])).toBeLessThan(13 * cw);
+    // The axis's hours sit under the panel, one clock for both; the chart grows to hold them.
+    for (const t of [0, 6, 12, 18, 24]) expect(svg).toMatch(new RegExp(`y="${zb + 13}" text-anchor="(start|middle|end)" class="tick" aria-hidden="true">${t}</text>`));
+    expect(Number(svg.match(/height="([\d.]+)"/)![1])).toBeGreaterThan(zb + 13);
+    // A fall too early in the day to put the rate beside the zoom: the rate on a bracket over the ribbon instead.
+    const early = hourBars({ got: got.map((n, h) => (h < 3 ? n : 40)), usual, cut: 3, to: 23, cutLabel: '03:00', floorLabel: 'still ~40/h', aria: 'Trips by hour' });
+    expect(early).not.toContain('class="zoom"');
+    expect(early.match(/class="brace"/g)).toHaveLength(1);
+    // A finding's own small chart, with no span and so no wash, keeps the rule through the plot.
+    const plain = hourBars({ got, usual, cut: 13, aria: 'Trips by hour' }).match(/<line class="cut-bad" x1="[\d.]+" x2="[\d.]+" y1="[\d.]+" y2="([\d.]+)"\/>/)!;
+    expect(Number(plain[1])).toBe(80);
     // Nothing came in the short hours: nothing to zoom, the rate on a bracket above the (empty) ribbon.
     const none = hourBars({ got: got.map((n, h) => (h < 13 ? n : 0)), usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: '~0/h', aria: 'Trips by hour' });
     expect(none).not.toContain('class="zoom"');
@@ -99,16 +121,19 @@ describe('the news’s charts', () => {
     expect(before.match(/class="brace"/g)).toHaveLength(1);
   });
 
-  it('zooms a real trickle to its own scale: Thu Sep 21, 2023 from 13:00, its mean the rate the head says', () => {
+  it('zooms a real trickle to its own scale: Thu Sep 21, 2023 from 13:00, its mean the rate on its line', () => {
     const thu = [2577, 1196, 677, 419, 431, 731, 2000, 4290, 5131, 4840, 5020, 5359, 5589, 742, 150, 206, 244, 315, 317, 279, 283, 393, 399, 351];
     const svg = hourBars({ got: thu, usual: thu.map((n, h) => (h < 13 ? n : 8000)), cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~330/h', missingLabel: '~77k fewer', ghostLabel: 'usual Thursday', aria: 'Trips by hour' });
     const zoom = svg.slice(svg.indexOf('<g class="zoom">'));
-    const zb = Number(zoom.match(/<line class="base" x1="[\d.]+" x2="334" y1="([\d.]+)"/)![1]) - 0.5;
+    const zh = Number(zoom.match(/<rect class="zoom-panel" [^>]*height="([\d.]+)"/)![1]) - 4;
+    const zb = Number(zoom.match(/<line class="base" x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)"/)![1]) - 0.5;
     const level = Number(zoom.match(/<line class="level" [^>]*y1="([\d.]+)"/)![1]);
     // 3,679 trips in eleven hours: a mean of 334 an hour, on a zoom to 800 (the 13:00 hour's 742 its tallest bar).
-    expect(zb - level).toBeCloseTo((3679 / 11 / 800) * 26, 0);
+    expect(zb - level).toBeCloseTo((3679 / 11 / 800) * zh, 0);
     const bars = [...zoom.matchAll(/<path class="ink-strong zoom-bar" d="M[\d.]+ ([\d.]+)V([\d.]+)/g)].map((m) => Number(m[1]) - Number(m[2]) + 1.5);
-    expect(bars.map((b) => Math.round((b / 26) * 800))).toEqual(thu.slice(13).map((n) => expect.closeTo(n, -1.5)));
+    expect(bars.map((b) => Math.round((b / zh) * 800))).toEqual(thu.slice(13).map((n) => expect.closeTo(n, -1.5)));
+    // The tallest, the 13:00 hour's, stays under the panel's top.
+    expect(Math.max(...bars)).toBeLessThanOrEqual(zh);
     // At the chart's own scale the same hours are the ribbon, 5 px each: under 3 px of a usual ~9k.
     expect(svg).toContain('class="ink-strong trickle"');
   });

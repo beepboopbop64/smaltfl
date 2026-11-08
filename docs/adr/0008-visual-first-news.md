@@ -76,8 +76,10 @@ where about 35,000 are usual, and everything else held.
    the share's own decimals ("10.45% … 0.45 pt over"); on the full bar its end sits 3 px clear of the tick on its side.
 
 5. **Words.** A head is at most six words and carries the number or the time ("Only Flex Fare records arrived", "Trips
-   fall to ~330/h from 13:00": a fall that runs to the day's end is headed by the rate the trips fell to, so it can't
-   read as the file cut off; "Vendor 1 sent almost nothing", "Normal for MLK Day"); a finding's title at most eight, with
+   fall to trickle from 13:00": a fall that runs to the day's end, with trips in every hour after it and under a tenth
+   of a usual day's in them, is a fall to a trickle, so it reads as most trips falling away and the rest still coming,
+   never as the file cut off, which the rate in the head, "Trips fall to ~330/h", still read as; a fall to more than
+   that is headed by its rate; "Vendor 1 sent almost nothing", "Normal for MLK Day"); a finding's title at most eight, with
    its measured number and value names ("Payment type Credit card: 0.2% (usually 75–80%)"), and as a head it leaves its
    "(usually …)" to the visual under it when six words won't hold it; its detail at most one sentence of twenty words,
    shown only on tap, every word of it from the figures with a tolerance ("as usual" only within 5% of usual and inside
@@ -100,11 +102,15 @@ where about 35,000 are usual, and everything else held.
    them when the surge is the news, "+6k over usual", a sliver of them under 6 px taking no notch; 24 hour bars over a
    ghost of a usual day, the short hours' trips one dark ribbon never under 5 px, the trips missing one wash 3 px clear
    of it whose dashed edge runs up its sides and along the usual skyline, never along the trickle, labelled "~77k
-   fewer" (the hours are short, never missing: "missing" over a ribbon read as the file cut off), and under the axis the
-   trickle zoomed, its hours widened into a panel joined to their span by the gate's zoom wedge, each hour a bar on the
-   zoom's own scale from 0, their mean a solid line labelled with the rate ("still ~330/h"), so a trickle reads as
-   trips still coming every hour and not as the end of the file (at the chart's scale ~330 an hour against a usual ~9k
-   is under 3 px, and a ribbon with its rate on a bracket still read as the file cut off), and when the hours before
+   fewer" (the hours are short, never missing: "missing" over a ribbon read as the file cut off), the first short hour
+   marked by the wash's edge and a short mark under its label (a rule through the plot read as the file cut there), and
+   under the axis the trickle zoomed in its own hours' columns, an outlined panel under their span, each hour a bar on
+   the zoom's own scale from 0, their mean a solid line labelled with the rate beside the panel ("still ~330/h"), the
+   axis's hours under the panel, so each hour after the fall keeps a bar and a trickle reads as trips still coming
+   every hour and not as the end of the file (at the chart's scale ~330 an hour against a usual ~9k is under 3 px; a
+   ribbon with its rate on a bracket, and then a panel widened under a wedge, which read as a range slider, both still
+   read as the file cut off; a fall early in the morning, with no room beside the panel for the rate, keeps it on a
+   bracket over the ribbon), and when the hours before
    the fall ran a twentieth of the day or more off usual, a bracket over them saying by how much ("~8.3k above usual",
    Sat Sep 17, 2022, so ~52k fewer and the whole day's −42% are both read true); a day told by its hours shows the
    part and the rest beside them only when the part moved too; a strip of days each with its own range, 9 px at least,

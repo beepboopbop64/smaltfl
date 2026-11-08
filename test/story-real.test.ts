@@ -31,8 +31,9 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('tells Thu Sep 21, 2023 as the hour the trips fall, to the trickle that still came', () => {
     const s = story('2023-09-21');
-    // The head says the rate the trips fell to, so the fall can't read as the file cut off (~330 an hour still came).
-    expect(s.head).toBe('Trips fall to ~330/h from 13:00');
+    // The head says the trips fell to a trickle, so the fall can't read as the file cut off: ~330 an hour still came,
+    // 3,679 of a usual ~80k, which the chart's zoom says.
+    expect(s.head).toBe('Trips fall to trickle from 13:00');
     expect(s.split).toMatchObject({ kind: 'held', name: 'Flex Fare' });
     // The trips go on after the fall (~330 an hour), the missing trips are counted, and the day's own change is on
     // the amount line, named as the whole day's so it can't fight the head; the morning ran close to usual (no label).
@@ -44,7 +45,7 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('names each figure of an hour-fall day by its window, and the detail’s waterfall says the same (Sat Sep 17, 2022)', () => {
     const s = story('2022-09-17');
-    expect(s.head).toBe('Trips fall to ~270/h from 15:00');
+    expect(s.head).toBe('Trips fall to trickle from 15:00');
     // ~52k fewer from 15:00; the morning ~8.3k above a usual Saturday's; the whole day −42%: they add up.
     expect(s.hoursLabels).toMatchObject({ missing: '~52k fewer', before: '~8.3k above usual' });
     expect(s.labels.amount).toEqual(['59,501 trips', 'whole day −42%', 'usual 91k–118k']);
@@ -191,7 +192,7 @@ describe.skipIf(!has)('the story on the real history', () => {
       expect(s.labels.amount[1], day).toMatch(/^\+1\d%$/);
     }
     // The incident after them is told as before.
-    expect(story('2022-09-17').head).toBe('Trips fall to ~270/h from 15:00');
+    expect(story('2022-09-17').head).toBe('Trips fall to trickle from 15:00');
   });
 
   it('names the episode a calm day comes after, and says nothing is left to do', () => {
@@ -278,8 +279,13 @@ describe.skipIf(!has)('the story on the real history', () => {
         const had = got.slice(from, to + 1).reduce((a, b) => a + b, 0);
         said(s.hoursLabels.floor, had / (to - from + 1));
         said(s.hoursLabels.missing, usual.slice(from, to + 1).reduce((a, b) => a + b, 0) - had);
-        // The head's rate is the floor's ("Trips fall to ~330/h from 13:00"), its hour the cut's.
-        if (to === 23) said(s.head.replace(/ from .*$/, ''), had / (to - from + 1));
+        // A head's rate is the floor's ("Trips fall to ~330/h from 13:00"), its hour the cut's; a trickle is trips in
+        // every one of those hours and under a tenth of a usual day's.
+        if (to === 23 && /~[\d,]+\/h/.test(s.head)) said(s.head.replace(/ from .*$/, ''), had / (to - from + 1));
+        if (/trickle/.test(s.head)) {
+          expect(got.slice(from, to + 1).every((n) => n > 0), s.day).toBe(true);
+          expect(had, s.day).toBeLessThan(0.1 * usual.slice(from, to + 1).reduce((a, b) => a + b, 0));
+        }
         if (s.hoursLabels.before) said(s.hoursLabels.before, Math.abs(fallParts(s.hours, s.amount!)!.before));
       }
       if (s.gate?.held || s.gate?.near) {

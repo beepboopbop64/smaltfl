@@ -17,6 +17,8 @@ const gauss = (rnd: () => number) => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.
 export interface Trouble {
   blank?: boolean;
   stopAt?: number;
+  /** With `stopAt`: the share of each hour's trips that still come from then (else 2%). */
+  keep?: number;
   vendorGone?: boolean;
   vendorShare?: number;
   newValue?: boolean;
@@ -42,7 +44,7 @@ export function historyWith(trouble: Record<string, Trouble> = {}): HistoryFile 
     let n = Math.round(100_000 * wd * (holidayOf(day) ? 0.7 : seasonOf(day) ? 0.8 : 1) * Math.exp(0.03 * gauss(rnd)) * (t.more ?? 1));
     let byHour = HOUR.map((x) => Math.round((n * x) / HOURS));
     if (t.blank) byHour = byHour.map((x) => Math.round(x * 0.03));
-    if (t.stopAt !== undefined) byHour = byHour.map((x, h) => (h >= t.stopAt! ? Math.round(x * 0.02) : x));
+    if (t.stopAt !== undefined) byHour = byHour.map((x, h) => (h >= t.stopAt! ? Math.round(x * (t.keep ?? 0.02)) : x));
     const share1 = t.vendorShare ?? 0.3 + 0.005 * gauss(rnd);
     let v1 = Math.round((t.blank || t.stopAt !== undefined ? byHour.reduce((a, b) => a + b, 0) : n) * share1);
     let v2 = (t.blank || t.stopAt !== undefined ? byHour.reduce((a, b) => a + b, 0) : n) - v1;
