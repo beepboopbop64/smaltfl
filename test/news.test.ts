@@ -340,6 +340,16 @@ describe('a day’s news on any dataset (ADR 0010 §1, §4, §8)', () => {
     const n = flowNames({ ...base, steps: [] } as unknown as FlowDocument, 'auth');
     expect([n.noun!(1), n.noun!(2), n.noun!(), n.column('result'), n.part!('VendorID'), n.part!('result')]).toEqual(['sign-in', 'sign-ins', 'sign-ins', 'result', { name: 'Vendor {code}', role: 'sender' }, undefined]);
   });
+
+  it('names a source’s rows by the object of what reads it, through its fill step (C7)', () => {
+    const ontology = { objectTypes: [{ name: 'Login', dataset: 'auth_valid', key: 'id', description: 'A sign-in' }], linkTypes: [], actionTypes: [] };
+    const checks = { id: 'auth_valid', kind: 'expectations' as const, rules: [] };
+    const direct = flowNames({ ontology, steps: [{ ...checks, inputs: ['auth'] }] } as unknown as FlowDocument, 'auth');
+    const filled = flowNames({ ontology, steps: [{ id: 'auth_filled', kind: 'fill', inputs: ['auth'], time: 'at', shift: ['at'] }, { ...checks, inputs: ['auth_filled'] }] } as unknown as FlowDocument, 'auth');
+    expect([direct.noun!(1), direct.noun!(2)]).toEqual(['login', 'logins']);
+    expect([filled.noun!(1), filled.noun!(2)]).toEqual(['login', 'logins']);
+    expect(flowNames({ ontology, steps: [{ ...checks, inputs: ['other'] }] } as unknown as FlowDocument, 'auth').noun!(2)).toBe('rows');
+  });
 });
 
 describe('a file’s columns, month to month', () => {

@@ -13,7 +13,7 @@
  * passenger count, a rate code and a surcharge) are told once. A day with nothing to tell says so. No DOM, no engine.
  */
 import { NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
-import { isGeneralWatch, type FlowDocument } from './document.js';
+import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
 import { HistoryRanges, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
 import { marksOn, nounOf, partNamed, propertyOf } from './ontology.js';
@@ -124,7 +124,9 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
  * read, with the ontology's noun for the source and its parts' names and roles (ADR 0010 §8).
  */
 export function flowNames(doc: Pick<FlowDocument, 'ontology' | 'steps'>, source: string): Names {
-  const noun = nounOf(doc.ontology, source, doc.steps.filter((s) => s.inputs.some((i) => i.toLowerCase() === source.toLowerCase())).map((s) => s.id));
+  // What reads the source reads it through its fill step, when it has one (C7): those steps' objects name its rows.
+  const reads = (i: string) => sourceOf(doc, i)?.toLowerCase() === source.toLowerCase();
+  const noun = nounOf(doc.ontology, source, doc.steps.filter((s) => s.inputs.some(reads)).map((s) => s.id));
   return {
     column: (c) => c,
     value: (_c, v) => String(v),
