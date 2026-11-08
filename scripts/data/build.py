@@ -44,8 +44,9 @@ EPISODES = [
 ]
 # Days a paused day may be filled from (ADR 0009 §7): for each episode day that is off, the same weekday before it that
 # the history says nothing wrong of (Sep 21–24, 2023 from Sep 14–17; Sep 17–18, 2022 from Sep 10–11; Nov 14–18, 2022
-# from Nov 7, Nov 1 (Nov 8 was off), Nov 9–11). The nearest good day before or after is already among the episodes'.
-DONORS = ['2022-09-10', '2022-09-11', '2022-11-01', '2022-11-07', '2022-11-09', '2022-11-10', '2022-11-11',
+# from Nov 7, Nov 1 (Nov 8 was off), Nov 9, Nov 10 and Nov 4 (Nov 11 is Veterans Day, and holidays aren't donors)).
+# The nearest good day before or after is already among the episodes'.
+DONORS = ['2022-09-10', '2022-09-11', '2022-11-01', '2022-11-04', '2022-11-07', '2022-11-09', '2022-11-10',
           '2023-09-14', '2023-09-15', '2023-09-16', '2023-09-17']
 TLC = 'https://d37ci6vzurychx.cloudfront.net'
 WEATHER = 'https://archive-api.open-meteo.com/v1/archive'

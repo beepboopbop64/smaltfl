@@ -78,8 +78,9 @@ const step: ExpectationsStep = (() => {
 })();
 // The checks alone, over the trips. The history counts every day's failures, so a day over the step's limit on
 // dropped rows still runs to the end: the limit stops a run, it doesn't change what the checks count.
+// Format 1: the checks alone hold nothing, so they carry no publish block (ADR 0009 §2: format 2 is only for one).
 const checks: FlowDocument = {
-  smaltfl: doc.smaltfl,
+  smaltfl: 1,
   id: `${doc.id}-history`,
   name: `${doc.name}: the trip checks`,
   parameters: doc.parameters,
