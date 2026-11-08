@@ -425,6 +425,16 @@ export function appendPeriods(file: HistoryFile, ms: readonly Measures[]): Histo
     if (last !== undefined && m.slot <= last) throw new Error(`the tail's ${m.slot} isn't after the history's ${last}`);
     if (canonicalJSON(m.columns) !== canonicalJSON(out.columns) || canonicalJSON(m.types) !== canonicalJSON(out.types)) throw new Error(`the tail's ${m.slot} has other columns than the history`);
     const d = out.days.length;
+    // A period counted with other checks than the latest starts their segment (ADR 0010 §6): the checks' numbers are
+    // judged only from periods counted with the rules in force.
+    const step = m.checks?.step ?? '';
+    const rules = m.checks?.rules ?? [];
+    const sameRules = out.step === step && out.rules.length === rules.length && out.rules.every((r, k) => r.name === rules[k]!.name && r.check === rules[k]!.check && r.onFail === rules[k]!.onFail);
+    if (!sameRules) {
+      if (d > 0) out.checks = [...(out.checks ?? [{ from: 0, step: out.step, rules: out.rules.map((r) => ({ ...r })) }]), { from: d, step, rules: rules.map((r) => ({ ...r })) }];
+      out.step = step;
+      out.rules = rules.map((r) => ({ ...r }));
+    }
     out.days.push(m.slot);
     out.rows.push(m.rows);
     out.dropped.push(m.dropped);

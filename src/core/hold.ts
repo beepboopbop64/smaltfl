@@ -108,11 +108,12 @@ export type FlowFor = Pick<FlowDocument, 'steps' | 'ontology' | 'publish' | 'cal
  * The flow's story of a day (ADR 0009 §3, ADR 0010): told with raw names and the ontology's noun and parts, no hidden
  * columns, no findings marked as expected, no episode, and no gate (the checks hold from the run's own counts); judged
  * as the document says (`judgeOf`: the watch's form and settings, the marks on the source). `h` must learn from every day
- * of the history, leaving incident days out being one browser's choice, not the flow's, and must have the flow's
- * calendar for the source.
+ * of the history but those the record leaves out (ADR 0010 §5, X8: held and not published as is, which its claim
+ * names): leaving incident days out is one browser's choice, not the flow's. It must have the flow's calendar for the
+ * source.
  */
 export function flowStory(h: HistoryRanges, day: string, doc: FlowFor, source: string): Story {
-  if (h.skipped > 0) throw new Error("the flow's verdict learns from every day of the history: these ranges leave days out");
+  if (h.skipped > 0) throw new Error("the flow's verdict learns from every day of the history but those the record leaves out: these ranges leave out days one viewer marked");
   const judge = judgeOf(doc, source);
   if (h.calendar.base !== judge.calendar.base) throw new Error(`the flow judges ${source} by the ${judge.calendar.base} calendar: these ranges were made with ${h.calendar.base}`);
   const names = flowNames(doc, source);
