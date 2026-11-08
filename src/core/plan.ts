@@ -6,13 +6,15 @@
  * Nobody needs to read it. It is canonical JSON with positional references, built for hashing, optimizing and
  * replaying, and its format is versioned (`smaltflPlan`).
  */
-import type { FlowDocument, ParameterDef, StepDef } from './document.js';
-import { validateDocument, withoutDisplay } from './document.js';
+import type { FlowDocument, HoldKind, ParameterDef, StepDef } from './document.js';
+import { HOLD_KINDS, validateDocument, withoutDisplay } from './document.js';
 import { hashOf } from './hash.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { bindParameters, quoteIdent, SqlTextError, withoutTrailingSemicolons } from './sqltext.js';
 
-export const PLAN_FORMAT = 0;
+/** The formats this version runs: 0, and 1 for a plan that says what holds its publication (ADR 0009, E10 plan/1). */
+export const PLAN_FORMATS = [0, 1] as const;
+export type PlanFormat = (typeof PLAN_FORMATS)[number];
 
 /** A column's static type, as smaltdb reports it (`Statement.columnTypes`). */
 export type ColumnType = 'int' | 'real' | 'num' | 'text' | 'blob' | 'null' | 'any';
@@ -93,8 +95,20 @@ export interface PlanOutput {
   node: number;
 }
 
+/**
+ * What holds the plan's publication (ADR 0009 §2), from the document's publish block: `hold` sorted, each watched
+ * source by its node (sorted by node) with its history's file, the period parameter's name or null, and `together`.
+ */
+export interface PlanPublish {
+  hold: HoldKind[];
+  watch: [node: number, file: string][];
+  period: string | null;
+  together: boolean;
+}
+
 export interface FlowPlan {
-  smaltflPlan: typeof PLAN_FORMAT;
+  /** 1 exactly when the plan has `publish` (plan/1); a plan without it is format 0, hashed as plan/0 byte for byte. */
+  smaltflPlan: PlanFormat;
   /** The document's id, and its hash without display fields (the flow hash). */
   flow: { id: string; hash: string };
   /** The parameter values filled in, for the record (the nodes no longer need them). */
@@ -103,6 +117,8 @@ export interface FlowPlan {
   nodes: PlanNode[];
   /** Sorted by name. */
   outputs: PlanOutput[];
+  /** What holds its publication: only in a format-1 plan. */
+  publish?: PlanPublish;
 }
 
 export class PlanError extends Error {
@@ -156,7 +172,12 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   outputs.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const parameters: Record<string, string | number | null> = {};
   for (const [k, p] of Object.entries(params)) parameters[k] = typeof p.value === 'bigint' ? p.value.toString() : p.value;
-  return { smaltflPlan: PLAN_FORMAT, flow: { id: doc.id, hash: await flowHash(doc) }, parameters, nodes, outputs };
+  const plan: FlowPlan = { smaltflPlan: 0, flow: { id: doc.id, hash: await flowHash(doc) }, parameters, nodes, outputs };
+  // Without a publish block the plan is what it always was, so every plan/0 hash holds (ADR 0009, E10).
+  if (!doc.publish) return plan;
+  const p = doc.publish;
+  const watch = Object.entries(p.watch ?? {}).map(([id, file]): [number, string] => [index.get(id.toLowerCase())!, file]).sort((a, b) => a[0] - b[0]);
+  return { ...plan, smaltflPlan: 1, publish: { hold: [...new Set(p.hold)].sort(), watch, period: p.period ?? null, together: p.together ?? true } };
 }
 
 type Base = Pick<NodeBase, 'origin' | 'inputs' | 'storage'>;
@@ -242,7 +263,7 @@ export function validatePlan(plan: unknown): asserts plan is FlowPlan {
   };
   if (typeof plan !== 'object' || plan === null) fail('not an object');
   const p = plan as FlowPlan;
-  if (p.smaltflPlan !== PLAN_FORMAT) fail(`format ${String(p.smaltflPlan)}, expected ${PLAN_FORMAT}`);
+  if (!(PLAN_FORMATS as readonly unknown[]).includes(p.smaltflPlan)) fail(`format ${String(p.smaltflPlan)}, expected ${PLAN_FORMATS.join(' or ')}`);
   if (!p.flow || typeof p.flow.id !== 'string' || typeof p.flow.hash !== 'string') fail('flow needs an id and a hash');
   if (!Array.isArray(p.nodes)) fail('nodes is not an array');
   p.nodes.forEach((n, i) => {
@@ -259,4 +280,32 @@ export function validatePlan(plan: unknown): asserts plan is FlowPlan {
     if (names.has(o.name.toLowerCase())) fail(`two outputs named ${o.name}`);
     names.add(o.name.toLowerCase());
   }
+  // Format 0 never holds; format 1 always says what holds it. An older plugin refuses format 1 outright.
+  if (p.smaltflPlan === 0 && p.publish !== undefined) fail('a format-0 plan has no publish block: a plan that holds is format 1');
+  if (p.smaltflPlan === 1) validatePublish(p, fail);
+}
+
+function validatePublish(p: FlowPlan, fail: (message: string) => never): void {
+  const pub = p.publish as unknown;
+  if (typeof pub !== 'object' || pub === null || Array.isArray(pub)) return fail('a format-1 plan says what holds it: publish { hold, watch, period, together }');
+  const { hold, watch, period, together, ...rest } = pub as Record<string, unknown>;
+  if (Object.keys(rest).length) fail(`publish has ${Object.keys(rest).join(', ')}, which this version doesn't read`);
+  if (!Array.isArray(hold) || hold.length === 0 || hold.some((k) => !(HOLD_KINDS as readonly unknown[]).includes(k))) fail(`publish.hold is a list of ${HOLD_KINDS.join(', ')}`);
+  const kinds = hold as string[];
+  if (kinds.some((k, i) => i > 0 && !(kinds[i - 1]! < k))) fail('publish.hold is sorted, each kind once');
+  if (kinds.includes('short') && kinds.includes('wrong')) fail('publish.hold has short and wrong: one or the other');
+  if (!Array.isArray(watch)) fail('publish.watch is a list of [node, file]');
+  const pairs = watch as unknown[];
+  pairs.forEach((w, i) => {
+    if (!Array.isArray(w) || w.length !== 2 || !Number.isInteger(w[0]) || typeof w[1] !== 'string' || w[1] === '') fail(`publish.watch[${i}] is [node, file]`);
+    const [node] = w as [number, string];
+    if (p.nodes[node]?.op !== 'table') fail(`publish.watch[${i}] watches node ${node}, which isn't a source`);
+    if (i > 0 && !((pairs[i - 1] as [number, string])[0] < node)) fail('publish.watch is sorted by node, each node once');
+  });
+  const judged = kinds.includes('short') || kinds.includes('wrong');
+  if (judged !== pairs.length > 0) fail(judged ? 'publish.hold judges a source (short or wrong), and publish.watch names none' : 'publish.watch names a source, and publish.hold judges none');
+  if (period !== null && (typeof period !== 'string' || !Object.hasOwn(p.parameters ?? {}, period))) fail(`publish.period ${String(period)} is not one of the plan's parameters`);
+  if (period !== null && typeof p.parameters[period as string] !== 'string' && p.parameters[period as string] !== null) fail(`publish.period ${String(period)} is not a text parameter`);
+  if (period === null && pairs.length > 0) fail('publish.watch needs a period: the parameter whose value is the day a claim names');
+  if (typeof together !== 'boolean') fail('publish.together is true or false');
 }

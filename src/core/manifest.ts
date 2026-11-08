@@ -68,7 +68,12 @@ export interface RunManifest {
   previous: string | null;
 }
 
-export const planHash = (plan: FlowPlan): Promise<string> => hashOf('plan/0', plan);
+/**
+ * A plan's hash kind, by its own format (ADR 0009, E10): plan/1 for a plan that says what holds it, else plan/0, so a
+ * plan without a publish block hashes byte for byte as it always did. Q-47 is decided here and in `documentFormat`.
+ */
+export const planKind = (plan: Pick<FlowPlan, 'smaltflPlan'>): 'plan/0' | 'plan/1' => (plan.smaltflPlan === 1 ? 'plan/1' : 'plan/0');
+export const planHash = (plan: FlowPlan): Promise<string> => hashOf(planKind(plan), plan);
 /** A manifest's hash, by its own format: run/0 manifests made before run/1 still verify. */
 export const manifestKind = (manifest: RunManifest): string => (manifest.smaltflRun === 1 ? 'run/1' : 'run/0');
 export const manifestHash = (manifest: RunManifest): Promise<string> => hashOf(manifestKind(manifest), manifest);

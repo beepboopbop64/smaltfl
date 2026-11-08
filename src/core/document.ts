@@ -6,14 +6,49 @@
  * their inputs, and SQL steps to their inputs' data, by the inputs' ids.
  */
 import type { Ontology } from './ontology.js';
-import type { Policies } from './policy.js';
+import { DECIDE, DECIDE_OPTIONS, type Policies } from './policy.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { renameIdentifier, SqlTextError, tokens } from './sqltext.js';
 
-export const DOCUMENT_FORMAT = 1;
+/** The formats this version reads: 1, and 2 for a document that says what holds its publication (ADR 0009 §2). */
+export const DOCUMENT_FORMATS = [1, 2] as const;
+export type DocumentFormat = (typeof DOCUMENT_FORMATS)[number];
+
+/**
+ * The format a document must say it is: 2 when it has a publish block, else 1, so an older build, which reads only 1,
+ * refuses a flow that holds rather than publish what that flow would hold. Q-47 is decided here and in `planKind`.
+ */
+export const documentFormat = (doc: { publish?: unknown }): DocumentFormat => (doc.publish === undefined ? 1 : 2);
+
+/**
+ * What pauses publication (ADR 0009 §2). `checks`: a `fail` rule failed, or more rows were dropped than `maxDropped`
+ * allows. `wrong`: the watched source's story says something wrong on the day. `short`: it says so and the day's rows
+ * are below their range, which narrows `wrong`; a flow holds on one or the other.
+ */
+export const HOLD_KINDS = ['checks', 'short', 'wrong'] as const;
+export type HoldKind = (typeof HOLD_KINDS)[number];
+
+/**
+ * What holds a flow's publication, and what waits while it holds (ADR 0009 §2, §4). A run that holds is built, checked,
+ * hashed and recorded, its versions staged, and nothing it made is published until a person decides. Without
+ * `checks` in `hold`, a check that trips throws, as it does without the block: neither way publishes.
+ */
+export interface PublishDef {
+  hold: HoldKind[];
+  /** Each source judged against its history, by its id, with the history's file (a file in the data's list). */
+  watch?: Record<string, string>;
+  /** The text parameter whose value is the run's day: the day a claim must name, and the order days are decided in. */
+  period?: string;
+  /** Nothing goes out while any output waits (the default); with false, a hold reaches only the outputs that read
+   * what the holding step reads, and the rest publish. */
+  together?: boolean;
+}
+
+/** The publish block's fields this version knows: any other is refused, never ignored. */
+const PUBLISH_FIELDS = ['hold', 'watch', 'period', 'together'];
 
 export interface FlowDocument {
-  smaltfl: typeof DOCUMENT_FORMAT;
+  smaltfl: DocumentFormat;
   id: string;
   name: string;
   description?: string;
@@ -24,6 +59,8 @@ export interface FlowDocument {
   ontology?: Ontology;
   /** Who may read which rows and columns, and run which actions (policy.ts). */
   policies?: Policies;
+  /** What pauses publication, and what waits (ADR 0009): a document with it is format 2. */
+  publish?: PublishDef;
   /** Display only: sections of the canvas, each holding sources and steps. Not part of any hash. */
   groups?: GroupDef[];
   /**
@@ -170,7 +207,8 @@ export function validateDocument(doc: unknown): Issue[] {
   const issues: Issue[] = [];
   const add = (path: string, message: string) => issues.push({ path, message });
   if (!isRecord(doc)) return [{ path: '$', message: 'a flow document is a JSON object' }];
-  if (doc.smaltfl !== DOCUMENT_FORMAT) add('$.smaltfl', `expected ${DOCUMENT_FORMAT}, the format this version reads`);
+  if (!(DOCUMENT_FORMATS as readonly unknown[]).includes(doc.smaltfl)) add('$.smaltfl', `expected ${DOCUMENT_FORMATS.join(' or ')}, the formats this version reads`);
+  else if (doc.smaltfl !== documentFormat(doc)) add('$.smaltfl', doc.publish === undefined ? 'expected 1: format 2 is for a document with a publish block' : 'expected 2: a document with a publish block is format 2');
   if (typeof doc.id !== 'string' || doc.id === '') add('$.id', 'a non-empty string');
   if (typeof doc.name !== 'string' || doc.name === '') add('$.name', 'a non-empty string');
 
@@ -251,7 +289,46 @@ export function validateDocument(doc: unknown): Issue[] {
     else for (const [k, v] of Object.entries(doc.layout)) if (!(Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && Number.isFinite(n)))) add(`$.layout.${k}`, '[x, y]');
   }
   validateExtras(doc, ids, add);
+  validatePublish(doc, params, add);
   return issues;
+}
+
+/** The publish block (ADR 0009 §2): what holds, the sources judged against their history, the period, together. */
+function validatePublish(doc: Record<string, unknown>, params: Map<string, ParameterDef>, add: (path: string, message: string) => void): void {
+  const p = doc.publish;
+  if (p === undefined) return;
+  if (!isRecord(p)) return add('$.publish', '{ hold, watch, period, together }');
+  for (const k of Object.keys(p)) if (!PUBLISH_FIELDS.includes(k)) add(`$.publish.${k}`, `not a field this version reads (${PUBLISH_FIELDS.join(', ')}): refused rather than ignored`);
+  const hold = new Set<HoldKind>();
+  if (!Array.isArray(p.hold) || p.hold.length === 0) add('$.publish.hold', `a list of what holds: ${HOLD_KINDS.join(', ')}`);
+  else
+    p.hold.forEach((k: unknown, i: number) => {
+      if (!(HOLD_KINDS as readonly unknown[]).includes(k)) add(`$.publish.hold[${i}]`, `one of ${HOLD_KINDS.join(', ')}`);
+      else if (hold.has(k as HoldKind)) add(`$.publish.hold[${i}]`, `${String(k)} is listed twice`);
+      else hold.add(k as HoldKind);
+    });
+  if (hold.has('short') && hold.has('wrong')) add('$.publish.hold', 'short or wrong, not both: wrong holds every day short does');
+  const judged = hold.has('short') || hold.has('wrong');
+  const sources = new Map((Array.isArray(doc.sources) ? doc.sources : []).filter((s: unknown) => isRecord(s) && typeof s.id === 'string').map((s: Record<string, unknown>) => [String(s.id).toLowerCase(), String(s.id)]));
+  let watched = 0;
+  if (p.watch !== undefined) {
+    if (!isRecord(p.watch)) add('$.publish.watch', "each source judged against its history, with the history's file");
+    else
+      for (const [id, file] of Object.entries(p.watch)) {
+        watched++;
+        if (!sources.has(id.toLowerCase())) add(`$.publish.watch.${id}`, `no source ${id}: a watch judges a source`);
+        else if (Object.keys(p.watch).findIndex((k) => k.toLowerCase() === id.toLowerCase()) < watched - 1) add(`$.publish.watch.${id}`, `${sources.get(id.toLowerCase())} is watched twice (ids are compared without case)`);
+        if (typeof file !== 'string' || file === '') add(`$.publish.watch.${id}`, "the history's file, a file in the data's list");
+      }
+  }
+  if (judged && watched === 0) add('$.publish.watch', `${hold.has('short') ? 'short' : 'wrong'} judges a source against its history: watch names it`);
+  if (!judged && watched > 0) add('$.publish.watch', 'a watch is judged only for short or wrong, and hold has neither');
+  if (p.period !== undefined) {
+    const d = typeof p.period === 'string' ? params.get(p.period) : undefined;
+    if (!d) add('$.publish.period', `no parameter ${String(p.period)}`);
+    else if (d.type !== 'text') add('$.publish.period', `${d.name} is ${d.type === 'integer' ? 'an' : 'a'} ${d.type}: the period is a text parameter, such as a day`);
+  } else if (watched > 0) add('$.publish.period', 'a watch needs a period: the parameter whose value is the day a claim names');
+  if (p.together !== undefined && typeof p.together !== 'boolean') add('$.publish.together', 'true or false');
 }
 
 /** Groups, the ontology and the policies: their references, checked against the flow's ids. */
@@ -359,7 +436,19 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
       r.for.forEach((x: unknown, j: number) => !who.has(String(x)) && add(`${at}.for[${j}]`, `no person or group ${String(x)}`));
       if (r.kind === 'row' && (!Array.isArray(r.columns) || r.columns.length === 0 || typeof r.attribute !== 'string')) add(at, 'a row rule needs columns and an attribute');
       if (r.kind === 'column' && !Array.isArray(r.remove)) add(at, 'a column rule needs remove');
-      if (r.kind === 'action' && !(isRecord(o) && Array.isArray(o.actionTypes) && o.actionTypes.some((a: unknown) => isRecord(a) && a.id === r.action))) add(`${at}.action`, `no action type ${String(r.action)}`);
+      if (r.kind === 'action') {
+        // smaltfl's own action, deciding a held day (ADR 0009 §8), is not an ontology action type: an older build
+        // rejects it as unknown, and so refuses the document.
+        if (r.action === DECIDE) {
+          if (r.scope !== undefined) add(`${at}.scope`, `${DECIDE} has no rows to scope: its rule lists the options it allows in may`);
+          if (r.may !== undefined && (!Array.isArray(r.may) || r.may.length === 0 || r.may.some((m: unknown) => !(DECIDE_OPTIONS as readonly unknown[]).includes(m)) || new Set(r.may).size !== r.may.length))
+            add(`${at}.may`, `a list of ${DECIDE_OPTIONS.join(', ')}, each once`);
+        } else {
+          if (typeof r.action === 'string' && r.action.startsWith('smaltfl:')) add(`${at}.action`, `${r.action} is not one of smaltfl's actions (${DECIDE})`);
+          else if (!(isRecord(o) && Array.isArray(o.actionTypes) && o.actionTypes.some((a: unknown) => isRecord(a) && a.id === r.action))) add(`${at}.action`, `no action type ${String(r.action)}`);
+          if (r.may !== undefined) add(`${at}.may`, `may is for ${DECIDE}`);
+        }
+      }
     });
   }
 }

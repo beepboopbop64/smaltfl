@@ -9,7 +9,7 @@ import io from '@smaltdb/io';
 import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../src/plugin/index.js';
-import { checkAction, readView, runFlow, validateDocument, wrapRead, type Edit, type FlowDocument } from '../src/index.js';
+import { checkAction, checkDecision, DECIDE, readView, runFlow, validateDocument, wrapRead, type Edit, type FlowDocument, type Policies } from '../src/index.js';
 import { EXAMPLE_SOURCES } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
 
@@ -96,5 +96,42 @@ describe('actions', () => {
     const db = await ran();
     await expect(act(db, 'ana', { pu_zone: 'x', pu_hour: 'y' }, 1.5)).rejects.toThrow('Target trips in this hour needs a whole number');
     expect(db.query('SELECT count(*) FROM _smaltfl_edits').rows[0]![0]).toBe(0);
+  });
+});
+
+describe('deciding a held day (smaltfl:decide, ADR 0009 §8)', () => {
+  /** The example's people, with a decide rule for the district leads that lets them only not publish. */
+  const withRule = (rule: Record<string, unknown>): Policies => ({ ...p, groups: [...(p.groups ?? []), { id: 'stewards', name: 'Stewards', members: ['dev'] }], rules: [...p.rules, rule as never] });
+  const leads = { id: 'decide', kind: 'action', name: 'Leads decide', action: DECIDE, for: ['leads'], may: ['dont'] };
+
+  it('lets the owner always decide, and anyone in a flow without policies', () => {
+    expect(checkDecision(p, 'owner', 'asis')).toEqual({ allowed: true, reason: 'Owner owns the flow' });
+    expect(checkDecision(undefined, 'anyone', 'asis')).toEqual({ allowed: true, reason: 'the flow has no policies' });
+  });
+
+  it('lets the people a rule covers take the options it lists, and keeps the rule that allowed it', () => {
+    expect(checkDecision(withRule(leads), 'ana', 'dont')).toEqual({ allowed: true, reason: 'Leads decide allows Ana', rule: 'decide' });
+    // A rule with no `may` allows every option.
+    expect(checkDecision(withRule({ ...leads, may: undefined, for: ['stewards'] }), 'dev', 'asis')).toEqual({ allowed: true, reason: 'Leads decide allows Dev', rule: 'decide' });
+  });
+
+  it('refuses an option outside the rule, and everyone the rules leave out, naming who may', () => {
+    expect(checkDecision(withRule(leads), 'ana', 'asis')).toEqual({ allowed: false, reason: 'only Owner may publish a held day as is' });
+    expect(checkDecision(withRule(leads), 'cara', 'dont')).toEqual({ allowed: false, reason: 'only Owner and District leads may decide not to publish a held day' });
+    expect(checkDecision(p, 'ana', 'dont')).toEqual({ allowed: false, reason: 'only Owner may decide not to publish a held day' });
+    expect(checkDecision(p, 'zed', 'dont')).toEqual({ allowed: false, reason: "zed is not one of the flow's people" });
+    expect(checkDecision(p, 'owner', 'fill' as never)).toEqual({ allowed: false, reason: 'fill is not an option for a held day' });
+  });
+
+  it('validates as smaltfl’s own action, with no ontology action type, and refuses any other', () => {
+    const docWith = (rule: Record<string, unknown>) => ({ ...doc, policies: { ...p, rules: [...p.rules, { id: 'r', kind: 'action', name: 'R', for: ['owner'], ...rule }] } }) as FlowDocument;
+    expect(validateDocument(docWith({ action: DECIDE, may: ['asis', 'dont'] }))).toEqual([]);
+    expect(validateDocument(docWith({ action: DECIDE }))).toEqual([]);
+    const at = `$.policies.rules[${p.rules.length}]`;
+    expect(validateDocument(docWith({ action: 'smaltfl:release' }))).toEqual([{ path: `${at}.action`, message: "smaltfl:release is not one of smaltfl's actions (smaltfl:decide)" }]);
+    expect(validateDocument(docWith({ action: DECIDE, may: ['fill'] }))).toEqual([{ path: `${at}.may`, message: 'a list of asis, dont, each once' }]);
+    expect(validateDocument(docWith({ action: DECIDE, may: ['dont', 'dont'] }))).toEqual([{ path: `${at}.may`, message: 'a list of asis, dont, each once' }]);
+    expect(validateDocument(docWith({ action: DECIDE, scope: { columns: ['pu_borough'], attribute: 'districts' } }))).toEqual([{ path: `${at}.scope`, message: 'smaltfl:decide has no rows to scope: its rule lists the options it allows in may' }]);
+    expect(validateDocument(docWith({ action: 'annotate_weather', may: ['dont'] }))).toEqual([{ path: `${at}.may`, message: 'may is for smaltfl:decide' }]);
   });
 });

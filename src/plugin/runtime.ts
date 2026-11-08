@@ -49,6 +49,8 @@ export function pluginsOf(db: Database): [string, string][] {
 
 export async function runPlan(db: Database, input: unknown, options: RunOptions, version: string, signal?: AbortSignal, commit = 'dev'): Promise<RunResult> {
   validatePlan(input);
+  // A plan that says what holds it (plan/1, ADR 0009) is refused until the runtime holds, never run as if it didn't.
+  if (input.publish !== undefined) throw new RunError("this runtime doesn't hold runs yet: a plan with a publish block (plan/1) is refused rather than published");
   if (typeof options?.smaltdb !== 'string' || options.smaltdb === '') throw new RunError('a run needs the engine version: { smaltdb: "0.9.0" }');
   // An engine built from its sources (as in this repo's tests) reports 'unknown': there is nothing to check against.
   const actual = engineVersion(db);

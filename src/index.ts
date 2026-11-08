@@ -11,29 +11,32 @@ import type { ParamValue } from './core/sqltext.js';
 
 export { canonicalJSON } from './core/canonical.js';
 export { hashOf, hex, sha256, sha256Hex, unhex, utf8 } from './core/hash.js';
-export { DOCUMENT_FORMAT, validateDocument, withoutDisplay } from './core/document.js';
+export { DOCUMENT_FORMATS, HOLD_KINDS, documentFormat, validateDocument, withoutDisplay } from './core/document.js';
 export type {
   AggregateStep,
   DatasetDef,
+  DocumentFormat,
   ExpectationRule,
   ExpectationsStep,
   FilterStep,
   FlowDocument,
   FormulaStep,
   GroupDef,
+  HoldKind,
   ProfileDef,
   Issue,
   JoinStep,
   NamedExpr,
   ParameterDef,
+  PublishDef,
   SelectStep,
   SourceDef,
   SqlStep,
   StepDef,
   StepKind,
 } from './core/document.js';
-export { PLAN_FORMAT, PlanError, flowHash, translate, validatePlan } from './core/plan.js';
-export type { Column, ColumnType, FlowPlan, PlanNode, PlanOutput } from './core/plan.js';
+export { PLAN_FORMATS, PlanError, flowHash, translate, validatePlan } from './core/plan.js';
+export type { Column, ColumnType, FlowPlan, PlanFormat, PlanNode, PlanOutput, PlanPublish } from './core/plan.js';
 export { shapeOf } from './core/optimize.js';
 export type { RunShape } from './core/optimize.js';
 export { emitSelect, nodeSelect } from './core/emit.js';
@@ -48,10 +51,10 @@ export { isPlaceholder, MATERIAL, newsOf, PLACEHOLDERS, schemaChanges, tableNews
 export type { Act, Finding, Look, Names, Severity, TableFacts } from './core/news.js';
 export { nodeKey } from './core/keys.js';
 export type { KeyEnv } from './core/keys.js';
-export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, signManifest, verifyManifest } from './core/manifest.js';
+export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, planKind, signManifest, verifyManifest } from './core/manifest.js';
 export type { DatasetRecord, ExpectationResult, Identity, IdentityCard, ManifestNode, RunManifest, SignatureCheck, SignedManifest } from './core/manifest.js';
-export { checkAction, covers, readView, wrapRead } from './core/policy.js';
-export type { ActionCheck, ActionRule, ColumnRule, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
+export { DECIDE, DECIDE_OPTIONS, checkAction, checkDecision, covers, readView, wrapRead } from './core/policy.js';
+export type { ActionCheck, ActionRule, ColumnRule, DecideOption, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
 export type { ActRequest, ActionType, Edit, LinkType, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
 export { meaningOf, propertyOf } from './core/ontology.js';
 export { PLUGIN_NAME } from './core/protocol.js';

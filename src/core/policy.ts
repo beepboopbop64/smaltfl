@@ -50,11 +50,21 @@ export interface ActionRule {
   id: string;
   kind: 'action';
   name: string;
+  /** An ontology action type's id, or smaltfl's own action, `smaltfl:decide` (DECIDE). */
   action: string;
   for: string[];
   /** Optional: the object's row must have, in this column, one of the actor's values for this attribute. */
   scope?: { columns: string[]; attribute: string };
+  /** `smaltfl:decide` only: the options the rule lets its people take; every option when left out (ADR 0009 §8). */
+  may?: DecideOption[];
 }
+
+/** smaltfl's own action: deciding what happens to a held day (ADR 0009 §8). It is not an ontology action type. */
+export const DECIDE = 'smaltfl:decide';
+/** What a decision may do with a held day, in slice 1: publish it as is (with a reason), or don't publish it. */
+export const DECIDE_OPTIONS = ['asis', 'dont'] as const;
+export type DecideOption = (typeof DECIDE_OPTIONS)[number];
+const DECIDE_VERB: Record<DecideOption, string> = { asis: 'publish a held day as is', dont: 'decide not to publish a held day' };
 
 export type Rule = RowRule | ColumnRule | ActionRule;
 
@@ -156,4 +166,28 @@ export function checkAction(p: Policies | undefined, action: string, actor: stri
     return { allowed: false, reason: `${value === undefined ? 'this object' : String(value)} is outside ${who.name}'s ${r.scope.attribute}`, rule: r.id };
   }
   return { allowed: false, reason: 'no object to check' };
+}
+
+/** "Owner", "Owner and Stewards", "Owner, Ana and Stewards". */
+const listed = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+
+/**
+ * Whether `actor` may take `option` for a held day (ADR 0009 §8). The owner always may; a flow without policies lets
+ * its one user decide; otherwise a `smaltfl:decide` rule must cover the actor and list the option (or list none). The
+ * plugin asks this at release, against the policies stored with the run, and the record keeps the rule that allowed it.
+ * Until principals are bound to identity cards (ADR 0006 §8), it is a convenience, not a guard.
+ */
+export function checkDecision(p: Policies | undefined, actor: string, option: DecideOption): ActionCheck {
+  if (!(DECIDE_OPTIONS as readonly string[]).includes(option)) return { allowed: false, reason: `${String(option)} is not an option for a held day` };
+  if (!p) return { allowed: true, reason: 'the flow has no policies' };
+  const who = p.principals.find((x) => x.id === actor);
+  if (!who) return { allowed: false, reason: `${actor} is not one of the flow's people` };
+  if (who.owner) return { allowed: true, reason: `${who.name} owns the flow` };
+  const rules = p.rules.filter((r): r is ActionRule => r.kind === 'action' && r.action === DECIDE);
+  const lets = (r: ActionRule) => !r.may || r.may.includes(option);
+  const mine = rules.find((r) => lets(r) && covers(p, r.for, actor));
+  if (mine) return { allowed: true, reason: `${mine.name} allows ${who.name}`, rule: mine.id };
+  const nameOf = (id: string) => p.groups?.find((g) => g.id === id)?.name ?? p.principals.find((x) => x.id === id)?.name ?? id;
+  const may = [...new Set([...p.principals.filter((x) => x.owner).map((x) => x.name), ...rules.filter(lets).flatMap((r) => r.for.map(nameOf))])];
+  return { allowed: false, reason: may.length ? `only ${listed(may)} may ${DECIDE_VERB[option]}` : `no one may ${DECIDE_VERB[option]}: the flow has no owner and no rule allows it` };
 }
