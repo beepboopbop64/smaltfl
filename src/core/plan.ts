@@ -8,7 +8,7 @@
  */
 import { calendarProblems, resolveCalendar, type Calendar } from './calendar.js';
 import type { DonorRule, FlowDocument, HoldKind, Meanwhile, Missing, ParameterDef, StepDef, Until, WatchDef } from './document.js';
-import { DONOR_RULES, HOLD_KINDS, isGeneralWatch, MEANWHILES, missingProblem, UNTILS, validateDocument, withoutDisplay } from './document.js';
+import { DONOR_RULES, HOLD_KINDS, isGeneralWatch, MEANWHILES, missingProblem, periodOf, UNTILS, validateDocument, withoutDisplay } from './document.js';
 import { hashOf } from './hash.js';
 import { marksOn, type Ontology } from './ontology.js';
 import type { ParamType, ParamValue } from './sqltext.js';
@@ -262,13 +262,14 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
     nodes.push({ op: 'table', origin: s.id, inputs: [], table: s.table });
   }
   const outputs: PlanOutput[] = [];
-  // The day a fill moves its donor's rows to: the period's value (validateDocument made sure a fill from a day has one).
-  const period = doc.publish?.period;
-  const day = period === undefined ? undefined : params[period]?.value;
   for (const step of topological(doc.steps)) {
     const at = `steps.${step.id}`;
     const inputs = step.inputs.map((id) => index.get(id.toLowerCase())!);
     const base = { origin: step.id, inputs, ...(step.dataset?.storage === 'columnar' ? { storage: 'columnar' as const } : {}) };
+    // The day a fill moves its donor's rows to: its source's period's value, the watch's own or the flow's
+    // (validateDocument made sure a fill from a day has one).
+    const period = step.kind === 'fill' ? periodOf(doc, step.inputs[0]!) : undefined;
+    const day = period === undefined ? undefined : params[period]?.value;
     if (step.kind === 'fill' && step.from !== undefined && step.from !== null && (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day))) {
       const message = `a fill from ${step.from} moves its rows to the run's day, and ${period} is ${day === null || day === undefined ? 'not given' : `'${String(day)}', not a day`}`;
       throw new PlanError(`${at}: ${message}`, [{ path: at, message }]);

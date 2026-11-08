@@ -71,6 +71,19 @@ export interface WatchDef {
   follow?: string[];
 }
 
+/**
+ * The text parameter whose value is a source's period: its watch's own (a general watch, ADR 0010 §10), else the flow's
+ * `publish.period`. Undefined when neither names one. A fill on the source moves a donor's rows to that day.
+ */
+export function periodOf(doc: { publish?: unknown }, source: string): string | undefined {
+  const p = isRecordLike(doc.publish) ? doc.publish : undefined;
+  const watch = isRecordLike(p?.watch) ? p.watch : {};
+  const w = Object.entries(watch).find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1];
+  const own = isGeneralWatch(w) && typeof w.period === 'string' ? w.period : undefined;
+  return own ?? (typeof p?.period === 'string' ? p.period : undefined);
+}
+const isRecordLike = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
 /** A watch's history file, whichever form it is given in. */
 export const watchHistory = (w: string | WatchDef): string => (typeof w === 'string' ? w : w.history);
 
@@ -429,10 +442,7 @@ function validateFills(doc: Record<string, unknown>, steps: readonly Record<stri
       else if (donor.toLowerCase() === source.toLowerCase()) add(`${at}.inputs[1]`, 'a day is never its own donor');
       else donors.set(donor.toLowerCase(), i);
     }
-    if (s.from !== undefined && s.from !== null) {
-      const pub = isRecord(doc.publish) ? doc.publish : null;
-      if (typeof pub?.period !== 'string') add(`${at}.from`, 'a fill from another day needs publish.period: the parameter whose value is the day its rows move to');
-    }
+    if (s.from !== undefined && s.from !== null && periodOf(doc, source) === undefined) add(`${at}.from`, `a fill from another day needs ${source}'s period (its watch's, or publish.period): the parameter whose value is the day its rows move to`);
   });
   steps.forEach((s, i) => {
     inputsOf(s).forEach((x, j) => {
@@ -502,6 +512,8 @@ function validatePublish(doc: Record<string, unknown>, params: Map<string, Param
   else if (unperiod > 0) add('$.publish.period', 'a watch needs a period: the parameter whose value is the day a claim names');
   if (p.together !== undefined && typeof p.together !== 'boolean') add('$.publish.together', 'true or false');
   if (p.donor !== undefined && !(DONOR_RULES as readonly unknown[]).includes(p.donor)) add('$.publish.donor', `one of ${DONOR_RULES.join(', ')}`);
+  // Format 3 says how each source is judged in its watch, its donor among it (C1): a flow-wide rule there is refused.
+  else if (p.donor !== undefined && documentFormat(doc) === 3) add('$.publish.donor', 'in format 3 each watch names its own donor (publish.watch.<source>.donor, a watch given as an object): refused rather than ignored');
   if (p.meanwhile !== undefined && !(MEANWHILES as readonly unknown[]).includes(p.meanwhile)) add('$.publish.meanwhile', `one of ${MEANWHILES.join(', ')}`);
   if (p.until !== undefined && !(UNTILS as readonly unknown[]).includes(p.until)) add('$.publish.until', `one of ${UNTILS.join(', ')}`);
   if (p.meanwhile !== undefined && p.meanwhile !== 'last' && !judged) add('$.publish.meanwhile', `${String(p.meanwhile)} fills a watched source's missing part, which its story names: hold has neither short nor wrong`);

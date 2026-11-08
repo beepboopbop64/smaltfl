@@ -571,7 +571,7 @@ describe('a fill step (ADR 0009 amendment 1 S1)', () => {
     ]);
     const noPeriod = derived({ column: 'VendorID', value: 1 }, '2022-11-07');
     noPeriod.publish = { hold: ['checks'] };
-    expect(validateDocument(noPeriod)).toEqual([{ path: '$.steps[0].from', message: 'a fill from another day needs publish.period: the parameter whose value is the day its rows move to' }]);
+    expect(validateDocument(noPeriod)).toEqual([{ path: '$.steps[0].from', message: "a fill from another day needs trips's period (its watch's, or publish.period): the parameter whose value is the day its rows move to" }]);
   });
 
   it('checks the three settings: the donor rule, what readers get meanwhile, and what closes a pause', () => {
@@ -805,5 +805,57 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
     expect(bad({ ...pub, hold: ['checks', 'unlearned'] })).toThrow('publish.hold has unlearned without short or wrong');
     // A plan/1 plugin reading plan/2's block refuses its fields by name; and the format must match the block.
     expect(() => validatePlan({ ...plan, smaltflPlan: 1 })).toThrow("publish has calendar, which this version doesn't read");
+  });
+
+  it('carries the fills’ settings for a document in the general form: the donor in each watch, meanwhile and until in publish (C1, I10)', async () => {
+    const values = { day: '2023-09-21' };
+    // A legacy document with a fill step stays plan/1, with the fills' settings only when set (vectors 1 and 4).
+    expect((await translate(withFill(), values)).smaltflPlan).toBe(1);
+    // In format 3 the fill step changes nothing of the format: plan/2, every setting filled in, the donor in the watch.
+    const general = (watch: Record<string, unknown> = { history: 'history.json' }, publish: Partial<PublishDef> = {}): FlowDocument => {
+      const d = withFill(v2(watch));
+      return { ...d, publish: { ...d.publish!, ...publish } };
+    };
+    expect(validateDocument(general())).toEqual([]);
+    const plan = await translate(general(), values);
+    expect(plan.smaltflPlan).toBe(2);
+    const pub = plan.publish as PlanPublish2;
+    expect([pub.meanwhile, pub.until, pub.watch[0]![1].donor]).toEqual(['last', 'decision', 'weekday']);
+    expect('donor' in pub).toBe(false);
+    const set = (await translate(general({ history: 'history.json', donor: 'nearest' }, { meanwhile: 'fill', until: 'normal' }), values)).publish as PlanPublish2;
+    expect([set.meanwhile, set.until, set.watch[0]![1].donor]).toEqual(['fill', 'normal', 'nearest']);
+    expect(() => validatePlan({ ...plan, publish: set })).not.toThrow();
+    // A flow-wide donor rule is plan/1's: format 3 refuses it, and a plan/2 plugin refuses it in the plan, by name.
+    expect(validateDocument(general(undefined, { donor: 'nearest' }))).toEqual([{ path: '$.publish.donor', message: 'in format 3 each watch names its own donor (publish.watch.<source>.donor, a watch given as an object): refused rather than ignored' }]);
+    expect(() => validatePlan({ ...plan, publish: { ...pub, donor: 'nearest' } } as FlowPlan)).toThrow("publish has donor, which this version doesn't read");
+    // A derived document keeps its original's format: plan/2 stays plan/2, plan/1 stays plan/1.
+    const repaired = (d: FlowDocument): FlowDocument => ({
+      ...d,
+      sources: [...d.sources, { id: 'trips_donor', table: 'trips_file_donor' }],
+      steps: d.steps.map((st) => (st.id === 'trips_filled' ? ({ ...st, missing: { time: 'tpep_pickup_datetime', hours: [13, 23] }, from: '2023-09-14', inputs: ['trips', 'trips_donor'] } as FillStep) : st)),
+    });
+    expect(validateDocument(repaired(general()))).toEqual([]);
+    const fixed = await translate(repaired(general()), values);
+    expect(fixed.smaltflPlan).toBe(2);
+    expect(watchesOf(fixed.publish).map((w) => fixed.nodes[w.node]!.origin)).toEqual(['trips']);
+    expect((await translate(repaired(withFill()), values)).smaltflPlan).toBe(1);
+  });
+
+  it('moves a donor’s rows to the day its source’s watch names, when the flow names none (C1)', async () => {
+    const d = withFill(v2({ history: 'history.json', period: 'day' }));
+    const { period: _p, ...pub } = d.publish!;
+    const own: FlowDocument = {
+      ...d,
+      publish: pub,
+      sources: [...d.sources, { id: 'trips_donor', table: 'trips_file_donor' }],
+      steps: d.steps.map((st) => (st.id === 'trips_filled' ? ({ ...st, missing: { column: 'VendorID', value: 1 }, from: '2022-11-07', inputs: ['trips', 'trips_donor'] } as FillStep) : st)),
+    };
+    expect(validateDocument(own)).toEqual([]);
+    const plan = await translate(own, { day: '2022-11-14' });
+    expect(plan.nodes.find((n) => n.op === 'fill')).toMatchObject({ from: '2022-11-07', to: '2022-11-14' });
+    expect(planPeriod(plan.publish)).toBe('day');
+    // With neither, the document says which period is missing.
+    const none: FlowDocument = { ...own, publish: { ...pub, watch: { trips: { history: 'history.json' } }, hold: ['checks'] } };
+    expect(validateDocument(none).filter((x) => x.path === '$.steps[0].from')).toEqual([{ path: '$.steps[0].from', message: "a fill from another day needs trips's period (its watch's, or publish.period): the parameter whose value is the day its rows move to" }]);
   });
 });
