@@ -3,7 +3,7 @@
  * branch), and the series a day's normal range is drawn from (normal.ts). The numbers count the checks named here, as
  * they were published: a range for what the checks drop holds only while the checks are the same. No DOM, no engine.
  */
-import { plusDays, daysBetween } from './calendar.js';
+import { plusDays, daysBetween, US_NYC_1, type Calendar } from './calendar.js';
 import { NormalRanges, type DailySeries, type Scale } from './normal.js';
 import type { Kind } from './quality.js';
 
@@ -136,18 +136,21 @@ export class HistoryRanges {
   readonly file: HistoryFile;
   private readonly made = new Map<string, NormalRanges | null>();
   private readonly skip: ReadonlySet<string>;
+  /** The flow's calendar (ADR 0010 §2): `US_NYC_1` unless the flow chose one. */
+  readonly calendar: Calendar;
 
-  /** With `skip`, days left out of what a normal day is learned from (an incident's). */
-  constructor(file: HistoryFile, options: { skip?: ReadonlySet<string> } = {}) {
+  /** With `skip`, days left out of what a normal day is learned from (an incident's); with `calendar`, the flow's. */
+  constructor(file: HistoryFile, options: { skip?: ReadonlySet<string>; calendar?: Calendar } = {}) {
     this.file = file;
     this.skip = options.skip ?? new Set();
+    this.calendar = options.calendar ?? US_NYC_1;
   }
 
   of(m: Metric): NormalRanges | null {
     const key = metricKey(m);
     if (!this.made.has(key)) {
       const s = seriesOf(this.file, m);
-      this.made.set(key, s ? new NormalRanges(s, SCALES[m.of], { skip: this.skip }) : null);
+      this.made.set(key, s ? new NormalRanges(s, SCALES[m.of], { skip: this.skip, calendar: this.calendar }) : null);
     }
     return this.made.get(key)!;
   }

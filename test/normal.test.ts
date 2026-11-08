@@ -45,7 +45,7 @@ describe('holidays', () => {
   });
 
   it('have windows around them, as a forecast’s holidays do: no holidays, but no ordinary days either', () => {
-    expect(['2023-12-23', '2023-12-27', '2024-01-02', '2024-01-03'].map(seasonOf)).toEqual(Array(4).fill('Holiday season'));
+    expect(['2023-12-23', '2023-12-27', '2024-01-02', '2024-01-03'].map((d) => seasonOf(d))).toEqual(Array(4).fill('Holiday season'));
     expect([seasonOf('2023-12-25'), seasonOf('2024-01-01'), seasonOf('2024-01-04'), seasonOf('2023-12-22')]).toEqual([undefined, undefined, undefined, undefined]);
     expect([seasonOf('2023-07-01'), seasonOf('2023-07-07'), seasonOf('2023-07-04'), seasonOf('2023-07-08')]).toEqual(['Independence Day week', 'Independence Day week', undefined, undefined]);
     expect([seasonOf('2023-11-22'), seasonOf('2023-11-25'), seasonOf('2023-11-26'), seasonOf('2023-11-27')]).toEqual(['Day before Thanksgiving', 'Thanksgiving weekend', 'Thanksgiving weekend', undefined]);

@@ -27,7 +27,7 @@
  * Counts are guessed on a log scale (a miss is a ratio), shares on a logit scale, anything else as it is. No DOM, no
  * engine: the numbers come from runs, or from the scenario's history (scripts/data/history.ts).
  */
-import { dayLastYear, daysBetween, holidayOf, isSpecial, plusDays, seasonOf } from './calendar.js';
+import { dayLastYear, daysBetween, isSpecial, plusDays, specialOf, US_NYC_1, type Calendar } from './calendar.js';
 
 /** How a number varies: a count (by ratios), a share of rows (0 to 1), or a level, such as a median. */
 export type Scale = 'count' | 'share' | 'level';
@@ -103,6 +103,20 @@ export interface NormalOptions {
   z?: number;
   /** Days left out of what a normal day is learned from: an incident's, say. A day left out still has its own range. */
   skip?: ReadonlySet<string>;
+  /** The flow's calendar: its special days are judged by last year's alone and never learned from (ADR 0010 §2). */
+  calendar?: Calendar;
+}
+
+/**
+ * Why a day has no range, for the words that say it isn't judged (ADR 0010 §1): a special day last year's history
+ * doesn't have (`no last year`), one whose last year has moved too far to judge it by (`last year moved`), too few days
+ * before it to learn from (`too few days`), or a day past the history's end (`history ends`). `days` counts the days
+ * before it that have a number; `special` names a special day.
+ */
+export interface NoRange {
+  why: 'no last year' | 'last year moved' | 'too few days' | 'history ends';
+  days: number;
+  special?: string;
 }
 
 const EPS = 1e-4;
@@ -160,7 +174,7 @@ export class NormalRanges {
   constructor(series: DailySeries, scale: Scale, options: NormalOptions = {}) {
     this.series = series;
     this.scale = scale;
-    this.o = { weeks: 6, back: 10, half: 2, window: 42, z: 3, skip: new Set(), ...options };
+    this.o = { weeks: 6, back: 10, half: 2, window: 42, z: 3, skip: new Set(), calendar: US_NYC_1, ...options };
   }
 
   /** A day not learned from: a holiday or one around it, or one left out. */
@@ -193,14 +207,14 @@ export class NormalRanges {
 
   private special(k: number): boolean {
     let s = this.specials.get(k);
-    if (s === undefined) this.specials.set(k, (s = isSpecial(this.date(k))));
+    if (s === undefined) this.specials.set(k, (s = isSpecial(this.date(k), this.o.calendar)));
     return s;
   }
 
   private lastYear(k: number): number | null {
     let j = this.lastYears.get(k);
     if (j === undefined) {
-      const d = dayLastYear(this.date(k));
+      const d = dayLastYear(this.date(k), this.o.calendar);
       this.lastYears.set(k, (j = d === undefined ? null : daysBetween(this.series.from, d)));
     }
     return j;
@@ -352,10 +366,32 @@ export class NormalRanges {
     return out;
   }
 
+  /**
+   * Why the day has no range (`NoRange`), or null when it has one. It follows `compute`'s own order, so the reason given
+   * is the one that left the day without a range.
+   */
+  explain(day: string): NoRange | null {
+    if (this.at(day)) return null;
+    const k = daysBetween(this.series.from, day);
+    let days = 0;
+    for (let j = 0; j < Math.min(k, this.series.values.length); j++) if (this.val(j) !== null) days++;
+    if (k >= this.series.values.length) return { why: 'history ends', days };
+    const special = k < 0 ? undefined : specialOf(day, this.o.calendar);
+    if (!special) return { why: 'too few days', days };
+    const c = this.lastYear(k);
+    if (c === null || this.val(c) === null) return { why: 'no last year', days, special };
+    const Y = this.year(k);
+    if (!Y) return { why: 'too few days', days, special };
+    const ms = this.misses(k);
+    const [sW, sY] = [this.missOf(ms, (m) => m.w), this.missOf(ms, (m) => m.y)];
+    if ((sW !== null && sY !== null && broken(sY, sW)) || Math.abs(Y.r ?? 0) > 0.5) return { why: 'last year moved', days, special };
+    return { why: 'too few days', days, special };
+  }
+
   private compute(k: number): NormalRange | null {
     const least = Math.ceil(this.o.window / 4);
     const day = this.date(k);
-    const special = holidayOf(day) ?? seasonOf(day);
+    const special = specialOf(day, this.o.calendar);
     const Y = this.year(k);
     if (special) {
       if (!Y) return null;

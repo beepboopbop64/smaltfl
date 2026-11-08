@@ -15,7 +15,7 @@
  *
  * Severity is carried through: a folded finding is told as a note, with what it was kept. No DOM, no engine.
  */
-import { holidayOf, plusDays, seasonOf } from './calendar.js';
+import { holidayOf, plusDays, seasonOf, shortName } from './calendar.js';
 import { QUANTILES, type HistoryRanges } from './history.js';
 import { shortfall, type EpisodeDay } from './days.js';
 import { MATERIAL, hoursShort, shareWords, type Act, type Finding, type Names, type Severity } from './news.js';
@@ -171,7 +171,6 @@ const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const VALUE_KINDS = new Set<Finding['kind']>(['gone', 'share', 'missing']);
 const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'schema', 'integrity', 'weather', 'calm']);
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const SHORT_HOLIDAY: Record<string, string> = { 'Martin Luther King Jr. Day': 'MLK Day', 'Day after Thanksgiving': 'Black Friday', 'Independence Day week': 'July 4th week', 'Day before Thanksgiving': 'Thanksgiving Eve' };
 const worst = (xs: readonly Severity[]): Severity => xs.reduce<Severity>((a, b) => (RANK[b] < RANK[a] ? b : a), 'ok');
 const weekdayOf = (day: string) => WEEKDAYS[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
 const clock = (h: number) => `${String(h).padStart(2, '0')}:00`;
@@ -723,7 +722,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   // The head: the cause as a population or a time, in at most six words.
   const holiday = holidayOf(day);
   const season = seasonOf(day);
-  const calmHead = holiday ? `Normal for ${SHORT_HOLIDAY[holiday] ?? holiday}` : season ? `Normal for ${(SHORT_HOLIDAY[season] ?? season).replace(/^Holiday season$/, 'the holidays')}` : `A normal ${weekdayOf(day)}`;
+  const calmHead = holiday ? `Normal for ${shortName(holiday)}` : season ? `Normal for ${shortName(season).replace(/^Holiday season$/, 'the holidays')}` : `A normal ${weekdayOf(day)}`;
   const pctShort = (x: number) => `${Math.round(x * 100)}%`;
   // The trips an hour after a fall that runs to the day's end: they fall to a trickle and don't stop (Thu Sep 21, 2023
   // kept ~330 an hour), which the chart's zoom says ("still ~330/h").
