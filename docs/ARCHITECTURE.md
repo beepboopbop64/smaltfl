@@ -157,7 +157,36 @@ every run.
 2. Create the dataset's new version as a typed table named by its key (`smaltdb` has no `CREATE TABLE … AS SELECT`, so:
    `CREATE TABLE` from the static types, then `INSERT INTO … SELECT`), in one transaction.
 3. Hash the new version while scanning it in the worker (section 6), and record it.
-4. Point the dataset's name (a view) at the new version. A failure at any step leaves the previous version current.
+4. Point the dataset's name (a view) at the new version, unless the flow holds it (below). A failure at any step
+   leaves the previous version current.
+
+**Holding a run** ([ADR 0009](adr/0009-paused-not-published.md)). A flow can say what pauses its publication, in a
+`publish` block: `checks` (a `fail` rule failed, or more rows were dropped than `maxDropped` allows), `wrong` (the
+day's story says something wrong) or `short` (wrong, and the day's trips below their range), each watched source
+judged against a history file, by the parameter that orders the days. Such a document is format 2, and its plan
+plan/1. Where its run would have thrown, it holds (`src/plugin/runtime.ts`, with `src/core/hold.ts`):
+1. The checks count and are recorded without throwing. What they hold is read from the manifest's counts
+   (`holdsOf`), so a check reused by key holds again on the same day.
+2. Each watched source is judged by the page's *claim*: the day's story told for the flow, with raw names and nothing
+   hidden or marked as expected, from the history file the page checked against the data's list and pinned in the
+   engine (`dayClaim`). The plugin accepts a claim only for the run's day, the history pinned under the watch's name
+   and the snapshot's row count. A source with no claim, or one that doesn't match, is held as *not judged*: never
+   published.
+3. With `together` (the default) every output waits while anything holds, so outputs never show different days;
+   otherwise the outputs that read what held. An output *waits* when its staged key differs from its current one.
+4. In the run's transaction, only the outputs nothing holds are pointed. A held run keeps its manifest and its
+   versions, *staged*, and a `_smaltfl_holds` row says what held it and the claims it was judged by.
+
+**Releasing** (`src/plugin/release.ts`). A person decides what becomes of a held day: wait (nothing to do), publish
+it as is, or don't publish it, for that day or until a day passes (`smaltfl:decide`, a rule in the flow's policies;
+the owner may always decide). The decision is recorded first, by the day's inputs and every held output's staged key.
+Publishing as is is then a release, one transaction that checks the run against its manifest hash, the keys against
+the decision's, the actor against the policies stored with the run, the reason, the decision's record leaf, and that
+no later day is current for a name, then points the names and keeps the release in `_smaltfl_releases`. A refusal is
+kept too, and returned, never thrown. The app's engine lives in memory: after a reload, a day held again with the
+same inputs and keys is released again by the same decision, recorded as citing it, and a standing decision not to
+publish closes each held day after it until one publishes. A flow without a `publish` block runs as before, and its
+gate still throws.
 
 **Runs** are recorded as manifests (section 6), with the flow plan they ran stored by its hash. Cancellation uses the
 client's `AbortSignal`; progress is reported per step. Previews run a segment up to the chosen step, with a `LIMIT`.
@@ -167,16 +196,16 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
 | What | Hash of | Notes |
 | --- | --- | --- |
 | Flow | The canonical JSON of the document, without display fields | Canonical JSON: sorted keys, no insignificant whitespace, numbers in shortest form |
-| Flow plan | The canonical JSON of the plan a run executed | Stored with the run, so a re-run replays exactly what ran |
+| Flow plan | The canonical JSON of the plan a run executed, tagged `plan/0`, or `plan/1` when it carries a `publish` block (ADR 0009 E10) | Stored with the run, so a re-run replays exactly what ran. A plan without the block hashes as before, byte for byte |
 | Step key | Its plan node in canonical form, its inputs' keys, the engine and plugin versions | Merkle-style: a change upstream changes every key downstream. Names and display fields are not in it |
 | Source file | The exact bytes the engine reads: plain SHA-256, so it equals `sha256sum` and the data branch's MANIFEST.json (ADR 0006 E1) | Checked by the page against the data's list, then hashed again in the engine as the plugin pins it (`smaltfl:<file>`); a run records the file each snapshot read |
 | Snapshot | A source's rows, as a dataset version | Its key is its content, so the same rows from another file are the same snapshot |
 | Dataset version | Its schema and the multiset of its rows: each row's canonical binary encoding is hashed, and the sorted row hashes are hashed in 1 MiB chunks | Exact: `REAL` values hash by their IEEE-754 bits; `NULL` and each type are tagged. The same rows in any order give the same hash, with no sort in the engine (`src/plugin/dataset-hash.ts`) |
 | Edit | The edit and the previous edit's hash | A hash chain in the engine; each edit also goes into the record with the policies and ontology hashes in force |
 | Run manifest (run/1) | The flow (with its policies and ontology hashes), the plan, parameters, engine and plugin versions and the code's commit, step keys, the source files read, snapshot and dataset hashes, row counts, expectation results, the data commit and list hash, the record's head, the previous run | The flow document is kept with it; run/0 manifests still verify. Signed when shared (section 7) |
-| Record entry (log/1) | The entry's canonical JSON, as an RFC 9162 leaf; the record's root as the Merkle tree hash of its leaves | One append-only record per flow and browser (`src/core/log.ts`, `src/app/record.ts`): runs, flow changes, file checks, actions on findings, edits, verifications, signatures, exports |
+| Record entry (log/1) | The entry's canonical JSON, as an RFC 9162 leaf; the record's root as the Merkle tree hash of its leaves | One append-only record per flow and browser (`src/core/log.ts`, `src/app/record.ts`): runs (`ok`, `failed`, or `held` with what held them, what waits and the staged keys), decisions on held days, releases, flow changes, file checks, actions on findings, edits, verifications, signatures, exports |
 | Checkpoint | The record's origin, size and root, signed (ECDSA P-256) by this browser's identity | Downloaded and kept elsewhere, it anchors the record: a later record is checked against it with a consistency proof |
-| Audit bag | BagIt 1.0: every file by SHA-256 in its manifests | The record, checkpoints, card, manifests, plans, flow documents, the data's list and a proof per dataset; checked with `sha256sum -c` and `node scripts/audit.mjs` |
+| Audit bag | BagIt 1.0: every file by SHA-256 in its manifests | The record, checkpoints, card, manifests, plans, flow documents, the data's list, what each dataset name shows and the engine's releases, and a proof per dataset as published (by its run's entry, or by the release that published it); checked with `sha256sum -c` and `node scripts/audit.mjs` |
 
 - **Algorithm:** SHA-256 through WebCrypto, available in pages, workers and Node, with no dependency.
 - **Verification** has three levels (ADR 0006): *stored* (the manifest agrees with its plan, the flow document
@@ -185,6 +214,13 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
   snapshots and compare every dataset hash and count) and *rederive* (decode the pinned source files again to the same
   snapshots, then rerun). Shown as Intact, Recomputed and Re-derived. Against someone who controls the browser, only a
   checkpoint kept elsewhere, or an audit bag checked offline, is evidence.
+  A run of a flow that holds (ADR 0009) also gets a *held* check at every level: its stored holds must recompute from
+  the manifest's counts and the stored claims, each claim judged again against the run's day, history file and
+  snapshot rows; and every held output a dataset name shows needs an applied release of that run, with its manifest
+  and key, citing a decision's record leaf, so a held output pointed by hand fails. *published* accepts a release.
+  `audit.mjs check` checks held runs as it checks the others, and fails a decision whose actor the stored policies
+  don't allow, or that came under a standing decision that no longer stood; a release that cites no earlier decision,
+  or whose keys aren't its run's and its decision's; and a held output the engine shows with no release.
   Re-running on an older engine needs that version's worker build; smaltkit's engine loader, which already loads a
   chosen smaltdb version, is the starting point.
 - **Determinism:** results that can differ between runs of the same plan are pinned for verified runs: row order
@@ -294,8 +330,9 @@ plugin, and the app built as a static site.
 ```
 src/
   core/       flow model, validation, compiler, hashes, lineage, policies, ontology, packages; data quality (profiles,
-              odd rows, drift), the holiday calendar, each day's normal range, and the news (a day's, a table's)
-  plugin/     the runtime plugin (engine worker)
+              odd rows, drift), the holiday calendar, each day's normal range, the news (a day's, a table's), and what
+              holds a run and what became of a held day
+  plugin/     the runtime plugin (engine worker): running and holding a plan, releasing a held run, verifying
   worker.ts   the app's worker entry
   app/        the UI
 test/         vitest on the in-process engine and through the worker protocol; Playwright end-to-end tests with the app

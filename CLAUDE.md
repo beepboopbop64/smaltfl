@@ -45,6 +45,12 @@ match smaltdb's `CLAUDE.md`.
   `src/plugin/verify.ts`, the record (`src/core/log.ts`, RFC 9162; `src/app/record.ts`, IndexedDB), the audit bag
   (`src/core/bag.ts`, `src/core/zip.ts`) and its offline check (`src/core/audit.ts`, `node scripts/audit.mjs check
   BAG.zip`). A new hash encoding goes in an ADR first, with test vectors.
+- A day that is off is paused, not published (ADR 0009): the document's `publish` block (format 2, plan/1);
+  `src/core/hold.ts` says what holds a run (its checks, the story's claim), what waits, and what the record decided;
+  `src/plugin/runtime.ts` holds instead of throwing and `src/plugin/release.ts` publishes a held run as a recorded
+  decision says; verify's *held* check and `src/core/audit.ts` check both; `src/core/decision.ts` and
+  `src/app/viz.ts` `decisionRow` draw and word the decision. The days `wrong` and `short` hold on the history are a
+  test vector (`test/hold-real.test.ts`): a story change that moves them is a decision, not a fix.
 
 ## Rules for this repository
 
