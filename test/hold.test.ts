@@ -369,7 +369,7 @@ describe('what became of a held day (ADR 0009 §6, §12)', () => {
   });
 });
 
-describe('a decision that stands until a day passes (ADR 0009 §6)', () => {
+describe('a decision that stands until a day publishes (ADR 0009 §6)', () => {
   it('covers each held day after it until a day publishes', () => {
     const fri = decide('2023-09-22', 3, 'dont', 'untilPass');
     const log = [held('2023-09-22', 3), fri];

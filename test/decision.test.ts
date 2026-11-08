@@ -4,7 +4,7 @@
  * within their budgets.
  */
 import { describe, expect, it } from 'vitest';
-import { afterLabel, afterLine, decidedLines, decisionDrawing, goLabel, heldLine, pauseLines, ribbonOf, sheetText, sheetWords, waitedLabel, type SheetIn } from '../src/core/decision.js';
+import { afterLabel, afterLine, dayPausedLine, decidedLines, decisionDrawing, goLabel, heldLine, outputPausedLine, pauseLines, ribbonOf, sheetText, sheetWords, waitedLabel, type SheetIn } from '../src/core/decision.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
 import { storyOf, wordsIn } from '../src/core/story.js';
@@ -67,16 +67,20 @@ describe('what readers would get, drawn by the day’s cause (ADR 0009 §12)', (
 });
 
 describe('the decision sheet’s words (ADR 0009 §12: 45 at a glance)', () => {
-  const thu: SheetIn = { day: '2023-09-21', waited: 120, otherBuild: false, outputs: 3, rows: 41_939, readers: { day: '2023-09-20', rows: 108_434 }, later: null, part: null, ticks: ['0h', '13h', '24h'], unjudged: false, hash: '8324c8f4ab', may: true, deciders: 'Owner', head: 'Trips fall 95% from 13:00' };
+  const thu: SheetIn = { day: '2023-09-21', waited: 120, otherBuild: false, outputs: 3, rows: 41_939, reach: 37_935, readers: { day: '2023-09-20', rows: 102_870 }, later: null, part: null, ticks: ['0h', '13h', '24h'], unjudged: false, hash: '8324c8f4ab', may: true, deciders: 'Owner', head: 'Trips fall 95% from 13:00' };
 
   it('names the day, each option with one number, the reasons, and a button that names the result beside the hash', () => {
     const t = sheetText(thu);
     expect(t.title).toBe('Thu Sep 21 · what readers get');
     expect(t.status).toBe('Waiting 2 h');
-    expect(t.options.map((o) => [o.label, o.number])).toEqual([['Publish as is', '41,939'], ['Don’t publish', 'Wed 20 · 108,434']]);
+    // The numbers are what readers get: the trips that reach the outputs, past the checks, on both rows.
+    expect(t.options.map((o) => [o.label, o.number])).toEqual([['Publish as is', '37,935'], ['Don’t publish', 'Wed 20 · 102,870']]);
     for (const o of t.options) expect(wordsIn(o.label)).toBeLessThanOrEqual(4);
-    expect(t.options[0]!.aria).toContain('41,939 trips');
-    expect(t.options[1]!.aria).toContain('108,434 trips');
+    expect(t.options[0]!.aria).toContain('37,935 trips past its checks, of 41,939 that arrived');
+    expect(t.options[1]!.aria).toContain('102,870 trips');
+    expect(sheetText({ ...thu, reach: null }).options[0]!.number).toBe('41,939');
+    // What a decision covers, named by its effect: a day that publishes ends it, not one that passes.
+    expect(t.scopes).toEqual(['This day', 'Until a day publishes']);
     expect(t.chips).toEqual(['Real change', 'Source confirmed', 'Known outage']);
     expect(t.go).toEqual(['Decide', 'Publish as is · 3 outputs', 'Don’t publish Thu 21', 'Don’t publish from Thu 21']);
     expect(t.hash).toBe('8324 c8f4');
@@ -119,12 +123,29 @@ describe('the cause card’s pause row, the day after an episode, and the record
     expect(pauseLines({ ...base, state: 'asis', who: 'Owner', at: '09:40' })).toEqual({ reach: 'Published as is · Owner · 09:40', verb: null });
     expect(pauseLines({ ...base, state: 'dont', who: 'Owner', at: '09:41' }).reach).toBe('Not published · Owner · 09:41');
     expect(pauseLines({ ...base, state: 'dont', who: 'Owner', under: 'Fri' }).reach).toBe('Not published · under Fri’s decision');
+    // A decision that stands says it closes the days after it too.
+    expect(pauseLines({ ...base, state: 'dont', who: 'Owner', at: '09:24', standing: true }).reach).toBe('Unpublished until a day publishes');
     // Every held output already showing its versions: published as is, by nobody.
     expect(pauseLines({ ...base, state: 'asis' }).reach).toBe('Published as is');
     // Never more words than the row it replaces and the verb: 4 + 1.
-    for (const s of ['waiting', 'asis', 'dont'] as const) for (const may of [true, false]) {
-      const l = pauseLines({ ...base, state: s, may, who: 'Owner', at: '09:40', under: s === 'dont' ? 'Fri' : null });
+    for (const s of ['waiting', 'asis', 'dont'] as const) for (const may of [true, false]) for (const standing of [false, true]) {
+      const l = pauseLines({ ...base, state: s, may, who: 'Owner', at: '09:40', under: s === 'dont' && !standing ? 'Fri' : null, standing });
       expect(wordsIn(l.reach) + (l.verb ? wordsIn(l.verb) : 0)).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('says the day held under the strip, readers’ day and Decide; and atop a waiting output’s News, that it waits', () => {
+    expect(dayPausedLine({ state: 'waiting', readers: '2023-09-18', may: true, standing: false })).toEqual({ text: 'Paused · readers see Mon 18', verb: 'Decide' });
+    expect(dayPausedLine({ state: 'waiting', readers: null, may: false, standing: false })).toEqual({ text: 'Paused · nothing published yet', verb: null });
+    expect(dayPausedLine({ state: 'asis', readers: '2023-09-21', may: true, standing: false })).toEqual({ text: 'Published as is', verb: null });
+    expect(dayPausedLine({ state: 'dont', readers: '2022-11-13', may: true, standing: true }).text).toBe('Unpublished until a day publishes · readers see Sun 13');
+    expect(outputPausedLine({ state: 'waiting', may: true, deciders: 'Owner', standing: false })).toEqual({ text: 'Waits for a decision', verb: 'Decide' });
+    expect(outputPausedLine({ state: 'waiting', may: false, deciders: 'Owner', standing: false })).toEqual({ text: 'Waits on Owner', verb: null });
+    expect(outputPausedLine({ state: 'dont', may: true, deciders: 'Owner', standing: false }).text).toBe('Not published');
+    // A line, not a paragraph: at most 8 words with its verb, in every state.
+    for (const state of ['waiting', 'asis', 'dont'] as const) for (const standing of [false, true]) {
+      const l = dayPausedLine({ state, readers: '2023-09-18', may: true, standing });
+      expect(wordsIn(l.text) + (l.verb ? wordsIn(l.verb) : 0)).toBeLessThanOrEqual(10);
     }
   });
 

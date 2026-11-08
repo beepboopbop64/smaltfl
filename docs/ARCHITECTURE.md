@@ -178,7 +178,7 @@ plan/1. Where its run would have thrown, it holds (`src/plugin/runtime.ts`, with
    versions, *staged*, and a `_smaltfl_holds` row says what held it and the claims it was judged by.
 
 **Releasing** (`src/plugin/release.ts`). A person decides what becomes of a held day: wait (nothing to do), publish
-it as is, or don't publish it, for that day or until a day passes (`smaltfl:decide`, a rule in the flow's policies;
+it as is, or don't publish it, for that day or until a day publishes (`smaltfl:decide`, a rule in the flow's policies;
 the owner may always decide). The decision is recorded first, by the day's inputs and every held output's staged key.
 Publishing as is is then a release, one transaction that checks the run against its manifest hash, the keys against
 the decision's, the actor against the policies stored with the run, the reason, the decision's record leaf, and that

@@ -374,8 +374,8 @@ describe.skipIf(!has)('the story on the real history', () => {
       // waiting with Decide, waiting on the owner for someone who may not decide, and each receipt.
       const base = glanceStrings(s).filter((x) => x !== s.labels.primary);
       const words = (xs: readonly string[]) => xs.reduce((t, x) => t + wordsIn(x), 0);
-      for (const [state, may, under] of [['waiting', true, null], ['waiting', false, null], ['asis', true, null], ['dont', true, null], ['dont', true, 'Wed']] as const) {
-        const l = pauseLines({ state, outputs: 3, who: 'Owner', at: '23:59', under, may, deciders: 'Owner' });
+      for (const [state, may, under, standing] of [['waiting', true, null, false], ['waiting', false, null, false], ['asis', true, null, false], ['dont', true, null, false], ['dont', true, null, true], ['dont', true, 'Wed', true]] as const) {
+        const l = pauseLines({ state, outputs: 3, who: 'Owner', at: '23:59', under, may, deciders: 'Owner', standing });
         const said = [...base, l.reach, l.verb ?? ''];
         expect(words(said), `${d} ${state}${may ? '' : ' (may not decide)'}: ${said.join(' | ')}`).toBeLessThanOrEqual(60);
       }
@@ -384,7 +384,7 @@ describe.skipIf(!has)('the story on the real history', () => {
       const draw = decisionDrawing(h, s, d, plus(d, -1), { day: rows(d), readers: rows(plus(d, -1)) });
       expect(draw.cause, d).toBe(s.hero === 'hours' ? 'hours' : s.split ? 'split' : 'amount');
       expect(draw.dont, d).not.toBeNull();
-      const t = sheetText({ day: d, waited: 3000, otherBuild: true, outputs: 3, rows: rows(d), readers: { day: plus(d, -1), rows: rows(plus(d, -1)) }, later: plus(d, 4), part: draw.part, ticks: draw.ticks.map(([, x]) => x), unjudged: false, hash: 'a'.repeat(64), may: true, deciders: 'Owner', head: s.head });
+      const t = sheetText({ day: d, waited: 3000, otherBuild: true, outputs: 3, rows: rows(d), reach: rows(d) - file!.dropped[file!.days.indexOf(d)]!, readers: { day: plus(d, -1), rows: rows(plus(d, -1)) }, later: plus(d, 4), part: draw.part, ticks: draw.ticks.map(([, x]) => x), unjudged: false, hash: 'a'.repeat(64), may: true, deciders: 'Owner', head: s.head });
       expect(sheetWords(t), `${d}: ${JSON.stringify(t)}`).toBeLessThanOrEqual(45);
     }
     // Thu Sep 21: its hours, Wed 20 kept, on one scale; Mon Nov 14, 2022: Vendor 1's 2 trips beside 82,276.

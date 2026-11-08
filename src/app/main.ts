@@ -19,8 +19,8 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, dayMid, dayShort, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
-import { afterLine, decidedLines, decisionDrawing, goLabel, heldLine, pauseLines, ribbonOf, sheetText, type SheetText } from '../core/decision.js';
-import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, stagedKeys, standingFor, type DecideAbout, type HistoryRef, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
+import { afterLine, dayPausedLine, decidedLines, decisionDrawing, goLabel, heldLine, outputPausedLine, pauseLines, ribbonOf, sheetText, type SheetText } from '../core/decision.js';
+import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, stagedKeys, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { CELL_KINDS, CELL_NAMES, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
@@ -178,6 +178,13 @@ function asPublished(): string | null {
   if (!r || isPublished(r)) return null;
   const day = readersDay(r);
   return day ? `As published · ${dayShort(day)}` : 'Nothing published yet';
+}
+
+/** After a count read from what readers get, on a held day, for an output that waits: " · as published · Mon 18". */
+function publishedNote(dataset: string): string {
+  if (!stagedOutput(dataset)) return '';
+  const day = showsDay(dataset);
+  return day ? ` · as published · ${dayShort(day)}` : '';
 }
 
 /** Keep each node's columns from the latest run's typed plan, so policies can be applied as the app reads. */
@@ -2251,7 +2258,31 @@ function showsRunRows(card: string, tab: Tab): boolean {
   const id = dataOf(card);
   const src = loadSource();
   if (!src || (id !== src && !downstreamOf(src).includes(id))) return false;
-  return tab !== 'news' && tab !== 'dropped' && tab !== 'history';
+  // An output that waits on a held day leads its News with the staged bar too: what the tab says is of staged rows.
+  if (tab === 'news') return stagedOutput(id);
+  return tab !== 'dropped' && tab !== 'history';
+}
+
+/** Whether an output's rows on screen are staged, not what readers get: it waits on the day held, or was not published. */
+const stagedOutput = (id: string): boolean => {
+  const out = outputState(id);
+  return out === 'waiting' || out === 'dont';
+};
+
+/**
+ * The head of a held day's output's News (ADR 0009 §12), under the staged bar: that it waits, with Decide, or what
+ * became of it. Null for an output that doesn't wait (or a day that published).
+ */
+function outputPause(id: string): HTMLElement | null {
+  const out = outputState(id);
+  const own = onScreen();
+  if (!own || (out !== 'waiting' && out !== 'dont' && out !== 'asis')) return null;
+  const d = pauseOf(own)?.pause?.decision ?? null;
+  const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
+  const l = outputPausedLine({ state: out, may, deciders: deciders(), standing: standsOn(d) });
+  const day = dayOfRun(own);
+  return h('div', { class: `paused-line ${out}`, role: 'status' }, glyphEl(PAUSE_MARK[out], 15), h('b', {}, l.text),
+    l.verb ? h('button', { type: 'button', class: 'btn small vf-decide-out', onclick: () => decisionSheet(own, day ? storyFor(day) : null) }, `${l.verb} ›`) : null);
 }
 
 /** The sheet's head: the card, where it sits in the flow, the day, and the tabs. */
@@ -3480,18 +3511,20 @@ function causeCard(story: Story, card: string): HTMLElement {
     story.hero === 'hours' && story.split ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.split.name} and everything else: open`, onclick: () => causeDetail(story, card) }, splitVisual(story)) : null,
     // The weather after the numbers, as a plain note: context, never a cause, and nothing to tap (ADR 0008 §6).
     story.labels.context ? h('p', { class: 'vf-wx' }, story.labels.context) : null,
+    // A day paused says so under its visual, its one verb with it, before the health row and the checks, so deciding is
+    // on the first screen (ADR 0009 §12): Decide, every verb of the story behind ⋯, kept there once decided.
+    paused ? paused.reach : null,
+    paused ? (anchor ? actionsOf(anchor, card, null, paused.verb) : paused.verb ? h('div', { class: 'vf-acts' }, paused.verb) : null) : null,
     // The five health cells, under the day's visuals so they stay in the first screen on a day with something wrong.
     healthRow(story, card),
     // The checks on every day with something wrong, passed or held, and on a near miss (ADR 0008 §10).
     g && (held || g.near || (story.severity === 'alert' && !calm)) && story.hero !== 'gate' ? h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', held ? 'Checks held' : g.near ? 'Checks near the limit' : 'Checks passed'), gateVisual(g, false, gateScale(story))) : null,
     // What the day's outputs are: never "published" alone, which reads as good news; a tap names them.
-    paused ? paused.reach : story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${reachLabel(story, outs.length)}: ${outs.join(', ')}. Open the list.`, onclick: () => outputsDetail(story, outs) },
+    !paused && story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${reachLabel(story, outs.length)}: ${outs.join(', ')}. Open the list.`, onclick: () => outputsDetail(story, outs) },
       svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'published' })), reachLabel(story, outs.length), h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
     story.labels.follows ? foldRow(story.labels.follows, story.labels.kinds, story.follows, card, profileOf(card) !== undefined, true) : null,
     story.labels.sameDay ? foldRow(story.labels.sameDay, [], story.sameDay, card, profileOf(card) !== undefined, true) : null,
-    // A day paused leads with its one verb, Decide, every verb of the story behind ⋯, and keeps them there once decided:
-    // the receipt says what was done (ADR 0009 §12).
-    paused ? (anchor ? actionsOf(anchor, card, null, paused.verb) : paused.verb ? h('div', { class: 'vf-acts' }, paused.verb) : null) : anchor && primary ? actionsOf(anchor, card, primary) : null);
+    !paused && anchor && primary ? actionsOf(anchor, card, primary) : null);
 }
 
 /**
@@ -3541,7 +3574,7 @@ function pauseRow(r: RunRecord, story: Story | null): { reach: HTMLElement; verb
   const under = d?.about.under !== undefined ? ledger?.entries[d.about.under] : undefined;
   const underDay = (under?.about as { day?: string } | undefined)?.day;
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
-  const l = pauseLines({ state: now.state, outputs: waiting.length, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, may, deciders: deciders() });
+  const l = pauseLines({ state: now.state, outputs: waiting.length, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, may, deciders: deciders(), standing: standsOn(d) });
   const reach = h('div', { class: 'vf-pause' },
     h('button', { type: 'button', class: `vf-reach ${now.state}`, 'aria-label': `${l.reach}${waiting.length ? `: ${waiting.join(', ')}` : ''}. Open the list.`, onclick: () => waitingDetail(r, l.reach, !may && now.state === 'waiting' ? () => decisionSheet(r, story) : null) },
       now.state === 'waiting' ? svgNode(reachIcon({ n: waiting.length, state: 'held' })) : h('span', { class: 'vf-mark' }, glyphEl(PAUSE_MARK[now.state], 14)), l.reach, h('span', { class: 'vf-chev' }, glyphEl('chev', 14))));
@@ -3577,6 +3610,17 @@ function waitingDetail(r: RunRecord, label: string, options: (() => void) | null
 /** What the trips were on a run: its trips source's rows. */
 const tripsOf = (r: RunRecord | undefined) => r?.result.manifest.nodes.find((n) => n.origin === loadSource())?.rows;
 
+/** The trips of a run that reach its outputs: what its checks on the trips kept (the trips themselves, with none). */
+function tripsKept(r: RunRecord | undefined): number | undefined {
+  const src = loadSource();
+  const check = src ? state.doc.steps.find((x) => x.kind === 'expectations' && x.inputs.includes(src)) : undefined;
+  const kept = check ? r?.result.manifest.nodes.find((n) => n.origin === check.id) : undefined;
+  return kept?.expectations ? kept.expectations.rows - kept.expectations.dropped : tripsOf(r);
+}
+
+/** Whether a decision (or the one it came under) closes the days after it too: don't publish until a day publishes. */
+const standsOn = (d: Decided | null | undefined): boolean => !!d && d.about.option === 'dont' && (d.about.scope === 'untilPass' || d.about.under !== undefined);
+
 /** Re-draw the sheet behind a detail once the detail closes, when what it shows changed meanwhile. */
 let sheetStale = false;
 
@@ -3601,11 +3645,15 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
   const pause = pauseOf(r)?.pause ?? null;
   const opened = pause ? ledger?.entries[pause.opened]?.at : undefined;
   const rows = tripsOf(r) ?? 0;
-  const kept = shown ? (tripsOf(state.names.get(r.result.waiting[0] ?? Object.keys(r.result.manifest.outputs)[0] ?? '')) ?? null) : null;
-  const readers = shown && kept !== null ? { day: shown, rows: kept } : null;
-  const draw = decisionDrawing(history, story, day ?? '', readers?.day ?? null, { day: rows, readers: readers?.rows ?? null });
+  // The drawing keeps each day's shape as its trips arrived; the numbers are the trips that reach the outputs, past
+  // the checks: what readers would get, or keep.
+  const theirs = shown ? state.names.get(r.result.waiting[0] ?? Object.keys(r.result.manifest.outputs)[0] ?? '') : undefined;
+  const arrived = theirs ? (tripsOf(theirs) ?? null) : null;
+  const keptTheirs = theirs ? (tripsKept(theirs) ?? null) : null;
+  const readers = shown && keptTheirs !== null ? { day: shown, rows: keptTheirs } : null;
+  const draw = decisionDrawing(history, story, day ?? '', readers?.day ?? null, { day: rows, readers: arrived });
   const t: SheetText = sheetText({
-    day, waited: opened ? (Date.now() - Date.parse(opened)) / 60000 : null, otherBuild: !!pause?.otherBuild, outputs: n, rows, readers, later,
+    day, waited: opened ? (Date.now() - Date.parse(opened)) / 60000 : null, otherBuild: !!pause?.otherBuild, outputs: n, rows, reach: tripsKept(r) ?? null, readers, later,
     part: draw.part, ticks: draw.ticks.map(([, x]) => x), unjudged: r.result.holds.some((x) => x.by === 'unjudged'), hash: r.result.hash, may: anyone, deciders: deciders(), head: story?.head ?? null,
   });
   const optionRow = (o: SheetText['options'][number], last: boolean) => {
@@ -3636,18 +3684,24 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
     go.disabled = !option || (option === 'asis' && !reason);
     go.textContent = goLabel(option, scope, n, day);
   };
+  const status = oneLine(t.status);
+  const headMark = glyphEl('held', 16);
   const submit = async () => {
     if (!option) return;
     go.disabled = true;
     const entry = await decide(r, option, scope, reason);
     if (!entry) return sync();
     const now = pauseOf(r);
-    const l = pauseLines({ state: now?.state ?? 'waiting', outputs: n, who: personName(entry.by.as), at: clock(entry.at), under: null, may: true, deciders: deciders() });
-    foot.replaceChildren(h('p', { class: 'vf-receipt' }, glyphEl(PAUSE_MARK[now?.state ?? 'waiting'], 16), now?.state === 'waiting' ? 'Decided, not yet published' : l.reach), h('button', { type: 'button', class: 'linkish', onclick: () => ((ribbonPick = day), (location.hash = '#runs')) }, `Record #${entry.seq} ✓`));
+    const st = now?.state ?? 'waiting';
+    const l = pauseLines({ state: st, outputs: n, who: personName(entry.by.as), at: clock(entry.at), under: null, may: true, deciders: deciders(), standing: option === 'dont' && scope === 'untilPass' && !!day });
+    foot.replaceChildren(h('p', { class: 'vf-receipt' }, glyphEl(PAUSE_MARK[st], 16), st === 'waiting' ? 'Decided, not yet published' : l.reach), h('button', { type: 'button', class: 'linkish', onclick: () => ((ribbonPick = day), (location.hash = '#runs')) }, `Record #${entry.seq} ✓`));
+    // The sheet's top agrees with its receipt: the day's mark now, and no "Waiting" over a day decided.
+    headMark.replaceWith(glyphEl(PAUSE_MARK[st], 16));
+    if (st !== 'waiting') status?.remove();
     for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('.vf-detail .vf-option, .vf-detail .vf-seg-b, .vf-detail .vf-reason'))) b.disabled = true;
   };
-  openDetail(t.title, 'ok', [oneLine(t.status), scopes, rowsEl, chips, foot]);
-  document.querySelector('.vf-detail .vf-dhead h3')?.prepend(glyphEl('held', 16));
+  openDetail(t.title, 'ok', [status, scopes, rowsEl, chips, foot]);
+  document.querySelector('.vf-detail .vf-dhead h3')?.prepend(headMark);
   sync();
 }
 
@@ -3791,6 +3845,9 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
       f ? actionsOf(f, card, 'refetch') : null));
     return box;
   }
+  // An output that waits on a held day says so first, with Decide; its staged bar sits over the panel (showsRunRows).
+  const paused = outputPause(dataOf(card));
+  if (paused) box.append(paused);
   const story = storyDay && (kind === 'trips' || kind === 'checks') && !state.failed?.file ? storyFor(storyDay) : null;
   if (story) {
     // The checks' rows on screen may be another run's on a held day: their table is on the Dropped tab, labelled.
@@ -3856,7 +3913,7 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     const sev = alerts ? 'alert' : warns ? 'warn' : notes ? 'note' : 'ok';
     const idle = effect && !effect.measured && !alerts && !warns;
     box.append(h('div', { class: `verdict ${sev}` },
-      h('p', { class: 'v-day' }, kind && day ? `${dayLabel(day)}${loads.list[loads.at]?.note ? ` · ${loads.list[loads.at]!.note}` : ''}` : kind ? '' : 'From its rows on this run'),
+      h('p', { class: 'v-day' }, kind && day ? `${dayLabel(day)}${loads.list[loads.at]?.note ? ` · ${loads.list[loads.at]!.note}` : ''}` : kind ? '' : stagedOutput(id) ? 'From its staged rows' : 'From its rows on this run'),
       h('h3', { class: 'v-head' }, idle ? `No effect to measure ${spanOf(id) === 'today' ? 'today' : 'here'}` : head),
       h('p', { class: 'v-line' }, idle ? `Its ${plural(effect.total, 'row')} ${effect.total === 1 ? 'is' : 'are all'} ${effect.baseline}: nothing to compare with.` : alerts || warns ? `${listed([alerts ? plural(alerts, 'alert') : '', warns ? plural(warns, 'unusual thing') : '', notes ? plural(notes, 'note') : ''].filter(Boolean))}. The first: ${top.title}.` : (calm ?? top).detail)));
     if (effect?.measured) box.append(effectVisual(id, effect));
@@ -5749,7 +5806,7 @@ async function renderOntology(): Promise<void> {
         return h('button', { class: 'type', type: 'button', 'aria-pressed': String(state.ontologyType === t.id), onclick: () => ((state.ontologyType = t.id), (state.object = null), (state.verdict = null), void renderOntology()) },
           h('span', { class: 'tag' }, 'Object type'),
           h('span', { class: 'name' }, t.name),
-          h('span', { class: 'meta' }, `${c === undefined || c === null ? '' : `${fmtInt(c)} objects · `}from ${t.dataset}, keyed by ${t.key.join(' + ')}`),
+          h('span', { class: 'meta' }, `${c === undefined || c === null ? '' : `${fmtInt(c)} objects${publishedNote(t.dataset)} · `}from ${t.dataset}, keyed by ${t.key.join(' + ')}`),
           links.length ? h('span', { class: 'links' }, `Links: ${links.join(' · ')}`) : null,
           acts.length ? h('span', { class: 'links' }, `Actions: ${acts.join(', ')}`) : null);
       })),
@@ -6057,6 +6114,11 @@ function renderLoads(): void {
   const src = loadSource();
   const lens = profiles().find((p) => p.of === src)?.id ?? src;
   const top = now ? verdictOf(now.day) : undefined;
+  // The day held, on the first screen (ADR 0009 §12): the pause and the day readers see, and Decide a tap away.
+  const own = now ? onScreen() : undefined;
+  const held = own ? pauseOf(own) : null;
+  const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
+  const pl = own && held ? dayPausedLine({ state: held.state, readers: readersDay(own), may, standing: standsOn(held.pause?.decision) }) : null;
   box.replaceChildren(
     h('div', { class: 'loads-head' }, h('p', { class: 'eyebrow' }, `Daily loads · ${loads.episode}`), h('div', { class: 'loads-act' }, play, next)),
     episodes ?? '',
@@ -6065,7 +6127,10 @@ function renderLoads(): void {
     list.some((k) => holidayOf(loads.list[k]!.day) || loads.list[k]!.note) ? h('p', { class: 'loads-key' }, h('i', { class: 'lk-hol' }), 'holiday') : '',
     h('div', { class: `loads-now${top ? ` sev-${top.severity}` : ''}` },
       h('p', { 'aria-live': 'polite' }, top && (top.severity === 'alert' || top.severity === 'warn') ? glyphEl(top.severity, 14) : '', ' ', loadSummary()),
-      lens && top && visible(src!) ? h('button', { type: 'button', class: 'btn small', onclick: () => openTab(lens, 'news') }, 'The news ›') : null));
+      pl && held ? h('p', { class: `loads-pause ${held.state}` }, glyphEl(PAUSE_MARK[held.state], 14), h('b', {}, pl.text)) : null,
+      h('div', { class: 'loads-acts' },
+        pl?.verb && own ? h('button', { type: 'button', class: 'btn small primary vf-decide-day', 'aria-label': `Decide what readers get for ${dayMid(now!.day)}`, onclick: () => decisionSheet(own, storyFor(now!.day)) }, `${pl.verb} ›`) : null,
+        lens && top && visible(src!) ? h('button', { type: 'button', class: 'btn small', onclick: () => openTab(lens, 'news') }, 'The news ›') : null)));
   // The loaded day in view in the scrolling row.
   requestAnimationFrame(() => {
     const row = box.querySelector('.loads-row') as HTMLElement | null;
@@ -6800,7 +6865,7 @@ async function release(r: RunRecord, decision: RecordEntry, keys: Record<string,
  * After a held run: a decision the record holds for the same inputs and keys is applied again (published as is: released
  * again, citing it; not published: nothing to do), which is how a decision outlives the engine (ADR 0009 §10). A
  * decision under another build is shown and applied only by a person, as an amendment. Undecided, a standing decision
- * not to publish until a day passes closes the day, recorded as applied under it (§6).
+ * not to publish until a day publishes closes the day, recorded as applied under it (§6).
  */
 async function applyDecided(r: RunRecord): Promise<void> {
   if (!ledger || !r.result.waiting.length) return;
@@ -7101,12 +7166,55 @@ async function saveFile(name: string, bytes: Uint8Array<ArrayBuffer> | string, t
   }
 }
 
-const KIND_WORD: Record<string, (e: { about: Record<string, unknown>; by: { as: string }; reason: string | null }) => string> = {
-  run: ({ about: a }) => (a.outcome === 'ok' ? `Ran the flow${a.load ? ` on ${dayLabel(String(a.load))}` : ''}: run ${String(a.run)}, manifest ${String(a.manifest).slice(0, 12)}…, ${Array.isArray(a.files) ? `${a.files.length} file${a.files.length === 1 ? '' : 's'} read by their hashes` : ''}`
-    : a.outcome === 'held' ? `Held the flow${a.day ?? a.load ? ` on ${dayMid(String(a.day ?? a.load))}` : ''}: run ${String(a.run)}, ${plural(Array.isArray(a.waiting) ? a.waiting.length : 0, 'output')} waiting`
-    : `A run${a.load ? ` on ${dayLabel(String(a.load))}` : ''} stopped: ${String(a.error ?? '')}`),
-  decide: ({ about: a, reason }) => `Decided ${a.day ? dayMid(String(a.day)) : `run ${String(a.run)}`}: ${a.option === 'asis' ? 'publish as is' : `don’t publish${a.scope === 'untilPass' ? ', until a day passes' : ''}`}${typeof a.under === 'number' ? `, under #${a.under}` : ''}${reason ? ` (${reason})` : ''}`,
-  release: ({ about: a }) => (a.outcome === 'applied' ? `Released ${plural(Object.keys((a.outputs as Record<string, string> | null) ?? {}).length, 'output')} of run ${String(a.run)}, by decision #${String(a.decision)}` : `A release of run ${String(a.run)} was refused: ${String(a.why ?? '')}`),
+/**
+ * What a record line needs beyond its entry (ADR 0009 §12): the held runs that ran a day already held (the same
+ * inputs), and each held run's waiting outputs by its manifest, so a release counts the outputs whose version it
+ * changed, as the button that decided it counted them.
+ */
+interface RecordContext {
+  again: Set<number>;
+  waiting: Map<string, string[]>;
+}
+function recordContext(entries: readonly { seq: number; kind: string; about: unknown }[]): RecordContext {
+  const seen = new Set<string>();
+  const ctx: RecordContext = { again: new Set(), waiting: new Map() };
+  for (const e of entries) {
+    const a = e.about as { outcome?: string; inputs?: unknown; manifest?: unknown; waiting?: unknown } | null;
+    if (e.kind !== 'run' || a?.outcome !== 'held') continue;
+    const key = a.inputs && typeof a.inputs === 'object' ? inputsKey(a.inputs as Inputs) : null;
+    if (key && seen.has(key)) ctx.again.add(e.seq);
+    else if (key) seen.add(key);
+    if (typeof a.manifest === 'string') ctx.waiting.set(a.manifest, Array.isArray(a.waiting) ? (a.waiting as string[]) : []);
+  }
+  return ctx;
+}
+
+/** What became of a held run's day now, by the record's pause of its inputs: its mark on a line with nothing waiting. */
+function heldNow(a: Record<string, unknown>): PauseState | null {
+  const p = a.inputs && typeof a.inputs === 'object' ? pauseByInputs(inputsKey(a.inputs as Inputs)) : null;
+  return pauseState(null, p);
+}
+
+const KIND_WORD: Record<string, (e: { seq: number; about: Record<string, unknown>; by: { as: string }; reason: string | null }, ctx: RecordContext) => string> = {
+  run: ({ seq, about: a }, ctx) => {
+    if (a.outcome === 'ok') return `Ran the flow${a.load ? ` on ${dayLabel(String(a.load))}` : ''}: run ${String(a.run)}, manifest ${String(a.manifest).slice(0, 12)}…, ${Array.isArray(a.files) ? `${a.files.length} file${a.files.length === 1 ? '' : 's'} read by their hashes` : ''}`;
+    if (a.outcome !== 'held') return `A run${a.load ? ` on ${dayLabel(String(a.load))}` : ''} stopped: ${String(a.error ?? '')}`;
+    const day = a.day ?? a.load ? dayMid(String(a.day ?? a.load)) : null;
+    const waiting = Array.isArray(a.waiting) ? a.waiting.length : 0;
+    // A day held once more, or run again with nothing left waiting, says so: one pause, however many runs.
+    if (!waiting) return `Ran ${day ?? 'the flow'} again: run ${String(a.run)}, nothing waiting${heldNow(a) === 'asis' ? ', published as is' : heldNow(a) === 'dont' ? ', not published' : ''}`;
+    if (ctx.again.has(seq)) return `Held ${day ?? 'the flow'} again: run ${String(a.run)}, ${plural(waiting, 'output')} waiting`;
+    return `Held the flow${day ? ` on ${day}` : ''}: run ${String(a.run)}, ${plural(waiting, 'output')} waiting`;
+  },
+  decide: ({ about: a, reason }) => `Decided ${a.day ? dayMid(String(a.day)) : `run ${String(a.run)}`}: ${a.option === 'asis' ? 'publish as is' : `don’t publish${a.scope === 'untilPass' ? ', until a day publishes' : ''}`}${typeof a.under === 'number' ? `, under #${a.under}` : ''}${reason ? ` (${reason})` : ''}`,
+  release: ({ about: a }, ctx) => {
+    if (a.outcome !== 'applied') return `A release of run ${String(a.run)} was refused: ${String(a.why ?? '')}`;
+    // The outputs whose version it changed: those its run held back, as the cause card and the button counted them.
+    const named = Object.keys((a.outputs as Record<string, string> | null) ?? {});
+    const waited = typeof a.manifest === 'string' ? ctx.waiting.get(a.manifest) : undefined;
+    const changed = waited ? named.filter((n) => waited.includes(n)) : named;
+    return `Released ${plural(changed.length, 'output')} of run ${String(a.run)}, by decision #${String(a.decision)}`;
+  },
   flow: ({ about: a }) => (a.before ? `The flow changed: ${String(a.before).slice(0, 12)}… to ${String(a.after).slice(0, 12)}…` : `The flow as it first ran here: ${String(a.after).slice(0, 12)}…`),
   file: ({ about: a }) => describeFile(a as unknown as FileCheck).title,
   act: ({ about: a, by }) => `${personName(by.as)} ${ACT_DONE[a.act as LogAct] ?? String(a.act)}: ${String(a.title)}`,
@@ -7122,10 +7230,17 @@ const KIND_WORD: Record<string, (e: { about: Record<string, unknown>; by: { as: 
 };
 const ROUTINE = new Set(['file', 'sign']);
 
-/** A record line's mark (ADR 0009 §12): ‖ a held run, ⚑ or ✕ a decision, ⚑ an applied release. */
+/**
+ * A record line's mark (ADR 0009 §12): ‖ a held run with outputs waiting, ⚑ or ✕ a decision, ⚑ an applied release. A
+ * held run with nothing waiting (a day run again once decided) carries what became of its day, or no mark.
+ */
 function recordMark(e: { kind: string; about: unknown }): VizMark | null {
-  const a = e.about as { outcome?: string; option?: string };
-  if (e.kind === 'run' && a.outcome === 'held') return 'held';
+  const a = e.about as { outcome?: string; option?: string; waiting?: unknown };
+  if (e.kind === 'run' && a.outcome === 'held') {
+    if (Array.isArray(a.waiting) && a.waiting.length) return 'held';
+    const now = heldNow(e.about as Record<string, unknown>);
+    return now && now !== 'waiting' ? PAUSE_MARK[now] : null;
+  }
   if (e.kind === 'decide') return a.option === 'asis' ? 'flag' : 'closed';
   if (e.kind === 'release' && a.outcome === 'applied') return 'flag';
   return null;
@@ -7143,12 +7258,15 @@ function renderRecord(): void {
   const where = ledger.durable ? 'kept in this browser' : 'kept for this visit only: this browser has no storage for it';
   const card = ledger.identity.card;
   const recent = [...ledger.entries].reverse();
-  const shown = recent.filter((e) => !ROUTINE.has(e.kind)).slice(0, 15);
-  const routine = recent.filter((e) => ROUTINE.has(e.kind)).length;
+  const ctx = recordContext(ledger.entries);
+  // Routine: files first read, signatures, and a day held again or run again with nothing waiting (one pause, one line).
+  const isRoutine = (e: (typeof recent)[number]) => ROUTINE.has(e.kind) || (e.kind === 'run' && (e.about as { outcome?: string }).outcome === 'held' && (ctx.again.has(e.seq) || !((e.about as { waiting?: unknown[] }).waiting?.length)));
+  const shown = recent.filter((e) => !isRoutine(e)).slice(0, 15);
+  const routine = recent.filter(isRoutine).length;
   const line = (e: (typeof recent)[number]) => {
     const say = KIND_WORD[e.kind];
     const mark = recordMark(e);
-    return h('li', {}, h('span', { class: 'seq' }, `#${e.seq}`), h('span', { class: mark ? 'rec-marked' : '' }, mark ? glyphEl(mark, 14) : '', say ? say(e as never) : e.kind), h('span', { class: 'when' }, `${new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${personName(e.by.as)}`));
+    return h('li', {}, h('span', { class: 'seq' }, `#${e.seq}`), h('span', { class: mark ? 'rec-marked' : '' }, mark ? glyphEl(mark, 14) : '', say ? say(e as never, ctx) : e.kind), h('span', { class: 'when' }, `${new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${personName(e.by.as)}`));
   };
   const pick = h('input', { type: 'file', accept: '.json,application/json', hidden: true }) as HTMLInputElement;
   pick.addEventListener('change', () => void checkAgainst(pick.files?.[0]));
@@ -7164,7 +7282,7 @@ function renderRecord(): void {
       h('button', { type: 'button', class: 'btn quiet', onclick: () => void downloadCheckpoint() }, 'Download a checkpoint'),
       h('button', { type: 'button', class: 'btn quiet', onclick: () => pick.click() }, 'Check against a checkpoint'), pick),
     h('ul', { class: 'timeline' }, ...shown.map(line)),
-    routine ? h('details', { class: 'fold' }, h('summary', {}, `${routine === 1 ? '1 routine entry' : `${fmtInt(routine)} routine entries`}: files first read, signatures`), h('ul', { class: 'timeline' }, ...recent.filter((e) => ROUTINE.has(e.kind)).slice(0, 40).map(line))) : '',
+    routine ? h('details', { class: 'fold' }, h('summary', {}, `${routine === 1 ? '1 routine entry' : `${fmtInt(routine)} routine entries`}: files first read, signatures, days run again`), h('ul', { class: 'timeline' }, ...recent.filter(isRoutine).slice(0, 40).map(line))) : '',
   );
 }
 

@@ -136,8 +136,9 @@ published. Cached check counts must still hold. And older builds must refuse wha
    | ◐ **Publish the complete part** | only the part that arrived: the hours before the fall, or every vendor but the missing one | a derived document with a filter | 2 |
    | ↻ **Re-run when corrected** | the day run again when the data's list republishes its file (ADR 0006's amber "republished"); released if it passes, held again if not | a run | 3 |
 
-   - A decision covers **this day**, or the days **until a day passes**: it stands for each held day after it until a
-     day publishes. Nov 14–20 takes one decision, not seven. Publish as is covers one day at a time (Q-50).
+   - A decision covers **this day**, or the days **until a day publishes** (`untilPass` in the record): it stands for
+     each held day after it until a day publishes, and its receipt says so ("Unpublished until a day publishes"). Nov
+     14–20 takes one decision, not seven. Publish as is covers one day at a time (Q-50).
    - The *missing part* comes from the story's cause. An hours cause gives the hours from its fall; a split gives the
      part that vanished. A cause with no part to blame (an amount) has no missing part, so neither fill nor the complete
      part is offered.

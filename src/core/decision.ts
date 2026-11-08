@@ -10,6 +10,8 @@
  * - The sheet's words (`sheetText`, `sheetWords`): at most 45 at a glance, whichever button label shows.
  * - The cause card's row (`pauseLines`): what its outputs wait for, or what became of them, and its one verb; and the
  *   held card's line (`heldLine`), what held a day with no story to tell it.
+ * - The day line under the loads strip (`dayPausedLine`) and the head of a waiting output's News (`outputPausedLine`):
+ *   the pause, readers' day, and the verb that opens the sheet, on the first screen.
  * - An episode's days once it is over (`afterLine`), and the paused days by month (`ribbonOf`, `decidedLines`).
  */
 import { dayMid, dayShort, type PauseState } from './days.js';
@@ -129,9 +131,12 @@ export interface SheetIn {
   otherBuild: boolean;
   /** The outputs that wait. */
   outputs: number;
-  /** The day's trips (the held run's). */
+  /** The day's trips (the held run's), as they arrived. */
   rows: number;
-  /** What readers see now, or null when nothing is published. */
+  /** The day's trips that reach its outputs, past its checks: what readers would get (the drawing keeps the day's shape,
+   * as it arrived, on the sheet's one scale). Null where there are no checks to pass. */
+  reach: number | null;
+  /** What readers see now, its trips past its checks, or null when nothing is published. */
   readers: { day: string; rows: number } | null;
   /** A later day readers see already: the day can no longer be shown (Q-51). */
   later: string | null;
@@ -173,6 +178,12 @@ export interface SheetText {
   denied: string | null;
 }
 
+/**
+ * What a decision covers: this day, or each held day after it until a day publishes. Named by its effect: a day that
+ * merely passes (24 hours) ends nothing; a day that publishes does.
+ */
+export const SCOPES = ['This day', 'Until a day publishes'] as const;
+
 /** The button, naming the result: "Publish as is · 3 outputs", "Don’t publish Thu 21", "Don’t publish from Thu 21". */
 export function goLabel(option: DecideOption | null, scope: 'day' | 'untilPass', outputs: number, day: string | null): string {
   if (option === 'asis') return `Publish as is · ${outputs} output${outputs === 1 ? '' : 's'}`;
@@ -184,14 +195,16 @@ export function goLabel(option: DecideOption | null, scope: 'day' | 'untilPass',
  * and number, the reason chips, the button, and the hash of what goes out. */
 export function sheetText(o: SheetIn): SheetText {
   const name = o.day ? dayMid(o.day) : 'This run';
-  const asis = o.later ? `${dayShort(o.later)} is published` : fmtInt(o.rows);
+  const reach = o.reach ?? o.rows;
+  const asis = o.later ? `${dayShort(o.later)} is published` : fmtInt(reach);
   const dont = o.readers ? `${dayShort(o.readers.day)} · ${fmtInt(o.readers.rows)}` : 'nothing shown';
+  const past = o.reach !== null && o.reach !== o.rows ? ` past its checks, of ${fmtInt(o.rows)} that arrived` : '';
   return {
     title: `${o.day ? `${dayMid(o.day)} · w` : 'W'}hat readers get`,
     status: o.otherBuild ? 'Other build’s decision' : waitedLabel(o.waited),
-    scopes: ['This day', 'Until a day passes'],
+    scopes: SCOPES,
     options: [
-      { option: 'asis', label: 'Publish as is', number: asis, off: !!o.later, aria: o.later ? `Publish as is: not possible, ${dayMid(o.later)} is what readers see now` : `Publish as is: readers get ${name} as it came, ${fmtInt(o.rows)} trips${o.head ? `, ${o.head}` : ''}` },
+      { option: 'asis', label: 'Publish as is', number: asis, off: !!o.later, aria: o.later ? `Publish as is: not possible, ${dayMid(o.later)} is what readers see now` : `Publish as is: readers get ${name} as it came, ${fmtInt(reach)} trips${past}${o.head ? `, ${o.head}` : ''}` },
       { option: 'dont', label: 'Don’t publish', number: dont, off: false, aria: o.readers ? `Don’t publish: readers keep ${dayMid(o.readers.day)}, ${fmtInt(o.readers.rows)} trips, and this day is never published` : 'Don’t publish: readers get nothing, nothing is published yet' },
     ],
     part: o.part,
@@ -225,11 +238,33 @@ export function heldLine(x: Pick<Hold, 'by' | 'origin' | 'said'>, history: boole
  * who may not decide, whom it waits on, in the row itself; once decided, the receipt: who decided and when, or the
  * standing decision it came under. Its words count in the card's 60 at a glance.
  */
-export function pauseLines(o: { state: PauseState; outputs: number; who: string | null; at: string | null; under: string | null; may: boolean; deciders: string }): { reach: string; verb: string | null } {
+export function pauseLines(o: { state: PauseState; outputs: number; who: string | null; at: string | null; under: string | null; may: boolean; deciders: string; standing?: boolean }): { reach: string; verb: string | null } {
   const by = o.who ? ` · ${o.who}${o.at ? ` · ${o.at}` : ''}` : '';
   if (o.state === 'waiting') return o.may ? { reach: `Paused · ${o.outputs} output${o.outputs === 1 ? '' : 's'} waiting`, verb: 'Decide' } : { reach: `Paused · waiting on ${o.deciders}`, verb: null };
   if (o.state === 'asis') return { reach: `Published as is${by}`, verb: null };
-  return { reach: o.under ? `Not published · under ${o.under}’s decision` : `Not published${by}`, verb: null };
+  // A decision that stands says so, by its effect: the days after it are closed too, until one publishes.
+  return { reach: o.under ? `Not published · under ${o.under}’s decision` : o.standing ? 'Unpublished until a day publishes' : `Not published${by}`, verb: null };
+}
+
+/**
+ * The day line under the loads strip on a held day (ADR 0009 §12), on the canvas's first screen: the pause and the day
+ * readers see meanwhile, with Decide for someone who may decide; once decided, what became of the day.
+ */
+export function dayPausedLine(o: { state: PauseState; readers: string | null; may: boolean; standing: boolean }): { text: string; verb: string | null } {
+  const see = o.readers ? `readers see ${dayShort(o.readers)}` : 'nothing published yet';
+  if (o.state === 'waiting') return { text: `Paused · ${see}`, verb: o.may ? 'Decide' : null };
+  if (o.state === 'asis') return { text: 'Published as is', verb: null };
+  return { text: `${o.standing ? 'Unpublished until a day publishes' : 'Not published'} · ${see}`, verb: null };
+}
+
+/**
+ * The head of a waiting output's News on a held day (ADR 0009 §12), over the staged bar that says which day readers see:
+ * that it waits, with Decide for someone who may decide, or whom it waits on; once decided, what became of it.
+ */
+export function outputPausedLine(o: { state: PauseState; may: boolean; deciders: string; standing: boolean }): { text: string; verb: string | null } {
+  if (o.state === 'waiting') return o.may ? { text: 'Waits for a decision', verb: 'Decide' } : { text: `Waits on ${o.deciders}`, verb: null };
+  if (o.state === 'asis') return { text: 'Published as is', verb: null };
+  return { text: o.standing ? 'Unpublished until a day publishes' : 'Not published', verb: null };
 }
 
 /** Days said as runs of weekdays: "Fri–Sun", "Mon, Wed". */
