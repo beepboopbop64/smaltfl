@@ -27,6 +27,8 @@ export interface Trouble {
   vendorSurge?: number;
   /** The share of the day's rows the checks drop (else 4%). */
   dropShare?: number;
+  /** The day's trips this many times what they would be (a season's rise). */
+  more?: number;
 }
 export function historyWith(trouble: Record<string, Trouble> = {}): HistoryFile {
   const rnd = random(11);
@@ -37,7 +39,7 @@ export function historyWith(trouble: Record<string, Trouble> = {}): HistoryFile 
   for (const day of DAYS) {
     const t = trouble[day] ?? {};
     const wd = WEEKDAY[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
-    let n = Math.round(100_000 * wd * (holidayOf(day) ? 0.7 : seasonOf(day) ? 0.8 : 1) * Math.exp(0.03 * gauss(rnd)));
+    let n = Math.round(100_000 * wd * (holidayOf(day) ? 0.7 : seasonOf(day) ? 0.8 : 1) * Math.exp(0.03 * gauss(rnd)) * (t.more ?? 1));
     let byHour = HOUR.map((x) => Math.round((n * x) / HOURS));
     if (t.blank) byHour = byHour.map((x) => Math.round(x * 0.03));
     if (t.stopAt !== undefined) byHour = byHour.map((x, h) => (h >= t.stopAt! ? Math.round(x * 0.02) : x));

@@ -110,8 +110,8 @@ describe('a day’s news from its history', () => {
     const news = newsOf(new HistoryRanges(historyWith({ '2023-10-11': { stopAt: 13, vendorShare: 0.5 } })), '2023-10-11', vendorNames);
     const hours = news.find((f) => f.kind === 'hours')!;
     expect(hours.severity).toBe('alert');
-    // Pickup times, not arrival times: the trips fall to a trickle, they don't end.
-    expect(hours.title).toMatch(/^Trips fall 9\d% at 13:00$/);
+    // Pickup times, not arrival times: the trips fall to a trickle, they don't end; the fall is said from its hour on.
+    expect(hours.title).toMatch(/^Trips fall 9\d% from 13:00$/);
     expect(hours.hours).toMatchObject({ from: 13, to: 23 });
     expect(hours.hours!.got).toHaveLength(24);
     expect(hours.hours!.usual[14]).toBeGreaterThan(20 * hours.hours!.got[14]!);
@@ -124,6 +124,29 @@ describe('a day’s news from its history', () => {
     expect(news.find((f) => f.kind === 'volume')!.severity).toBe('alert');
     expect(news.find((f) => f.kind === 'gone')).toMatchObject({ title: 'Vendor 1: none', severity: 'alert' });
     expect(news.find((f) => f.kind === 'gone')!.detail).toMatch(/^Usually on \d+–\d+% of trips; none today\.$/);
+  });
+
+  it('counts a share’s trips against its usual share of the same trips, never “fewer than a day like it”', () => {
+    // Vendor 1 gone on a day with 30% fewer trips: its detail counts today's trips and its usual share of them.
+    const news = newsOf(new HistoryRanges(historyWith({ '2023-10-11': { vendorShare: 0.15 } })), '2023-10-11', vendorNames);
+    const share = news.find((f) => f.key === 'share:VendorID=1')!;
+    expect(share.detail).toMatch(/^[\d,]+ of today’s trips with it; about [\d,]+ at its usual share\.$/);
+    const [today, usual] = [...share.detail.replace(/,/g, '').matchAll(/\d+/g)].map((m) => Number(m[0]));
+    expect(today).toBeLessThan(usual!);
+    expect(today! / (today! / 0.15)).toBeCloseTo(0.15, 2);
+    for (const f of news) expect(f.detail).not.toMatch(/than a day like it\.$/);
+  });
+
+  it('tells findings that are one set of trips by the value that names them, with its own numbers', () => {
+    // Vendor 2 down and vendor 1 up by the same trips: told once, by the member most out of the ordinary.
+    const news = newsOf(new HistoryRanges(historyWith({ '2023-10-11': { vendorShare: 0.15 } })), '2023-10-11', vendorNames);
+    const together = news.find((f) => f.key.startsWith('together:'));
+    if (together) {
+      expect(together.title).not.toMatch(/move together|trips (fewer|more)/);
+      expect(together.title).toMatch(/^vendor \d: [\d.]+% \(usually [\d.–]+%\)$/i);
+      expect(together.detail).toMatch(/moved with it: the same trips, likely\.$/);
+      expect(together.members![0]!.share).toBe(together.value);
+    }
   });
 
   it('tells a value never seen before, after the history’s first weeks', () => {
@@ -163,6 +186,21 @@ describe('a day’s news from its history', () => {
     expect(later.lasting).toBe('2023-10-02');
     // Its first day is for the chart to show, not the title to say (ADR 0008).
     expect(later.title).toBe('Vendor 1: 15% (usually 27–32%)');
+  });
+
+  it('tells a rise in trips that has lasted most of a week as a note, each day judged against its own range', () => {
+    // Two weeks 12% above what the weeks before had (the weeks after Labor Day 2022, with no last year to go by).
+    const trouble: Record<string, Trouble> = {};
+    for (let d = '2023-10-02'; d <= '2023-10-15'; d = plusDays(d, 1)) trouble[d] = { more: 1.12 };
+    const h = new HistoryRanges(historyWith(trouble));
+    const first = newsOf(h, '2023-10-02', vendorNames).find((f) => f.kind === 'volume')!;
+    expect(first).toMatchObject({ severity: 'warn' });
+    expect(first.title).toMatch(/^More trips: [\d,]+ \(\+1\d%\)$/);
+    const later = newsOf(h, '2023-10-08', vendorNames).find((f) => f.kind === 'volume')!;
+    expect(later).toMatchObject({ severity: 'note', lasting: '2023-10-02' });
+    // Something wrong is never quieted for having lasted.
+    const blank = newsOf(new HistoryRanges(historyWith({ ...trouble, '2023-10-08': { blank: true } })), '2023-10-08', vendorNames).find((f) => f.kind === 'volume')!;
+    expect(blank.severity).toBe('alert');
   });
 
   it('gives the weather as context: snow is worth knowing, a dry day is normal', () => {

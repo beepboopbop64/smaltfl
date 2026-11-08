@@ -78,7 +78,7 @@ is judged, but not learned from: without that, September 2023's Sundays went by 
 The news (`src/core/news.ts`) finds what is out of the ordinary and the story (`src/core/story.ts`, ADR 0008) tells
 what it adds up to. Over every day from January 2023 to January 2024 (396 days), 363 have nothing unusual to tell (238
 calm, 125 with notes only), 27 something unusual, and 6 something wrong: the September 2023 gap (the trips falling 95%
-at 13:00 on the 21st, then three days when only the Flex Fare trips arrived), and two days in November 2023 when the
+from 13:00 on the 21st, then three days when only the Flex Fare trips arrived), and two days in November 2023 when the
 surcharges' shares were far from a day like it's (on the 7th, the $2.50 surcharge on 16.4% of trips where a day like it
 has 26.1% to 31.5%; on the 14th, no surcharge on 36.9% where it has 45.1% to 52.4%).
 Unusual are, for instance, the airport fee going from $1.25 to $1.75 in April 2023 (a value gone, another's share up,
@@ -88,7 +88,9 @@ kept the alarms down, from a first pass with an alert on 141 of those days: last
 misses days like the one judged far more than the weeks' (the TLC's surcharges changed in December 2022, so last
 year's Saturdays had no $1 surcharge to speak of), a holiday not judged by a last year that has moved too far,
 a share needing to move two points and four typical misses to be unusual, a change that has lasted told once as a
-note from the day it began, and a quantile's shift only where it moves rather than jumps.
+note from the day it began (the day's trips each day against its own range: the weeks after Labor Day 2022, which the
+history has no last year to learn from, are notes after their first four days), and a quantile's shift only where it
+moves rather than jumps.
 
 ## 3. The flows
 

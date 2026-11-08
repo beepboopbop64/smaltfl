@@ -99,10 +99,13 @@ export function splitRows({ rows, w = 334, aria }: { rows: SplitRow[]; w?: numbe
 }
 
 /**
- * Trips by pickup hour: 24 columns, today's count (ink) over the usual count that hour (ghost); the uncovered ghost is
- * the shortfall. A rule marks the first short hour; the floor after it and the ghost are labelled on the chart.
+ * Trips by pickup hour: 24 columns, today's count (ink) over the usual count that hour (ghost). In the short hours
+ * (`cut` to `to`) the trips that came are dark and never thinner than 3 px, so a trickle reads as present and low, not
+ * as the end of the file; above each, up to the usual count, the trips missing are drawn as missing (a wash with a
+ * dashed edge) and counted on the chart. A rule marks the first short hour; the floor after it and the ghost are
+ * labelled on the chart.
  */
-export function hourBars(o: { got: readonly number[]; usual: readonly number[]; w?: number; barsH?: number; cut?: number; cutLabel?: string; floorLabel?: string; ghostLabel?: string; aria: string; pick?: number }): string {
+export function hourBars(o: { got: readonly number[]; usual: readonly number[]; w?: number; barsH?: number; cut?: number; to?: number; cutLabel?: string; floorLabel?: string; missingLabel?: string; ghostLabel?: string; aria: string; pick?: number }): string {
   const w = o.w ?? 334;
   const barsH = o.barsH ?? 64;
   const top = 16;
@@ -112,22 +115,35 @@ export function hourBars(o: { got: readonly number[]; usual: readonly number[]; 
   const bw = cw - 2.5;
   const ymax = Math.max(1, ...o.usual, ...o.got) * 1.04;
   const y = (v: number) => (v / ymax) * barsH;
+  const short = (i: number) => o.cut !== undefined && o.to !== undefined && i >= o.cut && i <= o.to;
+  const MIN = 3;
   let s = open(w, h, o.aria, 'data-y0="0"');
+  // The trips missing in the short hours: one area under the usual hours' skyline, a wash with a dashed edge.
+  if (o.cut !== undefined && o.to !== undefined) {
+    let d = `M${f1(o.cut * cw + 0.75)} ${base}`;
+    for (let i = o.cut; i <= o.to; i++) d += `V${f1(base - y(Math.max(o.usual[i] ?? 0, o.got[i] ?? 0)))}H${f1((i + 1) * cw - (i === o.to ? 0.75 : 0))}`;
+    s += `<path class="absent" d="${d}V${base}Z"/>`;
+  }
   for (let i = 0; i < 24; i++) {
     const x0 = i * cw + 1.25;
-    s += `<path class="ghost" d="${colPath(x0, base, bw, y(o.usual[i] ?? 0))}"/>`;
     const got = o.got[i] ?? 0;
-    s += `<path class="${o.pick === i ? 'ink-strong' : 'ink'}" d="${colPath(x0 + 1.5, base, bw - 3, got > 0 ? Math.max(1.5, y(got)) : 0, 1.5)}"/>`;
+    const gh = got > 0 ? Math.max(short(i) ? MIN : 1.5, y(got)) : 0;
+    if (!short(i)) s += `<path class="ghost" d="${colPath(x0, base, bw, y(o.usual[i] ?? 0))}"/>`;
+    s += `<path class="${o.pick === i || short(i) ? 'ink-strong' : 'ink'}" d="${colPath(x0 + (short(i) ? 0.75 : 1.5), base, bw - (short(i) ? 1.5 : 3), gh, 1.5)}"/>`;
   }
   s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
   if (o.cut !== undefined) {
     const cx = o.cut * cw;
     s += `<line class="cut-bad" x1="${f1(cx)}" x2="${f1(cx)}" y1="${top - 3}" y2="${base}"/>`;
     if (o.cutLabel) s += `<text x="${f1(cx - 4)}" y="${top - 5}" text-anchor="end" class="lbl-bad">${esc(o.cutLabel)}</text>`;
-    if (o.floorLabel) {
-      const after = o.got.slice(o.cut + 1);
-      const fy = base - y(Math.max(0, ...after)) - 5;
-      s += `<text x="${f1(cx + 5)}" y="${f1(fy)}" class="lbl-m lbl-halo">${esc(o.floorLabel)}</text>`;
+    const span = o.got.slice(o.cut, (o.to ?? 23) + 1);
+    const floorY = base - Math.max(MIN, y(Math.max(0, ...span))) - 5;
+    if (o.floorLabel) s += `<text x="${f1(cx + 5)}" y="${f1(floorY)}" class="lbl-b lbl-halo">${esc(o.floorLabel)}</text>`;
+    if (o.missingLabel && o.to !== undefined) {
+      const wanted = o.usual.slice(o.cut, o.to + 1);
+      const mid = [...wanted].sort((a, b) => a - b)[wanted.length >> 1] ?? 0;
+      const my = Math.min(floorY - 16, base - y(mid) / 2);
+      s += `<text x="${f1(((o.cut + o.to + 1) / 2) * cw)}" y="${f1(my)}" text-anchor="middle" class="lbl-bad lbl-halo">${esc(o.missingLabel)}</text>`;
     }
   }
   if (o.ghostLabel) s += `<text x="${w}" y="${top - 5}" text-anchor="end" class="lbl-m">${esc(o.ghostLabel)}</text>`;
@@ -146,13 +162,21 @@ export interface GateRule {
   rows: number;
 }
 
+/** An axis's end: the first of 1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 or 10 times a power of ten at or above `raw`, so the
+ * scale of two neighbouring days doesn't jump from 9k to 20k. */
+export function niceMax(raw: number): number {
+  const mag = 10 ** Math.floor(Math.log10(Math.max(1e-9, raw)));
+  const step = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((x) => x * mag >= raw - 1e-9) ?? 10;
+  return step * mag;
+}
+
 /**
  * The checks: a share bar (0-100%: the dropped rows as one segment, a ‖ wall when the run was held, the kept rows in a
  * ghost; the limit a cut through the ink with stubs above and below) and under it a count bar (rows dropped today from 0,
  * over the usual range of rows dropped), which shows whether more bad rows came or the kept rows went missing. Both
  * scales' ends are printed.
  */
-export function gateBars(o: { rows: number; dropped: number; rules?: readonly GateRule[]; limit: number | null; usual: { low: number; high: number } | null; held: boolean; shareLabel: string; limitLabel?: string; countLabel: [string, string]; aria: string; w?: number; big?: boolean }): string {
+export function gateBars(o: { rows: number; dropped: number; rules?: readonly GateRule[]; limit: number | null; usual: { low: number; high: number } | null; held: boolean; shareLabel: string; limitLabel?: string; countLabel: [string, string]; aria: string; w?: number; big?: boolean; countMax?: number }): string {
   const w = o.w ?? 334;
   const share = o.rows ? o.dropped / o.rows : 0;
   const sbH = o.big ? 18 : 12;
@@ -175,9 +199,7 @@ export function gateBars(o: { rows: number; dropped: number; rules?: readonly Ga
   s += `<text x="${f1(Math.min(w - 40, Math.max(total, 76)))}" y="${sy - 6}" text-anchor="end" class="lbl-b">${esc(o.shareLabel)}</text>`;
   s += `<text x="${w}" y="${sy + sbH + 17}" text-anchor="end" class="tick" aria-hidden="true">100%</text>`;
   if (o.usual) {
-    const raw = Math.max(o.usual.high, o.dropped, 1) * 1.08;
-    const mag = 10 ** Math.floor(Math.log10(raw));
-    const cmax = Math.ceil(raw / mag) * mag;
+    const cmax = niceMax(Math.max(o.usual.high, o.dropped, o.countMax ?? 0, 1) * 1.08);
     const c = (v: number) => (v / cmax) * w;
     s += `<rect class="ghost-2 edge" x="${f1(c(o.usual.low))}" y="${cy}" width="${f1(Math.max(2, c(o.usual.high) - c(o.usual.low)))}" height="${cbH}" rx="2"/>`;
     s += `<path class="ink-strong" d="${barPath(0, cy + 2, Math.max(2, c(o.dropped)), cbH - 4, 1.5)}"/>`;
@@ -193,16 +215,19 @@ export function gateBars(o: { rows: number; dropped: number; rules?: readonly Ga
  * The day's count on a track from 0: the number large, in its severity when the amount is the news; its usual range as
  * a band with an edge; today a dot. One chart, so the first numbers on the screen are drawn, not said.
  */
-export function amountLine(o: { value: number; low: number; high: number; valueLabel: string; bandLabel: string; sev?: 'alert' | 'warn' | null; aria: string; w?: number }): string {
+export function amountLine(o: { value: number; low: number; high: number; valueLabel: string; bandLabel: string; changeLabel?: string; sev?: 'alert' | 'warn' | null; aria: string; w?: number }): string {
   const w = o.w ?? 334;
-  const h = 62;
-  const ty = 46;
+  // The count's width, roughly (32 px tabular digits, "trips", the change): the range's words go under it if they'd meet.
+  const countEnd = [...o.valueLabel].reduce((t, c) => t + (/\d/.test(c) ? 19.2 : 9), 0) + 39 + (o.changeLabel ? 8 + o.changeLabel.length * 10.5 : 0);
+  const below = countEnd + 8 > w - 30 - o.bandLabel.length * 6.4;
+  const h = below ? 76 : 62;
+  const ty = below ? 60 : 46;
   const raw = Math.max(o.high, o.value) * 1.05;
   const max = Math.ceil(raw / 10_000) * 10_000 || 1;
   const x = (v: number) => (v / max) * (w - 8) + 4;
   let s = open(w, h, o.aria, 'data-y0="0"');
-  s += `<text x="0" y="30" class="count${o.sev === 'alert' ? ' count-bad' : ''}">${esc(o.valueLabel)}<tspan class="count-unit" dx="6">trips</tspan></text>`;
-  s += `<text x="${w - 30}" y="30" text-anchor="end" class="lbl-m">${esc(o.bandLabel)}</text>`;
+  s += `<text x="0" y="30" class="count${o.sev === 'alert' ? ' count-bad' : ''}">${esc(o.valueLabel)}<tspan class="count-unit" dx="6">trips</tspan>${o.changeLabel ? `<tspan class="count-chg${o.sev ? ` chg-${o.sev}` : ''}" dx="8">${esc(o.changeLabel)}</tspan>` : ''}</text>`;
+  s += `<text x="${w - 30}" y="${below ? 47 : 30}" text-anchor="end" class="lbl-m">${esc(o.bandLabel)}</text>`;
   s += `<line class="base" x1="4" x2="${w - 4}" y1="${ty}" y2="${ty}"/>`;
   s += `<rect class="ghost-2 edge" x="${f1(x(o.low))}" y="${ty - 5}" width="${f1(Math.max(3, x(o.high) - x(o.low)))}" height="10" rx="3"/>`;
   s += `<circle class="dot${o.sev ? ` dot-${o.sev}` : ''}" cx="${f1(x(o.value))}" cy="${ty}" r="5.5"/>`;
@@ -222,7 +247,8 @@ export interface Part {
 /**
  * The split on one count scale: the named part on the left, everything else on the right, end to end. Each part's slot
  * is its usual or today's count, whichever is more, outlined; today fills it from its start (2 px at least). Rows missing
- * today are a dashed outline on a wash; a surge runs past a usual-end tick in a solid grey, never dashed.
+ * today are a dashed outline on a wash; trips beyond the usual count run past a usual notch (sticking out above and
+ * below the bar) as an outlined box, 6 px at least, never dashed.
  */
 export function partBar({ left, right, w = 334, aria }: { left: Part; right: Part; w?: number; aria: string }): string {
   const h = 58;
@@ -233,7 +259,7 @@ export function partBar({ left, right, w = 334, aria }: { left: Part; right: Par
   const total = slot(left) + slot(right);
   const scale = (w - gap) / total;
   let s = open(w, h, aria, 'data-y0="0"');
-  const draw = (p: Part, x0: number) => {
+  const draw = (p: Part, x0: number, end: number) => {
     const sw = slot(p) * scale;
     const today = p.today > 0 ? Math.max(2, p.today * scale) : 0;
     const usual = p.usual * scale;
@@ -244,14 +270,16 @@ export function partBar({ left, right, w = 334, aria }: { left: Part; right: Par
     } else {
       s += `<rect class="ink-strong" x="${f1(x0)}" y="${by}" width="${f1(Math.max(2, usual))}" height="${bh}" rx="2"/>`;
       if (today - usual > 1) {
-        s += `<rect class="over" x="${f1(x0 + usual + 2)}" y="${by}" width="${f1(today - usual - 2)}" height="${bh}" rx="2"/>`;
-        s += `<line class="usual-end" x1="${f1(x0 + usual + 1)}" x2="${f1(x0 + usual + 1)}" y1="${by - 3}" y2="${by + bh + 3}"/>`;
+        const ow = Math.min(Math.max(6, today - usual - 2), end - (x0 + usual + 2));
+        s += `<rect class="over" x="${f1(x0 + usual + 2.75)}" y="${by + 0.75}" width="${f1(Math.max(1, ow - 1.5))}" height="${bh - 1.5}" rx="2"/>`;
+        s += `<line class="usual-end" x1="${f1(x0 + usual + 1)}" x2="${f1(x0 + usual + 1)}" y1="${by - 6}" y2="${by + bh + 6}"/>`;
       }
     }
     return sw;
   };
-  const lw = draw(left, 0);
-  draw(right, lw + gap);
+  const lw = slot(left) * scale;
+  draw(left, 0, lw + gap - 1);
+  draw(right, lw + gap, w + 4);
   const name = (p: Part, x: number, anchor: 'start' | 'end') =>
     `<text x="${f1(x + (p.sev && anchor === 'start' ? 16 : 0))}" y="12" text-anchor="${anchor}" class="lbl-b">${esc(p.name)}</text>` +
     (p.sev ? `<g transform="translate(${f1(anchor === 'start' ? x : x - p.name.length * 6.9 - 16)} 1)">${glyph(p.sev, 13)}</g>` : '') +
@@ -366,6 +394,8 @@ export interface StripDay {
   low: number | null;
   high: number | null;
   sev?: 'alert' | 'warn' | null;
+  /** A mark over the day's column: an earlier day told as something wrong, or held at the checks. */
+  mark?: Mark;
 }
 
 /**
@@ -392,6 +422,7 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
     const same = new Date(`${d.day}T00:00:00Z`).getUTCDay() === wd;
     if (d.low !== null && d.high !== null) s += `<rect class="${same ? 'ghost-2' : 'ghost'}" x="${f1(cx - bw / 2)}" y="${f1(y(d.high))}" width="${f1(bw)}" height="${f1(Math.max(1, y(d.low) - y(d.high)))}" rx="2"/>`;
     if (d.v !== null) s += `<rect class="${d.sev ? `sev-${d.sev}-fill` : 'ink'}" x="${f1(cx - bw / 2 - 1)}" y="${f1(Math.min(y(d.v), base - 3) - 1.5)}" width="${f1(bw + 2)}" height="3" rx="1"/>`;
+    if (d.mark) s += `<g transform="translate(${f1(cx - 5.5)} 0)">${glyph(d.mark, 11)}</g>`;
   });
   if (last) {
     const lx = (n - 1) * cw + cw / 2;

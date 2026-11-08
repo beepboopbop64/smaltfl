@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
-import { glanceStrings, storyOf, wordsIn } from '../src/core/story.js';
+import { glanceStrings, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
 
 const HISTORY = new URL('../dist/app/data/history.json', import.meta.url);
 const has = existsSync(HISTORY) && (JSON.parse(readFileSync(HISTORY, 'utf8')) as HistoryFile).days.length > 400;
@@ -29,8 +29,69 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('tells Thu Sep 21, 2023 as the hour the trips fall', () => {
     const s = story('2023-09-21');
-    expect(s.head).toBe('Trips fall 95% at 13:00');
+    expect(s.head).toBe('Trips fall 95% from 13:00');
     expect(s.split).toMatchObject({ kind: 'held', name: 'Flex Fare' });
+    // The trips go on after the fall (~330 an hour), the missing trips are counted, and the day's own change is on
+    // the amount line; the detail's sentence says the others fell from 13:00, never that they almost stopped.
+    expect(s.hoursLabels).toEqual({ cut: '13:00', floor: 'still ~330/h', missing: '~77k missing', ghost: 'usual Thursday' });
+    expect(s.labels.amount).toEqual(['41,939 trips', '−65%', 'usual 89k–160k']);
+    expect(splitSentence(s)).toBe('Flex Fare as usual (4,657; usual 2.8k–5.4k); everything else fell from 13:00 (37,282; usual ~115k).');
+  });
+
+  it('says each split day’s sentence from its own figures', () => {
+    expect(splitSentence(story('2023-09-22'))).toBe('Flex Fare as usual (4,613; usual 2.6k–5.5k); everything else almost stopped (20; usual ~110k).');
+    // Inside its range but 44% above the usual count: not "as usual".
+    expect(splitSentence(story('2022-09-18'))).toBe('Flex Fare within its usual range (4,169; usual 1.6k–4.8k); everything else almost stopped (60; usual ~85k).');
+    expect(splitSentence(story('2022-09-17'))).toMatch(/^Flex Fare within its usual range \(4,878; .*everything else fell from 15:00 \(54,623; /);
+    expect(splitSentence(story('2022-11-19'))).toMatch(/^Vendor 1 almost stopped \(82; usual .*\); everything else as usual \(94,850; usual ~97.2k\)\.$/);
+    expect(splitSentence(story('2024-01-01'))).toBe('Flex Fare 2.3× usual (10,518; usual ~4.5k); everything else as usual (70,495; usual ~68.5k).');
+  });
+
+  it('heads Mon Sep 18, 2023 with the population, not its symptom, and folds the symptom under it', () => {
+    const s = story('2023-09-18');
+    expect(s.head).toBe('More Flex Fare trips: 5.3%');
+    // Its usual range is on the visual, labelled: the share against 2.1–4.6%.
+    expect(s.labels.hero).toEqual(['Flex Fare', '5.3%', 'usually 2.1–4.6%']);
+    expect(s.state).toBe('unusual');
+    expect(s.split).toMatchObject({ via: 'blanks', name: 'Flex Fare', kind: 'surged' });
+    // Stored and forwarded N's drop is the same trips going blank: it follows, told as a note.
+    expect(s.findings.find((f) => f.key === 'share:store_and_fwd_flag="N"')).toMatchObject({ tier: 'follows', severity: 'note', was: 'warn' });
+    expect(s.stories).toEqual([]);
+    expect(wordsIn(s.head)).toBeLessThanOrEqual(6);
+  });
+
+  it('counts together findings’ trips with the sign of their trips, not of their share', () => {
+    // New Year's Day 2024: more trips than usual, credit cards a smaller share of them. No "N trips fewer".
+    for (const day of ['2024-01-01', '2023-09-22']) {
+      for (const f of story(day).findings) {
+        expect(f.title, f.title).not.toMatch(/move together|trips (fewer|more)$/);
+        expect(f.detail, f.detail).not.toMatch(/trips (fewer|more) than a day like it/);
+      }
+    }
+    const cards = story('2024-01-01').findings.find((f) => f.key === 'together:share:RatecodeID=1,share:payment_type=1')!;
+    expect(cards.title).toBe('Rate code Standard rate: 80% (usually 82–90%)');
+  });
+
+  it('tells the weeks after Labor Day 2022 as a lasting rise, not as news every day (no last year to learn them from)', () => {
+    // Wed Sep 7 to Sat Sep 10 are unusual; from Sun Sep 11 most of the week before was above its own range too.
+    expect(story('2022-09-07').state).toBe('unusual');
+    for (const day of ['2022-09-14', '2022-09-15', '2022-09-16']) {
+      const s = story(day);
+      expect(s.state, day).toBe('notes');
+      expect(s.head, day).toBe('Busier than usual for days');
+      expect(s.findings.find((f) => f.kind === 'volume'), day).toMatchObject({ severity: 'note', lasting: '2022-09-07' });
+      // The amount line still says how far: +15% and more, outside its range.
+      expect(s.labels.amount[1], day).toMatch(/^\+1\d%$/);
+    }
+    // The incident after them is told as before.
+    expect(story('2022-09-17').head).toBe('Trips fall 96% from 15:00');
+  });
+
+  it('names the episode a calm day comes after, and says nothing is left to do', () => {
+    const s = story('2023-09-25');
+    expect(s.chip).toBe('after Thu–Sun · only Flex Fare');
+    expect(s.labels.after).toBe('Nothing to do · Thu published short, Fri–Sun held');
+    expect(s.recovery).toMatchObject({ held: ['2023-09-22', '2023-09-23', '2023-09-24'], published: ['2023-09-21'] });
   });
 
   it('tells Fri Sep 22, 2023 as the Flex Fare trips alone arriving, the run held with fewer rows dropped than usual', () => {
@@ -83,7 +144,16 @@ describe.skipIf(!has)('the story on the real history', () => {
         said(restNum!, s.split.rest.today, s.split.rest.usual);
       }
       said(s.labels.amount[0]!, s.amount!.value);
-      said(s.labels.amount[1]!, s.amount!.low, s.amount!.high);
+      said(s.labels.amount.at(-1)!, s.amount!.low, s.amount!.high);
+      // The day's change, when the amount line carries it: against the guess, rounded.
+      const change = s.labels.amount.find((l) => /^[+−]\d+%$/.test(l));
+      if (change) said(change, Math.abs(s.amount!.value / s.amount!.expected - 1) * 100);
+      if (s.hoursLabels && s.hours) {
+        const { got, usual, from, to } = s.hours;
+        const had = got.slice(from, to + 1).reduce((a, b) => a + b, 0);
+        said(s.hoursLabels.floor, had / (to - from + 1));
+        said(s.hoursLabels.missing, usual.slice(from, to + 1).reduce((a, b) => a + b, 0) - had);
+      }
       if (s.gate?.held) {
         const at = s.labels.hero.indexOf('Checks held');
         said(s.labels.hero[at + 1]!, s.gate.share * 100);
@@ -113,6 +183,6 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('tells calm days and the day after an episode calmly', () => {
     expect(story('2024-01-15')).toMatchObject({ state: 'calm', head: 'Normal for MLK Day' });
-    expect(story('2023-09-25')).toMatchObject({ state: 'recovery', head: 'Back to normal', chip: 'after Thu–Sun' });
+    expect(story('2023-09-25')).toMatchObject({ state: 'recovery', head: 'Back to normal', chip: 'after Thu–Sun · only Flex Fare' });
   });
 });

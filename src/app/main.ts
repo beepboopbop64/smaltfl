@@ -17,7 +17,7 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, t
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { compact, gateOf, storyOf, type Gate, type Story, type Told } from '../core/story.js';
+import { approx, compact, countLabel, gateOf, splitSentence, storyOf, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, dayStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
@@ -2574,8 +2574,8 @@ function splitVisual(story: Story): Element | null {
   const sev = story.severity === 'alert' || story.severity === 'warn' ? story.severity : 'warn';
   const partMoved = sp.kind !== 'held';
   return svgNode(partBar({
-    left: { name: sp.name, today: sp.part.today, usual: sp.part.usual, label: `${fmtInt(sp.part.today)} of ~${compact(sp.part.usual)}`, sev: partMoved ? sev : null },
-    right: { name: 'Everything else', today: sp.rest.today, usual: sp.rest.usual, label: `${fmtInt(sp.rest.today)} of ~${compact(sp.rest.usual)}`, sev: partMoved ? null : sev },
+    left: { name: sp.name, today: sp.part.today, usual: sp.part.usual, label: countLabel(sp.part), sev: partMoved ? sev : null },
+    right: { name: 'Everything else', today: sp.rest.today, usual: sp.rest.usual, label: countLabel(sp.rest), sev: partMoved ? null : sev },
     aria: `${sp.name} records: ${fmtInt(sp.part.today)} of about ${fmtInt(sp.part.usual)}. Everything else: ${fmtInt(sp.rest.today)} of about ${fmtInt(sp.rest.usual)}.`,
   }));
 }
@@ -2587,7 +2587,9 @@ function amountVisual(story: Story): Element | null {
   const wd = WEEKDAY_NAMES[dateOf(story.day).getUTCDay()]!;
   const volume = story.findings.find((f) => f.kind === 'volume');
   const sev = volume && (volume.was === 'alert' || volume.was === 'warn') ? volume.was : null;
-  return svgNode(amountLine({ value: a.value, low: a.low, high: a.high, valueLabel: fmtInt(a.value), bandLabel: `usual ${compact(a.low)}–${compact(a.high)}`, sev, aria: `${fmtInt(a.value)} trips on ${dayLabel(story.day)}, where a usual ${wd} has ${fmtInt(a.low)} to ${fmtInt(a.high)}.` }));
+  // The day's own change, when the story puts it on the line (outside its range, and not already in the head).
+  const change = story.labels.amount.find((l) => /^[+−]\d+%$/.test(l));
+  return svgNode(amountLine({ value: a.value, low: a.low, high: a.high, valueLabel: fmtInt(a.value), bandLabel: `usual ${compact(a.low)}–${compact(a.high)}`, changeLabel: change, sev, aria: `${fmtInt(a.value)} trips on ${dayLabel(story.day)}${change ? `, ${change} against a usual ${wd}` : ''}, where a usual ${wd} has ${fmtInt(a.low)} to ${fmtInt(a.high)}.` }));
 }
 
 /** The hero of a story's cause card: the one visual its cause calls for. */
@@ -2595,33 +2597,53 @@ function heroOf(story: Story): Element | null {
   const day = story.day;
   const wd = WEEKDAY_NAMES[dateOf(day).getUTCDay()]!;
   if (story.hero === 'split') return splitVisual(story);
-  if (story.hero === 'hours' && story.hours) {
+  if (story.hero === 'hours' && story.hours && story.hoursLabels) {
     const hr = story.hours;
-    const after = hr.got.slice(hr.from, hr.to + 1);
-    const perHour = after.reduce((a, b) => a + b, 0) / Math.max(1, after.length);
-    const fall = Math.round((1 - after.reduce((a, b) => a + b, 0) / Math.max(1, hr.usual.slice(hr.from, hr.to + 1).reduce((a, b) => a + b, 0))) * 100);
+    const l = story.hoursLabels;
+    const had = hr.got.slice(hr.from, hr.to + 1).reduce((a, b) => a + b, 0);
+    const want = hr.usual.slice(hr.from, hr.to + 1).reduce((a, b) => a + b, 0);
+    const fall = Math.round((1 - had / Math.max(1, want)) * 100);
     return svgNode(hourBars({
-      got: hr.got, usual: hr.usual, cut: hr.from, cutLabel: clockText(hr.from * 60),
-      floorLabel: hr.to === 23 ? `~${perHour >= 100 ? Math.round(perHour / 100) * 100 : Math.round(perHour)}/h after` : undefined,
-      ghostLabel: `usual ${wd}`,
-      aria: `Trips by hour, ${dayLabel(day)}, against a usual ${wd}: from ${clockText(hr.from * 60)} they fall ${fall}%, ${fmtInt(after.reduce((a, b) => a + b, 0))} trips where about ${fmtInt(hr.usual.slice(hr.from, hr.to + 1).reduce((a, b) => a + b, 0))} is usual.`,
+      got: hr.got, usual: hr.usual, cut: hr.from, to: hr.to, cutLabel: l.cut, floorLabel: l.floor, missingLabel: l.missing, ghostLabel: l.ghost,
+      aria: `Trips by hour, ${dayLabel(day)}, against a usual ${wd}: from ${clockText(hr.from * 60)} they fall ${fall}% but don't stop, ${fmtInt(had)} trips where about ${fmtInt(want)} is usual, ${l.floor.replace('/h', ' an hour')}.`,
     }));
   }
   if ((story.hero === 'amount' || story.hero === 'finding') && story.cause?.kind === 'volume') {
     const days = stripOf({ of: 'trips' }, day, 28, story.severity);
     return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, aria: `Trips day by day for four weeks to ${dayLabel(day)}, each against its own usual range.` })) : null;
   }
-  if (story.hero === 'gate' && story.gate) return gateVisual(story.gate, true);
+  if (story.hero === 'gate' && story.gate) return gateVisual(story.gate, true, gateScale(story));
+  // A population seen through its blanks: its share on its own row, zoomed to where it and its range are.
+  const pop = story.split?.via === 'blanks' ? story.cause?.members?.find((m) => m.value !== 'null') : undefined;
+  if (story.hero === 'finding' && pop && story.split) {
+    const w = shareWords(pop.share, pop.range.low, pop.range.high);
+    const sev = story.severity === 'alert' || story.severity === 'warn' ? story.severity : null;
+    return svgNode(dumbbellRows({ rows: [{ label: story.split.name, today: pop.share, low: pop.range.low, high: pop.range.high, todayLabel: w.value, usualLabel: `usually ${w.range}`, sev }], aria: `${story.split.name} trips: ${w.value} of the day's trips, where ${w.range} is usual.` }));
+  }
   if (story.hero === 'finding' && story.cause) return findingVisual(story.cause);
   if (story.hero === 'calm') {
-    const days = stripOf({ of: 'trips' }, day, 7);
-    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, aria: `Trips the seven days to ${dayLabel(day)}, each against its own usual range.` })) : null;
+    // After an episode, its days carry their marks: held at the checks, or published with something wrong.
+    const rec = story.recovery;
+    const days = stripOf({ of: 'trips' }, day, 7).map((d) => (rec && d.day >= rec.from && d.day <= rec.to ? { ...d, sev: 'alert' as const, mark: (rec.held.includes(d.day) ? 'held' : 'alert') as VizMark } : d));
+    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, aria: `Trips the seven days to ${dayLabel(day)}, each against its own usual range${rec ? `; ${rec.held.length ? `${rec.held.length} held at the checks` : ''}${rec.held.length && rec.published.length ? ', ' : ''}${rec.published.length ? `${rec.published.length} published with something wrong` : ''}` : ''}.` })) : null;
   }
   return null;
 }
 
+/** One count scale for the checks over an incident's days so far: the most any of them dropped or usually drops. */
+function gateScale(story: Story): number | undefined {
+  const g = gateStep();
+  if (!history || !g || !story.episode) return undefined;
+  let most = 0;
+  for (const d of daysFrom(story.episode.since, story.day)) {
+    const x = gateOf(history, d, g.step, g.limit);
+    if (x) most = Math.max(most, x.dropped, x.usual?.high ?? 0);
+  }
+  return most || undefined;
+}
+
 /** The checks: the share they dropped against their limit, and the rows against a day like it. */
-function gateVisual(g: Gate, big = false): Element {
+function gateVisual(g: Gate, big = false, countMax?: number): Element {
   const share = g.rows ? g.dropped / g.rows : 0;
   const pastLimit = g.limit !== null && share > g.limit;
   let said = `${Math.round(share * 100)}%`;
@@ -2631,7 +2653,7 @@ function gateVisual(g: Gate, big = false): Element {
   }
   return svgNode(gateBars({
     rows: g.rows, dropped: g.dropped, rules: g.rules.map((r) => ({ name: r.name, label: RULE_TITLE(r.name), warns: r.warns, rows: r.rows })), limit: g.limit,
-    usual: g.usual ? { low: g.usual.low, high: g.usual.high } : null, held: g.held, big,
+    usual: g.usual ? { low: g.usual.low, high: g.usual.high } : null, held: g.held, big, countMax,
     shareLabel: `${said} dropped`, limitLabel: g.limit !== null ? `limit ${Math.round(g.limit * 100)}%` : undefined,
     countLabel: [`${fmtInt(g.dropped)} rows`, g.usual ? `usual ${compact(g.usual.low)}–${compact(g.usual.high)}` : ''],
     aria: `${g.held ? `Held at ${g.step}` : `The checks at ${g.step}`}: ${said} dropped${g.limit !== null ? ` against a ${Math.round(g.limit * 100)}% limit` : ''}${pastLimit && !g.held ? ', past it' : ''}; ${fmtInt(g.dropped)} rows${g.usual ? `, where a day like it drops ${fmtInt(g.usual.low)} to ${fmtInt(g.usual.high)}` : ''}.`,
@@ -2713,10 +2735,10 @@ function causeDetail(story: Story, card: string): void {
     const usual = sp.part.usual + sp.rest.usual;
     body.push(block('From a usual day to this one', svgNode(waterfall({
       steps: [
-        { name: 'Usual', label: compact(usual), value: usual, total: true, kind: 'total' },
-        { name: movedName.length > 12 ? movedName.slice(0, 11) + '…' : movedName, label: `${moved >= 0 ? '+' : '−'}${compact(Math.abs(moved))}`, value: moved, kind: moved >= 0 ? 'up' : 'down', sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined },
-        { name: otherName.length > 12 ? otherName.slice(0, 11) + '…' : otherName, label: `${other >= 0 ? '+' : '−'}${compact(Math.abs(other))}`, value: other, kind: other >= 0 ? 'up' : 'down' },
-        { name: 'Today', label: compact(story.amount.value), value: story.amount.value, total: true, kind: 'total' },
+        { name: 'Usual', label: approx(usual), value: usual, total: true, kind: 'total' },
+        { name: movedName.length > 12 ? movedName.slice(0, 11) + '…' : movedName, label: `${moved >= 0 ? '+' : '−'}${approx(Math.abs(moved))}`, value: moved, kind: moved >= 0 ? 'up' : 'down', sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined },
+        { name: otherName.length > 12 ? otherName.slice(0, 11) + '…' : otherName, label: `${other >= 0 ? '+' : '−'}${approx(Math.abs(other))}`, value: other, kind: other >= 0 ? 'up' : 'down' },
+        { name: 'Today', label: approx(story.amount.value), value: story.amount.value, total: true, kind: 'total' },
       ],
       aria: `From a usual day's ${fmtInt(usual)} trips to ${fmtInt(story.amount.value)}: ${movedName} ${moved >= 0 ? '+' : '−'}${fmtInt(Math.abs(moved))}, ${otherName} ${other >= 0 ? '+' : '−'}${fmtInt(Math.abs(other))}.`,
     }))));
@@ -2724,7 +2746,7 @@ function causeDetail(story: Story, card: string): void {
     if (part.length) body.push(block(`${sp.name}, day by day`, svgNode(dayStrip({ days: part, labels: stripLabels(part), aria: `${sp.name} trips day by day for four weeks to ${dayLabel(day)}, each against its own usual range.` }))));
     const comp = compositionOf(sp.column, day, sp.value);
     if (comp) body.push(block(`${NEWS_NAMES.column(sp.column)}, usual and today`, comp));
-    body.push(oneLine(sp.kind === 'held' ? `${sp.name} trips came as usual; the others almost stopped.` : sp.kind === 'vanished' ? `${sp.name} fell away; everything else held.` : `${sp.name} came at ${(sp.part.today / Math.max(1, sp.part.usual)).toFixed(1)} times usual; everything else held.`));
+    body.push(oneLine(splitSentence(story)));
     if (sp.blank.length) body.push(h('div', { class: 'vf-chips' }, h('span', { class: 'vf-chip' }, `${sp.blank.length} fields blank on these trips`)));
   }
   if (story.hours || story.episode) body.push(hoursDetail(story));
@@ -2733,7 +2755,8 @@ function causeDetail(story: Story, card: string): void {
     if (days.length) body.push(block('Trips, eight weeks', svgNode(dayStrip({ days, h: 90, labels: stripLabels(days), zero: true, aria: `Trips day by day for eight weeks to ${dayLabel(day)}.` }))));
     if (story.context) body.push(oneLine(`${story.context.title}.`));
   }
-  if (story.hero === 'finding' && story.cause) body.push(findingVisual(story.cause), oneLine(story.cause.detail));
+  // A population's own rows (the value and each field blank on it, all at one share) would say the split again.
+  if (story.hero === 'finding' && story.cause && story.split?.via !== 'blanks') body.push(findingVisual(story.cause), oneLine(story.cause.detail));
   openDetail(story.head, story.severity, body, anchorOf(story), card, story.primary);
 }
 
@@ -2753,7 +2776,10 @@ function hoursDetail(story: Story): HTMLElement | null {
   const end = file.days.includes(dayPlus(last, 1)) ? dayPlus(last, 1) : last;
   const span = daysFrom(first, end).slice(0, 7);
   const ddd = (d: string) => WEEKDAY_NAMES[dateOf(d).getUTCDay()]!.slice(0, 3);
+  // The shortfall: an estimate against a usual day, and a bound against the low end of usual (ADR 0008: a bound is
+  // never printed as if it were the estimate).
   let short = 0;
+  let est = 0;
   let floor = 0;
   const blank: string[] = [];
   const days = span.map((d) => {
@@ -2766,8 +2792,8 @@ function hoursDetail(story: Story): HTMLElement | null {
     const got = file.hours[k]!;
     const st = storyFor(d);
     // The shortfall, conservatively: the hours after the cut, at the band's low; a whole short day, its low.
-    if (d === cutDay) for (let hr = hrs.from; hr < 24; hr++) short += Math.max(0, usual[hr]! * (r.low / r.expected) - got[hr]!);
-    else if (d !== end && st?.severity === 'alert') short += Math.max(0, r.low - got.reduce((a, b) => a + b, 0));
+    if (d === cutDay) for (let hr = hrs.from; hr < 24; hr++) (short += Math.max(0, usual[hr]! * (r.low / r.expected) - got[hr]!)), (est += Math.max(0, usual[hr]! - got[hr]!));
+    else if (d !== end && st?.severity === 'alert') (short += Math.max(0, r.low - got.reduce((a, b) => a + b, 0))), (est += Math.max(0, r.expected - got.reduce((a, b) => a + b, 0)));
     if (d !== first && d !== end && st?.severity === 'alert') (blank.push(d), (floor = Math.max(floor, ...got)));
     return { label: ddd(d), got, usual, mark: st?.severity === 'alert' ? `alert${st.gate?.held ? ' held' : ''}` : st?.severity === 'warn' ? 'warn' : '' };
   }).filter((x): x is { label: string; got: number[]; usual: number[]; mark: string } => !!x);
@@ -2776,21 +2802,26 @@ function hoursDetail(story: Story): HTMLElement | null {
   const cut = firstIdx * 24 + hrs.from;
   const lastBad = span.indexOf(last);
   const sig = (n: number) => { const mag = 10 ** (Math.floor(Math.log10(Math.max(1, n))) - 1); return Math.floor(n / mag) * mag; };
-  const shortLabel = short >= 1000 ? `≥${compact(sig(short))} fewer` : `≥${fmtInt(short)} fewer`;
+  const bound = short >= 1000 ? compact(sig(short)) : fmtInt(short);
+  const shortLabel = `~${compact(est)} fewer (≥${bound})`;
   const floorLabel = blank.length ? `under ${Math.ceil(floor / 100) * 100}/h ${blank.length > 1 ? `${ddd(blank[0]!)}–${ddd(blank.at(-1)!)}` : ddd(blank[0]!)}` : undefined;
   const svg = svgNode(episodeBars({
     days, cut, cutLabel: clockText(hrs.from * 60), floorLabel,
     bracket: { from: cut, to: (lastBad + 1) * 24, label: shortLabel },
-    aria: `Trips by hour, ${dayLabel(span[0]!)} to ${dayLabel(span.at(-1)!)}: a fall at ${clockText(hrs.from * 60)} ${ddd(cutDay)}, at least ${fmtInt(sig(short))} fewer through ${ddd(last)}${floorLabel ? `, ${floorLabel.replace('/h', ' an hour')}` : ''}.`,
+    aria: `Trips by hour, ${dayLabel(span[0]!)} to ${dayLabel(span.at(-1)!)}: a fall at ${clockText(hrs.from * 60)} ${ddd(cutDay)}, about ${fmtInt(est)} fewer than usual through ${ddd(last)}, at least ${fmtInt(sig(short))} against the low end of usual${floorLabel ? `, ${floorLabel.replace('/h', ' an hour')}` : ''}.`,
   }));
   const readout = h('p', { class: 'vf-readout', 'aria-live': 'polite' });
+  // First the fall as the head says it, over its hours (Thu from 13:00: 3,679 trips · usual ~80k, −95%); a tap then
+  // reads one hour.
+  const had = hrs.got.slice(hrs.from, hrs.to + 1).reduce((a, b) => a + b, 0);
+  const want = hrs.usual.slice(hrs.from, hrs.to + 1).reduce((a, b) => a + b, 0);
+  readout.textContent = `${ddd(cutDay)} ${hrs.to === 23 ? `from ${clockText(hrs.from * 60)}` : `${clockText(hrs.from * 60)}–${clockText((hrs.to + 1) * 60)}`}: ${fmtInt(had)} trips · usual ~${compact(want)} (−${Math.round((1 - had / Math.max(1, want)) * 100)}%)`;
   const at = (i: number) => {
     const d = days[Math.floor(i / 24)];
     if (!d) return;
     const hr = i % 24;
     readout.textContent = `${d.label} ${clockText(hr * 60)} · ${fmtInt(d.got[hr]!)} trips · usual ~${compact(d.usual[hr]!)}`;
   };
-  at(cut);
   svg.addEventListener('click', (e) => {
     const box = (svg as SVGSVGElement).getBoundingClientRect();
     const i = Math.floor(((e as MouseEvent).clientX - box.left) / Math.max(1, box.width) * days.length * 24);
@@ -2828,13 +2859,17 @@ function lineageVisual(g: Gate): Element | null {
 }
 
 /** The gate, told in visuals: the share against the limit and the rows against a day like it, each rule, what it held. */
-function gateBlocks(g: Gate, day: string): (Node | null)[] {
+function gateBlocks(g: Gate, day: string, countMax?: number): (Node | null)[] {
   const wd = WEEKDAY_NAMES[dateOf(day).getUTCDay()]!;
   const was = latest()?.load;
   const shown = was !== undefined ? loads.list[was]?.day : undefined;
+  // Said from the figures: "most rows were missing" only when under half the rows a day like it has arrived.
+  const trips = rangesOf({ of: 'trips' })?.at(day);
+  const arrived = trips ? g.rows / Math.max(1, trips.expected) : null;
+  const why = arrived === null ? null : arrived < 0.5 ? 'most rows were missing' : g.rows < trips!.low ? 'fewer rows than usual arrived' : null;
   return [
-    g.held && g.usual && g.dropped < g.usual.low ? oneLine(`Fewer rows dropped than on a usual ${wd}; most rows were missing.`) : null,
-    block('Dropped, and the limit', gateVisual(g, true)),
+    g.held && g.usual && g.dropped < g.usual.low && why ? oneLine(`Fewer rows dropped than on a usual ${wd}; ${why}.`) : null,
+    block('Dropped, and the limit', gateVisual(g, true, countMax)),
     block('Rows each rule failed', rulesVisual(g)),
     g.held ? block('What it held back', lineageVisual(g), shown && shown !== day ? h('p', { class: 'vf-sub' }, `last published ${WEEKDAY_NAMES[dateOf(shown).getUTCDay()]!.slice(0, 3)} ${dateOf(shown).getUTCDate()}`) : null) : null,
   ];
@@ -2851,7 +2886,7 @@ function gateSheet(story: Story, card: string): void {
     if ((share > g.limit) === (shown > g.limit * 100) && shown !== g.limit * 100) { said = `${(share * 100).toFixed(d)}%`; break; }
   }
   const anchor = anchorOf(story);
-  openDetail(g.held ? `Held at ${g.step}: ${said} dropped` : `${g.step}: ${said} dropped`, g.held ? 'alert' : 'warn', gateBlocks(g, story.day), anchor, card, g.held ? 'notify' : story.primary);
+  openDetail(g.held ? `Held at ${g.step}: ${said} dropped` : `${g.step}: ${said} dropped`, g.held ? 'alert' : 'warn', gateBlocks(g, story.day, gateScale(story)), anchor, card, g.held ? 'notify' : story.primary);
 }
 
 /** The checks, rule by rule, against a day like it, and what the held run didn't publish (inside another sheet). */
@@ -2921,25 +2956,46 @@ function actionsOf(f: Finding, card: string, primary: Act | null): HTMLElement {
   return h('div', { class: 'vf-acts' }, main, more, menu, done.length ? h('ul', { class: 'f-log' }, ...done.map((e) => h('li', {}, logText(e)))) : null);
 }
 
-/** A counted row that opens in place into compact rows, each a tap from its detail. */
-function foldRow(label: string, kinds: readonly string[], items: readonly Told[], card: string, open = false): HTMLElement {
-  const list = h('div', { class: 'vf-group', hidden: !open }, ...items.map((f) => compactRow(f, card)));
+/**
+ * A counted row that opens in place into compact rows, each a tap from its detail: a column's rows together, three
+ * shown and the rest behind "Show all". `kinds` say in words what the rows are ("shares · times · checks"); an
+ * explained row carries ↳.
+ */
+function foldRow(label: string, kinds: readonly string[], items: readonly Told[], card: string, open = false, explained = false): HTMLElement {
+  // A column's findings side by side (Passengers 1 to 5 together), in the order the column first comes.
+  const firstAt = new Map<string, number>();
+  items.forEach((f, i) => { const c = f.columns?.[0] ?? f.key; if (!firstAt.has(c)) firstAt.set(c, i); });
+  const sorted = items.map((f, i) => ({ f, i })).sort((a, b) => firstAt.get(a.f.columns?.[0] ?? a.f.key)! - firstAt.get(b.f.columns?.[0] ?? b.f.key)! || a.i - b.i).map((x) => x.f);
+  const rows = sorted.map((f) => compactRow(f, card));
+  const rest = rows.slice(3);
+  rest.forEach((r) => (r.hidden = true));
+  const all: HTMLElement | null = rest.length ? h('button', { type: 'button', class: 'vf-all', onclick: () => { rest.forEach((r) => (r.hidden = false)); all!.remove(); } }, `Show all ${rows.length}`) : null;
+  const list = h('div', { class: 'vf-group', hidden: !open }, ...rows, all);
   const btn = h('button', { type: 'button', class: 'vf-fold', 'aria-expanded': String(open), onclick: () => { list.hidden = !list.hidden; btn.setAttribute('aria-expanded', String(!list.hidden)); } },
-    label.startsWith('+') || label.startsWith('↳') ? glyphEl('explained', 14) : h('span', { class: 'g-slot' }), h('span', { class: 'vf-fold-t' }, label.replace(/^↳ /, '')), ...kinds.map((k) => h('span', { class: 'vf-kind' }, k)), h('span', { class: 'vf-chev' }, glyphEl('chev', 14)));
+    explained ? glyphEl('explained', 14) : h('span', { class: 'g-slot' }),
+    h('span', { class: 'vf-fold-t' }, label, kinds.length ? h('span', { class: 'vf-kinds' }, kinds.join(' · ')) : null),
+    h('span', { class: 'vf-chev' }, glyphEl('chev', 14)));
   return h('div', { class: 'vf-foldwrap' }, btn, list);
 }
 
-/** A finding in a folded group: its mark as it was (grey: the cause explains it), its name, a micro visual of today
- * against its usual, no buttons; a tap opens it. */
+/** A finding's title split into what, today and usual: "Passengers 1: 0.2% (usually 70–75%)", "Checks dropped 46%
+ * (usually 4.4–7.2%)". Null when it has no usual to show. */
+function todayUsual(title: string): { name: string; today: string; usual: string } | null {
+  const m = /^(.*?):\s*(.+?)\s*\(usually (.+)\)$/.exec(title) ?? /^(.*?)\s(\S+%)\s\(usually (.+)\)$/.exec(title);
+  return m ? { name: m[1]!, today: m[2]!, usual: m[3]! } : null;
+}
+
+/** A finding in a folded group: its mark as it was (grey: the cause explains it), its name, today against its usual
+ * (a micro visual for a share, both numbers in words), no buttons; a tap opens it. */
 function compactRow(f: Told, card: string): HTMLElement {
   const m = sevMark(f.was === 'ok' ? 'note' : f.was);
-  const share = (f.kind === 'share' || f.kind === 'gone' || f.kind === 'missing') && f.range && f.value !== undefined && !f.members;
-  const name = share ? f.title.replace(/:.*$/, '') : f.title;
-  const said = share ? (f.value === 0 ? 'none' : shareWords(f.value!, f.range!.low, f.range!.high).value) : '';
+  const share = (f.kind === 'share' || f.kind === 'gone' || f.kind === 'missing') && f.range && f.value !== undefined;
+  const w = share ? shareWords(f.value!, f.range!.low, f.range!.high) : null;
+  const parts = share ? { name: f.title.replace(/:.*$/, ''), today: f.value === 0 ? 'none' : w!.value, usual: w!.range } : todayUsual(f.title);
   return h('button', { type: 'button', class: `vf-row${f.tier === 'cause' || f.tier === 'standalone' ? '' : ' explained'}`, id: `finding-${f.key}`, 'aria-label': f.title, onclick: () => findingDetail(f, card) },
-    m ? glyphEl(m === 'note' ? 'note' : m, 13) : h('span', { class: 'g-slot' }), h('span', { class: 'vf-row-t' }, name),
+    m ? glyphEl(m === 'note' ? 'note' : m, 13) : h('span', { class: 'g-slot' }), h('span', { class: 'vf-row-t' }, parts?.name ?? f.title),
     share ? svgNode(microDot({ today: f.value!, low: f.range!.low, high: f.range!.high, gone: f.value === 0 })) : null,
-    share ? h('span', { class: 'vf-row-v' }, said) : null,
+    parts ? h('span', { class: 'vf-row-v' }, h('b', {}, parts.today), h('span', { class: 'vf-row-u' }, `usual ${parts.usual}`)) : null,
     f.acknowledged ? glyphEl('ack', 13) : null, h('span', { class: 'vf-chev' }, glyphEl('chev', 12)));
 }
 
@@ -2958,14 +3014,15 @@ function causeCard(story: Story, card: string): HTMLElement {
   return h('section', { class: `vf-card ${story.state}`, ...(anchor ? { id: `finding-${anchor.key}` } : {}) },
     h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head', role: 'status', 'aria-live': 'polite' }, m && !calm ? glyphEl(m, 18) : '', story.head)),
     story.chip ? h('button', { type: 'button', class: 'vf-chip-btn', onclick: () => causeDetail(story, card) }, story.chip, glyphEl('chev', 13)) : null,
+    story.labels.after ? h('p', { class: 'vf-after' }, story.labels.after) : null,
     amount ? h('div', { class: 'vf-amount' }, h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, amount), info) : info,
     hero ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, hero) : null,
     story.hero === 'hours' && story.split ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.split.name} and everything else: open`, onclick: () => causeDetail(story, card) }, splitVisual(story)) : null,
-    g && (held || g.near) && story.hero !== 'gate' ? h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', held ? 'Checks held' : 'Checks near the limit'), gateVisual(g)) : null,
+    g && (held || g.near) && story.hero !== 'gate' ? h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', held ? 'Checks held' : 'Checks near the limit'), gateVisual(g, false, gateScale(story))) : null,
     story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${outs.join(', ')} ${held ? 'were not published from this load' : 'were published from this short day'}.`, onclick: () => select(null) },
       svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'alert' })), held ? `${outs.length} outputs not published` : `${outs.length} outputs published`, h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
-    story.labels.follows ? foldRow(story.labels.follows, story.labels.kinds, story.follows, card, profileOf(card) !== undefined) : null,
-    story.labels.sameDay ? foldRow(`↳ ${story.labels.sameDay}`, [], story.sameDay, card, profileOf(card) !== undefined) : null,
+    story.labels.follows ? foldRow(story.labels.follows, story.labels.kinds, story.follows, card, profileOf(card) !== undefined, true) : null,
+    story.labels.sameDay ? foldRow(story.labels.sameDay, [], story.sameDay, card, profileOf(card) !== undefined, true) : null,
     anchor && story.primary ? actionsOf(anchor, card, story.primary) : null);
 }
 
@@ -3012,7 +3069,7 @@ function checksNews(card: string, story: Story): HTMLElement[] {
   const anchor = findings[0] ? { ...findings[0], title: head } : null;
   return [h('section', { class: `vf-card ${g.held ? 'wrong' : worst === 'warn' ? 'unusual' : 'calm'}`, role: 'status', ...(anchor ? { id: `finding-${anchor.key}` } : {}) },
     h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head' }, m && worst !== 'note' ? glyphEl(g.held ? 'held' : m, 18) : '', head), h('button', { type: 'button', class: 'vf-info', 'aria-label': 'How it’s judged', onclick: () => judgedDetail(story) }, glyphEl('info', 16))),
-    h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${head}: open`, onclick: () => openDetail(head, worst, [gateDetail(g)]) }, gateVisual(g, true)),
+    h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${head}: open`, onclick: () => openDetail(head, worst, [gateDetail(g)]) }, gateVisual(g, true, gateScale(story))),
     svgNode(ruleRows({ rules: g.rules.map((r) => ({ label: RULE_TITLE(r.name), warns: r.warns, rows: r.rows, low: r.usual?.low ?? null, high: r.usual?.high ?? null, usualLabel: r.usual ? `usual ${compact(r.usual.low)}–${compact(r.usual.high)}` : '' })), aria: `Rows each check failed, against a day like it.` })),
     anchor ? actionsOf(anchor, card, g.held ? 'notify' : anchor.acts[0] ?? null) : null)];
 }
@@ -3211,7 +3268,7 @@ async function droppedTab(card: string, id: string, who: string): Promise<HTMLEl
   const story = day && historyOf(id) === 'checks' ? storyFor(day) : null;
   if (story?.gate) {
     const g = story.gate;
-    box.append(gateVisual(g, true),
+    box.append(gateVisual(g, true, gateScale(story)),
       svgNode(ruleRows({ rules: g.rules.map((r) => ({ label: RULE_TITLE(r.name), warns: r.warns, rows: r.rows, low: r.usual?.low ?? null, high: r.usual?.high ?? null, usualLabel: r.usual ? `usual ${compact(r.usual.low)}–${compact(r.usual.high)}` : '' })), aria: `Rows each check failed on ${dayLabel(day!)}, against a day like it: ${g.rules.map((r) => `${r.name} ${fmtInt(r.rows)}`).join(', ')}.` })));
     const reasons = ruleReasons(id);
     box.append(h('details', { class: 'vf-why' }, h('summary', {}, 'What each check tests'),

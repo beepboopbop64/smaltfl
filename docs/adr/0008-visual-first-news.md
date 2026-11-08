@@ -46,7 +46,12 @@ where about 35,000 are usual, and everything else held.
    smaller one and not a blank, so the head names a population ("Flex Fare", "Vendor 1"), never its symptom ("Stored
    and forwarded N"). It is considered on days with a volume finding or two findings of something wrong or unusual
    among the values. Its usual count is the one it was judged on (the value's usual share of the trips a day like it
-   has). A split states composition, not a reason: never "because" or "caused by".
+   has). A split states composition, not a reason: never "because" or "caused by". A value told together with the
+   fields blank on its rows (payment type 0 with five fields blank: the Flex Fare trips) is that population: when
+   nothing else is the cause and everything else kept to its usual count, it is the day's cause, headed by its share
+   ("More Flex Fare trips: 5.3%", its range on the visual), and what it predicts follows from it (Mon Sep 18, 2023's
+   "Stored and forwarded N: 94%" is those trips going blank). The split's twice-apart test isn't asked again: the
+   finding's own range has judged the part.
 
 3. **Four tiers.** Absorbed: it restates the cause (the amount, the split's own column, the fields blank on its rows).
    Follows: the cause predicts its count (the held part at its usual mix, the rest scaled to what arrived, by the
@@ -64,25 +69,38 @@ where about 35,000 are usual, and everything else held.
    never printed equal to the limit it passed or missed.
 
 5. **Words.** A head is at most six words and carries the number or the time ("Only Flex Fare records arrived", "Trips
-   fall 95% at 13:00", "Vendor 1 sent almost nothing", "Normal for MLK Day"); a finding's title at most eight, with its
-   measured number and value names ("Payment type Credit card: 0.2% (usually 75–80%)"); its detail at most one sentence
-   of twenty words, shown only on tap. A share outside its range is printed with the decimals that keep it from reading
+   fall 95% from 13:00", "Vendor 1 sent almost nothing", "Normal for MLK Day"); a finding's title at most eight, with
+   its measured number and value names ("Payment type Credit card: 0.2% (usually 75–80%)"), and as a head it leaves its
+   "(usually …)" to the visual under it when six words won't hold it; its detail at most one sentence of twenty words,
+   shown only on tap, every word of it from the figures with a tolerance ("as usual" only within 5% of usual and inside
+   its range, "within its usual range" further off, "almost stopped" only under a twentieth of usual on a day with no
+   hour the trips fall, which is said as a fall from its hour). A share outside its range is printed with the decimals that keep it from reading
    as the range's edge. The method (the band, its weights, typical misses, the denominators) is written once, behind
    (i). Banned at a glance: "because", "caused by", "feed stopped", "disappeared", "The band". Budgets: an incident day
-   60 words at a glance, an unusual one 45, a calm one 16.
+   60 words at a glance, an unusual one 45, a calm one 16, a day back to normal 24.
 
 6. **One cause card.** The head, one chip (the episode's day, "Day 2 · since Thu 13:00", or "Back to normal"'s "after
-   Thu–Sun", or the weather that names its day), the day's count on a line with its usual range (the amount line, under
-   the head on every day), one visual chosen by the cause (the part and the rest on one bar at one scale, today's ink
-   over a dashed usual, so a part that held and a rest that stopped read at their real sizes; 24 hour bars over a ghost
-   of a usual day; a strip of days each with its own range, four weeks on an amount day and the week on a calm one),
-   the gate when it held, what it reaches ("3 outputs not published" or "Reaches 3 outputs"), the folded findings as
-   counted rows ("+16 follow from this", "12 more this day") that open in place into compact rows with micro visuals,
+   Thu–Sun · only Flex Fare", which names the episode, with one line under it saying whether anything is left to do:
+   "Nothing to do · Thu published short, Fri–Sun held", a held load being never published and nothing waiting on a
+   person to release it; or the weather that names its day), the day's count on a line with its usual range (the
+   amount line, under the head on every day, carrying the day's own change, "−65%", when the count is outside its
+   range and the head doesn't say it), one visual chosen by the cause (the part and the rest on one bar at one scale,
+   today's ink over a dashed usual, so a part that held and a rest that stopped read at their real sizes, each labelled
+   "10,518 · usual ~4.5k" so it can't read as a fraction, trips beyond usual an outlined box past a notch; 24 hour bars
+   over a ghost of a usual day, the short hours' trips dark and never under 3 px so a trickle reads as present and low,
+   the trips missing one wash with a dashed edge, labelled "still ~330/h" and "~77k missing"; a strip of days each with
+   its own range, four weeks on an amount day and the week on a calm one, an episode's days marked), the gate when it
+   held, what it reaches ("3 outputs not published" or "Reaches 3 outputs"), the folded findings as counted rows ("16
+   changes this explains", with what they are in words: "shares · values gone · times"; "12 more changes this day")
+   that open in place into compact rows, a column's together, three and then "Show all", each today against its usual,
    and one verb with the others behind ⋯. Then a health row of five cells (File, Amount, Hours, Values, Shape: ↳ where
    the cause explains it; "All 5 normal" on a calm day), at most two more stories, and counted rows for the rest and
    the notes. A tap opens a sheet that is visual too: a waterfall from a usual day to this one, the part's own days,
-   its column's composition usual and today; the episode's hours; the checks rule by rule against their usual rows, and
-   the outputs the held run didn't publish.
+   its column's composition usual and today, the split in one sentence; the episode's hours, its readout first saying
+   the fall as the head does ("Thu from 13:00: 3,679 trips · usual ~80k (−95%)") and its shortfall an estimate with
+   its bound ("~375k fewer (≥270k)"), never the bound alone; the checks rule by rule against their usual rows, on one
+   count scale over an incident's days so far, and the outputs the held run didn't publish. Numbers that sit beside a
+   difference are rounded finely enough to subtract ("~68.5k" beside "+2k").
 
 7. **Marks** carry severity by shape and fill first and colour third (the tokens' hues are too close in greyscale):
    something wrong is a filled hexagon with "!", unusual an outlined triangle on a wash, a note a small dot, ok no mark,
@@ -95,13 +113,24 @@ where about 35,000 are usual, and everything else held.
 
 9. **A change that has lasted** stays a note, and its first day is no longer said in words: the current rule judges the
    days before against today's range and claims starts that aren't ("Since Nov 3" for vendor 1, who stopped on Mon Nov
-   14). Its chart shows when it began until that rule is done again.
+   14). Its chart shows when it began until that rule is done again. The day's trips are judged the right way: a rise or
+   fall is told as a note, unless it is something wrong, when four of the seven days before were outside their own
+   ranges the same way, and the day is headed "Busier than usual for days" (or "Quieter"), never "A normal Wednesday"
+   beside a count outside its range. The weeks after Labor Day 2022 were the case (no last year in the history to learn
+   the season from: Sep 7–16 all 11–21% above weeks of August; Sep 14–16 2023, with last year to go by, were inside
+   their ranges): Sep 11–16, 2022 become notes, Sep 7–10 stay unusual. Over Jan 2023 to Jan 2024 no day changes; over
+   2022 to Jan 2024, 8 days go from unusual to notes (those six and Jan 10 and 13, 2022, weeks of fewer trips).
 
 ## Consequences
 
 - news.ts finds; story.ts tells. newsOf no longer folds findings ("Likely from …" is gone); its titles and details
   are short and carry their numbers; the hours finding keeps its hours for its bars; findings told together keep their
-  members' numbers.
+  members' numbers and are told by the value that names them, with its own numbers, never "N values move together · N
+  trips fewer". A share's detail counts its trips today against its usual share of the same trips ("9 of today’s trips
+  with it; about 3,360 at its usual share"), never "N fewer than a day like it": a share can fall while its trips rise
+  (New Year's Day 2024's credit cards), and on a short day a day like it's count is mostly the day's own shortfall.
+- The population rule and the lasting trips (§2, §9) leave the days of §8 as they were: 6 something wrong, 27 unusual,
+  363 with nothing unusual to tell.
 - src/app/viz.ts draws the visuals as SVG strings with role=img and an aria-label stating the finding with its
   numbers, tested in Node.
 - The header says the day's head, not build statistics (they are on the Runs view and in the line's title); the

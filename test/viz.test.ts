@@ -3,7 +3,7 @@
  * broken numbers, and escapes what it is given.
  */
 import { describe, expect, it } from 'vitest';
-import { bulletTrack, composition, dayStrip, dumbbellRows, episodeLine, gateBars, glyph, hourBars, lineage, quantileStrip, ruleRows, splitRows, stripBar, waterfall } from '../src/app/viz.js';
+import { amountLine, bulletTrack, composition, dayStrip, dumbbellRows, episodeLine, gateBars, glyph, hourBars, lineage, niceMax, partBar, quantileStrip, ruleRows, splitRows, stripBar, waterfall } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -35,6 +35,42 @@ describe('the news’s charts', () => {
     const widths = [...svg.matchAll(/<path class="ink-strong" d="M0 [\d.]+H([\d.]+)/g)].map((m) => Number(m[1]));
     expect(widths.length).toBe(1);
     expect(widths[0]).toBeGreaterThan(0);
+  });
+
+  it('draws the hours after a fall as present but low, and the trips missing as missing, counted', () => {
+    const got = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 40));
+    const svg = hourBars({ got, usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~40/h', missingLabel: '~55k missing', ghostLabel: 'usual Thursday', aria: 'Trips by hour: they fall 99% from 13:00' });
+    // Each short hour's bar is at least 3 px tall, though 40 of 5,000 would be under 1 px.
+    const tall = [...svg.matchAll(/<path class="ink-strong" d="M[\d.]+ ([\d.]+)V[\d.]+Q[\d.]+ ([\d.]+)/g)].map((m) => Number(m[1]) - Number(m[2]));
+    expect(tall).toHaveLength(11);
+    for (const t of tall) expect(t).toBeGreaterThanOrEqual(3 - 1e-9);
+    // One area for what is missing, a wash with a dashed edge, and its count and the floor in words on the chart.
+    expect(svg.match(/class="absent"/g)).toHaveLength(1);
+    expect(svg).toContain('~55k missing');
+    expect(svg).toContain('still ~40/h');
+    // Without a span, no missing area: a finding's own small chart draws ghosts only.
+    expect(hourBars({ got, usual, cut: 13, aria: 'Trips by hour' })).not.toContain('absent');
+  });
+
+  it('puts the day’s change on the amount line when it is given', () => {
+    const svg = amountLine({ value: 41939, low: 89028, high: 160128, valueLabel: '41,939', bandLabel: 'usual 89k–160k', changeLabel: '−65%', sev: 'alert', aria: '41,939 trips, −65%' });
+    expect(svg).toContain('class="count-chg chg-alert" dx="8">−65%</tspan>');
+    expect(amountLine({ value: 1, low: 0, high: 2, valueLabel: '1', bandLabel: 'usual 0–2', aria: 'one trip' })).not.toContain('count-chg');
+  });
+
+  it('draws trips beyond the usual count as an outlined box past a notch, 6 px at least', () => {
+    const svg = partBar({ left: { name: 'Flex Fare', today: 10518, usual: 4508, label: '10,518 · usual ~4.5k', sev: 'warn' }, right: { name: 'Everything else', today: 69_500, usual: 68_486, label: '69,500 · usual ~68.5k' }, aria: 'Flex Fare 10,518 against about 4,508' });
+    const overs = [...svg.matchAll(/<rect class="over" x="[\d.]+" y="[\d.]+" width="([\d.]+)"/g)].map((m) => Number(m[1]));
+    expect(overs).toHaveLength(2);
+    // The rest's 1,014 extra trips are 4 px at this scale: drawn as 6 px (less its outline).
+    expect(Math.min(...overs)).toBeGreaterThanOrEqual(4.5 - 1e-9);
+    expect(svg.match(/class="usual-end"/g)).toHaveLength(2);
+  });
+
+  it('marks earlier days in a strip, and gives axes ends that don’t jump', () => {
+    const svg = dayStrip({ days: [{ day: '2023-09-22', v: 4633, low: 84912, high: 155515, sev: 'alert', mark: 'held' }, { day: '2023-09-25', v: 91341, low: 71515, high: 130105 }], aria: 'Trips by day' });
+    expect(svg).toContain('g-held');
+    expect([niceMax(8360), niceMax(10_800), niceMax(1), niceMax(21)]).toEqual([10_000, 12_000, 1, 25]);
   });
 
   it('escapes the names it is given', () => {

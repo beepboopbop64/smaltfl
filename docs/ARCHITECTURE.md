@@ -436,7 +436,8 @@ Builder and drawn in the family's look. The first concepts are on the design can
   number has to be outside its normal range; it has to matter (enough rows, a big enough change: `MATERIAL`, a share
   moving a fifth of its smaller side at least, and two points and four typical misses to be unusual rather than worth
   knowing); a change that has lasted (outside today's range on most of the week before, or the same weekday twice
-  running) is told as a note from the day it began, not as news every day, until the range learns it or it is marked
+  running; for the day's trips, most of the week before outside each day's own range) is told as a note from the day
+  it began, not as news every day, until the range learns it or it is marked
   expected; and findings that are likely one thing seen through several columns (the same number of trips missing a
   passenger count, a rate code and a surcharge) are told once. A share or a level is told only a typical miss past its
   range's edge. Calibrated on the history's days from January 2023 to January 2024: 363 of 396 with nothing unusual,
@@ -444,7 +445,8 @@ Builder and drawn in the family's look. The first concepts are on the design can
 - **The story, drawn** (ADR 0008). `src/core/story.ts` tells a day's news as one cause, a population or a time: the
   hour the trips fall, or a split (the part of the trips with one coded value that held while everything else moved,
   or vanished or surged while the rest held: on Fri Sep 22, 2023 the Flex Fare trips arrived as usual and every other
-  trip almost stopped), or an amount, or a held gate drawn with the rows it dropped against a usual day's. Every finding
+  trip almost stopped; or the population a value and the fields blank on its rows are, Mon Sep 18, 2023's Flex Fare
+  trips at 5.3% of the day), or an amount, or a held gate drawn with the rows it dropped against a usual day's. Every finding
   is sorted by what the cause explains (absorbed, follows, same day, standalone; new values, pairs, schema and
   integrity never fold), with the episode it belongs to ("Day 2 · since Thu 13:00") and the words a screen shows, short
   enough to count. `src/app/viz.ts` draws it: split rows, hour bars over a usual day's, the gate, day strips, dumbbells,
