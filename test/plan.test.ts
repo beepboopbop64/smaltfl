@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { documentFormat, insertAfter, takeOut, validateDocument, type FlowDocument, type PublishDef, type WatchDef } from '../src/core/document.js';
+import { documentFormat, fillStepOf, insertAfter, sourceOf, takeOut, validateDocument, type FillStep, type FlowDocument, type PublishDef, type WatchDef } from '../src/core/document.js';
 import { renameIdentifier } from '../src/core/sqltext.js';
 import { nodeKey } from '../src/core/keys.js';
 import { shapeOf } from '../src/core/optimize.js';
-import { flowHash, planPeriod, PlanError, translate, validatePlan, watchesOf, type FlowPlan, type PlanPublish2 } from '../src/core/plan.js';
+import { flowHash, planPeriod, PlanError, translate, validatePlan, watchesOf, type Column, type FlowPlan, type PlanPublish2 } from '../src/core/plan.js';
+import { missingSql, nodeSelect, shiftSql } from '../src/core/emit.js';
 import { planHash, planKind } from '../src/core/manifest.js';
 import { canonicalJSON } from '../src/core/canonical.js';
 import { visualFlow } from './fixtures/taxi.js';
@@ -34,7 +35,7 @@ describe('validating a flow document', () => {
       { path: '$.steps[6].id', message: 'duplicate id Trips_Valid (ids are compared without case, as SQL names are)' },
       { path: '$.steps[1].inputs[0]', message: 'no source or step nowhere' },
       { path: '$.steps[2].how', message: 'inner or left' },
-      { path: '$.steps[7].kind', message: 'one of sql, filter, formula, select, join, aggregate, expectations' },
+      { path: '$.steps[7].kind', message: 'one of sql, filter, formula, select, join, aggregate, expectations, fill' },
       { path: '$.steps[8].where', message: 'unterminated string at 0' },
     ]);
   });
@@ -265,7 +266,7 @@ describe('a document that says what holds its publication (ADR 0009 §2)', () =>
 
   it('says each problem with its block', () => {
     const issues = (publish: unknown) => validateDocument(holding(publish));
-    expect(issues('all')).toEqual([{ path: '$.publish', message: '{ hold, watch, period, together }' }]);
+    expect(issues('all')).toEqual([{ path: '$.publish', message: '{ hold, watch, period, together, donor, meanwhile, until }' }]);
     expect(issues({ hold: [] })).toEqual([{ path: '$.publish.hold', message: 'a list of what holds: checks, short, unlearned, wrong' }]);
     expect(issues({ hold: ['checks', 'late', 'checks'] })).toEqual([
       { path: '$.publish.hold[1]', message: 'one of checks, short, unlearned, wrong' },
@@ -286,8 +287,8 @@ describe('a document that says what holds its publication (ADR 0009 §2)', () =>
     expect(validateDocument(counted)).toEqual([{ path: '$.publish.period', message: 'n is an integer: the period is a text parameter, such as a day' }]);
     expect(issues({ ...PUBLISH, watch: { trips: 'history.json', TRIPS: 'other.json' } })).toEqual([{ path: '$.publish.watch.TRIPS', message: 'trips is watched twice (ids are compared without case)' }]);
     expect(issues({ ...PUBLISH, together: 'yes' })).toEqual([{ path: '$.publish.together', message: 'true or false' }]);
-    // A later slice's setting is refused, never ignored: this version wouldn't keep it.
-    expect(issues({ ...PUBLISH, meanwhile: 'fill' })).toEqual([{ path: '$.publish.meanwhile', message: 'not a field this version reads (hold, watch, period, together): refused rather than ignored' }]);
+    // A setting this version doesn't know is refused, never ignored: this version wouldn't keep it.
+    expect(issues({ ...PUBLISH, calendar: 'us' })).toEqual([{ path: '$.publish.calendar', message: 'not a field this version reads (hold, watch, period, together, donor, meanwhile, until): refused rather than ignored' }]);
     // checks alone needs neither a watch nor a period: a fail rule over a count is a fixed threshold.
     expect(issues({ hold: ['checks'] })).toEqual([]);
   });
@@ -470,7 +471,238 @@ describe('the plan of a flow that holds (plan/1, ADR 0009 E10)', () => {
     expect(bad({ ...plan.publish, period: 'week' })).toThrow("publish.period week is not one of the plan's parameters");
     expect(bad({ ...plan.publish, period: null })).toThrow('publish.watch needs a period');
     expect(bad({ ...plan.publish, together: 1 })).toThrow('publish.together is true or false');
-    expect(bad({ ...plan.publish, until: 'normal' })).toThrow("publish has until, which this version doesn't read");
+    expect(bad({ ...plan.publish, calendar: 'us' })).toThrow("publish has calendar, which this version doesn't read");
+  });
+});
+
+// ------------------------------------------------------------------ filling a paused day (ADR 0009 amendment 1)
+
+/** The ADR's test vector document (E10), small enough to check with sha256sum. */
+const vectorDoc = (): FlowDocument => ({
+  smaltfl: 2, id: 'v', name: 'V', parameters: [{ name: 'day', type: 'text', default: null }], sources: [{ id: 'trips', table: 'trips_file' }],
+  steps: [{ id: 'trips_valid', kind: 'expectations', inputs: ['trips'], rules: [{ name: 'fare', check: 'fare_amount >= 0', onFail: 'drop' }], maxDropped: 0.1, dataset: {} }],
+  publish: { hold: ['wrong', 'checks'], watch: { trips: 'history.json' }, period: 'day' },
+});
+const FILL = { id: 'trips_filled', kind: 'fill' as const, inputs: ['trips'], time: 'tpep_pickup_datetime', shift: ['tpep_pickup_datetime', 'tpep_dropoff_datetime'] };
+/** The vector document with a fill step on its watched source: what read the source reads the fill step. */
+const withFill = (doc: FlowDocument = vectorDoc()): FlowDocument => insertAfter(doc, 'trips', structuredClone(FILL));
+/** The same with a day filled: the derived document a fill decision makes (fill.ts repairDocument). */
+const derived = (missing: FillStep['missing'], from: string | null): FlowDocument => {
+  const doc = withFill();
+  return {
+    ...doc,
+    sources: from === null ? doc.sources : [...doc.sources, { id: 'trips_donor', table: 'trips_file_donor' }],
+    steps: doc.steps.map((s) => (s.id === 'trips_filled' ? { ...s, missing, from, inputs: from === null ? ['trips'] : ['trips', 'trips_donor'] } as FillStep : s)),
+  };
+};
+
+describe('a fill step (ADR 0009 amendment 1 S1)', () => {
+  it('reads its source, and what read the source reads it: insertAfter puts a box after it, not between', () => {
+    const doc = withFill();
+    expect(validateDocument(doc)).toEqual([]);
+    // A step after a source goes first: before every step, since a source comes before them all.
+    expect(doc.steps.map((s) => [s.id, s.inputs])).toEqual([['trips_filled', ['trips']], ['trips_valid', ['trips_filled']]]);
+    expect(fillStepOf(doc, 'TRIPS')?.id).toBe('trips_filled');
+    expect(fillStepOf(doc, 'trips_valid')).toBeUndefined();
+    expect(sourceOf(doc, 'trips_filled')).toBe('trips');
+    const box = { id: 'trips_checked', kind: 'expectations' as const, inputs: ['trips'], rules: [{ name: 'some', check: 'fare_amount < 1000', onFail: 'drop' as const }] };
+    const boxed = insertAfter(doc, 'trips', box);
+    expect(validateDocument(boxed)).toEqual([]);
+    expect(boxed.steps.map((s) => [s.id, s.inputs])).toEqual([['trips_filled', ['trips']], ['trips_checked', ['trips_filled']], ['trips_valid', ['trips_checked']]]);
+  });
+
+  it('says each problem with its path', () => {
+    const issues = (change: (doc: FlowDocument) => void) => {
+      const doc = withFill();
+      change(doc);
+      return validateDocument(doc);
+    };
+    const fill = (doc: FlowDocument) => doc.steps.find((s) => s.id === 'trips_filled') as unknown as Record<string, unknown>;
+    expect(issues((d) => (fill(d).time = 'pickup time'))).toEqual([{ path: '$.steps[0].time', message: 'the column an hours cause is of: a letter or _, then letters, digits or _' }]);
+    expect(issues((d) => (fill(d).shift = ['a', 'A', 3]))).toEqual([
+      { path: '$.steps[0].shift[1]', message: 'A is listed twice' },
+      { path: '$.steps[0].shift[2]', message: 'a column: a letter or _, then letters, digits or _' },
+    ]);
+    expect(issues((d) => (fill(d).inputs = ['trips_valid']))).toEqual([
+      { path: '$.steps', message: 'the steps form a cycle: trips_filled → trips_valid → trips_filled' },
+      { path: '$.steps[0].inputs[0]', message: 'trips_valid is a step: a fill step reads a source directly' },
+    ]);
+    expect(issues((d) => d.steps.push({ id: 'again', kind: 'fill', inputs: ['trips'], time: 't', shift: [] }))).toEqual([
+      { path: '$.steps[2].inputs[0]', message: 'trips has a fill step already: one fill step a source' },
+      { path: '$.steps[2].inputs[0]', message: 'trips has a fill step, trips_filled: read that instead' },
+    ]);
+    expect(issues((d) => (d.steps[1]!.inputs = ['trips']))).toEqual([{ path: '$.steps[1].inputs[0]', message: 'trips has a fill step, trips_filled: read that instead' }]);
+    expect(issues((d) => d.steps.push({ id: 'twice', kind: 'fill', inputs: ['trips_valid'], time: 't', shift: [] }))).toEqual([{ path: '$.steps[2].inputs[0]', message: 'trips_valid is a step: a fill step reads a source directly' }]);
+    // The missing part and the donor's day, set together, with a donor input exactly when there is a day.
+    expect(issues((d) => Object.assign(fill(d), { missing: { column: 'VendorID', value: 1 } }))).toEqual([{ path: '$.steps[0].from', message: 'a missing part needs from: the donor’s day, or null for the part that arrived alone' }]);
+    expect(issues((d) => Object.assign(fill(d), { from: null }))).toEqual([{ path: '$.steps[0].missing', message: 'from needs the missing part it fills' }]);
+    expect(issues((d) => Object.assign(fill(d), { missing: { column: 'VendorID', value: 1 }, from: '2022-11-07' }))).toEqual([{ path: '$.steps[0].inputs', message: 'a fill step that fills from another day reads its source and the donor' }]);
+    expect(issues((d) => Object.assign(fill(d), { missing: { column: 'VendorID', value: 1 }, from: 'last week' }))).toEqual([
+      { path: '$.steps[0].inputs', message: 'a fill step that fills from another day reads its source and the donor' },
+      { path: '$.steps[0].from', message: 'the donor’s day, YYYY-MM-DD, or null for the part that arrived alone' },
+    ]);
+    const missing = (m: unknown) => issues((d) => Object.assign(fill(d), { missing: m, from: null }));
+    expect(missing({ time: 'tpep_pickup_datetime', hours: [13, 23] })).toEqual([]);
+    expect(missing({ time: 'tpep_dropoff_datetime', hours: [13, 23] })).toEqual([{ path: '$.steps[0].missing', message: "the hours are of the step's time column, tpep_pickup_datetime" }]);
+    expect(missing({ time: 'tpep_pickup_datetime', hours: [13, 24] })).toEqual([{ path: '$.steps[0].missing', message: 'hours are [from, to], whole hours with 0 ≤ from ≤ to ≤ 23' }]);
+    expect(missing({ time: 'tpep_pickup_datetime', hours: [14, 13] })).toEqual([{ path: '$.steps[0].missing', message: 'hours are [from, to], whole hours with 0 ≤ from ≤ to ≤ 23' }]);
+    expect(missing({ column: 'payment_type', value: 0, rest: true })).toEqual([]);
+    expect(missing({ column: 'store_and_fwd_flag', value: null })).toEqual([]);
+    expect(missing({ column: 'VendorID' })).toEqual([{ path: '$.steps[0].missing', message: 'a part names its value: text, a number, true, false or null' }]);
+    expect(missing({ column: 'VendorID', value: 1, rest: 'yes' })).toEqual([{ path: '$.steps[0].missing', message: 'rest is true or false' }]);
+    expect(missing({ column: 'VendorID', value: 1, also: 2 })).toEqual([{ path: '$.steps[0].missing', message: 'a part is { column, value, rest }, nothing else' }]);
+    expect(missing('Vendor 1')).toEqual([{ path: '$.steps[0].missing', message: '{ time, hours: [from, to] } or { column, value, rest }' }]);
+  });
+
+  it('takes a donor that nothing else reads or watches, and fills from a day only with a period', () => {
+    expect(validateDocument(derived({ column: 'VendorID', value: 1 }, '2022-11-07'))).toEqual([]);
+    const read = derived({ column: 'VendorID', value: 1 }, '2022-11-07');
+    read.steps.push({ id: 'peek', kind: 'filter', inputs: ['trips_donor'], where: 'true' });
+    expect(validateDocument(read)).toEqual([{ path: '$.steps[2].inputs[0]', message: 'trips_donor is a donor of trips_filled: nothing else reads it' }]);
+    const watched = derived({ column: 'VendorID', value: 1 }, '2022-11-07');
+    watched.publish!.watch!.trips_donor = 'history.json';
+    expect(validateDocument(watched)).toEqual([{ path: '$.publish.watch.trips_donor', message: 'trips_donor is a donor: a donor is judged by its own day\'s claim, not watched' }]);
+    const itself = derived({ column: 'VendorID', value: 1 }, '2022-11-07');
+    (itself.steps[0]!.inputs as string[])[1] = 'trips';
+    expect(validateDocument(itself)).toEqual([
+      { path: '$.steps[0].inputs', message: 'an input is listed twice' },
+      { path: '$.steps[0].inputs[1]', message: 'a day is never its own donor' },
+    ]);
+    const noPeriod = derived({ column: 'VendorID', value: 1 }, '2022-11-07');
+    noPeriod.publish = { hold: ['checks'] };
+    expect(validateDocument(noPeriod)).toEqual([{ path: '$.steps[0].from', message: 'a fill from another day needs publish.period: the parameter whose value is the day its rows move to' }]);
+  });
+
+  it('checks the three settings: the donor rule, what readers get meanwhile, and what closes a pause', () => {
+    const issues = (publish: Partial<PublishDef>) => validateDocument({ ...withFill(), publish: { ...vectorDoc().publish!, ...publish } });
+    expect(issues({ donor: 'weekday', meanwhile: 'fill', until: 'normal' })).toEqual([]);
+    expect(issues({ donor: 'nearest', meanwhile: 'complete', until: 'decision' })).toEqual([]);
+    expect(issues({ donor: 'monday' as never, meanwhile: 'stale' as never, until: 'never' as never })).toEqual([
+      { path: '$.publish.donor', message: 'one of weekday, nearest' },
+      { path: '$.publish.meanwhile', message: 'one of last, fill, complete' },
+      { path: '$.publish.until', message: 'one of decision, normal' },
+    ]);
+    // meanwhile fills a watched source: each needs its fill step, and the story that names what is missing.
+    expect(validateDocument({ ...vectorDoc(), publish: { ...vectorDoc().publish!, meanwhile: 'fill' } })).toEqual([{ path: '$.publish.meanwhile', message: 'fill needs a fill step on every watched source, and trips has none' }]);
+    expect(validateDocument({ ...vectorDoc(), publish: { ...vectorDoc().publish!, meanwhile: 'last' } })).toEqual([]);
+    expect(validateDocument({ ...withFill(), publish: { hold: ['checks'], meanwhile: 'complete' } })).toEqual([{ path: '$.publish.meanwhile', message: "complete fills a watched source's missing part, which its story names: hold has neither short nor wrong" }]);
+  });
+});
+
+describe('the fill node (ADR 0009 amendment 1 S1, S4)', () => {
+  it('translates the step, the day it fills to taken from the period', async () => {
+    const plan = await translate(derived({ column: 'VendorID', value: 1 }, '2022-11-07'), { day: '2022-11-14' });
+    expect(plan.nodes.map((n) => [n.op, n.origin, n.inputs])).toEqual([['table', 'trips', []], ['table', 'trips_donor', []], ['fill', 'trips_filled', [0, 1]], ['expect', 'trips_valid', [2]]]);
+    expect(plan.nodes[2]).toEqual({ op: 'fill', origin: 'trips_filled', inputs: [0, 1], time: 'tpep_pickup_datetime', shift: ['tpep_pickup_datetime', 'tpep_dropoff_datetime'], missing: { column: 'VendorID', value: 1 }, from: '2022-11-07', to: '2022-11-14' });
+    expect(() => validatePlan(plan)).not.toThrow();
+    const base = await translate(withFill(), { day: '2022-11-14' });
+    expect(base.nodes[1]).toEqual({ op: 'fill', origin: 'trips_filled', inputs: [0], time: 'tpep_pickup_datetime', shift: ['tpep_pickup_datetime', 'tpep_dropoff_datetime'], missing: null, from: null, to: null });
+    await expect(translate(derived({ column: 'VendorID', value: 1 }, '2022-11-07'))).rejects.toThrow("steps.trips_filled: a fill from 2022-11-07 moves its rows to the run's day, and day is not given");
+    await expect(translate(derived({ column: 'VendorID', value: 1 }, '2022-11-07'), { day: 'Monday' })).rejects.toThrow("and day is 'Monday', not a day");
+  });
+
+  it('carries the settings in publish only when the document sets them, so plan/1 hashes hold', async () => {
+    const plain = await translate(withFill(), { day: '2023-09-21' });
+    expect(plain.publish).toEqual({ hold: ['checks', 'wrong'], watch: [[0, 'history.json']], period: 'day', together: true });
+    const set = await translate({ ...withFill(), publish: { ...vectorDoc().publish!, donor: 'nearest', meanwhile: 'fill', until: 'normal' } }, { day: '2023-09-21' });
+    expect(set.publish).toEqual({ hold: ['checks', 'wrong'], watch: [[0, 'history.json']], period: 'day', together: true, donor: 'nearest', meanwhile: 'fill', until: 'normal' });
+    expect(() => validatePlan(set)).not.toThrow();
+    expect(await planHash(set)).not.toBe(await planHash(plain));
+    const bad = (publish: unknown) => () => validatePlan({ ...set, publish } as FlowPlan);
+    expect(bad({ ...set.publish, donor: 'monday' })).toThrow('publish.donor is weekday or nearest');
+    expect(bad({ ...set.publish, meanwhile: 'stale' })).toThrow('publish.meanwhile is last, fill, complete');
+    expect(bad({ ...set.publish, until: 'never' })).toThrow('publish.until is decision or normal');
+  });
+
+  it('is checked before it is trusted: its arity, its days, its missing part, and that it reads sources', async () => {
+    const plan = await translate(derived({ column: 'VendorID', value: 1 }, '2022-11-07'), { day: '2022-11-14' });
+    const node = (change: Record<string, unknown>) => () => {
+      const p = structuredClone(plan);
+      Object.assign(p.nodes[2]!, change);
+      validatePlan(p);
+    };
+    expect(node({ from: null })).toThrow('node 2 (fill) has 2 inputs');
+    expect(node({ inputs: [0] })).toThrow('node 2 (fill) has 1 inputs');
+    expect(node({ to: null })).toThrow('node 2 (fill) fills from a day to a day: from and to are YYYY-MM-DD');
+    expect(node({ from: 'last week' })).toThrow('from and to are YYYY-MM-DD');
+    expect(node({ missing: { column: 'VendorID' } })).toThrow('node 2 (fill): its missing part isn\'t one: a part names its value');
+    expect(node({ missing: null })).toThrow('node 2 (fill) fills from 2022-11-07 with no missing part');
+    expect(node({ shift: [1] })).toThrow('node 2 (fill) names its time and the columns it shifts');
+    const complete = await translate(derived({ time: 'tpep_pickup_datetime', hours: [13, 23] }, null), { day: '2023-09-21' });
+    const p = structuredClone(complete);
+    Object.assign(p.nodes[1]!, { to: '2023-09-21' });
+    expect(() => validatePlan(p)).toThrow('node 1 (fill) moves rows to 2023-09-21 from no day');
+    const q = structuredClone(complete);
+    q.nodes.push({ op: 'fill', origin: 'again', inputs: [2], time: 't', shift: [], missing: null, from: null, to: null });
+    expect(() => validatePlan(q)).toThrow("node 3 (fill) reads a node that isn't a source");
+  });
+
+  it('is written by emit as the rows outside the missing part, and the donor’s inside it, moved and marked', async () => {
+    const types: Column[] = [['VendorID', 'int'], ['tpep_pickup_datetime', 'text'], ['tpep_dropoff_datetime', 'text'], ['fare_amount', 'real']];
+    const names = types.map(([c]) => c);
+    const sql = async (doc: FlowDocument, day: string) => {
+      const plan = await translate(doc, { day });
+      const fill = plan.nodes.find((n) => n.op === 'fill')!;
+      return nodeSelect(fill, fill.inputs.map((j) => `"t${j}"`), fill.inputs.map(() => names), fill.inputs.map(() => types));
+    };
+    expect(await sql(withFill(), '2022-11-14')).toBe('SELECT *, CAST(NULL AS TEXT) AS "filled_from" FROM "t0"');
+    expect(await sql(derived({ column: 'VendorID', value: 1 }, '2022-11-07'), '2022-11-14')).toBe(
+      'SELECT "VendorID", "tpep_pickup_datetime", "tpep_dropoff_datetime", "fare_amount", CAST(NULL AS TEXT) AS "filled_from" FROM "t0" WHERE CASE WHEN ("VendorID" IS 1) THEN 1 ELSE 0 END = 0\n' +
+        'UNION ALL\n' +
+        `SELECT CAST("VendorID" AS INTEGER) AS "VendorID", CAST((date(substr("tpep_pickup_datetime", 1, 10), '+7 days') || substr("tpep_pickup_datetime", 11)) AS TEXT) AS "tpep_pickup_datetime", CAST((date(substr("tpep_dropoff_datetime", 1, 10), '+7 days') || substr("tpep_dropoff_datetime", 11)) AS TEXT) AS "tpep_dropoff_datetime", CAST("fare_amount" AS REAL) AS "fare_amount", CAST('2022-11-07' AS TEXT) AS "filled_from" FROM "t1" WHERE CASE WHEN ("VendorID" IS 1) THEN 1 ELSE 0 END = 1`,
+    );
+    expect(await sql(derived({ time: 'tpep_pickup_datetime', hours: [13, 23] }, null), '2023-09-21')).toBe(
+      'SELECT "VendorID", "tpep_pickup_datetime", "tpep_dropoff_datetime", "fare_amount", CAST(NULL AS TEXT) AS "filled_from" FROM "t0" WHERE CASE WHEN (CAST(substr("tpep_pickup_datetime", 12, 2) AS INTEGER) BETWEEN 13 AND 23) THEN 1 ELSE 0 END = 0',
+    );
+    expect(missingSql({ column: 'payment_type', value: 0, rest: true }, types)).toBe('"payment_type" IS NOT 0');
+    expect(missingSql({ column: 'store_and_fwd_flag', value: 'N' }, types)).toBe(`"store_and_fwd_flag" IS 'N'`);
+    expect(missingSql({ column: 'store_and_fwd_flag', value: null }, types)).toBe('"store_and_fwd_flag" IS NULL');
+    expect(missingSql({ time: 'pickup', hours: [0, 5] }, [['pickup', 'real']])).toBe(`CAST(strftime('%H', "pickup") AS INTEGER) BETWEEN 0 AND 5`);
+    expect(shiftSql('"t"', -3, 'text')).toBe(`(date(substr("t", 1, 10), '-3 days') || substr("t", 11))`);
+    expect(shiftSql('"t"', 2, 'int')).toBe('("t" + 172800)');
+    expect(shiftSql('"t"', 2, 'real')).toBe('("t" + 2)');
+    expect(shiftSql('"t"', 0, 'text')).toBe('"t"');
+    const untyped = (await translate(derived({ column: 'VendorID', value: 1 }, null), { day: '2022-11-14' })).nodes[1]!;
+    expect(() => nodeSelect(untyped, ['"t0"'], [names])).toThrow("trips_filled: a fill is written for its source's types, and the plan isn't typed");
+  });
+});
+
+describe('the fills’ content vectors (ADR 0009 amendment 1, Encodings)', () => {
+  /** Snapshot hashes, fixed: the vectors' keys don't depend on any data. */
+  const SNAP = { trips: 'a'.repeat(64), trips_donor: 'b'.repeat(64) };
+  const fillKey = async (plan: FlowPlan) => {
+    const keys: string[] = [];
+    for (const n of plan.nodes) keys.push(await nodeKey(n, n.inputs.map((j) => keys[j]!), env, n.op === 'table' ? SNAP[n.origin as keyof typeof SNAP] : undefined));
+    return keys[plan.nodes.findIndex((n) => n.op === 'fill')]!;
+  };
+
+  it('1: the vector document with a base fill step on trips', async () => {
+    const plan = await translate(withFill(), { day: '2023-09-21' });
+    expect(canonicalJSON(plan)).toBe('{"flow":{"hash":"e2dcc2b1c8d0660d34a5b99e1821d8d860ba17c166d4ee3b76695b48d3a3c93b","id":"v"},"nodes":[{"inputs":[],"op":"table","origin":"trips","table":"trips_file"},{"from":null,"inputs":[0],"missing":null,"op":"fill","origin":"trips_filled","shift":["tpep_pickup_datetime","tpep_dropoff_datetime"],"time":"tpep_pickup_datetime","to":null},{"inputs":[1],"maxDropped":0.1,"op":"expect","origin":"trips_valid","rules":[["fare","fare_amount >= 0","drop"]]}],"outputs":[{"name":"trips_valid","node":2}],"parameters":{"day":"2023-09-21"},"publish":{"hold":["checks","wrong"],"period":"day","together":true,"watch":[[0,"history.json"]]},"smaltflPlan":1}');
+    expect(await planHash(plan)).toBe('4ec48299aa3e142ec5cbd81e2e1de68cd02a588a8dd47a974be6b8550f8d0257');
+  });
+
+  it('2: its derived document for Vendor 1 from 2022-11-07', async () => {
+    const doc = derived({ column: 'VendorID', value: 1 }, '2022-11-07');
+    const plan = await translate(doc, { day: '2022-11-14' });
+    expect(await flowHash(doc)).toBe('d5b55a25319ecef87142400e04aa81899f9bcf975c2593acbed60740ab444bbe');
+    expect(await planHash(plan)).toBe('05c117f88475414018e521253fe8647fbf4a7a8ecde4f93596fd474000abaab6');
+    expect(await fillKey(plan)).toBe('597ca2cd775ae0063b35478e1f6d2806f57dbafa81f9c40aa6ae1fb737ac761b');
+  });
+
+  it('3: the same, for the part that arrived alone', async () => {
+    const doc = derived({ column: 'VendorID', value: 1 }, null);
+    const plan = await translate(doc, { day: '2022-11-14' });
+    expect(await flowHash(doc)).toBe('34bb7cfbb4bfad9a86d0c587be865295c6d7e17de87604a36be21614455dce95');
+    expect(await planHash(plan)).toBe('1f0dccb414035422fe9db464ce2167bf65d181ac0cecbfa32959a6818198869a');
+    expect(await fillKey(plan)).toBe('8e220625656cb762a7731c4ba01d4bede329ee79a9722fa2ff5da57e51bf67d5');
+  });
+
+  it('5: the plans without a fill step hash as they did (fc700fdf…, 32609b0f…, 292c423f…)', async () => {
+    expect(await planHash(await translate(vectorDoc(), { day: '2023-09-21' }))).toBe('fc700fdf9d4dd95e71ee083cfee0ddca2ba46dd122b7a840e182234611668fd4');
+    const { publish: _p, ...without } = vectorDoc();
+    expect(await planHash(await translate({ ...without, smaltfl: 1 }, { day: '2023-09-21' }))).toBe('32609b0f1de25bc72ea09219c0c38cd2cff347619e2db5c8506a7da144720f8e');
+    expect(await planHash(await translate(exampleBefore()))).toBe('292c423f3a56ab26bd853af571c23cf2c1d5e775c882da06cf9725e0b91d1947');
   });
 });
 
@@ -539,8 +771,9 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
     const w = pub.watch[0]![1];
     const bad = (publish: unknown) => () => validatePlan({ ...plan, publish } as FlowPlan);
     expect(bad({ ...pub, breaks: [] })).toThrow("publish has breaks, which this version doesn't read");
-    expect(bad({ ...pub, meanwhile: 'fill' })).toThrow('publish.meanwhile fill is not one this version reads (last)');
-    expect(bad({ ...pub, until: 'normal' })).toThrow('publish.until normal is not one this version reads (decision)');
+    expect(bad({ ...pub, meanwhile: 'echo' })).toThrow('publish.meanwhile echo is not one this version reads (last, fill, complete)');
+    expect(bad({ ...pub, until: 'later' })).toThrow('publish.until later is not one this version reads (decision, normal)');
+    expect(() => validatePlan({ ...plan, publish: { ...pub, meanwhile: 'fill', until: 'normal' } } as FlowPlan)).not.toThrow();
     expect(bad({ ...pub, calendar: { ...pub.calendar, base: 'uk/1' } })).toThrow('publish.calendar is { base: none, us/1 or us-nyc/1, zone, days, windows, dates }');
     expect(bad({ ...pub, calendar: { ...pub.calendar, days: [{ name: 'Patch Tuesday' }] } })).toThrow("publish.calendar has a flow's own days");
     expect(bad({ ...pub, watch: [[0, { ...w, every: '6h' }]] })).toThrow('publish.watch[0].every 6h is not one this version can judge (day)');
@@ -552,6 +785,6 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
     expect(bad({ ...pub, watch: [[0, { ...w, holds: false }]] })).toThrow('publish.hold judges a source (short or wrong), and no watch holds');
     expect(bad({ ...pub, hold: ['checks', 'unlearned'] })).toThrow('publish.hold has unlearned without short or wrong');
     // A plan/1 plugin reading plan/2's block refuses its fields by name; and the format must match the block.
-    expect(() => validatePlan({ ...plan, smaltflPlan: 1 })).toThrow("publish has calendar, meanwhile, until, which this version doesn't read");
+    expect(() => validatePlan({ ...plan, smaltflPlan: 1 })).toThrow("publish has calendar, which this version doesn't read");
   });
 });

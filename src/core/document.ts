@@ -95,10 +95,25 @@ export interface PublishDef {
   /** Nothing goes out while any output waits (the default); with false, a hold reaches only the outputs that read
    * what the holding step reads, and the rest publish. */
   together?: boolean;
+  /** The flow's own donor rule (ADR 0009 amendment 1 S3): the same weekday, or the nearest good day. */
+  donor?: DonorRule;
+  /** What readers get while a held day waits (S5): the last day published (the default), its fill, or the part that
+   * arrived. Other than `last`, every watched source has a fill step. */
+  meanwhile?: Meanwhile;
+  /** Whether a person must close a pause (`decision`, the default), or a later day publishing closes it (`normal`). */
+  until?: Until;
 }
 
+/** The donor rules (S3): the same weekday 7, 14, 21 or 28 days away, or the nearest good day 1 to 28 days away. */
+export const DONOR_RULES = ['weekday', 'nearest'] as const;
+export type DonorRule = (typeof DONOR_RULES)[number];
+export const MEANWHILES = ['last', 'fill', 'complete'] as const;
+export type Meanwhile = (typeof MEANWHILES)[number];
+export const UNTILS = ['decision', 'normal'] as const;
+export type Until = (typeof UNTILS)[number];
+
 /** The publish block's fields this version knows: any other is refused, never ignored. */
-const PUBLISH_FIELDS = ['hold', 'watch', 'period', 'together'];
+const PUBLISH_FIELDS = ['hold', 'watch', 'period', 'together', 'donor', 'meanwhile', 'until'];
 
 export interface FlowDocument {
   smaltfl: DocumentFormat;
@@ -243,7 +258,35 @@ export interface ExpectationsStep extends StepBase {
   maxDropped?: number;
 }
 
-export type StepDef = SqlStep | FilterStep | FormulaStep | SelectStep | JoinStep | AggregateStep | ExpectationsStep;
+/**
+ * The part of a day a fill takes from another day, or leaves out (ADR 0009 amendment 1 S2): the hours from `hours[0]`
+ * to `hours[1]` (both included) by the fill step's `time` column; or the rows whose `column` is `value` (a value as the
+ * data types it: 1, "N", null); or, with `rest`, the rows whose `column` is not `value` (the part that held stays).
+ */
+export type Missing = { time: string; hours: [number, number] } | { column: string; value: string | number | boolean | null; rest?: boolean };
+
+/**
+ * A watched source that may be filled (ADR 0009 amendment 1 S1): it reads the source and whatever read the source reads
+ * it instead. On a day nothing fills it passes the source's rows through with one more column, `filled_from` (null). A
+ * derived document (fill.ts repairDocument) sets `missing` and `from`: the rows outside the missing part, plus, from the
+ * donor (its second input), the rows inside it, moved to the day by whole days and marked with the donor's day; with
+ * `from` null (the complete part), the rows outside the missing part alone.
+ */
+export interface FillStep extends StepBase {
+  kind: 'fill';
+  /** The column an hours cause's hours are of. */
+  time: string;
+  /** The columns a donor's rows are moved by whole days. */
+  shift: string[];
+  missing?: Missing;
+  /** The donor's day, or null for the complete part. Set exactly when `missing` is. */
+  from?: string | null;
+}
+
+/** The column a fill step adds: the day a row came from, or null for a row that arrived (S1). */
+export const FILLED_FROM = 'filled_from';
+
+export type StepDef = SqlStep | FilterStep | FormulaStep | SelectStep | JoinStep | AggregateStep | ExpectationsStep | FillStep;
 
 export type StepKind = StepDef['kind'];
 
@@ -253,7 +296,11 @@ export interface Issue {
 }
 
 const ID = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const KINDS: readonly StepKind[] = ['sql', 'filter', 'formula', 'select', 'join', 'aggregate', 'expectations'];
+const KINDS: readonly StepKind[] = ['sql', 'filter', 'formula', 'select', 'join', 'aggregate', 'expectations', 'fill'];
+/** A column a fill step names (its time, a column it shifts, a missing part's column). */
+const COLUMN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** A day, as a period's value is written. */
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Check a document's shape and references. An empty list means it can be translated into a flow plan. SQL text is
@@ -332,8 +379,9 @@ export function validateDocument(doc: unknown): Issue[] {
       else if (x.toLowerCase() === String(s.id).toLowerCase()) add(`${at}.inputs[${j}]`, 'a step cannot read itself');
     });
     if (new Set(inputs.map((x) => x.toLowerCase())).size !== inputs.length) add(`${at}.inputs`, 'an input is listed twice');
-    const arity = s.kind === 'join' ? 2 : s.kind === 'sql' ? -1 : 1;
-    if (arity >= 0 && inputs.length !== arity) add(`${at}.inputs`, `a ${s.kind} step has ${arity === 1 ? 'one input' : 'two inputs'}`);
+    // A fill step reads its source, and a donor exactly when it fills from another day (validateFills).
+    const arity = s.kind === 'join' ? 2 : s.kind === 'sql' ? -1 : s.kind === 'fill' ? (s.from === undefined || s.from === null ? 1 : 2) : 1;
+    if (arity >= 0 && inputs.length !== arity) add(`${at}.inputs`, s.kind === 'fill' ? (arity === 1 ? 'a fill step reads its source, and a donor only when it fills from another day' : 'a fill step that fills from another day reads its source and the donor') : `a ${s.kind} step has ${arity === 1 ? 'one input' : 'two inputs'}`);
     if (s.dataset !== undefined) {
       if (!isRecord(s.dataset)) add(`${at}.dataset`, 'an object');
       else if (s.dataset.storage !== undefined && s.dataset.storage !== 'row' && s.dataset.storage !== 'columnar') add(`${at}.dataset.storage`, 'row or columnar');
@@ -353,14 +401,61 @@ export function validateDocument(doc: unknown): Issue[] {
   validateExtras(doc, ids, add);
   validatePublish(doc, params, add);
   if (doc.calendar !== undefined) for (const [path, message] of calendarProblems(doc.calendar)) add(`$.calendar${path}`, message);
+  validateFills(doc, steps, add);
   return issues;
+}
+
+/**
+ * The fill steps (ADR 0009 amendment 1 S1): each reads a source directly, one fill step a source, and every other step
+ * that read the source reads the fill step instead; a donor is a source that nothing else reads and nothing watches; a
+ * fill from another day needs the period, the day its rows move to; and a standing setting other than `last` needs a
+ * fill step on every watched source.
+ */
+function validateFills(doc: Record<string, unknown>, steps: readonly Record<string, unknown>[], add: (path: string, message: string) => void): void {
+  const sources = new Set((Array.isArray(doc.sources) ? doc.sources : []).filter((s: unknown) => isRecord(s) && typeof s.id === 'string').map((s: Record<string, unknown>) => String(s.id).toLowerCase()));
+  const inputsOf = (s: Record<string, unknown>) => (Array.isArray(s.inputs) ? s.inputs.filter((x): x is string => typeof x === 'string') : []);
+  const filled = new Map<string, number>();
+  const donors = new Map<string, number>();
+  steps.forEach((s, i) => {
+    if (s.kind !== 'fill') return;
+    const [source, donor] = inputsOf(s);
+    if (source === undefined) return;
+    const at = `$.steps[${i}]`;
+    if (!sources.has(source.toLowerCase())) add(`${at}.inputs[0]`, `${source} is a step: a fill step reads a source directly`);
+    else if (filled.has(source.toLowerCase())) add(`${at}.inputs[0]`, `${source} has a fill step already: one fill step a source`);
+    else filled.set(source.toLowerCase(), i);
+    if (donor !== undefined) {
+      if (!sources.has(donor.toLowerCase())) add(`${at}.inputs[1]`, `${donor} is a step: a donor is a source of its own`);
+      else if (donor.toLowerCase() === source.toLowerCase()) add(`${at}.inputs[1]`, 'a day is never its own donor');
+      else donors.set(donor.toLowerCase(), i);
+    }
+    if (s.from !== undefined && s.from !== null) {
+      const pub = isRecord(doc.publish) ? doc.publish : null;
+      if (typeof pub?.period !== 'string') add(`${at}.from`, 'a fill from another day needs publish.period: the parameter whose value is the day its rows move to');
+    }
+  });
+  steps.forEach((s, i) => {
+    inputsOf(s).forEach((x, j) => {
+      const id = x.toLowerCase();
+      const fill = filled.get(id);
+      if (fill !== undefined && fill !== i) add(`$.steps[${i}].inputs[${j}]`, `${x} has a fill step, ${String(steps[fill]!.id)}: read that instead`);
+      const giver = donors.get(id);
+      if (giver !== undefined && !(giver === i && j === 1)) add(`$.steps[${i}].inputs[${j}]`, `${x} is a donor of ${String(steps[giver]!.id)}: nothing else reads it`);
+    });
+  });
+  const pub = isRecord(doc.publish) ? doc.publish : null;
+  if (pub && isRecord(pub.watch)) {
+    for (const id of Object.keys(pub.watch)) if (donors.has(id.toLowerCase())) add(`$.publish.watch.${id}`, `${id} is a donor: a donor is judged by its own day's claim, not watched`);
+    if (pub.meanwhile !== undefined && pub.meanwhile !== 'last')
+      for (const id of Object.keys(pub.watch)) if (!filled.has(id.toLowerCase())) add('$.publish.meanwhile', `${String(pub.meanwhile)} needs a fill step on every watched source, and ${id} has none`);
+  }
 }
 
 /** The publish block (ADR 0009 §2): what holds, the sources judged against their history, the period, together. */
 function validatePublish(doc: Record<string, unknown>, params: Map<string, ParameterDef>, add: (path: string, message: string) => void): void {
   const p = doc.publish;
   if (p === undefined) return;
-  if (!isRecord(p)) return add('$.publish', '{ hold, watch, period, together }');
+  if (!isRecord(p)) return add('$.publish', '{ hold, watch, period, together, donor, meanwhile, until }');
   for (const k of Object.keys(p)) if (!PUBLISH_FIELDS.includes(k)) add(`$.publish.${k}`, `not a field this version reads (${PUBLISH_FIELDS.join(', ')}): refused rather than ignored`);
   const hold = new Set<HoldKind>();
   if (!Array.isArray(p.hold) || p.hold.length === 0) add('$.publish.hold', `a list of what holds: ${HOLD_KINDS.join(', ')}`);
@@ -406,6 +501,10 @@ function validatePublish(doc: Record<string, unknown>, params: Map<string, Param
   if (p.period !== undefined) textParam(p.period, '$.publish.period', 'the period is a text parameter, such as a day');
   else if (unperiod > 0) add('$.publish.period', 'a watch needs a period: the parameter whose value is the day a claim names');
   if (p.together !== undefined && typeof p.together !== 'boolean') add('$.publish.together', 'true or false');
+  if (p.donor !== undefined && !(DONOR_RULES as readonly unknown[]).includes(p.donor)) add('$.publish.donor', `one of ${DONOR_RULES.join(', ')}`);
+  if (p.meanwhile !== undefined && !(MEANWHILES as readonly unknown[]).includes(p.meanwhile)) add('$.publish.meanwhile', `one of ${MEANWHILES.join(', ')}`);
+  if (p.until !== undefined && !(UNTILS as readonly unknown[]).includes(p.until)) add('$.publish.until', `one of ${UNTILS.join(', ')}`);
+  if (p.meanwhile !== undefined && p.meanwhile !== 'last' && !judged) add('$.publish.meanwhile', `${String(p.meanwhile)} fills a watched source's missing part, which its story names: hold has neither short nor wrong`);
 }
 
 /** A watch in the general form (ADR 0010 §10): its fields, each one this build can judge, else refused. */
@@ -644,7 +743,44 @@ function validateConfig(s: Record<string, unknown>, at: string, add: (path: stri
       if (s.maxDropped !== undefined && (typeof s.maxDropped !== 'number' || !(s.maxDropped >= 0 && s.maxDropped <= 1))) add(`${at}.maxDropped`, 'a fraction from 0 to 1');
       break;
     }
+    case 'fill': {
+      if (typeof s.time !== 'string' || !COLUMN.test(s.time)) add(`${at}.time`, 'the column an hours cause is of: a letter or _, then letters, digits or _');
+      if (!Array.isArray(s.shift)) add(`${at}.shift`, 'the columns a donor’s rows are moved by, a list');
+      else {
+        const seen = new Set<string>();
+        s.shift.forEach((c: unknown, j: number) => {
+          if (typeof c !== 'string' || !COLUMN.test(c)) add(`${at}.shift[${j}]`, 'a column: a letter or _, then letters, digits or _');
+          else if (seen.has(c.toLowerCase())) add(`${at}.shift[${j}]`, `${c} is listed twice`);
+          else seen.add(c.toLowerCase());
+        });
+      }
+      const has = s.missing !== undefined;
+      if (has) {
+        const problem = missingProblem(s.missing, s.time);
+        if (problem) add(`${at}.missing`, problem);
+      }
+      if (s.from !== undefined && s.from !== null && (typeof s.from !== 'string' || !DAY.test(s.from))) add(`${at}.from`, 'the donor’s day, YYYY-MM-DD, or null for the part that arrived alone');
+      if (has !== (s.from !== undefined)) add(`${at}.${has ? 'from' : 'missing'}`, has ? 'a missing part needs from: the donor’s day, or null for the part that arrived alone' : 'from needs the missing part it fills');
+      break;
+    }
   }
+}
+
+/** Why a value isn't a missing part (Missing), or null when it is. */
+export function missingProblem(m: unknown, time?: unknown): string | null {
+  if (!isRecord(m)) return '{ time, hours: [from, to] } or { column, value, rest }';
+  if ('hours' in m || 'time' in m) {
+    if (Object.keys(m).some((k) => k !== 'time' && k !== 'hours')) return 'hours are { time, hours: [from, to] }, nothing else';
+    const h = m.hours;
+    if (!Array.isArray(h) || h.length !== 2 || !h.every((x) => Number.isInteger(x)) || !(0 <= h[0] && h[0] <= h[1] && h[1] <= 23)) return 'hours are [from, to], whole hours with 0 ≤ from ≤ to ≤ 23';
+    if (typeof m.time !== 'string' || (time !== undefined && m.time !== time)) return `the hours are of the step's time column${typeof time === 'string' ? `, ${time}` : ''}`;
+    return null;
+  }
+  if (Object.keys(m).some((k) => k !== 'column' && k !== 'value' && k !== 'rest')) return 'a part is { column, value, rest }, nothing else';
+  if (typeof m.column !== 'string' || !COLUMN.test(m.column)) return 'a part names its column: a letter or _, then letters, digits or _';
+  if (!('value' in m) || !(m.value === null || typeof m.value === 'string' || typeof m.value === 'boolean' || (typeof m.value === 'number' && Number.isFinite(m.value)))) return 'a part names its value: text, a number, true, false or null';
+  if (m.rest !== undefined && typeof m.rest !== 'boolean') return 'rest is true or false';
+  return null;
 }
 
 /** The steps' ids in a cycle, if they have one. */
@@ -705,7 +841,10 @@ export function rewire(doc: FlowDocument, from: string, to: string, except?: str
  * The document with a step put between `id` and what reads it, such as a box of checks that drops rows: everything
  * that read `id` reads the new step instead, and the new step joins `id`'s section, just after it.
  */
-export function insertAfter(doc: FlowDocument, id: string, step: StepDef): FlowDocument {
+export function insertAfter(doc: FlowDocument, at: string, step: StepDef): FlowDocument {
+  // A watched source that may be filled is read through its fill step: a box after the source goes after that (C7).
+  const id = fillStepOf(doc, at)?.id ?? at;
+  if (id !== at) step = rewire({ ...doc, steps: [step] }, at, id).steps[0]!;
   const rewired = rewire(doc, id, step.id);
   const steps = [...rewired.steps];
   steps.splice(steps.findIndex((s) => s.id === id) + 1, 0, step);
@@ -734,6 +873,11 @@ export function takeOut(doc: FlowDocument, id: string): FlowDocument | undefined
     profiles: rewired.profiles?.filter((p) => !sameId(p.of, id)),
     layout: rewired.layout && Object.fromEntries(Object.entries(rewired.layout).filter(([k]) => k !== id && !rewired.profiles?.some((p) => p.id === k && sameId(p.of, id)))),
   };
+}
+
+/** A source's fill step (ADR 0009 amendment 1 S1): the step of kind `fill` whose first input it is, if any. */
+export function fillStepOf(doc: Pick<FlowDocument, 'steps'>, source: string): FillStep | undefined {
+  return doc.steps.find((s): s is FillStep => s.kind === 'fill' && s.inputs.length > 0 && sameId(s.inputs[0]!, source));
 }
 
 /**

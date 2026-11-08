@@ -7,8 +7,8 @@
  * replaying, and its format is versioned (`smaltflPlan`).
  */
 import { calendarProblems, resolveCalendar, type Calendar } from './calendar.js';
-import type { FlowDocument, HoldKind, ParameterDef, StepDef, WatchDef } from './document.js';
-import { HOLD_KINDS, isGeneralWatch, validateDocument, withoutDisplay } from './document.js';
+import type { DonorRule, FlowDocument, HoldKind, Meanwhile, Missing, ParameterDef, StepDef, Until, WatchDef } from './document.js';
+import { DONOR_RULES, HOLD_KINDS, isGeneralWatch, MEANWHILES, missingProblem, UNTILS, validateDocument, withoutDisplay } from './document.js';
 import { hashOf } from './hash.js';
 import { marksOn, type Ontology } from './ontology.js';
 import type { ParamType, ParamValue } from './sqltext.js';
@@ -92,7 +92,22 @@ export interface ExpectNode extends NodeBase {
   maxDropped: number | null;
 }
 
-export type PlanNode = TableNode | SqlNode | FilterNode | FormulaNode | SelectNode | JoinNode | AggregateNode | ExpectNode;
+/**
+ * A watched source's fill step (ADR 0009 amendment 1 S1, S4): its source's rows with `filled_from`; with `missing`, the
+ * rows outside it, plus (with `from`, from its second input, the donor) the rows inside it, their `shift` columns moved
+ * from the donor's day `from` to the run's day `to` by whole days. Its key covers all of these, and its inputs' keys.
+ */
+export interface FillNode extends NodeBase {
+  op: 'fill';
+  time: string;
+  shift: string[];
+  missing: Missing | null;
+  from: string | null;
+  /** The day the donor's rows move to: the run's period value. Null exactly when `from` is. */
+  to: string | null;
+}
+
+export type PlanNode = TableNode | SqlNode | FilterNode | FormulaNode | SelectNode | JoinNode | AggregateNode | ExpectNode | FillNode;
 
 export interface PlanOutput {
   /** The dataset's name: the id of the step that produces it. */
@@ -109,6 +124,10 @@ export interface PlanPublish {
   watch: [node: number, file: string][];
   period: string | null;
   together: boolean;
+  /** Only when the document sets them, so every plan/1 hash made before the fills holds (ADR 0009 amendment 1 S1, C1). */
+  donor?: DonorRule;
+  meanwhile?: Meanwhile;
+  until?: Until;
 }
 
 /**
@@ -146,8 +165,8 @@ export interface PlanPublish2 {
   together: boolean;
   calendar: Calendar;
   watch: [node: number, watch: WatchPlan][];
-  meanwhile: 'last';
-  until: 'decision';
+  meanwhile: Meanwhile;
+  until: Until;
 }
 
 /** A watched source as either plan format says it: its node, its history's file, its period, whether it holds, and in
@@ -234,11 +253,18 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
     nodes.push({ op: 'table', origin: s.id, inputs: [], table: s.table });
   }
   const outputs: PlanOutput[] = [];
+  // The day a fill moves its donor's rows to: the period's value (validateDocument made sure a fill from a day has one).
+  const period = doc.publish?.period;
+  const day = period === undefined ? undefined : params[period]?.value;
   for (const step of topological(doc.steps)) {
     const at = `steps.${step.id}`;
     const inputs = step.inputs.map((id) => index.get(id.toLowerCase())!);
     const base = { origin: step.id, inputs, ...(step.dataset?.storage === 'columnar' ? { storage: 'columnar' as const } : {}) };
-    nodes.push(translateStep(step, base, at, bind));
+    if (step.kind === 'fill' && step.from !== undefined && step.from !== null && (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day))) {
+      const message = `a fill from ${step.from} moves its rows to the run's day, and ${period} is ${day === null || day === undefined ? 'not given' : `'${String(day)}', not a day`}`;
+      throw new PlanError(`${at}: ${message}`, [{ path: at, message }]);
+    }
+    nodes.push(translateStep(step, base, at, bind, typeof day === 'string' ? day : null));
     index.set(step.id.toLowerCase(), nodes.length - 1);
     if (step.dataset) outputs.push({ name: step.id, node: nodes.length - 1 });
   }
@@ -255,14 +281,16 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   // an object, or a watched source with a mark that changes verdicts (Q-79), which an older plugin must refuse.
   if (!judgesItsOwnWay(doc, entries.map((e) => e.id))) {
     const watch = entries.map((e): [number, string] => [e.node, typeof e.w === 'string' ? e.w : e.w.history]);
-    return { ...plan, smaltflPlan: 1, publish: { hold, watch, period: p.period ?? null, together: p.together ?? true } };
+    // The fills' settings only when the document sets them, so every plan/1 hash made before them holds (C1).
+    const fills = { ...(p.donor !== undefined ? { donor: p.donor } : {}), ...(p.meanwhile !== undefined ? { meanwhile: p.meanwhile } : {}), ...(p.until !== undefined ? { until: p.until } : {}) };
+    return { ...plan, smaltflPlan: 1, publish: { hold, watch, period: p.period ?? null, together: p.together ?? true, ...fills } };
   }
   // A flow whose watches are all given as file names keeps the calendar it always had; any other has its block's, or
   // none (Q-58).
   const legacy = doc.calendar === undefined && entries.every((e) => !isGeneralWatch(e.w));
   const calendar = resolveCalendar(doc.calendar, legacy);
   const watch = entries.map((e): [number, WatchPlan] => [e.node, watchPlan(e.w, e.id, p.period ?? null, doc.ontology)]);
-  return { ...plan, smaltflPlan: 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: 'last', until: 'decision' } };
+  return { ...plan, smaltflPlan: 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: p.meanwhile ?? 'last', until: p.until ?? 'decision' } };
 }
 
 /** Whether a document judges its watched sources other than every flow did before ADR 0010: a plan/2. */
@@ -299,7 +327,7 @@ function watchPlan(w: string | WatchDef, source: string, period: string | null, 
 
 type Base = Pick<NodeBase, 'origin' | 'inputs' | 'storage'>;
 
-function translateStep(step: StepDef, base: Base, at: string, bind: (sql: string, path: string) => string): PlanNode {
+function translateStep(step: StepDef, base: Base, at: string, bind: (sql: string, path: string) => string, day: string | null): PlanNode {
   const named = (c: string | { name: string; expr: string }, path: string): Named => (typeof c === 'string' ? [c, quoteIdent(c)] : [c.name, bind(c.expr, path)]);
   switch (step.kind) {
     case 'sql':
@@ -332,6 +360,10 @@ function translateStep(step: StepDef, base: Base, at: string, bind: (sql: string
         rules: step.rules.map((r, i) => [r.name, bind(r.check, `${at}.rules[${i}].check`), r.onFail]),
         maxDropped: step.maxDropped ?? null,
       };
+    case 'fill': {
+      const from = step.from ?? null;
+      return { op: 'fill', ...base, time: step.time, shift: [...step.shift], missing: step.missing ? structuredClone(step.missing) : null, from, to: from === null ? null : day };
+    }
   }
 }
 
@@ -368,7 +400,8 @@ function topological(steps: readonly StepDef[]): StepDef[] {
   return out;
 }
 
-const OPS = new Set(['table', 'sql', 'filter', 'formula', 'select', 'join', 'aggregate', 'expect']);
+const OPS = new Set(['table', 'sql', 'filter', 'formula', 'select', 'join', 'aggregate', 'expect', 'fill']);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Check a plan's structure before the runtime trusts it: the format, the operations, inputs that come earlier, and
@@ -386,8 +419,9 @@ export function validatePlan(plan: unknown): asserts plan is FlowPlan {
   p.nodes.forEach((n, i) => {
     if (typeof n !== 'object' || n === null || !OPS.has(n.op)) fail(`node ${i} has no known op`);
     if (!Array.isArray(n.inputs) || n.inputs.some((j) => !Number.isInteger(j) || j < 0 || j >= i)) fail(`node ${i} reads a node that does not come before it`);
-    const arity = n.op === 'table' ? 0 : n.op === 'join' ? 2 : n.op === 'sql' ? n.names.length : 1;
+    const arity = n.op === 'table' ? 0 : n.op === 'join' ? 2 : n.op === 'sql' ? n.names.length : n.op === 'fill' ? (n.from === null ? 1 : 2) : 1;
     if (n.inputs.length !== arity) fail(`node ${i} (${n.op}) has ${n.inputs.length} inputs`);
+    if (n.op === 'fill') fillProblem(p, n, i, fail);
   });
   if (!Array.isArray(p.outputs)) fail('outputs is not an array');
   const names = new Set<string>();
@@ -416,9 +450,9 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never): void {
   const text = (name: unknown) => typeof name === 'string' && Object.hasOwn(p.parameters ?? {}, name) && (typeof p.parameters[name] === 'string' || p.parameters[name] === null);
   if (period !== null && !text(period)) fail(`publish.period ${String(period)} is not one of the plan's text parameters`);
   if (typeof together !== 'boolean') fail('publish.together is true or false');
-  // The fills add what readers get meanwhile (fill, complete) and a pause that closes itself (normal).
-  if (meanwhile !== 'last') fail(`publish.meanwhile ${String(meanwhile)} is not one this version reads (last)`);
-  if (until !== 'decision') fail(`publish.until ${String(until)} is not one this version reads (decision)`);
+  // What readers get meanwhile, and what closes a pause (ADR 0009 amendment 1 S5), filled in (C1).
+  if (!(MEANWHILES as readonly unknown[]).includes(meanwhile)) fail(`publish.meanwhile ${String(meanwhile)} is not one this version reads (${MEANWHILES.join(', ')})`);
+  if (!(UNTILS as readonly unknown[]).includes(until)) fail(`publish.until ${String(until)} is not one this version reads (${UNTILS.join(', ')})`);
   const c = calendar as Record<string, unknown> | null;
   if (typeof c !== 'object' || c === null || !['none', 'us/1', 'us-nyc/1'].includes(c.base as string) || typeof c.zone !== 'string' || calendarProblems({ zone: c.zone }).length || Object.keys(c).sort().join() !== 'base,dates,days,windows,zone')
     fail('publish.calendar is { base: none, us/1 or us-nyc/1, zone, days, windows, dates }');
@@ -463,11 +497,24 @@ function checkHold(hold: unknown, fail: (message: string) => never): void {
   if (kinds.includes('unlearned') && !kinds.includes('short') && !kinds.includes('wrong')) fail('publish.hold has unlearned without short or wrong');
 }
 
+/** A fill node's own fields (ADR 0009 amendment 1 S1): its source and donor are snapshots, and its days are days. */
+function fillProblem(p: FlowPlan, n: FillNode, i: number, fail: (message: string) => never): void {
+  if (typeof n.time !== 'string' || n.time === '' || !Array.isArray(n.shift) || n.shift.some((c) => typeof c !== 'string' || c === '')) fail(`node ${i} (fill) names its time and the columns it shifts`);
+  if (n.inputs.some((j) => p.nodes[j]?.op !== 'table')) fail(`node ${i} (fill) reads a node that isn't a source: it fills a source, from a source`);
+  if (n.missing !== null && missingProblem(n.missing, n.time) !== null) fail(`node ${i} (fill): its missing part isn't one: ${missingProblem(n.missing, n.time)}`);
+  if (n.from !== null && (typeof n.from !== 'string' || !DAY.test(n.from) || typeof n.to !== 'string' || !DAY.test(n.to))) fail(`node ${i} (fill) fills from a day to a day: from and to are YYYY-MM-DD`);
+  if (n.from === null && n.to !== null) fail(`node ${i} (fill) moves rows to ${String(n.to)} from no day`);
+  if (n.missing === null && n.from !== null) fail(`node ${i} (fill) fills from ${n.from} with no missing part`);
+}
+
 function validatePublish(p: FlowPlan, fail: (message: string) => never): void {
   const pub = p.publish as unknown;
   if (typeof pub !== 'object' || pub === null || Array.isArray(pub)) return fail('a format-1 plan says what holds it: publish { hold, watch, period, together }');
-  const { hold, watch, period, together, ...rest } = pub as Record<string, unknown>;
+  const { hold, watch, period, together, donor, meanwhile, until, ...rest } = pub as Record<string, unknown>;
   if (Object.keys(rest).length) fail(`publish has ${Object.keys(rest).join(', ')}, which this version doesn't read`);
+  if (donor !== undefined && !(DONOR_RULES as readonly unknown[]).includes(donor)) fail(`publish.donor is ${DONOR_RULES.join(' or ')}`);
+  if (meanwhile !== undefined && !(MEANWHILES as readonly unknown[]).includes(meanwhile)) fail(`publish.meanwhile is ${MEANWHILES.join(', ')}`);
+  if (until !== undefined && !(UNTILS as readonly unknown[]).includes(until)) fail(`publish.until is ${UNTILS.join(' or ')}`);
   checkHold(hold, fail);
   const kinds = hold as string[];
   if (!Array.isArray(watch)) fail('publish.watch is a list of [node, file]');

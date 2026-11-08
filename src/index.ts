@@ -11,13 +11,15 @@ import type { ParamValue } from './core/sqltext.js';
 
 export { canonicalJSON } from './core/canonical.js';
 export { hashOf, hex, sha256, sha256Hex, unhex, utf8 } from './core/hash.js';
-export { DOCUMENT_FORMATS, HOLD_KINDS, documentFormat, isGeneralWatch, sourceOf, validateDocument, watchHistory, withoutDisplay } from './core/document.js';
+export { DOCUMENT_FORMATS, DONOR_RULES, FILLED_FROM, HOLD_KINDS, MEANWHILES, UNTILS, documentFormat, fillStepOf, insertAfter, isGeneralWatch, sourceOf, validateDocument, watchHistory, withoutDisplay } from './core/document.js';
 export type {
   AggregateStep,
   DatasetDef,
   DocumentFormat,
+  DonorRule,
   ExpectationRule,
   ExpectationsStep,
+  FillStep,
   FilterStep,
   FlowDocument,
   FormulaStep,
@@ -26,6 +28,8 @@ export type {
   ProfileDef,
   Issue,
   JoinStep,
+  Meanwhile,
+  Missing,
   NamedExpr,
   ParameterDef,
   PublishDef,
@@ -34,13 +38,14 @@ export type {
   SqlStep,
   StepDef,
   StepKind,
+  Until,
   WatchDef,
 } from './core/document.js';
 export { PLAN_FORMATS, PlanError, flowHash, isPublish2, planPeriod, translate, validatePlan, watchesOf } from './core/plan.js';
-export type { Column, ColumnType, FlowPlan, PlanFormat, PlanNode, PlanOutput, PlanPublish, PlanPublish2, PlannedWatch, WatchPlan } from './core/plan.js';
+export type { Column, ColumnType, FillNode, FlowPlan, PlanFormat, PlanNode, PlanOutput, PlanPublish, PlanPublish2, PlannedWatch, WatchPlan } from './core/plan.js';
 export { shapeOf } from './core/optimize.js';
 export type { RunShape } from './core/optimize.js';
-export { emitSelect, nodeSelect } from './core/emit.js';
+export { emitSelect, missingSql, nodeSelect, shiftSql } from './core/emit.js';
 export { checksOver, drift, fillGaps, growForest, isolationForest, isolationPath, madsOf, pathLength, principalComponents, profileColumn, psi, scoreOf, suggestChecks, unusual } from './core/quality.js';
 export type { ColumnFacts, Cut, Drift, Forest, Judge, Kind, Profile, Projection, Quantiles, Suggestion, Tree, Unusual } from './core/quality.js';
 export { calendarProblems, dayLastYear, holidayOf, holidaysOf, isSpecial, NONE, resolveCalendar, seasonOf, shortName, specialOf, US_1, US_NYC_1 } from './core/calendar.js';

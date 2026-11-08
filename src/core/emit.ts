@@ -6,8 +6,10 @@
  * placed in parentheses on lines of its own, so a trailing `--` comment can't swallow what follows it, and the
  * engine's `prepare()` accepts one statement only, so nothing can be appended to it.
  */
+import { daysBetween } from './calendar.js';
+import { FILLED_FROM, type Missing } from './document.js';
 import { foldedInto } from './optimize.js';
-import type { Column, ColumnType, ExpectNode, FlowPlan, FormulaNode, Named, PlanNode } from './plan.js';
+import type { Column, ColumnType, ExpectNode, FillNode, FlowPlan, FormulaNode, Named, PlanNode } from './plan.js';
 import { identifiers, quoteIdent as q, tokens, type Token } from './sqltext.js';
 
 export interface EmitContext {
@@ -26,7 +28,9 @@ export function emitSelect(plan: FlowPlan, target: number, ctx: EmitContext): st
   const ref = (i: number) => q(ctx.table(i) ?? cteName(i));
   const body = (i: number) => {
     const node = plan.nodes[i]!;
-    return nodeSelect(node, node.inputs.map(ref), node.inputs.map((j) => ctx.columns(j)));
+    // A fill reads its inputs' types: its missing hours and shifts are written for the type of their column.
+    const types = node.op === 'fill' ? node.inputs.map((j) => plan.nodes[j]!.schema) : undefined;
+    return nodeSelect(node, node.inputs.map(ref), node.inputs.map((j) => ctx.columns(j)), types);
   };
   const main = body(target);
   if (folded.length === 0) return main;
@@ -51,8 +55,11 @@ export function emitExpectCounts(plan: FlowPlan, node: number, ctx: EmitContext)
   return `SELECT count(*), ${[...failures, dropped].join(', ')} FROM (\n${emitRead(plan, n.inputs[0]!, ctx)}\n)`;
 }
 
-/** One SELECT for one node, over its inputs' relations (quoted names) and their column names. */
-export function nodeSelect(node: PlanNode, from: readonly string[], inputColumns: readonly (readonly string[])[]): string {
+/**
+ * One SELECT for one node, over its inputs' relations (quoted names) and their column names. A fill node needs its
+ * inputs' typed columns too (`inputTypes`, as the typed plan has them).
+ */
+export function nodeSelect(node: PlanNode, from: readonly string[], inputColumns: readonly (readonly string[])[], inputTypes?: readonly (readonly Column[] | undefined)[]): string {
   const expr = ([name, e]: Named) => `(\n${e}\n) AS ${q(name)}`;
   switch (node.op) {
     case 'table':
@@ -83,7 +90,69 @@ export function nodeSelect(node: PlanNode, from: readonly string[], inputColumns
       const drops = dropChecks(node);
       return `SELECT * FROM ${from[0]}${drops.length ? ` WHERE ${drops.join(' AND ')}` : ''}`;
     }
+    case 'fill':
+      return fillSelect(node, from, inputTypes?.[0]);
   }
+}
+
+/**
+ * A fill (ADR 0009 amendment 1 S4): with nothing missing, the source's rows and `filled_from` null. With a missing part,
+ * the rows outside it (filled_from null), and with a donor the donor's rows inside it, each column taken by the
+ * source's name and cast to the source's type, the shift columns moved to the run's day by whole days, and
+ * `filled_from` the donor's day. A row is inside the missing part only when the part's test is true: a row whose hour
+ * or value can't be read stays with what arrived.
+ */
+function fillSelect(node: FillNode, from: readonly string[], source: readonly Column[] | undefined): string {
+  const mark = (v: string | null) => `CAST(${v === null ? 'NULL' : `'${v.replace(/'/g, "''")}'`} AS TEXT) AS ${q(FILLED_FROM)}`;
+  if (node.missing === null) return `SELECT *, ${mark(null)} FROM ${from[0]}`;
+  if (!source) throw new Error(`${node.origin}: a fill is written for its source's types, and the plan isn't typed`);
+  const inside = `CASE WHEN (${missingSql(node.missing, source)}) THEN 1 ELSE 0 END`;
+  const kept = `SELECT ${source.map(([c]) => q(c)).join(', ')}, ${mark(null)} FROM ${from[0]} WHERE ${inside} = 0`;
+  if (node.from === null) return kept;
+  const days = daysBetween(node.from, node.to!);
+  const shifted = new Set(node.shift.map((c) => c.toLowerCase()));
+  const cols = source.map(([c, t]) => {
+    const value = shifted.has(c.toLowerCase()) ? shiftSql(q(c), days, t) : q(c);
+    const cast = CASTS[t];
+    return `${cast ? `CAST(${value} AS ${cast})` : value} AS ${q(c)}`;
+  });
+  return `${kept}\nUNION ALL\nSELECT ${cols.join(', ')}, ${mark(node.from)} FROM ${from[1]} WHERE ${inside} = 1`;
+}
+
+/** The declared types a donor's columns are cast to, so they are the source's (ADR 0009 amendment 1 S4). */
+const CASTS: Partial<Record<ColumnType, string>> = { int: 'INTEGER', real: 'REAL', text: 'TEXT', blob: 'BLOB' };
+
+/**
+ * The test a row is inside a missing part by, over the source's columns: an hour from `hours[0]` to `hours[1]` of its
+ * time (the text's hour, as the history counts them, for a time kept as text); the part's value (`IS`, so a null is a
+ * value like another); or, for the rest, any other value.
+ */
+export function missingSql(m: Missing, columns: readonly Column[]): string {
+  const typeOf = (c: string) => columns.find(([n]) => n.toLowerCase() === c.toLowerCase())?.[1];
+  if ('hours' in m) {
+    const t = q(m.time);
+    const hour = typeOf(m.time) === 'text' ? `CAST(substr(${t}, 12, 2) AS INTEGER)` : `CAST(strftime('%H', ${t}) AS INTEGER)`;
+    return `${hour} BETWEEN ${m.hours[0]} AND ${m.hours[1]}`;
+  }
+  return `${q(m.column)} ${m.rest ? 'IS NOT' : 'IS'} ${valueSql(m.value)}`;
+}
+
+function valueSql(v: string | number | boolean | null): string {
+  if (v === null) return 'NULL';
+  if (typeof v === 'boolean') return v ? '1' : '0';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(v);
+  return `'${v.replace(/'/g, "''")}'`;
+}
+
+/**
+ * A column moved by whole days: for a time kept as text, its date part moved and the rest of the text as it was (so a
+ * local time keeps its hour); a whole number is read as seconds since 1970, a real number as a Julian day.
+ */
+export function shiftSql(col: string, days: number, type: ColumnType): string {
+  if (days === 0) return col;
+  if (type === 'int') return `(${col} + ${days * 86400})`;
+  if (type === 'real') return `(${col} + ${days})`;
+  return `(date(substr(${col}, 1, 10), '${days > 0 ? '+' : ''}${days} days') || substr(${col}, 11))`;
 }
 
 function dropChecks(node: ExpectNode): string[] {
