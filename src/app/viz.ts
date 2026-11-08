@@ -343,7 +343,11 @@ export function episodeBars(o: { days: readonly { label: string; got: readonly n
   if (o.bracket) {
     const x1 = o.bracket.from * xw;
     const x2 = o.bracket.to * xw;
-    s += `<path class="bracket" d="M${f1(x1)} ${top - 2}v-5H${f1(x2)}v5"/><text x="${f1((x1 + x2) / 2)}" y="${top - 10}" text-anchor="middle" class="lbl-bad">${esc(o.bracket.label)}</text>`;
+    // Centred over its span, but never over the cut's label, nor past the chart's end.
+    const half = (o.bracket.label.length * 6.6) / 2;
+    const clear = o.cut !== undefined && o.cutLabel ? o.cut * xw + 4 + o.cutLabel.length * 7 + 8 : -Infinity;
+    const mid = Math.min(w - half, Math.max((x1 + x2) / 2, clear + half));
+    s += `<path class="bracket" d="M${f1(x1)} ${top - 2}v-5H${f1(x2)}v5"/><text x="${f1(mid)}" y="${top - 10}" text-anchor="middle" class="lbl-bad lbl-halo">${esc(o.bracket.label)}</text>`;
   }
   if (o.floorLabel) s += `<text x="${f1(w * 0.62)}" y="${base - 10}" text-anchor="middle" class="lbl-m lbl-halo">${esc(o.floorLabel)}</text>`;
   return `${s}</svg>`;

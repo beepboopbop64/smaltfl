@@ -3,7 +3,7 @@
  * broken numbers, and escapes what it is given.
  */
 import { describe, expect, it } from 'vitest';
-import { amountLine, bulletTrack, composition, dayStrip, dumbbellRows, episodeLine, gateBars, glyph, hourBars, lineage, niceMax, partBar, quantileStrip, ruleRows, splitRows, stripBar, waterfall } from '../src/app/viz.js';
+import { amountLine, bulletTrack, composition, dayStrip, dumbbellRows, episodeBars, episodeLine, gateBars, glyph, hourBars, lineage, niceMax, partBar, quantileStrip, ruleRows, splitRows, stripBar, waterfall } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -71,6 +71,14 @@ describe('the news’s charts', () => {
     const svg = dayStrip({ days: [{ day: '2023-09-22', v: 4633, low: 84912, high: 155515, sev: 'alert', mark: 'held' }, { day: '2023-09-25', v: 91341, low: 71515, high: 130105 }], aria: 'Trips by day' });
     expect(svg).toContain('g-held');
     expect([niceMax(8360), niceMax(10_800), niceMax(1), niceMax(21)]).toEqual([10_000, 12_000, 1, 25]);
+  });
+
+  it('keeps an episode’s shortfall, an estimate with its bound, clear of the hour it began', () => {
+    const day = { label: 'Sat', got: hours, usual };
+    const svg = episodeBars({ days: [day, { ...day, label: 'Sun', got: hours.map(() => 60) }], cut: 15, cutLabel: '15:00', bracket: { from: 15, to: 48, label: '~135k fewer (≥110k)' }, aria: 'Trips by hour, Sat to Sun: about 135,000 fewer, at least 110,000' });
+    const at = Number(/<text x="([\d.]+)"[^>]*class="lbl-bad lbl-halo">~135k fewer/.exec(svg)![1]);
+    const cutEnd = (15 * 334) / 48 + 4 + 5 * 7;
+    expect(at - ('~135k fewer (≥110k)'.length * 6.6) / 2).toBeGreaterThan(cutEnd);
   });
 
   it('escapes the names it is given', () => {
