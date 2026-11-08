@@ -62,17 +62,17 @@ export type { KeyEnv } from './core/keys.js';
 export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, planKind, signManifest, verifyManifest } from './core/manifest.js';
 export type { DatasetRecord, ExpectationResult, Identity, IdentityCard, ManifestNode, RunManifest, SignatureCheck, SignedManifest } from './core/manifest.js';
 export { DECIDE, DECIDE_OPTIONS, checkAction, checkDecision, covers, readView, wrapRead } from './core/policy.js';
-export type { ActionCheck, ActionRule, ColumnRule, DecideOption, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
+export type { ActionCheck, ActionRule, ColumnRule, DecideOption, DecisionOption, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
 export type { ActRequest, ActionType, Edit, LinkType, Noun, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
 export { counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, VERDICT_MARKS } from './core/ontology.js';
 // What holds a run, what waits, and what the record decided (ADR 0009): one group a line, so that changes to one part
 // don't touch the others' lines.
 export { calendarFor, claimHolds, dayClaim, donorDefault, flowStory } from './core/hold.js';
-export { countedChecks, holdsOf, judgeClaim, judgeClaims, tripped } from './core/hold.js';
+export { countedChecks, donorGood, holdsOf, judgeClaim, judgeClaims, judgeDonors, tripped } from './core/hold.js';
 export { heldOutputs, reachOf, stagedKeys, waitingOf } from './core/hold.js';
-export { decisionFor, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, standingFor } from './core/hold.js';
-export type { ClaimAt, ClaimFacts, FlowFor, HistoryRef, Hold, Judged, StoryClaim } from './core/hold.js';
-export type { DecideAbout, Decided, HeldAbout, Inputs, Pause, ReleaseAbout } from './core/hold.js';
+export { dayState, decisionFor, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, standingFor } from './core/hold.js';
+export type { ClaimAt, ClaimFacts, Derived, FillHold, FlowFor, HistoryRef, Hold, Judged, RunHold, StoryClaim } from './core/hold.js';
+export type { DecideAbout, Decided, DerivedAbout, HeldAbout, Inputs, Pause, ReleaseAbout, RunRef } from './core/hold.js';
 // Filling a paused day (ADR 0009 amendment 1).
 export { DONOR_WINDOW, dayVersions, donorChoices, donorFor, donorRuleOf, donorSourceOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument } from './core/fill.js';
 export type { Direction, DonorPick, DonorQuery, FillCounts, NoDonor, Offer, OfferInput, Repair, Version } from './core/fill.js';

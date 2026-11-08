@@ -73,12 +73,20 @@ export function readersOf(published: string | null | undefined, day: string | nu
  * so a stale one reads stale: "readers see Wed 20", "readers see Mon 18 · 3 days old"; "nothing published yet". Said
  * as it stood then (`past`, readersOf): "readers kept Mon 18", or nothing when the day kept isn't known here.
  */
-export function readersSee(published: string | null | undefined, day: string | null | undefined, past = false): string {
-  if (past) return published ? `readers kept ${dayShort(published)}` : '';
+export function readersSee(published: string | null | undefined, day: string | null | undefined, past = false, mark?: RemedyMark | null): string {
+  const m = mark ? ` ${MARK[mark]}` : '';
+  if (past) return published ? `readers kept ${dayShort(published)}${m}` : '';
   if (!published) return 'nothing published yet';
   const age = day ? Math.round((at(day).getTime() - at(published).getTime()) / 864e5) : 0;
-  return `readers see ${dayShort(published)}${age >= 2 ? ` · ${age} days old` : ''}`;
+  return `readers see ${dayShort(published)}${m}${age >= 2 ? ` · ${age} days old` : ''}`;
 }
+
+/**
+ * What a day readers have was made by, when not as it came (ADR 0009 amendment 1 S12): filled (◧), or the part that
+ * arrived alone (◐). The mark goes beside the day's date, "readers see Thu 21 ◧"; it is not a word.
+ */
+export type RemedyMark = 'fill' | 'complete';
+export const MARK: Record<RemedyMark, string> = { fill: '◧', complete: '◐' };
 
 /**
  * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Thu 21 built, not
@@ -193,7 +201,7 @@ export function lacked(s: LoadStory, noun = 'rows'): { short: string; long: stri
  * never a source's name, a value or a figure (ADR 0009 §12). "Built from a short load", "Built from a load with
  * something wrong", "Built from a load its checks held", "Built from a load not yet judged". Null for a run nothing held.
  */
-export function heldLoadLine(holds: readonly { by: 'checks' | 'story' | 'unjudged'; claim?: { state: string; below: boolean } | undefined }[]): string | null {
+export function heldLoadLine(holds: readonly { by: string; claim?: { state: string; below: boolean } | undefined }[]): string | null {
   const story = holds.find((x) => x.by === 'story')?.claim;
   if (story?.below) return 'Built from a short load';
   if (story) return 'Built from a load with something wrong';
@@ -204,6 +212,9 @@ export function heldLoadLine(holds: readonly { by: 'checks' | 'story' | 'unjudge
 
 /** What became of a paused day's outputs (ADR 0009): waiting for a decision, published as is, or not published. */
 export type PauseState = 'waiting' | 'asis' | 'dont';
+/** The same with the remedies (amendment 1 S5): not published also once a fill is withdrawn; filled from another day;
+ * or published with the part that arrived. The screens draw these from step A9 on. */
+export type DayState = PauseState | RemedyMark;
 
 /**
  * The outputs row on a day with something wrong: never "published" alone, which reads as good news. Held: "Outputs
@@ -214,10 +225,12 @@ export type PauseState = 'waiting' | 'asis' | 'dont';
  * On a day paused (ADR 0009 §12), `n` counts the outputs that wait and the row says what became of them: "Paused · 3
  * outputs waiting" until someone decides, then "Published as is" or "Not published".
  */
-export function reachLabel(s: LoadStory, n: number, pause?: PauseState, noun = 'rows'): string {
+export function reachLabel(s: LoadStory, n: number, pause?: DayState, noun = 'rows'): string {
   if (pause === 'waiting') return `Paused · ${n} output${n === 1 ? '' : 's'} waiting`;
   if (pause === 'asis') return 'Published as is';
   if (pause === 'dont') return 'Not published';
+  if (pause === 'fill') return `${MARK.fill} Published filled`;
+  if (pause === 'complete') return `${MARK.complete} Published part only`;
   const outs = n > 3 ? `${n} outputs` : n === 1 ? 'Output' : 'Outputs';
   if (s.gate?.held) return `${outs} not published`;
   const l = lacked(s, noun);

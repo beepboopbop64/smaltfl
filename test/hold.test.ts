@@ -12,6 +12,7 @@ import {
   claimHolds,
   countedChecks,
   dayClaim,
+  dayState,
   decisionFor,
   donorDefault,
   flowStory,
@@ -21,6 +22,7 @@ import {
   inputsOf,
   judgeClaim,
   judgeClaims,
+  judgeDonors,
   lastPublished,
   pausesOf,
   pauseState,
@@ -33,11 +35,14 @@ import {
   waitingOf,
   type ClaimFacts,
   type DecideAbout,
+  type DerivedAbout,
   type HeldAbout,
   type Inputs,
   type Judged,
+  type ReleaseAbout,
   type StoryClaim,
 } from '../src/core/hold.js';
+import type { Repair } from '../src/core/fill.js';
 import type { LogEntry } from '../src/core/log.js';
 import type { ExpectationResult, RunManifest } from '../src/core/manifest.js';
 import { translate, type FlowPlan } from '../src/core/plan.js';
@@ -306,8 +311,8 @@ describe('the flow’s verdict on a day (ADR 0009 §3)', () => {
     expect(countedChecks(boxed, h, 'trips')).toBe(false);
   });
 
-  // A fill step (amendment 1 S1) passes its source's rows through on any day it fills nothing. Its kind isn't one this
-  // build's documents may hold yet, so these steps are written by hand.
+  // A fill step (amendment 1 S1) passes its source's rows through on any day it fills nothing. Only its kind and inputs
+  // matter here, so these steps are written short.
   const fill = (id: string, inputs: string[]) => ({ id, kind: 'fill', inputs }) as unknown as StepDef;
 
   it('reads the source through its fill step: what the checks count, and what an input stands for (C7)', () => {
@@ -544,5 +549,186 @@ describe('a decision that stands until a day publishes (ADR 0009 §6)', () => {
     expect(standingFor([fri, passed], '2023-09-24', 'day')).toBeNull();
     expect(standingFor([fri, passed], '2023-09-24')!.seq).toBe(fri.seq);
     expect(standingFor([fri, entry('run', { run: 5, outcome: 'ok', load: '2023-09-23' })], '2023-09-24')).toBeNull();
+  });
+});
+
+// ------------------------------------------------------------------ filling a paused day (ADR 0009 amendment 1)
+
+/** The example with a fill step on the trips, derived for Thu 21 from Thu 14: a plan with a donor (S4). */
+async function derivedPlan(from: string | null = '2023-09-14'): Promise<FlowPlan> {
+  const { publish: _p, ...doc } = example;
+  const parameters = [...(doc.parameters ?? []).filter((p) => p.name !== 'day'), DAY_PARAM];
+  const steps = [
+    { id: 'trips_filled', kind: 'fill' as const, inputs: from ? ['trips', 'trips_donor'] : ['trips'], time: 'tpep_pickup_datetime', shift: ['tpep_pickup_datetime'], missing: { time: 'tpep_pickup_datetime', hours: [13, 23] as [number, number] }, from },
+    ...doc.steps.map((s) => (s.id === 'trips_valid' ? { ...s, inputs: ['trips_filled'] } : s)),
+  ];
+  const sources = from ? [...doc.sources, { id: 'trips_donor', table: 'trips_file_donor' }] : doc.sources;
+  return translate({ ...doc, smaltfl: 2, parameters, sources, steps, publish: PUBLISH }, { month: '2023-09', day: '2023-09-21' });
+}
+const donorClaim = (over: Partial<StoryClaim> = {}): StoryClaim => claim({ source: 'trips_donor', day: '2023-09-14', state: 'calm', below: false, head: 'A normal Thursday', rows: 125_129, ...over });
+const donorFacts = (donor: number) => facts({ rows: (n) => (n === donor ? 125_129 : 41_939) });
+
+describe('a donor, judged by its claim (amendment 1 S3, C4)', () => {
+  it('is judged by the one check every claim goes through, at the donor’s node and the fill’s day', async () => {
+    const plan = await derivedPlan();
+    const donor = at(plan, 'trips_donor');
+    expect(judgeDonors(plan, [claim(), donorClaim()], donorFacts(donor))).toEqual([{ node: donor, claim: donorClaim() }]);
+    // The day's own claim (source trips) is a watched source's, not the donor's.
+    expect(judgeDonors(plan, [claim()], donorFacts(donor))).toEqual([{ node: donor, unjudged: 'no claim for trips_donor' }]);
+    expect(judgeDonors(plan, [donorClaim(), donorClaim()], donorFacts(donor))).toEqual([{ node: donor, unjudged: '2 claims for trips_donor' }]);
+  });
+
+  it('is not judged when the claim names another day, another history, or other rows', async () => {
+    const plan = await derivedPlan();
+    const donor = at(plan, 'trips_donor');
+    const said = (c: StoryClaim, f = donorFacts(donor)) => judgeDonors(plan, [c], f)[0];
+    expect(said(donorClaim({ day: '2023-09-07' }))).toEqual({ node: donor, unjudged: 'the claim is of 2023-09-07, the run of 2023-09-14' });
+    expect(said(donorClaim({ history: { ...HISTORY, path: 'other.json' } }))).toEqual({ node: donor, unjudged: 'the claim was told from other.json, not history.json' });
+    expect(said(donorClaim({ rows: 99 }))).toEqual({ node: donor, unjudged: 'the claim counts 99 rows of trips_donor, the snapshot holds 125,129' });
+    expect(said(donorClaim(), facts({ pinned: () => undefined }))).toEqual({ node: donor, unjudged: "history.json isn't pinned in the engine" });
+  });
+
+  it('judges none for a plan that fills nothing, and says so when the fill’s source isn’t watched', async () => {
+    expect(judgeDonors(await planOf(), [donorClaim()], facts())).toEqual([]);
+    expect(judgeDonors(await derivedPlan(null), [donorClaim()], facts())).toEqual([]);
+    const plan = await derivedPlan();
+    const unwatched = { ...plan, publish: { ...plan.publish!, watch: [] } };
+    expect(judgeDonors(unwatched, [donorClaim()], facts())).toEqual([{ node: at(plan, 'trips_donor'), unjudged: "trips isn't watched: there is no history to judge its donor by" }]);
+  });
+});
+
+describe('what holds a derived run (amendment 1 S4, S10)', () => {
+  it('holds it by its fill, reaching every output, whatever else holds; and by a donor not judged good', async () => {
+    const plan = await derivedPlan();
+    const donor = at(plan, 'trips_donor');
+    const fill = at(plan, 'trips_filled');
+    const m = manifestOf(plan, counts(121_931, 4_000));
+    const outputs = plan.outputs.map((o) => o.name);
+    const judged: Judged[] = [{ node: 0, claim: claim() }];
+    const derived = { by: 'derived', node: fill, origin: 'trips_filled', said: 'fills 13:00–23:59 from 2023-09-14', reaches: outputs };
+    expect(holdsOf(plan, m, judged, { derived: true, donors: [{ node: donor, claim: donorClaim() }] })).toEqual([
+      { by: 'story', node: 0, origin: 'trips', said: 'Trips fall 95% from 13:00', reaches: ['borough_hour', 'weather_effect', 'zone_hour'], claim: claim() },
+      derived,
+    ]);
+    const wrong = donorClaim({ state: 'wrong', head: 'Vendor 1 sent almost nothing' });
+    expect(holdsOf(plan, m, judged, { derived: true, donors: [{ node: donor, claim: wrong }] }).map((h) => [h.by, h.said])).toEqual([
+      ['story', 'Trips fall 95% from 13:00'],
+      ['donor', 'the donor day 2023-09-14: Vendor 1 sent almost nothing'],
+      ['derived', 'fills 13:00–23:59 from 2023-09-14'],
+    ]);
+    expect(holdsOf(plan, m, judged, { derived: true, donors: [{ node: donor, unjudged: 'no claim for trips_donor' }] }).map((h) => [h.by, h.origin, h.said])[1]).toEqual(['donor', 'trips_donor', 'no claim for trips_donor']);
+    // The complete part: no donor, the same hold.
+    const part = await derivedPlan(null);
+    expect(holdsOf(part, manifestOf(part), judged, { derived: true }).at(-1)).toMatchObject({ by: 'derived', said: 'keeps what arrived outside 13:00–23:59' });
+    // Not asked to be derived: the plan's own holds only, as before.
+    expect(holdsOf(plan, m, judged)).toEqual([holdsOf(plan, m, judged, { derived: true })[0]]);
+  });
+});
+
+/** A derived run's entry: Thu 21 filled, run `run`, repairing held run 41. */
+const derivedRun = (day: string, run: number, donor: string | null = '2023-09-14'): LogEntry =>
+  entry('run', { run, manifest: SHA(String(run % 10)), outcome: 'derived', day, inputs: { ...inputs(day), flow: SHA('g') }, holds: [], keys: { zone_hour: `kz-${run}` }, from: { run: 41, manifest: SHA('1') }, repair: repairOf(donor) } satisfies DerivedAbout);
+const repairOf = (donor: string | null): Repair => ({ kind: donor ? 'fill' : 'complete', step: 'trips_filled', source: 'trips', missing: { time: 'tpep_pickup_datetime', hours: [13, 23] }, donor: donor ? { rule: 'weekday', direction: 'before', day: donor, file: { path: `loads/${donor}.parquet`, sha256: SHA('b'), bytes: 1 }, claim: donorClaim({ day: donor }) } : null });
+const fillDecide = (day: string, donor: string | null, scope: DecideAbout['scope'] = 'day', more: Partial<DecideAbout> = {}, entryMore: Partial<LogEntry> = {}) =>
+  decide(day, 41, donor ? 'fill' : 'complete', scope, { repair: repairOf(donor), derived: { run: 42, manifest: SHA('2'), keys: { zone_hour: 'kz-42' } }, ...more }, entryMore);
+const fillRelease = (decision: number, more: Partial<ReleaseAbout> = {}): LogEntry => entry('release', { run: 42, manifest: SHA('2'), outputs: { zone_hour: 'kz-42' }, decision, leaf: SHA('d'), outcome: 'applied', why: null, from: { run: 41, manifest: SHA('1') }, filled: 83_671, ...more } satisfies ReleaseAbout);
+
+describe('a filled day in the record (amendment 1 S5, S7, S9)', () => {
+  it('opens no pause for a derived run, and is filled once its release applies', () => {
+    const fill = fillDecide('2023-09-21', '2023-09-14');
+    const log = [held('2023-09-21', 41), derivedRun('2023-09-21', 42), fill];
+    expect(pausesOf(log).map((p) => [p.day, p.run, p.state])).toEqual([['2023-09-21', 41, 'decided']]);
+    expect(pausesOf(log)[0]).toMatchObject({ repaired: null, released: null, withdrawn: null });
+    // Decided, not yet released: the day still waits.
+    expect(pauseState(null, pausesOf(log)[0]!)).toBe('waiting');
+    expect(dayState({ holds: 1, waiting: 3, released: false }, pausesOf(log)[0]!)).toBe('waiting');
+    const rel = fillRelease(fill.seq);
+    const p = pausesOf([...log, rel])[0]!;
+    expect(p.repaired).toEqual({ option: 'fill', release: rel.seq, decision: fill.seq, donor: '2023-09-14', meanwhile: false });
+    expect(dayState(null, p)).toBe('fill');
+    expect(dayState({ holds: 1, waiting: 3, released: false }, p)).toBe('fill');
+    // Slice 1's screens read a day readers got as published, until they draw the remedies (A9).
+    expect(pauseState(null, p)).toBe('asis');
+    // The part that arrived alone, the same way.
+    const part = fillDecide('2023-09-21', null);
+    expect(dayState(null, pausesOf([held('2023-09-21', 41), part, fillRelease(part.seq)])[0]!)).toBe('complete');
+    // A refused release gave readers nothing.
+    expect(dayState(null, pausesOf([...log, fillRelease(fill.seq, { outcome: 'refused', why: 'Mon 25 is published' })])[0]!)).toBe('waiting');
+  });
+
+  it('is refilled by an amendment released, and withdrawn by a decision not to publish that amends it (Q-61)', () => {
+    const fill = fillDecide('2023-09-21', '2023-09-14');
+    const rel = fillRelease(fill.seq);
+    const refill = fillDecide('2023-09-21', '2023-09-20', 'day', {}, { amends: fill.seq });
+    const rel2 = fillRelease(refill.seq);
+    const log = [held('2023-09-21', 41), fill, rel, refill, rel2];
+    expect(pausesOf(log)[0]!.repaired).toMatchObject({ donor: '2023-09-20', decision: refill.seq });
+    // The refill decided, not yet released: readers still have the first fill.
+    expect(pausesOf(log.slice(0, 4))[0]!.repaired).toMatchObject({ donor: '2023-09-14' });
+    expect(dayState(null, pausesOf(log.slice(0, 4))[0]!)).toBe('fill');
+    const withdraw = decide('2023-09-21', 41, 'dont', 'day', {}, { amends: refill.seq });
+    const back = entry('release', { run: 41, manifest: SHA('1'), outputs: { zone_hour: 'kz-wed' }, decision: withdraw.seq, leaf: SHA('d'), outcome: 'applied', why: null, withdraws: rel2.seq } satisfies ReleaseAbout);
+    const p = pausesOf([...log, withdraw, back])[0]!;
+    expect(p).toMatchObject({ repaired: null, withdrawn: back.seq, decision: { about: { option: 'dont' } } });
+    expect(dayState(null, p)).toBe('dont');
+    // With a later day current, the names can't go back: the withdrawal is recorded, and the day is not published.
+    const refused = entry('release', { run: 41, manifest: SHA('1'), outputs: {}, decision: withdraw.seq, leaf: SHA('d'), outcome: 'refused', why: '2023-09-25 is current', withdraws: rel2.seq } satisfies ReleaseAbout);
+    const q = pausesOf([...log, withdraw, refused])[0]!;
+    expect(q.repaired).toMatchObject({ decision: refill.seq });
+    expect(dayState(null, q)).toBe('dont');
+  });
+
+  it('says readers see the day before again once a fill is withdrawn', () => {
+    const fill = fillDecide('2023-09-21', '2023-09-14');
+    const rel = fillRelease(fill.seq);
+    const withdraw = decide('2023-09-21', 41, 'dont', 'day', {}, { amends: fill.seq });
+    const back = entry('release', { run: 41, manifest: SHA('1'), outputs: {}, decision: withdraw.seq, leaf: SHA('d'), outcome: 'applied', why: null, withdraws: rel.seq } satisfies ReleaseAbout);
+    const log = [ok('2023-09-20', 1), held('2023-09-21', 41), fill, rel];
+    expect(lastPublished(log)).toBe('2023-09-21');
+    expect(lastPublished([...log, withdraw, back])).toBe('2023-09-20');
+  });
+
+  it('is filled under the flow’s meanwhile setting while a person still decides', () => {
+    const setting = entry('flow', { flow: SHA('f'), set: { meanwhile: 'fill' } });
+    const meanwhile = fillRelease(setting.seq, { under: setting.seq, repair: repairOf('2023-09-14') });
+    const log = [setting, held('2023-09-21', 41), meanwhile];
+    const p = pausesOf(log)[0]!;
+    expect(p).toMatchObject({ state: 'open', repaired: { option: 'fill', meanwhile: true, donor: '2023-09-14', decision: setting.seq } });
+    expect(dayState(null, p)).toBe('waiting');
+    expect(dayState({ holds: 1, waiting: 3, released: false }, p)).toBe('waiting');
+    // A person's fill decision over it: filled.
+    const fill = fillDecide('2023-09-21', '2023-09-14');
+    expect(dayState(null, pausesOf([...log, fill])[0]!)).toBe('fill');
+    // A person's decision not to publish: not published.
+    expect(dayState(null, pausesOf([...log, decide('2023-09-21', 41, 'dont')])[0]!)).toBe('dont');
+  });
+});
+
+describe('a fill that stands until a day passes (amendment 1 S5, Q-64)', () => {
+  it('covers each held day after it, its releases under it not ending it', () => {
+    const mon = fillDecide('2022-11-14', '2022-11-07', 'untilPass');
+    const tue = fillDecide('2022-11-15', '2022-11-01', 'day', { under: mon.seq });
+    const log = [held('2022-11-14', 41), mon, fillRelease(mon.seq), held('2022-11-15', 43), tue, fillRelease(tue.seq)];
+    expect(standingFor(log, '2022-11-15')!.seq).toBe(mon.seq);
+    expect(standingFor(log, '2022-11-16')!.seq).toBe(mon.seq);
+    // A day that passes ends it; the part that arrived stands the same way.
+    expect(standingFor([...log, ok('2022-11-21', 50)], '2022-11-22')).toBeNull();
+    expect(standingFor([fillDecide('2022-11-14', null, 'untilPass')], '2022-11-15')).toMatchObject({ about: { option: 'complete' } });
+    // Another decision's release in between (a day published as is) ends it, as for a decision not to publish.
+    const wed = decide('2022-11-16', 44, 'asis');
+    expect(standingFor([...log, wed, release(wed.seq)], '2022-11-17')).toBeNull();
+  });
+
+  it('is ended by a withdrawal of a fill it covered, or of its own (Q-61): later days wait for a person', () => {
+    const mon = fillDecide('2022-11-14', '2022-11-07', 'untilPass');
+    const tue = fillDecide('2022-11-15', '2022-11-01', 'day', { under: mon.seq });
+    const log = [mon, fillRelease(mon.seq), tue, fillRelease(tue.seq)];
+    const withdrawTue = decide('2022-11-15', 43, 'dont', 'day', {}, { amends: tue.seq });
+    expect(standingFor([...log, withdrawTue], '2022-11-16')).toBeNull();
+    const withdrawMon = decide('2022-11-14', 41, 'dont', 'day', {}, { amends: mon.seq });
+    expect(standingFor([...log, withdrawMon], '2022-11-16')).toBeNull();
+    // A refill amends it too: the new decision stands if it says so.
+    const refill = fillDecide('2022-11-14', '2022-11-13', 'untilPass', {}, { amends: mon.seq });
+    expect(standingFor([...log, refill], '2022-11-16')!.seq).toBe(refill.seq);
   });
 });

@@ -18,6 +18,7 @@ import { fillStepOf, type DonorRule, type FillStep, type FlowDocument, type Miss
 import type { HistoryRanges } from './history.js';
 import { dayClaim, type HistoryRef, type StoryClaim } from './hold.js';
 import type { JSONValue, LogEntry } from './log.js';
+import type { DecisionOption } from './policy.js';
 import type { Story } from './story.js';
 
 export type { DonorRule, Missing } from './document.js';
@@ -267,7 +268,7 @@ export function partLabel(missing: Missing, name?: string): string {
 
 /** An option for a held day as the sheet offers it: its label, and why it is off when it is (S5). */
 export interface Offer {
-  option: 'asis' | 'dont' | 'fill' | 'complete';
+  option: DecisionOption;
   label: string;
   /** Why it can't be taken now: "No good day near", "Mon 25 is published". */
   off?: string;

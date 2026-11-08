@@ -165,6 +165,18 @@ describe('what the outputs of a day with something wrong say', () => {
     // At most four words, as the cause card's reach row has room for.
     for (const p of ['waiting', 'asis', 'dont'] as const) expect(reachLabel(base, 6, p).split(/\s+/).filter((w) => w !== '·').length).toBeLessThanOrEqual(4);
   });
+
+  it('says a day filled, or published with the part that arrived, by its mark (ADR 0009 amendment 1 S12)', () => {
+    expect(reachLabel(base, 3, 'fill')).toBe('◧ Published filled');
+    expect(reachLabel(base, 3, 'complete')).toBe('◐ Published part only');
+    for (const p of ['fill', 'complete'] as const) expect(wordsIn(reachLabel(base, 6, p))).toBeLessThanOrEqual(4);
+    // The mark goes beside the day readers have, and is no word.
+    expect(readersSee('2023-09-21', '2023-09-22', false, 'fill')).toBe('readers see Thu 21 ◧');
+    expect(readersSee('2023-09-21', '2023-09-24', false, 'complete')).toBe('readers see Thu 21 ◐ · 3 days old');
+    expect(readersSee('2023-09-21', '2023-09-22', true, 'fill')).toBe('readers kept Thu 21 ◧');
+    expect(readersSee('2023-09-21', '2023-09-22')).toBe('readers see Thu 21');
+    expect(wordsIn(readersSee('2023-09-21', '2023-09-22', false, 'fill'))).toBe(wordsIn(readersSee('2023-09-21', '2023-09-22')));
+  });
 });
 
 describe('a held day’s own rows, staged (ADR 0009 §12)', () => {

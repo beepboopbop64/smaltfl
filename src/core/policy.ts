@@ -56,15 +56,27 @@ export interface ActionRule {
   /** Optional: the object's row must have, in this column, one of the actor's values for this attribute. */
   scope?: { columns: string[]; attribute: string };
   /** `smaltfl:decide` only: the options the rule lets its people take; every option when left out (ADR 0009 §8). */
-  may?: DecideOption[];
+  may?: DecisionOption[];
 }
 
 /** smaltfl's own action: deciding what happens to a held day (ADR 0009 §8). It is not an ontology action type. */
 export const DECIDE = 'smaltfl:decide';
-/** What a decision may do with a held day, in slice 1: publish it as is (with a reason), or don't publish it. */
-export const DECIDE_OPTIONS = ['asis', 'dont'] as const;
-export type DecideOption = (typeof DECIDE_OPTIONS)[number];
-const DECIDE_VERB: Record<DecideOption, string> = { asis: 'publish a held day as is', dont: 'decide not to publish a held day' };
+/**
+ * What a decision may do with a held day (C2's order): publish it as is (with a reason), don't publish it (or, for a
+ * day readers have a fill of, withdraw the fill, Q-61), fill it from another day, or publish only the part that
+ * arrived (ADR 0009 amendment 1 S5).
+ */
+export const DECIDE_OPTIONS = ['asis', 'dont', 'fill', 'complete'] as const;
+export type DecisionOption = (typeof DECIDE_OPTIONS)[number];
+/** The options slice 1's decision sheet draws (decision.ts), publish as is and don't publish, until it draws the
+ * remedies too (step A9). */
+export type DecideOption = Extract<DecisionOption, 'asis' | 'dont'>;
+const DECIDE_VERB: Record<DecisionOption, string> = {
+  asis: 'publish a held day as is',
+  dont: 'decide not to publish a held day',
+  fill: 'fill a held day from another day',
+  complete: 'publish only the part of a held day that arrived',
+};
 
 export type Rule = RowRule | ColumnRule | ActionRule;
 
@@ -177,7 +189,7 @@ const listed = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${x
  * plugin asks this at release, against the policies stored with the run, and the record keeps the rule that allowed it.
  * Until principals are bound to identity cards (ADR 0006 §8), it is a convenience, not a guard.
  */
-export function checkDecision(p: Policies | undefined, actor: string, option: DecideOption): ActionCheck {
+export function checkDecision(p: Policies | undefined, actor: string, option: DecisionOption): ActionCheck {
   if (!(DECIDE_OPTIONS as readonly string[]).includes(option)) return { allowed: false, reason: `${String(option)} is not an option for a held day` };
   if (!p) return { allowed: true, reason: 'the flow has no policies' };
   const who = p.principals.find((x) => x.id === actor);

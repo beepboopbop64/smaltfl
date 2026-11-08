@@ -121,7 +121,18 @@ describe('deciding a held day (smaltfl:decide, ADR 0009 §8)', () => {
     expect(checkDecision(withRule(leads), 'cara', 'dont')).toEqual({ allowed: false, reason: 'only Owner and District leads may decide not to publish a held day' });
     expect(checkDecision(p, 'ana', 'dont')).toEqual({ allowed: false, reason: 'only Owner may decide not to publish a held day' });
     expect(checkDecision(p, 'zed', 'dont')).toEqual({ allowed: false, reason: "zed is not one of the flow's people" });
-    expect(checkDecision(p, 'owner', 'fill' as never)).toEqual({ allowed: false, reason: 'fill is not an option for a held day' });
+    // Accept the new level comes later (ADR 0009 amendment 1 S6, M3): not an option yet, not even for the owner.
+    expect(checkDecision(p, 'owner', 'accept' as never)).toEqual({ allowed: false, reason: 'accept is not an option for a held day' });
+  });
+
+  it('takes a fill and the complete part as options a rule may list, and says each (amendment 1 S8)', () => {
+    const stewards = { ...leads, for: ['stewards'], may: ['dont', 'fill', 'complete'] };
+    expect(checkDecision(withRule(stewards), 'dev', 'fill')).toEqual({ allowed: true, reason: 'Leads decide allows Dev', rule: 'decide' });
+    expect(checkDecision(withRule(stewards), 'dev', 'complete')).toEqual({ allowed: true, reason: 'Leads decide allows Dev', rule: 'decide' });
+    expect(checkDecision(withRule(leads), 'ana', 'fill')).toEqual({ allowed: false, reason: 'only Owner may fill a held day from another day' });
+    expect(checkDecision(withRule(leads), 'ana', 'complete')).toEqual({ allowed: false, reason: 'only Owner may publish only the part of a held day that arrived' });
+    // A rule without may still allows every option, the remedies among them.
+    expect(checkDecision(withRule({ ...leads, may: undefined }), 'ana', 'fill')).toMatchObject({ allowed: true, rule: 'decide' });
   });
 
   it('validates as smaltfl’s own action, with no ontology action type, and refuses any other', () => {
@@ -130,8 +141,9 @@ describe('deciding a held day (smaltfl:decide, ADR 0009 §8)', () => {
     expect(validateDocument(docWith({ action: DECIDE }))).toEqual([]);
     const at = `$.policies.rules[${p.rules.length}]`;
     expect(validateDocument(docWith({ action: 'smaltfl:release' }))).toEqual([{ path: `${at}.action`, message: "smaltfl:release is not one of smaltfl's actions (smaltfl:decide)" }]);
-    expect(validateDocument(docWith({ action: DECIDE, may: ['fill'] }))).toEqual([{ path: `${at}.may`, message: 'a list of asis, dont, each once' }]);
-    expect(validateDocument(docWith({ action: DECIDE, may: ['dont', 'dont'] }))).toEqual([{ path: `${at}.may`, message: 'a list of asis, dont, each once' }]);
+    expect(validateDocument(docWith({ action: DECIDE, may: ['dont', 'fill', 'complete'] }))).toEqual([]);
+    expect(validateDocument(docWith({ action: DECIDE, may: ['accept'] }))).toEqual([{ path: `${at}.may`, message: 'a list of asis, dont, fill, complete, each once' }]);
+    expect(validateDocument(docWith({ action: DECIDE, may: ['dont', 'dont'] }))).toEqual([{ path: `${at}.may`, message: 'a list of asis, dont, fill, complete, each once' }]);
     expect(validateDocument(docWith({ action: DECIDE, scope: { columns: ['pu_borough'], attribute: 'districts' } }))).toEqual([{ path: `${at}.scope`, message: 'smaltfl:decide has no rows to scope: its rule lists the options it allows in may' }]);
     expect(validateDocument(docWith({ action: 'annotate_weather', may: ['dont'] }))).toEqual([{ path: `${at}.may`, message: 'may is for smaltfl:decide' }]);
   });
