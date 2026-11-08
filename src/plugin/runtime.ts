@@ -23,7 +23,7 @@ import { nodeKey } from '../core/keys.js';
 import { FILLED_FROM, withoutDisplay, type FlowDocument } from '../core/document.js';
 import type { DatasetRecord, ExpectationResult, ManifestNode, RunManifest, SourceFile } from '../core/manifest.js';
 import { MANIFEST_FORMAT, manifestHash, ontologyHash, planHash, policiesHash } from '../core/manifest.js';
-import { flowHash } from '../core/plan.js';
+import { flowHash, translate } from '../core/plan.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, ColumnType, ExpectNode, FillNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
 import { isPublish2, validatePlan, watchesOf } from '../core/plan.js';
@@ -31,7 +31,7 @@ import { heldOutputs, holdsOf, judgeClaims, judgeDonors, tailPath, tripped, wait
 import { measuresHash, settingsFor, type MeasureSettings, type Measures } from '../core/measures.js';
 import { measureSnapshot, pinnedHeader, pinnedTail } from './measure.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
-import { quoteIdent as q } from '../core/sqltext.js';
+import { quoteIdent as q, type ParamValue } from '../core/sqltext.js';
 import type { TableHash } from './dataset-hash.js';
 import { hashTable, sourceColumns } from './dataset-hash.js';
 import { pinned, pinnedLocation, takeOpened } from './pinned.js';
@@ -205,10 +205,27 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   // when it is of this snapshot), its claim told from those measures; a derived run's claims are judged against the
   // held run it repairs (C4): its flow hash, and its stored measures when the snapshot is the same.
   const measured = new Map<number, { hash: string; measures: Measures; settings: MeasureSettings }>();
-  let told: { flow: string; measured: (node: number) => string | undefined } | null = null;
+  let told: { flow: string; measured: (node: number) => string | undefined; unmeasured: (node: number) => string } | null = null;
   if (plan.publish && isPublish2(plan.publish)) {
-    if (stage) told = heldMeasures(db, stage, plan, records);
-    else {
+    if (stage) {
+      told = heldMeasures(db, stage, plan, records);
+      // Each donor a fill reads, measured as a load of its source on its own day: what its claim/2 is told from (C4).
+      for (const n of plan.nodes) {
+        if (n.op !== 'fill' || n.from === null || n.inputs.length !== 2) continue;
+        const [src, donor] = n.inputs as [number, number];
+        const w = watchesOf(plan.publish).find((x) => x.node === src);
+        const table = tables.get(donor);
+        const rec = records.get(donor);
+        if (!w || w.period === null || !table || !rec?.content || context.doc === undefined) continue;
+        // Its checks counted as its own day's run counts them: the document's parameters with the donor's day.
+        const own = settingsFor(await translate(context.doc as FlowDocument, typedValues(context.doc as FlowDocument, { ...plan.parameters, [w.period]: n.from })), src, pinnedHeader(w.history), steps);
+        if (!own) continue;
+        aborted(signal);
+        const settings = { ...own, slot: n.from };
+        const m = await measureSnapshot(db, table, settings, rec.file?.sha256 ?? null, rec.content);
+        measured.set(donor, { hash: await measuresHash(m), measures: m, settings });
+      }
+    } else {
       for (const w of watchesOf(plan.publish)) {
         const table = tables.get(w.node);
         const rec = records.get(w.node);
@@ -227,7 +244,8 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
         const p = pinned(path);
         return p && { sha256: p.sha256, bytes: p.bytes.byteLength };
       },
-      measured: (node) => (told ? told.measured(node) : measured.get(node)?.hash),
+      measured: (node) => measured.get(node)?.hash ?? told?.measured(node),
+      unmeasured: (node) => told?.unmeasured(node) ?? `${plan.nodes[node]?.origin ?? node}'s snapshot wasn't measured`,
       tail: (source) => pinnedTail(tailPath(source), source),
       flow: told ? told.flow : plan.flow.hash,
     };
@@ -265,22 +283,42 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   };
 }
 
+/** A plan's parameter values as its document types them (an integer is recorded as text, to keep its digits). */
+function typedValues(doc: FlowDocument, values: Readonly<Record<string, string | number | null>>): Record<string, ParamValue> {
+  const out: Record<string, ParamValue> = {};
+  for (const d of doc.parameters ?? []) {
+    if (!Object.hasOwn(values, d.name)) continue;
+    const v = values[d.name]!;
+    out[d.name] = d.type === 'integer' && typeof v === 'string' && /^-?\d+$/.test(v) ? BigInt(v) : v;
+  }
+  return out;
+}
+
 /**
  * What a derived run's watched sources are judged by (ADR 0010 §6, C4): the flow hash of the held run it repairs, and
  * for each watched source, that run's stored measures when the derived run read the same snapshot (its content hash);
  * none otherwise, which leaves the source not judged.
  */
-function heldMeasures(db: Database, from: RunRef, plan: FlowPlan, records: ReadonlyMap<number, ManifestNode>): { flow: string; measured: (node: number) => string | undefined } {
+function heldMeasures(db: Database, from: RunRef, plan: FlowPlan, records: ReadonlyMap<number, ManifestNode>): { flow: string; measured: (node: number) => string | undefined; unmeasured: (node: number) => string } {
   const row = db.query('SELECT manifest, hash FROM _smaltfl_runs WHERE id = ?', [from.run]).rows[0];
   const held = row && String(row[1]) === from.manifest ? (JSON.parse(String(row[0])) as RunManifest) : null;
   const stored = held ? measuresOfRun(db, from.run) : [];
+  const of = (node: number) => {
+    const origin = plan.nodes[node]?.origin;
+    const heldNode = held?.nodes.find((n) => n.op === 'table' && n.origin === origin)?.node;
+    return { origin, m: stored.find((x) => x.node === heldNode) };
+  };
   return {
     flow: held?.flow.hash ?? '',
     measured: (node) => {
-      const origin = plan.nodes[node]?.origin;
-      const heldNode = held?.nodes.find((n) => n.op === 'table' && n.origin === origin)?.node;
-      const m = stored.find((x) => x.node === heldNode);
+      const { m } = of(node);
       return m && m.measures.snapshot === records.get(node)?.content ? m.hash : undefined;
+    },
+    unmeasured: (node) => {
+      const { origin, m } = of(node);
+      if (!held) return `run ${from.run}, which it repairs, isn't in this database with that manifest`;
+      if (!m) return `run ${from.run}, which it repairs, has no measures of ${origin}`;
+      return `it read another ${origin} than run ${from.run}, which it repairs, measured`;
     },
   };
 }

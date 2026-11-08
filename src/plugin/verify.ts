@@ -192,7 +192,7 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
       // A derived run: its donors judged again, and what holds it besides, computed again (amendment 1 S4, S11).
       if (derived) {
         const donorClaims = derived.donors.flatMap((j) => ('claim' in j ? [j.claim] : []));
-        const againDonors = judgeDonors(plan, donorClaims, factsFromClaims(donorClaims, { rows: (node) => byNode.get(node)?.rows }));
+        const againDonors = judgeDonors(plan, donorClaims, factsFromClaims(donorClaims, { rows: (node) => byNode.get(node)?.rows, flow: measuredBy.flow ?? plan.flow.hash }));
         for (const j of derived.donors) {
           if (!('claim' in j)) continue;
           const k = againDonors.find((x) => x.node === j.node);

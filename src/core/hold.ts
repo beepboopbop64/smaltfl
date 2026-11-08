@@ -19,6 +19,7 @@ import { isGeneralWatch, sourceOf, type FlowDocument, type HoldKind, type WatchD
 import type { Repair } from './fill.js';
 import { HistoryRanges, type HistoryFile } from './history.js';
 import { appendPeriods, emptyHistory, measuresHash, samePeriod, tailBefore, tailRef, type MeasureSettings, type Measures, type TailRef } from './measures.js';
+import { rootOf } from './log.js';
 import type { JSONValue, LogEntry } from './log.js';
 import type { ExpectationResult, RunManifest } from './manifest.js';
 import { flowNames, judgeOf, newsOf } from './news.js';
@@ -267,9 +268,11 @@ export interface ClaimFacts {
   /** plan/2 (ADR 0010 §6): the measures/0 hash of a watched node's snapshot as the run measured it; for a derived run,
    * its held run's stored measures (C4). Undefined when it couldn't be measured. */
   measured?(node: number): string | undefined;
-  /** plan/2: the tail pinned for a source (`tailPath`), as the plugin computed its size and root, or why it isn't a
-   * tail; undefined when none is pinned. */
-  tail?(source: string): TailRef | { problem: string } | undefined;
+  /** plan/2: why a watched node's snapshot has no measures to judge its claim by (`measured` gave none). */
+  unmeasured?(node: number): string | undefined;
+  /** plan/2: the tail pinned for a source (`tailPath`): its leaves as the plugin computed them, or why it isn't a tail;
+   * undefined when none is pinned. A claim names a prefix of it: its first `size` leaves. */
+  tail?(source: string): { leaves: string[] } | { known: TailRef[] } | { problem: string } | undefined;
   /** plan/2: the flow hash a claim must be told under: the plan's; for a derived run, its held run's (C4). */
   flow?: string;
 }
@@ -331,6 +334,8 @@ export interface ClaimAt {
   day: unknown;
   /** The plan's format: claim/1 under plan/1, claim/2 under plan/2. */
   plan?: 1 | 2;
+  /** claim/2: the watched source whose tail the claim was told from (a donor's is its source's). */
+  tailOf?: string;
 }
 
 /**
@@ -381,13 +386,17 @@ function judgeClaim2(c: Record<string, unknown>, at: ClaimAt, facts: ClaimFacts)
     if (pin.sha256 !== base.sha256 || pin.bytes !== base.bytes) return { node, unjudged: `the claim's ${file} isn't the one pinned in the engine` };
   }
   if (claim.history.tail !== null) {
-    const t = facts.tail?.(claim.source);
-    if (!t) return { node, unjudged: `the claim names a tail of ${claim.history.tail.size}, and no tail is pinned for ${claim.source}` };
-    if ('problem' in t) return { node, unjudged: `the tail pinned for ${claim.source} ${t.problem}` };
-    if (t.size !== claim.history.tail.size || t.root !== claim.history.tail.root) return { node, unjudged: `the claim's tail isn't the one pinned for ${claim.source}` };
+    const of = at.tailOf ?? claim.source;
+    const t = facts.tail?.(of);
+    if (!t) return { node, unjudged: `the claim names a tail of ${claim.history.tail.size}, and no tail is pinned for ${of}` };
+    if ('problem' in t) return { node, unjudged: `the tail pinned for ${of} ${t.problem}` };
+    // The claim's tail is the first `size` periods of the one pinned: a donor's, told before the day, is shorter.
+    const { size, root } = claim.history.tail;
+    const fits = 'leaves' in t ? size <= t.leaves.length && rootOf(t.leaves, size) === root : t.known.some((k) => k.size === size && k.root === root);
+    if (!fits) return { node, unjudged: `the claim's tail isn't the one pinned for ${of}` };
   }
   const measured = facts.measured?.(node);
-  if (measured === undefined) return { node, unjudged: `${origin}'s snapshot wasn't measured` };
+  if (measured === undefined) return { node, unjudged: facts.unmeasured?.(node) ?? `${origin}'s snapshot wasn't measured` };
   if (measured !== claim.measured) return { node, unjudged: `the claim was told from other measures of ${origin} than its snapshot's` };
   const rows = facts.rows(node);
   if (rows !== claim.rows) return { node, unjudged: `the claim counts ${fmt(claim.rows)} rows of ${origin}, the snapshot holds ${fmt(rows)}` };
@@ -432,7 +441,8 @@ export function factsFromClaims(claims: readonly Claim[], o: { rows(node: number
       return b ? { sha256: b.sha256, bytes: b.bytes } : undefined;
     },
     measured: o.measured ?? ((node) => (claims.filter(isClaim2).length === 1 ? own(node) : undefined)),
-    tail: (source) => claims.find((c): c is StoryClaim2 => isClaim2(c) && c.source === source)?.history.tail ?? undefined,
+    // The claims' own tails: judged again where the pinned tail is gone, each stands for itself.
+    tail: () => ({ known: claims.flatMap((c) => (isClaim2(c) && c.history.tail ? [c.history.tail] : [])) }),
     ...(o.flow !== undefined ? { flow: o.flow } : {}),
   };
 }
@@ -446,6 +456,7 @@ export function factsFromClaims(claims: readonly Claim[], o: { rows(node: number
  */
 export function judgeDonors(plan: Pick<FlowPlan, 'nodes' | 'publish'>, claims: readonly unknown[] | undefined, facts: ClaimFacts): Judged[] {
   const out: Judged[] = [];
+  const format = plan.publish && isPublish2(plan.publish) ? 2 : 1;
   plan.nodes.forEach((n) => {
     if (n.op !== 'fill' || n.from === null || n.inputs.length !== 2) return;
     const [source, donor] = n.inputs as [number, number];
@@ -455,7 +466,7 @@ export function judgeDonors(plan: Pick<FlowPlan, 'nodes' | 'publish'>, claims: r
     const mine = (claims ?? []).filter((c): c is Record<string, unknown> => isRecord(c) && typeof c.source === 'string' && c.source.toLowerCase() === origin.toLowerCase());
     if (mine.length === 0) return out.push({ node: donor, unjudged: `no claim for ${origin}` });
     if (mine.length > 1) return out.push({ node: donor, unjudged: `${mine.length} claims for ${origin}` });
-    out.push(judgeClaim(mine[0]!, { node: donor, origin, file, day: n.from }, facts));
+    out.push(judgeClaim(mine[0]!, { node: donor, origin, file, day: n.from, plan: format, tailOf: plan.nodes[source]!.origin }, facts));
   });
   return out;
 }
