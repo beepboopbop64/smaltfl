@@ -7,6 +7,11 @@
  * throwing, each watched source is judged by the page's claim, and what holds keeps its outputs back. A held run is
  * built, checked, hashed and stored like any other, its versions staged; only the outputs nothing holds are pointed,
  * and a release (release.ts) publishes the rest when a person decides. A plan without the block runs as it always did.
+ *
+ * A derived run (`stage`, ADR 0009 amendment 1 S4) holds every output whatever else holds: it is a fill, or the part
+ * that arrived, of a held day, and only a decision releases it. Its donors are judged by their claims, as watched
+ * sources are. A plan whose fill step fills a day runs only so, and every output a fill step reaches carries
+ * `filled_from`, or the run is refused (S1, Q-65).
  */
 import type { Database } from 'smaltdb/engine';
 import { canonicalJSON } from '../core/canonical.js';
@@ -15,14 +20,14 @@ import { createTable, emitExpectCounts, emitSelect } from '../core/emit.js';
 import { hex, sha256Hex } from '../core/hash.js';
 import type { KeyEnv } from '../core/keys.js';
 import { nodeKey } from '../core/keys.js';
-import { withoutDisplay, type FlowDocument } from '../core/document.js';
+import { FILLED_FROM, withoutDisplay, type FlowDocument } from '../core/document.js';
 import type { DatasetRecord, ExpectationResult, ManifestNode, RunManifest, SourceFile } from '../core/manifest.js';
 import { MANIFEST_FORMAT, manifestHash, ontologyHash, planHash, policiesHash } from '../core/manifest.js';
 import { flowHash } from '../core/plan.js';
 import { shapeOf } from '../core/optimize.js';
-import type { Column, ColumnType, ExpectNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
+import type { Column, ColumnType, ExpectNode, FillNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
 import { validatePlan } from '../core/plan.js';
-import { heldOutputs, holdsOf, judgeClaims, tripped, waitingOf, type Hold, type Judged } from '../core/hold.js';
+import { heldOutputs, holdsOf, judgeClaims, judgeDonors, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef } from '../core/hold.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 import type { Declared, TableHash } from './dataset-hash.js';
@@ -30,7 +35,7 @@ import { hashTable, tableColumns } from './dataset-hash.js';
 import { pinned, pinnedLocation, takeOpened } from './pinned.js';
 
 const STATIC: Record<Exclude<Declared, 'ANY'>, ColumnType> = { INTEGER: 'int', REAL: 'real', TEXT: 'text', BLOB: 'blob' };
-import { currentOf, ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, nameInUse, pointDataset, recordCheck, recordHolds, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
+import { currentOf, ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, nameInUse, pointDataset, recordCheck, recordDerived, recordHolds, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
 
 export class RunError extends Error {
   override name = 'RunError';
@@ -61,6 +66,7 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   if (actual && actual !== 'unknown' && actual !== options.smaltdb) throw new RunError(`the engine is smaltdb ${actual}, not the ${options.smaltdb} the run was asked to record`);
   const plan = structuredClone(input) as FlowPlan;
   const env: KeyEnv = { smaltdb: options.smaltdb, smaltfl: version };
+  const stage = stageOf(plan, options);
   ensureStore(db);
   // The flow document, when given, must be the one the plan was translated from: it is kept with the run.
   const context = options.context ?? {};
@@ -99,14 +105,17 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     record(i, snap.reused ? 'reused' : 'built', { content: snap.content, rows: snap.rows, ...(snap.file ? { file: snap.file } : {}) });
   }
 
-  // 2. Types: every node's output columns, with everything folded onto the snapshots.
+  // 2. Types: every node's output columns, with everything folded onto the snapshots. A donor has its source's
+  // columns, or a fill can't take them by name (S4); every output a fill step reaches carries its mark (S1).
   const columns = (i: number) => plan.nodes[i]!.schema!.map(([name]) => name);
   const onSnapshots: EmitContext = { table: (i) => (plan.nodes[i]!.op === 'table' ? tables.get(i) : undefined), columns };
   for (const i of needed) {
     const n = plan.nodes[i]!;
     if (n.op === 'table') continue;
+    if (n.op === 'fill' && n.inputs.length === 2) sameColumnsAsSource(plan, n);
     n.schema = typeNode(db, emitSelect(plan, i, onSnapshots), n, snapshotsRead(plan, i, tables));
   }
+  marked(plan, needed);
 
   // 3. Keys, from the typed plan.
   for (const i of needed) {
@@ -188,16 +197,24 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   let holds: Hold[] = [];
   let held: string[] = [];
   let waiting: string[] = [];
+  let derived: { from: RunRef; holds: FillHold[]; donors: Judged[]; filled: number | null } | null = null;
   if (plan.publish) {
-    judged = judgeClaims(plan, context.claims, {
+    const facts: ClaimFacts = {
       rows: (node) => records.get(node)?.rows,
       pinned: (path) => {
         const p = pinned(path);
         return p && { sha256: p.sha256, bytes: p.bytes.byteLength };
       },
-    });
+    };
+    judged = judgeClaims(plan, context.claims, facts);
     holds = holdsOf(plan, manifest, judged);
-    held = heldOutputs(plan, holds);
+    if (stage) {
+      // A derived run: held by its fill whatever else holds, and by each donor not judged good (S3, S4).
+      const donors = judgeDonors(plan, context.claims, facts);
+      const fills = holdsOf(plan, manifest, judged, { derived: true, donors }).filter((h): h is FillHold => h.by === 'derived' || h.by === 'donor');
+      derived = { from: stage, holds: fills, donors, filled: filledRows(db, plan, ctx) };
+    }
+    held = heldOutputs(plan, [...holds, ...(derived?.holds ?? [])]);
     const current = Object.fromEntries(held.map((name) => [name, currentOf(db, name)?.key]));
     waiting = waitingOf(manifest, held, current);
   }
@@ -212,9 +229,83 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     const id = Number(r.lastInsertRowid);
     for (const o of plan.outputs) if (!holding.has(o.name)) pointDataset(db, o.name, keys.get(o.node)!, tables.get(o.node)!, id);
     if (plan.publish) recordHolds(db, id, holds, judged);
+    if (derived) recordDerived(db, { run: id, ...derived });
     return id;
   });
-  return { run, hash, manifest, holds, published: plan.outputs.map((o) => o.name).filter((name) => !holding.has(name)), waiting };
+  return { run, hash, manifest, holds, published: plan.outputs.map((o) => o.name).filter((name) => !holding.has(name)), waiting, ...(derived ? { derived: { holds: derived.holds, filled: derived.filled } } : {}) };
+}
+
+/**
+ * The held run a derived run repairs, when it is one (ADR 0009 amendment 1 S4, C4): `stage` needs a plan that says
+ * what holds it and names the held run (`from`); a plan whose fill step fills a day runs only staged, so a fill is
+ * never published but by a decision. Null for a run that isn't staged.
+ */
+function stageOf(plan: FlowPlan, options: RunOptions): RunRef | null {
+  const filling = plan.nodes.find((n): n is FillNode => n.op === 'fill' && n.missing !== null);
+  if (options.stage === undefined || options.stage === false) {
+    if (options.from !== undefined) throw new RunError('from names the held run a derived run repairs: it goes with stage');
+    if (filling) throw new RunError(`${filling.origin} fills a day: a derived document runs staged, as the derived run of a decision`);
+    return null;
+  }
+  if (options.stage !== true) throw new RunError('stage is true or false');
+  if (!plan.publish) throw new RunError('a derived run is held until a decision releases it, and this plan says nothing of what holds it');
+  const f = options.from;
+  if (typeof f !== 'object' || f === null || !Number.isSafeInteger(f.run) || typeof f.manifest !== 'string' || !/^[0-9a-f]{64}$/.test(f.manifest)) throw new RunError('a derived run names the held run it repairs: from { run, manifest }');
+  return { run: f.run, manifest: f.manifest };
+}
+
+/** A donor has its source's columns, with their types (ADR 0009 amendment 1 S4), or its rows can't be taken by name. */
+function sameColumnsAsSource(plan: FlowPlan, n: FillNode): void {
+  const [source, donor] = n.inputs.map((j) => plan.nodes[j]!) as [PlanNode, PlanNode];
+  const key = (cols: readonly Column[]) => new Map(cols.map(([c, t]) => [c.toLowerCase(), t]));
+  const a = key(source.schema!);
+  const b = key(donor.schema!);
+  const lacks = [...a.keys()].filter((c) => !b.has(c));
+  const extra = [...b.keys()].filter((c) => !a.has(c));
+  const typed = [...a].filter(([c, t]) => b.has(c) && b.get(c) !== t).map(([c, t]) => `${c} is ${b.get(c)}, not ${t}`);
+  if (lacks.length || extra.length || typed.length) {
+    const said = [...(lacks.length ? [`it lacks ${lacks.join(', ')}`] : []), ...(extra.length ? [`it has ${extra.join(', ')} besides`] : []), ...typed];
+    throw new RunError(`the donor ${donor.origin} has other columns than ${source.origin}: ${said.join('; ')}`, n.origin);
+  }
+}
+
+/**
+ * Every output a fill step reaches carries `filled_from` (ADR 0009 amendment 1 S1): a run that doesn't is refused,
+ * naming the output (Q-65), so the published data always says which rows came from another day.
+ */
+function marked(plan: FlowPlan, needed: readonly number[]): void {
+  const fills = plan.nodes.flatMap((n, i) => (n.op === 'fill' ? [i] : []));
+  if (fills.length === 0) return;
+  const reads = (from: number, target: number): boolean => {
+    const stack = [target];
+    const seen = new Set<number>();
+    while (stack.length) {
+      const i = stack.pop()!;
+      if (i === from) return true;
+      if (seen.has(i)) continue;
+      seen.add(i);
+      stack.push(...plan.nodes[i]!.inputs);
+    }
+    return false;
+  };
+  for (const o of plan.outputs) {
+    if (!needed.includes(o.node)) continue;
+    const fill = fills.find((f) => reads(f, o.node));
+    if (fill === undefined) continue;
+    if (!plan.nodes[o.node]!.schema!.some(([c]) => c.toLowerCase() === FILLED_FROM)) throw new RunError(`${o.name} reads ${plan.nodes[fill]!.origin} and doesn't carry ${FILLED_FROM}`, o.name);
+  }
+}
+
+/** The rows a derived run's fills took from another day: those whose mark isn't null. Null when nothing is filled from
+ * a donor (the part that arrived alone). */
+function filledRows(db: Database, plan: FlowPlan, ctx: EmitContext): number | null {
+  let total: number | null = null;
+  plan.nodes.forEach((n, i) => {
+    if (n.op !== 'fill' || n.from === null) return;
+    const row = engine(n.origin, () => db.query(`SELECT count(*) FROM (\n${emitSelect(plan, i, ctx)}\n) WHERE ${q(FILLED_FROM)} IS NOT NULL`).rows[0]);
+    total = (total ?? 0) + Number(row?.[0] ?? 0);
+  });
+  return total;
 }
 
 interface Snapshot {

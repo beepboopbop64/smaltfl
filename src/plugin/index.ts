@@ -3,17 +3,21 @@
  * the engine worker (`serve({ plugins: [smaltfl] })`), in Node with `Database.open…(…, { plugins: [smaltfl] })`.
  *
  * Methods, called with `callPlugin('smaltfl', name, args)` (or `runFlow` / `verifyRun` from the core):
- *   run [plan, { smaltdb, context }]  → RunResult     run a flow plan; only what changed is rebuilt, and with a
- *                                                     publish block only what nothing holds is published (ADR 0009)
- *   release [ReleaseInput]            → ReleaseResult publish a held run's outputs as a recorded decision says, or
- *                                                     refuse, saying why; refusals are kept too (ADR 0009 §5)
+ *   run [plan, { smaltdb, context,    → RunResult     run a flow plan; only what changed is rebuilt, and with a
+ *        stage, from }]                               publish block only what nothing holds is published (ADR 0009);
+ *                                                     staged, a derived run, held until its decision is released
+ *   release [ReleaseInput]            → ReleaseResult publish a held run's outputs as a recorded decision says (a
+ *                                                     fill or the part that arrived: its derived run; a withdrawal:
+ *                                                     the versions before a fill), or refuse, saying why; refusals
+ *                                                     are kept too (ADR 0009 §5, amendment 1 S10)
  *   verify [run, { smaltdb, level }]  → VerifyResult  check a run's hashes, recompute it, decode its files again
  *   pin [name, bytes, sha256]         → { sha256 }    hash a source file in the engine, refuse a mismatch, serve it
  *                                                     as smaltfl:<name> (ADR 0006 §3); null bytes unpin it
  *   manifest [run]                    → RunManifest   a stored run's manifest
- *   names                             → { datasets, releases, holds }  what each dataset name shows, by which
- *                                                     run and release, every release, and what held each run: an
- *                                                     audit bag's engine/ files
+ *   names                             → { datasets, releases, holds, repairs }  what each dataset name shows,
+ *                                                     by which run and release, every release, what held each run,
+ *                                                     and the derived runs, repairs and withdrawals: an audit bag's
+ *                                                     engine/ files
  *   act [ActInput]                    → Edit          check an action and record its edit or refusal
  *   edits / verifyEdits               → Edit[] / …    the hash chain of edits, and its check
  *

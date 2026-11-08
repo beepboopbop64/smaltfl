@@ -2,9 +2,10 @@
  * What the app (or a test, or a server) and the runtime plugin say to each other through `callPlugin`. Plain data
  * only, so it crosses the worker protocol by structured clone.
  */
-import type { Hold, StoryClaim } from './hold.js';
+import type { Repair } from './fill.js';
+import type { FillHold, Hold, RunRef, StoryClaim } from './hold.js';
 import type { RunManifest } from './manifest.js';
-import type { DecideOption } from './policy.js';
+import type { DecisionOption } from './policy.js';
 
 /** The plugin's name, as `callPlugin` addresses it. */
 export const PLUGIN_NAME = 'smaltfl';
@@ -18,6 +19,13 @@ export interface RunOptions {
    * it loaded from, and the head of its record before the run.
    */
   context?: RunContext;
+  /**
+   * A derived run (ADR 0009 amendment 1 S4): every output held whatever else holds, its versions staged as any held
+   * run's are, until a decision releases them. A plan whose fill step fills a day runs only this way. `from` names the
+   * held run it repairs, which its release is checked against (C4).
+   */
+  stage?: boolean;
+  from?: RunRef;
 }
 
 export interface RunContext {
@@ -27,7 +35,8 @@ export interface RunContext {
   /**
    * What the page's story says of each watched source's day (ADR 0009 §3), for a plan whose publish block watches
    * one. The plugin checks each claim against the run (its day, the pinned history, the snapshot's rows): a claim that
-   * is missing or doesn't match leaves its source not judged, which holds. A claim can only add a hold.
+   * is missing or doesn't match leaves its source not judged, which holds. A claim can only add a hold. A derived run's
+   * claims add each donor's (amendment 1 S3): the donor source's id, its day, the same pinned history.
    */
   claims?: StoryClaim[];
 }
@@ -61,6 +70,9 @@ export interface RunResult {
   published: string[];
   /** The held outputs whose staged key isn't the one their name shows: what waits for a decision (§4). */
   waiting: string[];
+  /** A derived run (amendment 1 S4): what holds it besides its day's holds (`derived`, and `donor` for a donor not
+   * judged good), and the rows its fill took from another day (null for the part that arrived alone). */
+  derived?: { holds: FillHold[]; filled: number | null };
 }
 
 /**
@@ -73,14 +85,26 @@ export interface ReleaseInput {
   manifest: string;
   /** The outputs the decision names, with their keys: `{ name: key }`. */
   keys: Record<string, string>;
-  /** Only publish as is is released; don't publish is a decision and nothing more. */
-  option: DecideOption;
+  /**
+   * Publish as is releases a held run; a fill or the part that arrived releases the derived run its decision made
+   * (amendment 1 S10); don't publish is a decision and nothing more, unless it withdraws a fill readers have (Q-61).
+   */
+  option: DecisionOption;
   /** The principal who decided. */
   actor: string;
   /** The person's reason: publish as is needs one. */
   reason: string | null;
-  /** The decide entry's log/1 leaf (64 hex characters): the record's entry the release cites. */
+  /** The decide entry's log/1 leaf (64 hex characters): the record's entry the release cites (for a `meanwhile`
+   * release, the flow entry that set it). */
   decision: string;
+  /** A fill or the part that arrived: the held run the derived run repairs, and the repair. */
+  from?: RunRef;
+  repair?: Repair;
+  /** A release under the flow's `meanwhile` setting, rather than a person's decision (amendment 1 S5). */
+  meanwhile?: boolean;
+  /** A withdrawal (Q-61): the release of the fill it takes back, by its number here. `run`, `manifest` and `keys` are
+   * that release's. */
+  withdraws?: number;
 }
 
 export interface ReleaseResult {
@@ -89,8 +113,11 @@ export interface ReleaseResult {
   why: string | null;
   /** The release's number in this database (refusals are kept too). */
   release: number;
-  /** The names that now show the run's versions: none when refused. */
+  /** The names that now show the run's versions (after a withdrawal, the versions they showed before): none when
+   * refused. */
   published: string[];
+  /** A derived run's release: the rows its fill took from another day (null for the part that arrived alone). */
+  filled?: number | null;
 }
 
 export interface VerifyCheck {
@@ -104,9 +131,10 @@ export interface VerifyCheck {
    * to is there with that hash; accounting: rows in and out add up; flow: the stored document hashes to the plan's
    * flow hash and translates to the plan; file: the source file the run read still has its hash and decodes to the
    * snapshot; held: what held the run computes again from its manifest and its stored claims, and every held output a
-   * name shows was released by a decision (ADR 0009 §11).
+   * name shows was released by a decision (ADR 0009 §11); repair: a derived run released with a repair is that repair
+   * of its held run, read the donor's file the repair names, and read the held run's snapshot (amendment 1 S11).
    */
-  check: 'stored' | 'rerun' | 'expectations' | 'coherent' | 'key' | 'published' | 'previous' | 'accounting' | 'flow' | 'file' | 'held';
+  check: 'stored' | 'rerun' | 'expectations' | 'coherent' | 'key' | 'published' | 'previous' | 'accounting' | 'flow' | 'file' | 'held' | 'repair';
   ok: boolean;
   expected?: string;
   actual?: string | null;

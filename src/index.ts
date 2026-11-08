@@ -5,7 +5,7 @@
  */
 import type { FlowDocument } from './core/document.js';
 import { translate } from './core/plan.js';
-import type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunResult, VerifyLevel, VerifyResult } from './core/protocol.js';
+import type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunOptions, RunResult, VerifyLevel, VerifyResult } from './core/protocol.js';
 import { PLUGIN_NAME } from './core/protocol.js';
 import type { ParamValue } from './core/sqltext.js';
 
@@ -85,18 +85,23 @@ export type { ParamType, ParamValue } from './core/sqltext.js';
  * document goes with the plan: the plugin checks that it hashes to the plan's flow hash, and keeps it with the run.
  * `data` and `log` are recorded in the manifest as the caller's claims (ADR 0006 §4). For a document with a publish
  * block, `claims` are what the story says of each watched source's day (core/hold.ts dayClaim): a run returns what
- * holds it, and only `published` names show its versions (ADR 0009).
+ * holds it, and only `published` names show its versions (ADR 0009). A derived document (fill.ts repairDocument) runs
+ * with `stage` and `from`, the held run it repairs, its claims the day's and each donor's (ADR 0009 amendment 1 S4):
+ * held whatever else holds, until a release of its decision.
  */
-export async function runFlow(db: PluginCaller, doc: FlowDocument, options: { smaltdb: string; parameters?: Readonly<Record<string, ParamValue>>; data?: RunContext['data']; log?: RunContext['log']; claims?: RunContext['claims'] }): Promise<RunResult> {
+export async function runFlow(db: PluginCaller, doc: FlowDocument, options: { smaltdb: string; parameters?: Readonly<Record<string, ParamValue>>; data?: RunContext['data']; log?: RunContext['log']; claims?: RunContext['claims']; stage?: boolean; from?: RunOptions['from'] }): Promise<RunResult> {
   const plan = await translate(doc, options.parameters ?? {});
   const context: RunContext = { doc, data: options.data ?? null, log: options.log ?? null, ...(options.claims !== undefined ? { claims: options.claims } : {}) };
-  return (await db.callPlugin(PLUGIN_NAME, 'run', [plan, { smaltdb: options.smaltdb, context }], { lock: true })) as RunResult;
+  const stage = options.stage ? { stage: true, ...(options.from ? { from: options.from } : {}) } : options.from ? { from: options.from } : {};
+  return (await db.callPlugin(PLUGIN_NAME, 'run', [plan, { smaltdb: options.smaltdb, context, ...stage }], { lock: true })) as RunResult;
 }
 
 /**
  * Publish a held run's outputs as a decision says (ADR 0009 §5), after the decision is in the record: `decision` is
- * its entry's leaf. The plugin checks it against the run and its stored policies, and returns a refusal, saying why,
- * rather than throwing; either way it keeps the release.
+ * its entry's leaf. A fill or the part that arrived releases its derived run, `from` and `repair` naming what it
+ * repairs; a withdrawal (`dont` with `withdraws`) takes a released fill back (ADR 0009 amendment 1 S10, Q-61). The
+ * plugin checks it against the run and its stored policies, and returns a refusal, saying why, rather than throwing;
+ * either way it keeps the release.
  */
 export async function releaseRun(db: PluginCaller, input: ReleaseInput): Promise<ReleaseResult> {
   return (await db.callPlugin(PLUGIN_NAME, 'release', [input], { lock: true })) as ReleaseResult;

@@ -11,7 +11,10 @@
  *   manifest's counts and its stored claims hold (each claim judged again against the manifest: its day, its
  *   history's file, the snapshot's rows), and every output it held that a name shows was released, by a release of
  *   this run, with this manifest and key and a decision's leaf, so a held output pointed by hand fails, under this
- *   run's number or under one that is no run, or a run that didn't make that version.
+ *   run's number or under one that is no run, or a run that didn't make that version. A derived run (ADR 0009
+ *   amendment 1 S4) is held by its fill and its donors too, computed again the same way; one released with a repair is
+ *   checked *repair* (S11): its document is the repair of its held run's, it read the donor's file the repair names,
+ *   and it read the held run's snapshot of the watched source.
  * - **rerun:** recomputing every stored node from the run's snapshots, with the same plan, gives the same content
  *   hashes and the same expectation counts. The recomputed rows go to temporary tables, which are dropped after.
  * - **rederive:** the source files the run read are still pinned with the hashes it recorded, each source is still the
@@ -24,7 +27,8 @@ import type { FlowDocument } from '../core/document.js';
 import type { EmitContext } from '../core/emit.js';
 import { createTable, emitSelect } from '../core/emit.js';
 import { hex } from '../core/hash.js';
-import { heldOutputs, holdsOf, judgeClaims, type StoryClaim } from '../core/hold.js';
+import { repairDocument } from '../core/fill.js';
+import { heldOutputs, holdsOf, judgeClaims, judgeDonors, type FillHold, type StoryClaim } from '../core/hold.js';
 import { nodeKey } from '../core/keys.js';
 import type { ManifestNode, RunManifest } from '../core/manifest.js';
 import { manifestHash, ontologyHash, planHash, policiesHash } from '../core/manifest.js';
@@ -36,8 +40,9 @@ import type { ParamValue } from '../core/sqltext.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 import { hashTable } from './dataset-hash.js';
 import { PINNED_PREFIX, pinned, pinnedLocation, takeOpened } from './pinned.js';
+import { donorRead } from './release.js';
 import { aborted, countExpectations, engineVersion, RunError } from './runtime.js';
-import { currentOf, datasetView, ensureStore, findVersion, holdsOfRun, releasesOf } from './store.js';
+import { currentOf, datasetView, derivedOf, ensureStore, findVersion, holdsOfRun, releasesOf, repairsOf } from './store.js';
 
 type Json = Parameters<typeof canonicalJSON>[0];
 const same = (a: unknown, b: unknown) => canonicalJSON(a as Json) === canonicalJSON(b as Json);
@@ -161,9 +166,11 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
 
   // Held: what held the run, computed again from what was stored; and no held output shown without a release.
   const kept = holdsOfRun(db, runId);
+  const derived = derivedOf(db, runId);
   if (plan.publish || kept) {
     const notes: string[] = [];
     let holds = kept?.holds ?? [];
+    let fills: FillHold[] = derived?.holds ?? [];
     if (!plan.publish) notes.push("the run's plan doesn't hold, yet a record of what held it is stored");
     else if (!kept) notes.push("the run's plan says what holds it, and no record of what held it is stored");
     else {
@@ -179,11 +186,28 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
       }
       holds = holdsOf(plan, manifest, kept.judged);
       if (!same(holds, kept.holds)) notes.push("the holds stored with it aren't what its manifest and its claims hold");
+      // A derived run: its donors judged again, and what holds it besides, computed again (amendment 1 S4, S11).
+      if (derived) {
+        const donorClaims = derived.donors.flatMap((j) => ('claim' in j ? [j.claim] : []));
+        const historyOfDonor = (path: string) => donorClaims.find((c) => c.history.path === path)?.history;
+        const againDonors = judgeDonors(plan, donorClaims, { rows: (node) => byNode.get(node)?.rows, pinned: historyOfDonor });
+        for (const j of derived.donors) {
+          if (!('claim' in j)) continue;
+          const k = againDonors.find((x) => x.node === j.node);
+          if (!k || 'unjudged' in k || !same(k.claim, j.claim)) notes.push(`its donor's claim for ${plan.nodes[j.node]?.origin ?? j.node} doesn't match the run${k && 'unjudged' in k ? `: ${k.unjudged}` : ''}`);
+        }
+        fills = holdsOf(plan, manifest, kept.judged, { derived: true, donors: derived.donors }).filter((h): h is FillHold => h.by === 'derived' || h.by === 'donor');
+        if (!same(fills, derived.holds)) notes.push("the holds stored with it as a derived run aren't what its plan and its donors hold");
+      } else {
+        const filling = plan.nodes.find((n) => n.op === 'fill' && n.missing !== null);
+        if (filling) notes.push(`${filling.origin} fills a day, and the run isn't stored as a derived run`);
+      }
     }
-    const said = holds.length ? `held by ${holds.map((x) => `${x.origin} (${x.by === 'checks' ? 'its checks' : x.by === 'story' ? x.said : 'not judged'})`).join(', ')}` : 'nothing held it';
+    const all = [...holds, ...fills];
+    const said = all.length ? `held by ${all.map((x) => `${x.origin} (${x.by === 'checks' ? 'its checks' : x.by === 'story' || x.by === 'derived' || x.by === 'donor' ? x.said : 'not judged'})`).join(', ')}` : 'nothing held it';
     check({ node: -1, origin: 'holds', check: 'held', ok: notes.length === 0, note: notes.length ? notes.join('; ') : said });
     // Fail closed: the outputs that should have been held, from the holds computed again, and those stored.
-    const held = new Set(plan.publish ? [...heldOutputs(plan, holds), ...heldOutputs(plan, kept?.holds ?? [])] : []);
+    const held = new Set(plan.publish ? [...heldOutputs(plan, all), ...heldOutputs(plan, [...(kept?.holds ?? []), ...(derived?.holds ?? [])])] : []);
     const releases = releasesOf(db, runId).filter((x) => x.outcome === 'applied');
     for (const o of plan.outputs) {
       if (!held.has(o.name)) continue;
@@ -203,6 +227,35 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
       const rel = releases.find((x) => x.names[o.name] === key && x.manifest === String(row[1]) && /^[0-9a-f]{64}$/.test(x.decision ?? ''));
       check({ node: o.node, origin: o.name, check: 'held', ok: !!rel, expected: key, actual: named.key, note: rel ? `released by release ${rel.id}, citing the decision ${rel.decision!.slice(0, 16)}…` : `run ${runId} held it, and its name shows it with no release` });
     }
+  }
+
+  // Repair: each release of this derived run with a repair, against the held run it repairs (amendment 1 S11).
+  for (const rep of repairsOf(db, runId)) {
+    const notes: string[] = [];
+    const from = db.query('SELECT manifest, hash FROM _smaltfl_runs WHERE id = ?', [rep.from.run]).rows[0];
+    const fromManifest = from && String(from[1]) === rep.from.manifest ? (JSON.parse(String(from[0])) as RunManifest) : null;
+    const fromPlan = fromManifest ? db.query('SELECT plan FROM _smaltfl_plans WHERE hash = ?', [fromManifest.plan]).rows[0] : undefined;
+    const fromDoc = fromPlan ? db.query('SELECT doc FROM _smaltfl_flows WHERE hash = ?', [(JSON.parse(String(fromPlan[0])) as FlowPlan).flow.hash]).rows[0] : undefined;
+    if (!fromManifest) notes.push(`the held run it repairs, run ${rep.from.run} (${rep.from.manifest.slice(0, 16)}…), isn't in this database`);
+    else if (!fromDoc) notes.push(`run ${rep.from.run}'s flow document isn't stored, so the repair can't be rebuilt`);
+    else {
+      try {
+        const rebuilt = repairDocument(JSON.parse(String(fromDoc[0])) as FlowDocument, rep.repair);
+        if ((await flowHash(rebuilt)) !== plan.flow.hash) notes.push(`its document isn't run ${rep.from.run}'s repaired as its release says`);
+      } catch (e) {
+        notes.push(`the repair doesn't rebuild from run ${rep.from.run}'s document: ${(e as Error).message}`);
+      }
+      const source = (m: RunManifest) => m.nodes.find((n) => n.op === 'table' && n.origin.toLowerCase() === rep.repair.source.toLowerCase());
+      if (source(manifest)?.content === undefined || source(manifest)?.content !== source(fromManifest)?.content) notes.push(`it read another snapshot of ${rep.repair.source} than run ${rep.from.run}`);
+    }
+    if (rep.repair.donor) {
+      const fill = plan.nodes.findIndex((n) => n.op === 'fill' && n.origin === rep.repair.step);
+      const donor = fill >= 0 && plan.nodes[fill]!.inputs.length === 2 ? plan.nodes[fill]!.inputs[1]! : -1;
+      const read = donorRead(manifest, donor);
+      if (!read || read.sha256 !== rep.repair.donor.file.sha256 || (read.bytes !== null && read.bytes !== rep.repair.donor.file.bytes)) notes.push(`its donor didn't read the ${rep.repair.donor.day} file the repair names`);
+    }
+    const what = rep.repair.donor ? `filled from ${rep.repair.donor.day}` : 'the part that arrived';
+    check({ node: -1, origin: 'repair', check: 'repair', ok: notes.length === 0, note: notes.length ? notes.join('; ') : `release ${rep.release}: run ${rep.from.run} ${what}, rebuilt from its document and the repair` });
   }
 
   // Accounting: an expectation reads its input's rows, and a stored one keeps what it didn't drop.

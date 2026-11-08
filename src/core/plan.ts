@@ -189,6 +189,15 @@ export function watchesOf(pub: PlanPublish | PlanPublish2 | undefined): PlannedW
   return pub.watch.map(([node, history]) => ({ node, history, period: pub.period, holds: true, settings: null }));
 }
 
+/**
+ * The donor rule a plan gives a watched source (ADR 0009 amendment 1 S3, C1): plan/2's watch names it; plan/1's
+ * `publish.donor`, else the same weekday, the rule every flow had before the fills.
+ */
+export function plannedDonor(pub: PlanPublish | PlanPublish2 | undefined, node: number): DonorRule {
+  if (pub && isPublish2(pub)) return pub.watch.find(([n]) => n === node)?.[1].donor ?? 'weekday';
+  return pub?.donor ?? 'weekday';
+}
+
 /** The parameter a plan's days are named by: its period, else the one every watch names; null when they differ. */
 export function planPeriod(pub: PlanPublish | PlanPublish2 | undefined): string | null {
   if (!pub) return null;

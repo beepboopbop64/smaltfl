@@ -321,10 +321,17 @@ export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, m
     if ('unjudged' in j) out.push({ by: 'donor', node: j.node, origin, said: j.unjudged, reaches: reachOf(plan, j.node) });
     else if (!donorGood(j.claim)) out.push({ by: 'donor', node: j.node, origin, said: `the donor day ${j.claim.day}: ${j.claim.head}`, reaches: reachOf(plan, j.node), claim: j.claim });
   }
-  if (derived.derived)
+  if (derived.derived) {
+    const all = plan.outputs.map((o) => o.name);
+    let filling = false;
     plan.nodes.forEach((n, i) => {
-      if (n.op === 'fill' && n.missing !== null) out.push({ by: 'derived', node: i, origin: n.origin, said: fillSaid(n), reaches: plan.outputs.map((o) => o.name) });
+      if (n.op !== 'fill' || n.missing === null) return;
+      filling = true;
+      out.push({ by: 'derived', node: i, origin: n.origin, said: fillSaid(n), reaches: all });
     });
+    // Staged with nothing filled: held all the same, as the run asked.
+    if (!filling) out.push({ by: 'derived', node: -1, origin: 'run', said: 'staged: released only by a decision', reaches: all });
+  }
   return out;
 }
 
