@@ -118,6 +118,26 @@ export const VERDICT_MARKS = ['bad', 'newValues', 'after'] as const;
 /** Whether an ontology carries a mark that changes verdicts. */
 export const marksVerdicts = (ontology: Ontology | undefined): boolean => (ontology?.properties ?? []).some((p) => VERDICT_MARKS.some((m) => p[m] !== undefined));
 
+/**
+ * The marks the ontology puts on a source's columns that change verdicts (ADR 0010 §4, §11), each column's property for
+ * it (`propertyOf`), as plan/2 carries them: a list of `[column, …]` sorted by column, `bad` as `[column, code, …]` (codes
+ * sorted), `newValues` as `[column, "alert"]` for each serious column (one listing bad codes or saying so, Q-56), `after`
+ * as `[column, of, minutes]`.
+ */
+export function marksOn(ontology: Ontology | undefined, source: string): { bad: [string, ...string[]][]; newValues: [string, 'alert'][]; after: [string, string, number][] } {
+  const columns = [...new Set((ontology?.properties ?? []).map((x) => x.column.toLowerCase()))];
+  const props = columns.flatMap((c) => {
+    const p = propertyOf(ontology, source, c);
+    return p ? [p] : [];
+  });
+  const byColumn = <T extends unknown[]>(xs: T[]) => xs.sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0));
+  return {
+    bad: byColumn(props.filter((x) => x.bad?.length).map((x): [string, ...string[]] => [x.column, ...[...x.bad!].sort()])),
+    newValues: byColumn(props.filter((x) => x.bad?.length || x.newValues === 'alert').map((x): [string, 'alert'] => [x.column, 'alert'])),
+    after: byColumn(props.filter((x) => x.after).map((x): [string, string, number] => [x.column, x.after!.of, x.after!.minutes])),
+  };
+}
+
 /** The plain word for rows: what a row is called when nothing names it. */
 export const ROWS: Noun = Object.freeze({ one: 'row', many: 'rows' });
 

@@ -12,9 +12,11 @@
  * enough change: MATERIAL), and findings that are one thing seen through several columns (the same rows missing a
  * passenger count, a rate code and a surcharge) are told once. A day with nothing to tell says so. No DOM, no engine.
  */
-import { holidayOf, plusDays, seasonOf } from './calendar.js';
+import { NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
+import { isGeneralWatch, type FlowDocument } from './document.js';
 import { HistoryRanges, QUANTILES, type Metric, type ValueHistory } from './history.js';
-import type { NormalRange, NormalRanges } from './normal.js';
+import type { NoRange, NormalRange, NormalRanges } from './normal.js';
+import { marksOn, nounOf, partNamed, propertyOf } from './ontology.js';
 import { clockText } from './quality.js';
 
 export type Severity = 'alert' | 'warn' | 'note' | 'ok';
@@ -25,7 +27,7 @@ export type Act = 'expected' | 'incident' | 'notify' | 'rule' | 'quarantine' | '
 
 export interface Finding {
   key: string;
-  kind: 'volume' | 'hours' | 'gone' | 'share' | 'new' | 'pair' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
+  kind: 'volume' | 'hours' | 'gone' | 'share' | 'new' | 'pair' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
   severity: Severity;
   /** How far out, in typical misses (capped): what ranks findings of a severity. */
   score: number;
@@ -53,6 +55,10 @@ export interface Finding {
   hours?: { got: number[]; usual: number[]; from: number; to: number; fall: number };
   /** The findings told together as one (the same trips seen through several columns): each with its own numbers. */
   members?: { column: string; value: string; label: string; share: number; range: NormalRange; rows: number }[];
+  /** About a value the ontology marks bad (ADR 0010 §4): never folded under a cause, never marked as expected. */
+  bad?: boolean;
+  /** A day not judged (`unlearned`): why its rows have no range. */
+  why?: NoRange;
 }
 
 /** How a column and a value are said: a column's title, and a code with what it stands for. */
@@ -61,7 +67,77 @@ export interface Names {
   value(c: string, v: unknown): string;
   /** A value said on its own, for short titles: what a code stands for ("Credit card"), or the value ("$2.50"). */
   label?(c: string, v: unknown): string;
+  /** What `n` rows are called (ADR 0010 §8): "trip" for one, "trips" for any other number or none. Without it, rows. */
+  noun?(n?: number): string;
+  /** How a part with one of a column's codes is named ("Vendor {code}") and whether the column names who sent the rows,
+   * from the ontology. */
+  part?(column: string): { name?: string; role?: 'sender' } | undefined;
 }
+
+/** What `n` rows are called, by the names given: "trips", "trip", else "rows". */
+export const nounFor = (names: Pick<Names, 'noun'>, n?: number): string => names.noun?.(n) ?? (n === 1 ? 'row' : 'rows');
+
+/**
+ * How a watched source is judged (ADR 0010 §4, §8), from its watch and the ontology's marks (`judgeOf`). The legacy
+ * form, a watch given as a file name, keeps the rules every flow had before (fixed floors; a vendor named by its code; a
+ * drop-off 15 minutes behind its pickup; the weather in Manhattan), so its verdicts don't move.
+ */
+export interface JudgeSettings {
+  legacy: boolean;
+  /** The flow's calendar for this source: none when its watch says `calendar: false`. */
+  calendar: Calendar;
+  /** Floors as set for 100,000 rows a day, or scaled with the day's expected rows. */
+  scale: 'fixed' | 'volume';
+  /** Each column's bad codes, as text. */
+  bad: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Columns whose values never seen before are something wrong. */
+  serious: ReadonlySet<string>;
+  /** Time columns that run behind another, by minutes. */
+  after: ReadonlyMap<string, { of: string; minutes: number }>;
+}
+
+/** The legacy form's settings: what every flow was judged by before ADR 0010. */
+export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map() }) as JudgeSettings;
+
+/**
+ * How a document judges a watched source (ADR 0010 §10, §11): its watch's settings and the marks its ontology puts on the
+ * source's columns. A source the flow doesn't watch is judged in the legacy form.
+ */
+export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calendar'>, source: string): JudgeSettings {
+  const watches = Object.entries(doc.publish?.watch ?? {});
+  const w = watches.find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1];
+  const general = isGeneralWatch(w) ? w : null;
+  const legacyFlow = doc.calendar === undefined && watches.every(([, x]) => !isGeneralWatch(x));
+  const m = marksOn(doc.ontology, source);
+  return {
+    legacy: !general,
+    calendar: general?.calendar === false ? NONE : resolveCalendar(doc.calendar, legacyFlow),
+    scale: general ? (general.scale ?? 'volume') : 'fixed',
+    bad: new Map(m.bad.map(([column, ...codes]) => [column.toLowerCase(), new Set(codes)])),
+    serious: new Set(m.newValues.map(([column]) => column.toLowerCase())),
+    after: new Map(m.after.map(([column, of, minutes]) => [column.toLowerCase(), { of, minutes }])),
+  };
+}
+
+/**
+ * The names a flow's own verdict is told with (ADR 0009 §3): raw columns and values, as the claim's head has always
+ * read, with the ontology's noun for the source and its parts' names and roles (ADR 0010 §8).
+ */
+export function flowNames(doc: Pick<FlowDocument, 'ontology' | 'steps'>, source: string): Names {
+  const noun = nounOf(doc.ontology, source, doc.steps.filter((s) => s.inputs.some((i) => i.toLowerCase() === source.toLowerCase())).map((s) => s.id));
+  return {
+    column: (c) => c,
+    value: (_c, v) => String(v),
+    noun: (n) => (n === 1 ? noun.one : noun.many),
+    part: (column) => {
+      const p = propertyOf(doc.ontology, source, column);
+      return p && (p.name || p.role) ? { ...(p.name ? { name: p.name } : {}), ...(p.role ? { role: p.role } : {}) } : undefined;
+    },
+  };
+}
+
+/** A part's name by its column's template, through `Names.part` ("Vendor 1"), when the ontology gives one. */
+export const partTemplate = (names: Pick<Names, 'part'>, column: string, code: unknown): string | undefined => partNamed(names.part?.(column) as never, code);
 
 /** How much a finding must matter to be told. */
 export const MATERIAL = {
@@ -86,7 +162,76 @@ export const MATERIAL = {
   hourRows: 200,
   /** All but blank: under a tenth of the trips a day like it has. */
   blank: 0.1,
+  /** A new value is unusual, not just worth knowing, on this many rows (or a thousandth of the day). */
+  newUnusual: 100,
+  /** A part that held or moved is a split's cause from this many rows (story.ts). */
+  split: 200,
 };
+
+/** The floors that count rows, which scale with a day's expected rows in the general form (ADR 0010 §4). */
+const ROW_FLOORS = ['rows', 'newRows', 'newUnusual', 'hourRows', 'split'] as const;
+
+/**
+ * The floors for a day expected to have `expected` rows (ADR 0010 §4): as set, with fixed floors (the legacy form); or
+ * each floor f set for 100,000 rows a day scaled to f·√(E/100,000), kept between f/20 and 10f, since counting noise grows
+ * as the square root.
+ */
+export function materialFor(expected: number, scale: 'fixed' | 'volume'): typeof MATERIAL {
+  if (scale === 'fixed') return MATERIAL;
+  const k = Math.sqrt(Math.max(0, expected) / 100_000);
+  const out = { ...MATERIAL };
+  for (const f of ROW_FLOORS) out[f] = Math.min(10 * MATERIAL[f], Math.max(MATERIAL[f] / 20, MATERIAL[f] * k));
+  return out;
+}
+
+/** How long to say a day isn't judged, in four words at most (ADR 0010 §1): "First Thanksgiving here", "9 days of
+ * history", "Changed since last year", "History ends Jan 31". */
+export function notJudgedChip(why: NoRange, calendarShort = (name: string) => shortName(name), end?: string): string {
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  if (why.why === 'no last year' && why.special) {
+    const name = calendarShort(why.special).replace(/^Holiday season$/, 'holiday season');
+    const words = (t: string) => t.split(/\s+/).length;
+    return words(`First ${name} here`) <= 4 ? `First ${name} here` : words(`First ${name}`) <= 4 ? `First ${name}` : 'None last year';
+  }
+  if (why.why === 'last year moved') return 'Changed since last year';
+  if (why.why === 'history ends' && end) return `History ends ${MON[Number(end.slice(5, 7)) - 1]} ${Number(end.slice(8, 10))}`;
+  return `${why.days.toLocaleString('en-US')} ${why.days === 1 ? 'day' : 'days'} of history`;
+}
+
+/**
+ * What a day's news could judge (ADR 0010 §1): its rows; of the values seen in the six weeks to it, how many have a range
+ * (`values`: judged, of); of the measures and times with quantiles that day, how many medians have one; whether the
+ * checks' share does (false when the history doesn't count the flow's checks); and, when the rows have none, why.
+ */
+export interface Coverage {
+  rows: boolean;
+  values: [number, number];
+  quantiles: [number, number];
+  checks: boolean;
+  why: NoRange | null;
+}
+
+export function coverageOf(h: HistoryRanges, day: string, options: { checks?: boolean } = {}): Coverage {
+  const file = h.file;
+  const k = file.days.indexOf(day);
+  const trips = h.of({ of: 'trips' });
+  const out: Coverage = { rows: !!trips?.at(day), values: [0, 0], quantiles: [0, 0], checks: options.checks !== false && !!h.of({ of: 'dropped' })?.at(day), why: trips && !trips.at(day) ? trips.explain(day) : null };
+  if (k < 0) return out;
+  for (const [column, vh] of Object.entries(file.values ?? {})) {
+    if (!vh.counts) continue;
+    vh.values.forEach((value, i) => {
+      if (vh.first[i]! > k || vh.last[i]! < k - 42) return;
+      out.values[1]++;
+      if (h.of({ of: 'value', column, value })?.at(day)) out.values[0]++;
+    });
+  }
+  file.columns.forEach((column, c) => {
+    if ((file.kinds[c] !== 'measure' && file.kinds[c] !== 'time') || file.values?.[column]?.counts || !file.quantiles?.[k]?.[c]) return;
+    out.quantiles[1]++;
+    if (h.of({ of: 'quantile', column, q: 3 })?.at(day)) out.quantiles[0]++;
+  });
+  return out;
+}
 
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
@@ -118,17 +263,24 @@ const parse = (key: string): unknown => {
  * 3,360 at its usual share". Never "N fewer than a day like it": a share can fall while its trips rise (New Year's Day
  * 2024's credit cards), and on a short day the trips a day like it has are mostly the day's own shortfall.
  */
-const atShare = (share: number, usual: number, rows: number, how: string) => `${fmtInt(share * rows)} of today’s trips ${how}; about ${fmtInt(usual * rows)} at its usual share.`;
+const atShare = (share: number, usual: number, rows: number, how: string, noun = 'trips') => `${fmtInt(share * rows)} of today’s ${noun} ${how}; about ${fmtInt(usual * rows)} at its usual share.`;
 const listed = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** A day's findings, most important first; `checks` says whether the flow's checks are the ones the history counted. */
-export function newsOf(h: HistoryRanges, day: string, names: Names, options: { checks?: boolean } = {}): Finding[] {
+/**
+ * A day's findings, most important first; `checks` says whether the flow's checks are the ones the history counted, and
+ * `judge` how the source is judged (ADR 0010 §4: bad values, serious columns, floors; the legacy form by default).
+ */
+export function newsOf(h: HistoryRanges, day: string, names: Names, options: { checks?: boolean; judge?: JudgeSettings } = {}): Finding[] {
   const file = h.file;
   const k = file.days.indexOf(day);
   if (k < 0) return [];
   const rows = file.rows[k]!;
   const out: Finding[] = [];
+  const judge = options.judge ?? LEGACY_JUDGE;
+  const noun = (n?: number) => nounFor(names, n);
+  const Noun = (n?: number) => sentence(noun(n));
+  const cal = h.calendar;
   // A value in a short title: its meaning when that is short ("Credit card"), else its own value ("N", "$2.50").
   const label = (column: string, key: string) => {
     const said = (names.label ?? names.value)(column, parse(key));
@@ -177,11 +329,13 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
 
   // Volume: the day's trips against what a day like it has; all but blank; the hours it stops or starts.
   const trips = judged({ of: 'trips' });
+  // The floors, scaled in the general form with the day's expected rows (its rows, when they have no range).
+  const M = materialFor(trips?.range.expected ?? rows, judge.scale);
   if (trips) {
     const { range, value } = trips;
     const like = `A day like it has ${fmtInt(range.low)} to ${fmtInt(range.high)}.`;
     if (value < MATERIAL.blank * range.expected) {
-      out.push({ key: 'volume', kind: 'volume', severity: 'alert', score: 99, title: `Almost no trips: ${fmtInt(value)}`, detail: like, look: 'history', metric: { of: 'trips' }, value, range, rows: value, acts: ['incident', 'notify', 'expected'] });
+      out.push({ key: 'volume', kind: 'volume', severity: 'alert', score: 99, title: `Almost no ${noun()}: ${fmtInt(value)}`, detail: like, look: 'history', metric: { of: 'trips' }, value, range, rows: value, acts: ['incident', 'notify', 'expected'] });
     } else if (outside(trips)) {
       const more = value > range.expected;
       // A rise or fall that has lasted (most of the week before outside each day's own range the same way, as the
@@ -207,33 +361,64 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       }
       out.push({
         key: 'volume', kind: 'volume', severity: cap(trips.d) >= 6 ? 'alert' : lasted ? 'note' : 'warn', score: lasted ? cap(trips.d) / 10 : cap(trips.d),
-        title: `${more ? 'More' : 'Fewer'} trips: ${fmtInt(value)} (${more ? '+' : '−'}${Math.round(Math.abs(value / range.expected - 1) * 100)}%)`,
+        title: `${more ? 'More' : 'Fewer'} ${noun()}: ${fmtInt(value)} (${more ? '+' : '−'}${Math.round(Math.abs(value / range.expected - 1) * 100)}%)`,
         detail: like,
         look: 'history', metric: { of: 'trips' }, value, range, rows: value, acts: ['expected', 'incident', 'notify'],
         ...(lasted ? { lasting: since } : {}),
       });
     }
     // The hours: trips by pickup hour against what a day like it has then, from the same weekday's hours lately.
-    const hours = hoursShort(h, k, range.expected);
+    const hours = hoursShort(h, k, range.expected, M, names);
     if (hours && value >= MATERIAL.blank * range.expected) out.push(hours);
+  } else {
+    // The floor that needs no range (ADR 0010 §1): a day with under a tenth of the median of its last seven days' rows,
+    // any weekday, is something wrong, judged or not (a first-year holiday cut to 5%). The owner: it still pauses (Q-53).
+    const before = file.rows.slice(Math.max(0, k - 7), k);
+    const usual = before.length >= 3 ? [...before].sort((a, b) => a - b)[before.length >> 1]! : null;
+    if (usual !== null && rows < MATERIAL.blank * usual) {
+      out.push({ key: 'volume', kind: 'volume', severity: 'alert', score: 99, title: `Almost no ${noun()}: ${fmtInt(rows)}`, detail: `Under a tenth of the last ${before.length} days’ median, ${fmtInt(usual)}; not judged against a day like it.`, look: 'history', metric: { of: 'trips' }, value: rows, rows, acts: ['incident', 'notify', 'expected'] });
+    }
   }
 
   // Each coded value's share: one usually there and gone, or one whose share is unusual.
   for (const [column, vh] of Object.entries(file.values ?? {})) {
     if (!vh.counts) continue;
+    const badCodes = judge.bad.get(column.toLowerCase());
     vh.values.forEach((key, i) => {
       if (vh.first[i]! > k) return;
       const j = judged({ of: 'value', column, value: key });
-      if (!j || !outside(j)) return;
+      if (!j) return;
       const delta = j.value - j.range.expected;
-      if (Math.abs(delta) < MATERIAL.share || Math.abs(delta) * rows < MATERIAL.rows) return;
-      if (Math.abs(delta) < MATERIAL.shareRelative * Math.min(j.range.expected, 1 - j.range.expected)) return;
       const said = label(column, key);
       const w = shareWords(j.value, j.range.low, j.range.high);
+      const place = j.ranges.place(j.range, j.value);
+      // A value marked bad (ADR 0010 §4): something wrong above its range at twice its usual rows past its floor, however
+      // few points it moved; good news below it; never marked as expected, never folded (story.ts).
+      if (key !== 'null' && badCodes?.has(String(parse(key)))) {
+        if (place === 'within') return;
+        const usualRows = j.range.expected * (trips?.range.expected ?? rows);
+        const today = j.value * rows;
+        const base = { key: `share:${column}=${key}`, kind: 'share' as const, score: cap(j.d), columns: [column], values: [key], metric: { of: 'value' as const, column, value: key }, value: j.value, range: j.range, rows: Math.round(Math.abs(today - usualRows)), look: 'columns' as const, bad: true };
+        if (place === 'above' && today >= 2 * usualRows && today - usualRows >= M.rows) {
+          const times = usualRows > 0 ? today / usualRows : Infinity;
+          out.push({ ...base, severity: 'alert', title: `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: `${fmtInt(today)} ${noun(today)} with it today${Number.isFinite(times) ? `, ${times.toFixed(1).replace(/\.0$/, '')}× its usual ${fmtInt(usualRows)}` : ''}: a value marked bad.`, acts: ['incident', 'notify'] });
+        } else if (place === 'below') {
+          out.push({ ...base, severity: 'note', title: `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: `Fewer than usual of a value marked bad: ${fmtInt(today)} ${noun(today)}, about ${fmtInt(usualRows)} usually.`, acts: ['notify'] });
+        }
+        return;
+      }
+      // The relative rule (ADR 0010 §4, the general form): a value at three times its usual rows or more, or a third or
+      // less, outside its range and past its floor, is at least unusual, where the point gates miss 0.5% → 0.9%.
+      const ratio = j.value / Math.max(1e-9, j.range.expected);
+      const relative = !judge.legacy && place !== 'within' && (ratio >= 3 || ratio <= 1 / 3) && Math.abs(delta) * rows >= M.rows;
+      if (!outside(j) && !relative) return;
+      if (!relative && (Math.abs(delta) < MATERIAL.share || Math.abs(delta) * rows < M.rows)) return;
+      if (!relative && Math.abs(delta) < MATERIAL.shareRelative * Math.min(j.range.expected, 1 - j.range.expected)) return;
+      const atLeast = (sv: Severity): Severity => (relative && RANK[sv] > RANK.warn ? 'warn' : sv);
       if (j.value === 0) {
-        out.push(quiet({ key: `gone:${column}=${key}`, kind: 'gone', severity: j.range.expected >= 0.2 ? 'alert' : 'warn', score: cap(j.d), title: `${sentence(names.column(column))} ${said}: none`, detail: `Usually on ${w.range} of trips; none today.`, look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(-delta * rows), acts: ['incident', 'notify', 'expected'] }, j));
+        out.push(quiet({ key: `gone:${column}=${key}`, kind: 'gone', severity: atLeast(j.range.expected >= 0.2 ? 'alert' : 'warn'), score: cap(j.d), title: `${sentence(names.column(column))} ${said}: none`, detail: `Usually on ${w.range} of ${noun()}; none today.`, look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(-delta * rows), acts: ['incident', 'notify', 'expected'] }, j));
       } else {
-        out.push(quiet({ key: `share:${column}=${key}`, kind: key === 'null' ? 'missing' : 'share', severity: shareSeverity(delta, j), score: cap(j.d), title: key === 'null' ? `${sentence(names.column(column))} blank: ${w.value} (usually ${w.range})` : `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: atShare(j.value, j.range.expected, rows, key === 'null' ? 'blank' : 'with it'), look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j));
+        out.push(quiet({ key: `share:${column}=${key}`, kind: key === 'null' ? 'missing' : 'share', severity: atLeast(shareSeverity(delta, j)), score: cap(j.d), title: key === 'null' ? `${sentence(names.column(column))} blank: ${w.value} (usually ${w.range})` : `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: atShare(j.value, j.range.expected, rows, key === 'null' ? 'blank' : 'with it', noun()), look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j));
       }
     });
   }
@@ -244,11 +429,11 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     const j = judged({ of: 'missing', column });
     if (!j || !outside(j)) return;
     const delta = j.value - j.range.expected;
-    if (Math.abs(delta) < MATERIAL.share || Math.abs(delta) * rows < MATERIAL.rows) return;
+    if (Math.abs(delta) < MATERIAL.share || Math.abs(delta) * rows < M.rows) return;
     if (Math.abs(delta) < MATERIAL.shareRelative * Math.min(j.range.expected, 1 - j.range.expected)) return;
     void c;
     const w = shareWords(j.value, j.range.low, j.range.high);
-    out.push(quiet({ key: `missing:${column}`, kind: 'missing', severity: shareSeverity(delta, j), score: cap(j.d), title: `${sentence(names.column(column))} blank: ${w.value} (usually ${w.range})`, detail: atShare(j.value, j.range.expected, rows, 'without it'), look: 'columns', columns: [column], values: ['null'], metric: { of: 'missing', column }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j));
+    out.push(quiet({ key: `missing:${column}`, kind: 'missing', severity: shareSeverity(delta, j), score: cap(j.d), title: `${sentence(names.column(column))} blank: ${w.value} (usually ${w.range})`, detail: atShare(j.value, j.range.expected, rows, 'without it', noun()), look: 'columns', columns: [column], values: ['null'], metric: { of: 'missing', column }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j));
   });
 
   // Values and combinations never seen before.
@@ -256,9 +441,11 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     const fresh = newOn(vh, k);
     if (!fresh) continue;
     const n = fresh.rows ?? vh.fresh.find(([d]) => d === k)?.[1] ?? 0;
-    if (n < MATERIAL.newRows && n < MATERIAL.newShare * rows) continue;
+    // A serious column's new value is something wrong, however few rows bring it (ADR 0010 §4, the owner, Q-56).
+    const serious = judge.serious.has(column.toLowerCase());
+    if (!serious && n < M.newRows && n < MATERIAL.newShare * rows) continue;
     const said = fresh.keys.slice(0, 5).map((key) => names.value(column, parse(key)));
-    out.push({ key: `new:${column}`, kind: 'new', severity: n >= 100 || n >= 0.001 * rows ? 'warn' : 'note', score: Math.min(99, n / Math.max(1, rows) * 1000), title: fresh.keys.length === 1 ? `New ${names.column(column)}: ${label(column, fresh.keys[0]!)} · ${fmtInt(n)} trips` : `New ${names.column(column)} values: ${fresh.keys.length} · ${fmtInt(n)} trips`, detail: `${listed(said)}${fresh.keys.length > 5 ? ` and ${fresh.keys.length - 5} more` : ''}: never in ${daysSeen(file, k)} days of history.`, look: 'columns', columns: [column], values: fresh.keys, rows: n, acts: ['expected', 'quarantine', 'rule', 'notify'] });
+    out.push({ key: `new:${column}`, kind: 'new', severity: serious ? 'alert' : n >= M.newUnusual || n >= 0.001 * rows ? 'warn' : 'note', score: serious ? 60 : Math.min(99, n / Math.max(1, rows) * 1000), title: fresh.keys.length === 1 ? `New ${names.column(column)}: ${label(column, fresh.keys[0]!)} · ${fmtInt(n)} ${noun(n)}` : `New ${names.column(column)} values: ${fresh.keys.length} · ${fmtInt(n)} ${noun(n)}`, detail: `${listed(said)}${fresh.keys.length > 5 ? ` and ${fresh.keys.length - 5} more` : ''}: never in ${daysSeen(file, k)} days of history.`, look: 'columns', columns: [column], values: fresh.keys, rows: n, acts: serious ? ['incident', 'quarantine', 'notify', 'expected'] : ['expected', 'quarantine', 'rule', 'notify'] });
   }
   for (const [pair, vh] of Object.entries(file.pairs ?? {})) {
     const fresh = newOn(vh, k);
@@ -272,12 +459,12 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       return !newA.has(JSON.stringify(x)) && !newB.has(JSON.stringify(y));
     });
     const n = vh.fresh.find(([d]) => d === k)?.[1] ?? 0;
-    if (!keys.length || (n < MATERIAL.newRows && n < MATERIAL.newShare * rows)) continue;
+    if (!keys.length || (n < M.newRows && n < MATERIAL.newShare * rows)) continue;
     const said = keys.slice(0, 3).map((key) => {
       const [x, y] = parse(key) as [unknown, unknown];
       return `${names.column(a)} ${names.value(a, x)} with ${names.column(b)} ${names.value(b, y)}`;
     });
-    out.push({ key: `pair:${pair}`, kind: 'pair', severity: n >= 100 || n >= 0.001 * rows ? 'warn' : 'note', score: Math.min(99, n / Math.max(1, rows) * 1000), title: `New pair: ${names.column(a)} with ${names.column(b)} · ${fmtInt(n)} trips`, detail: `${sentence(listed(said))}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}: never together in ${daysSeen(file, k)} days.`, look: 'columns', columns: [a, b], values: keys, rows: n, acts: ['expected', 'quarantine', 'rule', 'notify'] });
+    out.push({ key: `pair:${pair}`, kind: 'pair', severity: n >= M.newUnusual || n >= 0.001 * rows ? 'warn' : 'note', score: Math.min(99, n / Math.max(1, rows) * 1000), title: `New pair: ${names.column(a)} with ${names.column(b)} · ${fmtInt(n)} ${noun(n)}`, detail: `${sentence(listed(said))}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}: never together in ${daysSeen(file, k)} days.`, look: 'columns', columns: [a, b], values: keys, rows: n, acts: ['expected', 'quarantine', 'rule', 'notify'] });
   }
 
   // Shape: a measure's or a time's bottom tenth, median or top tenth moved.
@@ -317,14 +504,14 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   // What the checks drop, and which rules drop more or less than usual.
   if (options.checks !== false) {
     const dropped = judged({ of: 'dropped' });
-    const rules = file.rules.map((r) => ({ r, j: judged({ of: 'rule', name: r.name }) })).filter((x) => x.j && outside(x.j) && Math.abs(x.j.value - x.j.range.expected) * rows >= MATERIAL.rows);
+    const rules = file.rules.map((r) => ({ r, j: judged({ of: 'rule', name: r.name }) })).filter((x) => x.j && outside(x.j) && Math.abs(x.j.value - x.j.range.expected) * rows >= M.rows);
     const ruleWords = rules.map(({ r, j }) => `${r.name} ${shareWords(j!.value, j!.range.low, j!.range.high).value}`);
-    if (dropped && outside(dropped) && Math.abs(dropped.value - dropped.range.expected) * rows >= MATERIAL.rows) {
+    if (dropped && outside(dropped) && Math.abs(dropped.value - dropped.range.expected) * rows >= M.rows) {
       const more = dropped.value > dropped.range.expected;
       out.push(quiet({ key: 'dropped', kind: 'dropped', severity: dropped.value >= 2 * dropped.range.expected && dropped.value >= 0.1 ? 'alert' : 'warn', score: cap(dropped.d), title: `Checks dropped ${shareWords(dropped.value, dropped.range.low, dropped.range.high).value} (usually ${shareWords(dropped.value, dropped.range.low, dropped.range.high).range})`, detail: `A ${more ? 'larger' : 'smaller'} share than a day like it drops${ruleWords.length ? `; by rule, ${listed(ruleWords)}` : ''}.`, look: 'dropped', metric: { of: 'dropped' }, value: dropped.value, range: dropped.range, rows: Math.round(dropped.value * rows), acts: ['quarantine', 'rule', 'notify', 'expected'] }, dropped));
     } else {
       for (const { r, j } of rules) {
-        out.push({ key: `rule:${r.name}`, kind: 'rule', severity: 'note', score: cap(j!.d), title: `${sentence(r.name)} rule: ${shareWords(j!.value, j!.range.low, j!.range.high).value} ${r.onFail === 'warn' ? 'flagged' : 'fail'} (usually ${shareWords(j!.value, j!.range.low, j!.range.high).range})`, detail: atShare(j!.value, j!.range.expected, rows, r.onFail === 'warn' ? 'flagged' : 'failed'), look: 'dropped', metric: { of: 'rule', name: r.name }, value: j!.value, range: j!.range, acts: ['quarantine', 'rule', 'expected'] });
+        out.push({ key: `rule:${r.name}`, kind: 'rule', severity: 'note', score: cap(j!.d), title: `${sentence(r.name)} rule: ${shareWords(j!.value, j!.range.low, j!.range.high).value} ${r.onFail === 'warn' ? 'flagged' : 'fail'} (usually ${shareWords(j!.value, j!.range.low, j!.range.high).range})`, detail: atShare(j!.value, j!.range.expected, rows, r.onFail === 'warn' ? 'flagged' : 'failed', noun()), look: 'dropped', metric: { of: 'rule', name: r.name }, value: j!.value, range: j!.range, acts: ['quarantine', 'rule', 'expected'] });
       }
     }
   }
@@ -337,18 +524,20 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     if (changes.length) out.push({ key: 'schema', kind: 'schema', severity: 'note', score: changes.length, title: `Columns changed: ${schemaCount(changes)}`, detail: `${sentence(listed(changes))}. The loads are cast to the month's columns.`, look: 'columns', acts: ['expected', 'notify'] });
   }
 
-  // The weather, as context.
+  // The weather, as context: in the place the history names (ADR 0010 §8); the legacy form's is Manhattan.
   const w = file.weather;
   if (w) {
+    const place = w.place ?? (judge.legacy ? 'Manhattan' : null);
+    const inPlace = place ? ` in ${place}` : '';
     const snow = w.snow[k] ?? 0;
     const rain = w.precip[k] ?? 0;
     const gaps = w.boroughs.filter((_, b) => (w.hours[k]?.[b] ?? 24) < 24);
     // Whole degrees, rounded first: never "−0".
     const deg = (x: number) => String(Math.round(x) || 0);
     const temps = w.tmin[k] != null && w.tmax[k] != null ? `between ${deg(w.tmin[k]!)} and ${deg(w.tmax[k]!)} °C` : 'its temperatures not on record';
-    if (snow >= 1) out.push({ key: 'weather', kind: 'weather', severity: 'note', score: snow, title: `Snow: ${snow.toFixed(1)} cm in Manhattan`, detail: `With ${rain.toFixed(1)} mm of rain and snow in all, ${temps}.`, look: 'history', acts: [] });
-    else if (rain >= 15) out.push({ key: 'weather', kind: 'weather', severity: 'note', score: rain / 10, title: `Heavy rain: ${rain.toFixed(0)} mm in Manhattan`, detail: `${sentence(temps)}.`, look: 'history', acts: [] });
-    else out.push({ key: 'weather', kind: 'weather', severity: 'ok', score: 0, title: rain >= 1 ? `Some rain: ${rain.toFixed(0)} mm in Manhattan` : 'A dry day in Manhattan', detail: `${sentence(temps)}${gaps.length ? '' : ', every district’s 24 hours on record'}.`, look: 'history', acts: [] });
+    if (snow >= 1) out.push({ key: 'weather', kind: 'weather', severity: 'note', score: snow, title: `Snow: ${snow.toFixed(1)} cm${inPlace}`, detail: `With ${rain.toFixed(1)} mm of rain and snow in all, ${temps}.`, look: 'history', acts: [] });
+    else if (rain >= 15) out.push({ key: 'weather', kind: 'weather', severity: 'note', score: rain / 10, title: `Heavy rain: ${rain.toFixed(0)} mm${inPlace}`, detail: `${sentence(temps)}.`, look: 'history', acts: [] });
+    else out.push({ key: 'weather', kind: 'weather', severity: 'ok', score: 0, title: rain >= 1 ? `Some rain: ${rain.toFixed(0)} mm${inPlace}` : `A dry day${inPlace}`, detail: `${sentence(temps)}${gaps.length ? '' : ', every district’s 24 hours on record'}.`, look: 'history', acts: [] });
     if (gaps.length) out.push({ key: 'weather-gaps', kind: 'weather', severity: 'note', score: 1, title: `The weather has hours missing`, detail: `${listed(gaps)}: fewer than 24 hours on record.`, look: 'history', acts: ['notify'] });
   }
 
@@ -357,8 +546,17 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   const told = together(out, rows, names);
   told.sort((a, b) => RANK[a.severity] - RANK[b.severity] || b.score - a.score);
   if (!told.some((f) => f.severity === 'alert' || f.severity === 'warn')) {
-    const note = holidayOf(day) ?? seasonOf(day);
-    told.unshift({ key: 'calm', kind: 'calm', severity: 'ok', score: 0, title: 'Nothing out of the ordinary', detail: trips ? `${fmtInt(trips.value)} trips, normal for ${note ?? 'a day like it'} (${fmtInt(trips.range.low)} to ${fmtInt(trips.range.high)}).` : 'Every value, column and check as a day like it has them.', look: 'history', metric: trips ? { of: 'trips' } : undefined, value: trips?.value, range: trips?.range, acts: [] });
+    const note = specialOf(day, cal);
+    const why = trips ? null : h.of({ of: 'trips' })?.explain(day) ?? null;
+    if (why) {
+      // Nothing to compare the day's rows with: not judged, never "normal" (ADR 0010 §1). Published, marked (Q-53).
+      const name = why.special ? shortName(why.special).replace(/^Holiday season$/, 'holiday season') : '';
+      const because = why.why === 'no last year' ? `the history has no ${name || 'day like it'} before this one to judge it by`
+        : why.why === 'last year moved' ? `last year’s ${name || 'day'} is too far from this year’s days to judge it by`
+        : why.why === 'history ends' ? 'the history ends before it'
+        : `${fmtInt(why.days)} ${why.days === 1 ? 'day' : 'days'} of history before it, too few to judge it by`;
+      told.unshift({ key: 'unlearned', kind: 'unlearned', severity: 'ok', score: 0, title: 'Not judged yet', detail: `${fmtInt(rows)} ${noun(rows)}; ${because}.`, look: 'history', metric: { of: 'trips' }, value: rows, rows, why, acts: [] });
+    } else told.unshift({ key: 'calm', kind: 'calm', severity: 'ok', score: 0, title: 'Nothing out of the ordinary', detail: trips ? `${fmtInt(trips.value)} ${noun(trips.value)}, normal for ${note ?? 'a day like it'} (${fmtInt(trips.range.low)} to ${fmtInt(trips.range.high)}).` : 'Every value, column and check as a day like it has them.', look: 'history', metric: trips ? { of: 'trips' } : undefined, value: trips?.value, range: trips?.range, acts: [] });
   }
   return told;
 }
@@ -466,7 +664,7 @@ export function usualHours(h: HistoryRanges, k: number, expected: number): numbe
   for (let w = 1; w <= 10 && shares[0]!.length < 6; w++) {
     const d = plusDays(day, -7 * w);
     const j = file.days.indexOf(d);
-    if (j < 0 || holidayOf(d) || seasonOf(d) || !file.rows[j] || !file.hours?.[j]) continue;
+    if (j < 0 || specialOf(d, h.calendar) || !file.rows[j] || !file.hours?.[j]) continue;
     file.hours[j]!.forEach((n, hr) => shares[hr]!.push(n / file.rows[j]!));
   }
   if (shares[0]!.length < 3) return null;
@@ -474,18 +672,19 @@ export function usualHours(h: HistoryRanges, k: number, expected: number): numbe
   return shares.map((xs) => median(xs) * expected);
 }
 
-export function hoursShort(h: HistoryRanges, k: number, expected: number): Finding | null {
+export function hoursShort(h: HistoryRanges, k: number, expected: number, material: typeof MATERIAL = MATERIAL, names: Pick<Names, 'noun'> = {}): Finding | null {
   const file = h.file;
   const want = usualHours(h, k, expected);
   if (!want || !file.hours?.[k]) return null;
   const got = file.hours[k]!;
-  const short = got.map((n, hr) => want[hr]! >= MATERIAL.hourRows && n < MATERIAL.hourShare * want[hr]!);
+  const noun = (n?: number) => nounFor(names, n);
+  const short = got.map((n, hr) => want[hr]! >= material.hourRows && n < material.hourShare * want[hr]!);
   // The longest run of short hours.
   let best = [0, -1];
   for (let a = 0; a < 24; a++) {
     if (!short[a]) continue;
     let b = a;
-    while (b + 1 < 24 && (short[b + 1] || want[b + 1]! < MATERIAL.hourRows)) b++;
+    while (b + 1 < 24 && (short[b + 1] || want[b + 1]! < material.hourRows)) b++;
     while (b > a && !short[b]) b--;
     if (b - a > best[1]! - best[0]!) best = [a, b];
     a = b;
@@ -499,8 +698,8 @@ export function hoursShort(h: HistoryRanges, k: number, expected: number): Findi
   const fall = Math.round((1 - had / Math.max(1, usual)) * 100);
   return {
     key: 'hours', kind: 'hours', severity: 'alert', score: 50 + (b - a),
-    title: b === 23 ? `Trips fall ${fall}% from ${clockText(a * 60)}` : a === 0 ? `Trips start late, at ${clockText((b + 1) * 60)}` : `Gap in trips, ${clockText(a * 60)}–${clockText((b + 1) * 60)}`,
-    detail: `${fmtInt(had)} trips ${span}, where a day like it has about ${fmtInt(usual)}.`,
+    title: b === 23 ? `${sentence(noun())} fall ${fall}% from ${clockText(a * 60)}` : a === 0 ? `${sentence(noun())} start late, at ${clockText((b + 1) * 60)}` : `Gap in ${noun()}, ${clockText(a * 60)}–${clockText((b + 1) * 60)}`,
+    detail: `${fmtInt(had)} ${noun(had)} ${span}, where a day like it has about ${fmtInt(usual)}.`,
     look: 'history', rows: Math.round(usual - had), acts: ['incident', 'notify', 'expected'],
     hours: { got: [...got], usual: want.map((x) => Math.round(x)), from: a, to: b, fall },
   };
@@ -572,8 +771,8 @@ function together(findings: Finding[], rows: number, names: Names): Finding[] {
       score: best(all).score,
       title: named.length ? lead.title : `${all.length} fields blank: ${w.value} (usually ${w.range})`,
       detail: named.length
-        ? fits(`${sentence(listed(others.map(said)))} ${blankOthers ? 'blank on' : 'moved with it:'} the same trips, likely.`, `${others.length} more ${blankOthers ? 'fields blank on' : 'values moved with it:'} the same trips, likely.`)
-        : fits(`${sentence(listed(all.map(said)))}: blank on the same trips, likely.`, 'Blank on the same trips, likely.'),
+        ? fits(`${sentence(listed(others.map(said)))} ${blankOthers ? 'blank on' : 'moved with it:'} the same ${nounFor(names)}, likely.`, `${others.length} more ${blankOthers ? 'fields blank on' : 'values moved with it:'} the same ${nounFor(names)}, likely.`)
+        : fits(`${sentence(listed(all.map(said)))}: blank on the same ${nounFor(names)}, likely.`, `Blank on the same ${nounFor(names)}, likely.`),
       columns: all.flatMap((g) => g.columns ?? []),
       values: all.flatMap((g) => g.values ?? []),
       members: [lead, ...others].map((g) => ({ column: g.columns![0]!, value: g.values![0]!, label: g.values?.[0] === 'null' ? 'blank' : (names.label ?? names.value)(g.columns![0]!, parse(g.values![0]!)), share: g.value!, range: g.range!, rows: g.rows! })),

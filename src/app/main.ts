@@ -24,7 +24,7 @@ import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf,
 import { ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
-import { glossOf, meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
+import { glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
 import { DECIDE, checkDecision, covers, readView, wrapRead, type DecideOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
@@ -2872,7 +2872,15 @@ const NEWS_NAMES = {
     const p = loadSource() ? meaningsOf(loadSource()!)(c) : undefined;
     return meaningFor(p, v) ?? (typeof v === 'number' && p?.unit === 'USD' ? inUnit(String(v), v, p) : String(v));
   },
+  /** What the watched source's rows are called (ADR 0010 §8): its noun in the ontology, else rows. */
+  noun: (n?: number) => {
+    const x = rowNoun(loadSource() ?? '');
+    return n === 1 ? x.one : x.many;
+  },
 };
+
+/** What a source's or step's rows are called, one and many (ADR 0010 §8, ontology.ts `nounOf`). */
+const rowNoun = (id: string): Noun => ontologyNoun(state.doc.ontology, id, readersOf(id));
 
 const storyCache = new Map<string, Story>();
 

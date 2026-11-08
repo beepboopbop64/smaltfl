@@ -229,11 +229,16 @@ describe('keys', () => {
 
 // ------------------------------------------------------------------ what holds publication (ADR 0009)
 
-/** The example as ADR 0009 found it: format 1, no `day` parameter, no publish block (whatever it gains later). */
+/**
+ * The example as ADR 0009 found it: format 1, no `day` parameter, no publish block, and none of ADR 0010's display marks
+ * (its nouns, a part's name and role), whatever it gains later.
+ */
 function exampleBefore(): FlowDocument {
   const doc = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
   const { publish: _publish, ...rest } = doc;
-  return { ...rest, smaltfl: 1, parameters: (doc.parameters ?? []).filter((p) => p.name !== 'day') };
+  const { nouns: _nouns, ...ontology } = doc.ontology!;
+  const properties = ontology.properties?.map(({ name: _name, role: _role, ...p }) => p);
+  return { ...rest, smaltfl: 1, parameters: (doc.parameters ?? []).filter((p) => p.name !== 'day'), ontology: { ...ontology, properties } };
 }
 const PUBLISH: PublishDef = { hold: ['checks', 'wrong'], watch: { trips: 'history.json' }, period: 'day', together: true };
 const DAY = { name: 'day', type: 'text' as const, default: null, description: 'The day the trips are from' };
@@ -425,8 +430,14 @@ describe('the plan of a flow that holds (plan/1, ADR 0009 E10)', () => {
     expect(await planHash(plan)).toBe('fc700fdf9d4dd95e71ee083cfee0ddca2ba46dd122b7a840e182234611668fd4');
     const { publish: _p, ...without } = v;
     expect(await planHash(await translate({ ...without, smaltfl: 1 }, { day: '2023-09-21' }))).toBe('32609b0f1de25bc72ea09219c0c38cd2cff347619e2db5c8506a7da144720f8e');
-    // The example with the block of ADR 0009 §2.
+    // The example with the block of ADR 0009 §2, and its ontology's nouns and the vendor's name and role (ADR 0010 §8,
+    // display: they move the flow hash and the plan hash, and no node key).
+    const withMarks = (doc: FlowDocument): FlowDocument => {
+      const now = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
+      return { ...doc, ontology: now.ontology };
+    };
     expect(await planHash(await translate(exampleHolding(), { month: '2023-09', day: '2023-09-21' }))).toBe('ccbc4d7bee92ae2e153ab8a345e6a3d807e201193ab9dade82a48362dc3cd8c8');
+    expect(await planHash(await translate(withMarks(exampleHolding()), { month: '2023-09', day: '2023-09-21' }))).toBe('7d7236ead520908b210b879a16815f4d3a727b6320f620d2821d3f87195fd252');
   });
 
   it('changes no node: every key is the same with and without the block', async () => {

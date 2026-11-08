@@ -5,10 +5,12 @@
 import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
-import { isPlaceholder, newsOf, schemaChanges, shareWords, tableNewsOf, type TableFacts } from '../src/core/news.js';
-import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
+import { NONE } from '../src/core/calendar.js';
+import type { FlowDocument } from '../src/core/document.js';
+import { coverageOf, flowNames, isPlaceholder, judgeOf, LEGACY_JUDGE, MATERIAL, materialFor, newsOf, notJudgedChip, schemaChanges, shareWords, tableNewsOf, type JudgeSettings, type TableFacts } from '../src/core/news.js';
+import { historyWith, tripNoun, vendorNames, type Trouble } from './helpers/history.js';
 
-const names = { column: (c: string) => c, value: (_c: string, v: unknown) => String(v) };
+const names = { column: (c: string) => c, value: (_c: string, v: unknown) => String(v), noun: tripNoun };
 
 const zones = (over: Partial<TableFacts> = {}): TableFacts => ({
   noun: 'zones',
@@ -211,6 +213,132 @@ describe('a day’s news from its history', () => {
 
   it('has nothing to say of a day outside the history', () => {
     expect(newsOf(new HistoryRanges(historyWith()), '2025-01-01', vendorNames)).toEqual([]);
+  });
+});
+
+/** How a general-form watch judges the made-up history: the legacy settings but the general form's own, and its marks. */
+const general = (over: Partial<JudgeSettings> = {}): JudgeSettings => ({ ...LEGACY_JUDGE, legacy: false, scale: 'fixed', ...over });
+/** The made-up history with value 6 at about a fifth of a percent of every day's trips, and `share` on `day`. */
+function rare(day: string, share: number) {
+  const file = historyWith();
+  const vh = file.values.VendorID!;
+  vh.first[2] = 0;
+  vh.last[2] = file.days.length - 1;
+  vh.counts = vh.counts!.map((c, k) => [c[0]!, c[1]!, Math.round(file.rows[k]! * (file.days[k] === day ? share : 0.002 * (1 + 0.04 * Math.sin(k * 1.7))))]);
+  return new HistoryRanges(file);
+}
+
+describe('a day’s news on any dataset (ADR 0010 §1, §4, §8)', () => {
+  const FIRST_THANKSGIVING = '2021-11-25';
+
+  it('says a day with nothing to compare against is not judged, never normal, and why', () => {
+    const h = new HistoryRanges(historyWith());
+    const news = newsOf(h, FIRST_THANKSGIVING, names);
+    expect(news[0]).toMatchObject({ kind: 'unlearned', severity: 'ok', title: 'Not judged yet', why: { why: 'no last year', special: 'Thanksgiving' } });
+    expect(news[0]!.detail).toMatch(/^[\d,]+ trips; the history has no Thanksgiving before this one to judge it by\.$/);
+    expect(news.some((f) => f.kind === 'calm')).toBe(false);
+    // A year on it is judged, and normal.
+    expect(newsOf(h, '2022-11-24', names)[0]).toMatchObject({ kind: 'calm', title: 'Nothing out of the ordinary' });
+    expect(newsOf(h, '2021-10-05', names)[0]).toMatchObject({ kind: 'unlearned', why: { why: 'too few days', days: 4 } });
+  });
+
+  it('catches a first-year holiday cut to a few percent by the floor that needs no range, which pauses (Q-53)', () => {
+    const h = new HistoryRanges(historyWith({ [FIRST_THANKSGIVING]: { blank: true } }));
+    const f = newsOf(h, FIRST_THANKSGIVING, names)[0]!;
+    expect(f).toMatchObject({ key: 'volume', kind: 'volume', severity: 'alert' });
+    expect(f.title).toMatch(/^Almost no trips: [\d,]+$/);
+    expect(f.detail).toMatch(/^Under a tenth of the last 7 days’ median, [\d,]+; not judged against a day like it\.$/);
+    expect(f.range).toBeUndefined();
+  });
+
+  it('says counts with the source’s noun, and rows without one', () => {
+    const h = new HistoryRanges(historyWith({ '2023-10-04': { blank: true } }));
+    const signIns = { ...names, noun: (n?: number) => (n === 1 ? 'sign-in' : 'sign-ins') };
+    expect(newsOf(h, '2023-10-04', signIns)[0]!.title).toMatch(/^Almost no sign-ins: /);
+    expect(newsOf(h, '2023-10-04', { column: names.column, value: names.value })[0]!.title).toMatch(/^Almost no rows: /);
+    const fall = new HistoryRanges(historyWith({ '2023-10-04': { stopAt: 13 } }));
+    expect(newsOf(fall, '2023-10-04', signIns).find((x) => x.kind === 'hours')!.title).toBe('Sign-ins fall 98% from 13:00');
+  });
+
+  it('calls a bad value that surged something wrong, with no marking as expected; one that fell, good news', () => {
+    const judge = general({ bad: new Map([['vendorid', new Set(['1'])]]) });
+    const up = new HistoryRanges(historyWith({ '2023-10-04': { vendorSurge: 2.5 } }));
+    const f = newsOf(up, '2023-10-04', names, { judge }).find((x) => x.key === 'share:VendorID=1')!;
+    expect(f).toMatchObject({ severity: 'alert', bad: true, acts: ['incident', 'notify'] });
+    expect(f.detail).toMatch(/× its usual [\d,]+: a value marked bad\.$/);
+    // Unmarked, the same surge is a share that moved, which may be marked as expected.
+    expect(newsOf(up, '2023-10-04', names).find((x) => x.key === 'share:VendorID=1')!.acts).toContain('expected');
+    const down = new HistoryRanges(historyWith({ '2023-10-04': { vendorShare: 0.1 } }));
+    expect(newsOf(down, '2023-10-04', names, { judge }).find((x) => x.key === 'share:VendorID=1')).toMatchObject({ severity: 'note', bad: true, acts: ['notify'] });
+  });
+
+  it('marks a bad value something wrong however few points it moved: 0.2% to 0.65%, 3.3×', () => {
+    const h = rare('2023-10-04', 0.0065);
+    const judge = general({ bad: new Map([['vendorid', new Set(['6'])]]) });
+    expect(newsOf(h, '2023-10-04', names, { judge }).find((x) => x.key === 'share:VendorID=6')).toMatchObject({ severity: 'alert', bad: true });
+    // Unmarked, the legacy form's point gates leave it out (under half a point); the general form's relative rule tells it.
+    expect(newsOf(h, '2023-10-04', names).find((x) => x.key === 'share:VendorID=6')).toBeUndefined();
+    expect(newsOf(h, '2023-10-04', names, { judge: general() }).find((x) => x.key === 'share:VendorID=6')).toMatchObject({ severity: 'warn' });
+    // Under three times its usual share, the relative rule says nothing.
+    expect(newsOf(rare('2023-10-04', 0.005), '2023-10-04', names, { judge: general() }).find((x) => x.key === 'share:VendorID=6')).toBeUndefined();
+  });
+
+  it('alerts on a value never seen before in a serious column (Q-56)', () => {
+    const h = new HistoryRanges(historyWith({ '2023-10-04': { newValue: true } }));
+    expect(newsOf(h, '2023-10-04', names).find((x) => x.kind === 'new')!.severity).toBe('warn');
+    const f = newsOf(h, '2023-10-04', names, { judge: general({ serious: new Set(['vendorid']) }) }).find((x) => x.kind === 'new')!;
+    expect(f).toMatchObject({ severity: 'alert', acts: ['incident', 'quarantine', 'notify', 'expected'] });
+  });
+
+  it('scales its floors with the day’s expected rows in the general form, and keeps them fixed in the legacy one', () => {
+    expect(materialFor(2_000, 'fixed')).toBe(MATERIAL);
+    expect(materialFor(100_000, 'volume')).toEqual(MATERIAL);
+    const quiet = materialFor(2_000, 'volume');
+    expect([quiet.hourRows, quiet.rows, quiet.newRows, quiet.newUnusual, quiet.split].map((x) => Math.round(x * 100) / 100)).toEqual([28.28, 7.07, 1.41, 14.14, 28.28]);
+    const busy = materialFor(100_000_000, 'volume');
+    expect([busy.hourRows, busy.rows, busy.share]).toEqual([2_000, 500, MATERIAL.share]);
+    expect(materialFor(10, 'volume').hourRows).toBe(10);
+  });
+
+  it('says the weather’s place as the history names it; the legacy form’s is Manhattan', () => {
+    const file = historyWith();
+    expect(newsOf(new HistoryRanges(file), '2023-10-04', names).find((x) => x.kind === 'weather')!.title).toBe('A dry day in Manhattan');
+    expect(newsOf(new HistoryRanges(file), '2023-10-04', names, { judge: general() }).find((x) => x.kind === 'weather')!.title).toBe('A dry day');
+    const placed = { ...file, weather: { ...file.weather!, place: 'Leeds' } };
+    expect(newsOf(new HistoryRanges(placed), '2023-10-04', names, { judge: general() }).find((x) => x.kind === 'weather')!.title).toBe('A dry day in Leeds');
+  });
+
+  it('counts what it could judge on a day', () => {
+    const h = new HistoryRanges(historyWith());
+    expect(coverageOf(h, '2023-10-04')).toEqual({ rows: true, values: [2, 2], quantiles: [0, 0], checks: true, why: null });
+    expect(coverageOf(h, FIRST_THANKSGIVING)).toMatchObject({ rows: false, why: { why: 'no last year', special: 'Thanksgiving' } });
+    expect(coverageOf(h, '2023-10-04', { checks: false }).checks).toBe(false);
+    // Under a calendar with no days, the first Thanksgiving is an ordinary Thursday, judged.
+    expect(coverageOf(new HistoryRanges(historyWith(), { calendar: NONE }), FIRST_THANKSGIVING).rows).toBe(true);
+  });
+
+  it('says why a day is not judged in four words at most', () => {
+    expect(notJudgedChip({ why: 'no last year', days: 55, special: 'Thanksgiving' })).toBe('First Thanksgiving here');
+    expect(notJudgedChip({ why: 'no last year', days: 55, special: 'Martin Luther King Jr. Day' })).toBe('First MLK Day here');
+    expect(notJudgedChip({ why: 'no last year', days: 55, special: 'Holiday season' })).toBe('First holiday season here');
+    expect(notJudgedChip({ why: 'no last year', days: 55, special: 'Memorial Day weekend' })).toBe('First Memorial Day weekend');
+    expect(notJudgedChip({ why: 'last year moved', days: 400, special: 'Thanksgiving' })).toBe('Changed since last year');
+    expect(notJudgedChip({ why: 'too few days', days: 9 })).toBe('9 days of history');
+    expect(notJudgedChip({ why: 'too few days', days: 1 })).toBe('1 day of history');
+    expect(notJudgedChip({ why: 'history ends', days: 800 }, undefined, '2024-01-31')).toBe('History ends Jan 31');
+  });
+
+  it('reads how a document judges a source: the legacy form for a file name, the general form’s settings and marks', () => {
+    const base = { ontology: { objectTypes: [], linkTypes: [], actionTypes: [], nouns: { auth: { one: 'sign-in', many: 'sign-ins' } }, properties: [{ column: 'result', title: 'Result', description: 'How', values: { ok: 'Signed in', fail: 'Failed' }, bad: ['fail'] }, { column: 'country', title: 'Country', description: 'Where', newValues: 'alert' as const }, { column: 'VendorID', title: 'Vendor', description: 'Who', name: 'Vendor {code}', role: 'sender' as const }] } };
+    const legacy = judgeOf({ ...base, publish: { hold: ['wrong'], watch: { auth: 'h.json' }, period: 'day' } }, 'auth');
+    expect(legacy).toMatchObject({ legacy: true, scale: 'fixed', calendar: { base: 'us-nyc/1' } });
+    expect([...legacy.bad]).toEqual([['result', new Set(['fail'])]]);
+    expect([...legacy.serious].sort()).toEqual(['country', 'result']);
+    const g = judgeOf({ ...base, publish: { hold: ['wrong'], watch: { auth: { history: 'h.json' } }, period: 'day' } }, 'auth');
+    expect(g).toMatchObject({ legacy: false, scale: 'volume', calendar: { base: 'none' } });
+    expect(judgeOf({ ...base, calendar: { base: 'us' }, publish: { hold: ['wrong'], watch: { auth: { history: 'h.json', calendar: false, scale: 'fixed' } }, period: 'day' } }, 'auth')).toMatchObject({ calendar: NONE, scale: 'fixed' });
+    const n = flowNames({ ...base, steps: [] } as unknown as FlowDocument, 'auth');
+    expect([n.noun!(1), n.noun!(2), n.noun!(), n.column('result'), n.part!('VendorID'), n.part!('result')]).toEqual(['sign-in', 'sign-ins', 'sign-ins', 'result', { name: 'Vendor {code}', role: 'sender' }, undefined]);
   });
 });
 

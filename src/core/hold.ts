@@ -19,7 +19,7 @@ import { sourceOf, type FlowDocument, type HoldKind } from './document.js';
 import type { HistoryRanges } from './history.js';
 import type { JSONValue, LogEntry } from './log.js';
 import type { ExpectationResult, RunManifest } from './manifest.js';
-import { newsOf, type Names } from './news.js';
+import { flowNames, newsOf } from './news.js';
 import { watchesOf, type ExpectNode, type FlowPlan } from './plan.js';
 import { DECIDE_OPTIONS, type DecideOption } from './policy.js';
 import { storyOf, type Story } from './story.js';
@@ -72,8 +72,6 @@ export interface Hold {
   claim?: StoryClaim;
 }
 
-const RAW: Names = { column: (c) => c, value: (_c, v) => String(v) };
-
 /**
  * Whether the history counts the document's checks: the step it counted reads the source alone (directly, or through
  * its fill step, `sourceOf`), with the same rules (names, checks and what each does). A box put in front of the source
@@ -90,16 +88,17 @@ export function countedChecks(doc: Pick<FlowDocument, 'steps'>, h: HistoryRanges
  * episode, and no gate (the checks hold from the run's own counts). `h` must learn from every day of the history:
  * leaving incident days out is one browser's choice, not the flow's.
  */
-export function flowStory(h: HistoryRanges, day: string, doc: Pick<FlowDocument, 'steps'>, source: string): Story {
+export function flowStory(h: HistoryRanges, day: string, doc: Pick<FlowDocument, 'steps' | 'ontology'>, source: string): Story {
   if (h.skipped > 0) throw new Error("the flow's verdict learns from every day of the history: these ranges leave days out");
-  return storyOf(h, day, newsOf(h, day, RAW, { checks: countedChecks(doc, h, source) }), { names: RAW, episode: false });
+  const names = flowNames(doc, source);
+  return storyOf(h, day, newsOf(h, day, names, { checks: countedChecks(doc, h, source) }), { names, episode: false });
 }
 
 /**
  * The claim a page passes to a run for a watched source's day, from the history file it checked against the data's
  * list (ADR 0006 §2) and pinned in the engine. Null for a day the history doesn't have: the run holds it as not judged.
  */
-export function dayClaim(h: HistoryRanges, doc: Pick<FlowDocument, 'steps'>, file: HistoryRef, day: string, source: string, build: string): StoryClaim | null {
+export function dayClaim(h: HistoryRanges, doc: Pick<FlowDocument, 'steps' | 'ontology'>, file: HistoryRef, day: string, source: string, build: string): StoryClaim | null {
   const k = h.file.days.indexOf(day);
   if (k < 0) return null;
   const s = flowStory(h, day, doc, source);

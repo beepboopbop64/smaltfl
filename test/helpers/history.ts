@@ -78,5 +78,7 @@ export function historyWith(trouble: Record<string, Trouble> = {}): HistoryFile 
     weather: { boroughs: ['Manhattan'], hours: DAYS.map(() => [24]), precip: snow.map((x) => x * 1.2), snow, tmin: DAYS.map(() => -2), tmax: DAYS.map(() => 4) },
   };
 }
-export const vendorNames = { column: (c: string) => (c === 'VendorID' ? 'vendor' : c), value: (_c: string, v: unknown) => String(v) };
+/** The made-up history's names: the taxi's noun (ADR 0010 §8), and its vendor column said short. */
+export const tripNoun = (n?: number) => (n === 1 ? 'trip' : 'trips');
+export const vendorNames = { column: (c: string) => (c === 'VendorID' ? 'vendor' : c), value: (_c: string, v: unknown) => String(v), noun: tripNoun };
 

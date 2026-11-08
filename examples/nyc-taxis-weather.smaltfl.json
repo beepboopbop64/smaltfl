@@ -405,6 +405,12 @@
         ]
       }
     ],
+    "nouns": {
+      "trips": {
+        "one": "trip",
+        "many": "trips"
+      }
+    },
     "properties": [
       {
         "column": "VendorID",
@@ -416,6 +422,8 @@
           "6": "Myle Technologies Inc",
           "7": "Helix"
         },
+        "name": "Vendor {code}",
+        "role": "sender",
         "note": "January 2024 is almost all 1 and 2: 260 of its 2,964,624 trips come from 6, all of them Flex Fare trips. Dictionaries before 2025 name 2 VeriFone Inc. Vendors 1 and 2 fill extra differently.",
         "sources": [
           "tlc-yellow",

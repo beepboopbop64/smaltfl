@@ -25,6 +25,7 @@ describe.skipIf(!has)('the story on the real history', () => {
       return m ? `${String(v)} (${m})` : String(v);
     },
     label: (c, v) => meaningOf(prop(c), v) ?? String(v),
+    noun: (n) => (n === 1 ? 'trip' : 'trips'),
   };
   const h = file ? new HistoryRanges(file) : null;
   const story = (day: string) => storyOf(h!, day, newsOf(h!, day, names), { names, step: 'trips_valid', limit: 0.1 });

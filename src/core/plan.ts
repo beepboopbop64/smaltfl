@@ -10,7 +10,7 @@ import { calendarProblems, resolveCalendar, type Calendar } from './calendar.js'
 import type { FlowDocument, HoldKind, ParameterDef, StepDef, WatchDef } from './document.js';
 import { HOLD_KINDS, isGeneralWatch, validateDocument, withoutDisplay } from './document.js';
 import { hashOf } from './hash.js';
-import { propertyOf, VERDICT_MARKS, type Ontology } from './ontology.js';
+import { marksOn, type Ontology } from './ontology.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { bindParameters, quoteIdent, SqlTextError, withoutTrailingSemicolons } from './sqltext.js';
 
@@ -263,21 +263,6 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   const calendar = resolveCalendar(doc.calendar, legacy);
   const watch = entries.map((e): [number, WatchPlan] => [e.node, watchPlan(e.w, e.id, p.period ?? null, doc.ontology)]);
   return { ...plan, smaltflPlan: 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: 'last', until: 'decision' } };
-}
-
-/** The verdict-changing marks the ontology puts on a source's columns: each column's property for it (`propertyOf`). */
-function marksOn(ontology: Ontology | undefined, source: string): Pick<WatchPlan, 'bad' | 'newValues' | 'after'> {
-  const columns = [...new Set((ontology?.properties ?? []).map((x) => x.column.toLowerCase()))];
-  const props = columns.flatMap((c) => {
-    const p = propertyOf(ontology, source, c);
-    return p ? [p] : [];
-  });
-  const byColumn = <T extends unknown[]>(xs: T[]) => xs.sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0));
-  return {
-    bad: byColumn(props.filter((x) => x.bad?.length).map((x): [string, ...string[]] => [x.column, ...[...x.bad!].sort()])),
-    newValues: byColumn(props.filter((x) => x.bad?.length || x.newValues === 'alert').map((x): [string, 'alert'] => [x.column, 'alert'])),
-    after: byColumn(props.filter((x) => x.after).map((x): [string, string, number] => [x.column, x.after!.of, x.after!.minutes])),
-  };
 }
 
 /** Whether a document judges its watched sources other than every flow did before ADR 0010: a plan/2. */

@@ -67,8 +67,9 @@ export interface HistoryFile {
   pairs: Record<string, ValueHistory>;
   /** The trips file's own columns, month by month, before they were cast to the month's (scripts/data/build.py). */
   schemas?: { month: string; columns: [string, string][] }[];
-  /** Each day's weather in the city (scripts/data/build.py): hours on record per borough, rain and snow, the temperatures. */
-  weather?: { boroughs: string[]; hours: number[][]; precip: (number | null)[]; snow: (number | null)[]; tmin: (number | null)[]; tmax: (number | null)[] };
+  /** Each day's weather in the city (scripts/data/build.py): hours on record per borough, rain and snow, the temperatures;
+   * and the place it is of, said in the news (ADR 0010 §8: "Manhattan" for the legacy form when a history doesn't say). */
+  weather?: { place?: string; boroughs: string[]; hours: number[][]; precip: (number | null)[]; snow: (number | null)[]; tmin: (number | null)[]; tmax: (number | null)[] };
 }
 
 /** A number the history keeps a day of. */
