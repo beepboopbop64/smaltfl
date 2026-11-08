@@ -15,7 +15,7 @@
  */
 import { canonicalJSON } from './canonical.js';
 import type { PauseState } from './days.js';
-import type { FlowDocument, HoldKind } from './document.js';
+import { sourceOf, type FlowDocument, type HoldKind } from './document.js';
 import type { HistoryRanges } from './history.js';
 import type { JSONValue, LogEntry } from './log.js';
 import type { ExpectationResult, RunManifest } from './manifest.js';
@@ -75,12 +75,13 @@ export interface Hold {
 const RAW: Names = { column: (c) => c, value: (_c, v) => String(v) };
 
 /**
- * Whether the history counts the document's checks: the step it counted reads the source alone, with the same rules
- * (names, checks and what each does). A box put in front of the source would leave the checks other rows to count.
+ * Whether the history counts the document's checks: the step it counted reads the source alone (directly, or through
+ * its fill step, `sourceOf`), with the same rules (names, checks and what each does). A box put in front of the source
+ * would leave the checks other rows to count.
  */
 export function countedChecks(doc: Pick<FlowDocument, 'steps'>, h: HistoryRanges, source: string | undefined): boolean {
   const step = doc.steps.find((x) => x.id === h.file.step);
-  return !!source && step?.kind === 'expectations' && step.inputs.length === 1 && step.inputs[0] === source
+  return !!source && step?.kind === 'expectations' && step.inputs.length === 1 && sourceOf(doc, step.inputs[0]!) === source
     && h.sameChecks(step.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })));
 }
 
@@ -141,9 +142,41 @@ function claimProblem(c: Record<string, unknown>): string | null {
 }
 
 /**
- * Each watched source of a plan judged by its claim (ADR 0009 §3), or not judged when there is no claim for it, more
- * than one, or one that isn't shaped as a claim, names another day than the run's period, was told from another
- * history than the file pinned under the watch's name, or counts other rows than the snapshot holds. Not judged holds.
+ * Where a claim is judged: the node whose snapshot it must count, that node's origin (for what it says), the history
+ * file pinned under the watch's name, and the day it must be of (the run's period parameter, as the plan holds it).
+ */
+export interface ClaimAt {
+  node: number;
+  origin: string;
+  file: string;
+  day: unknown;
+}
+
+/**
+ * One claim judged against the run (ADR 0009 §3): the one check every claim goes through, a watched source's and, with
+ * the fills, a donor's (amendment 1 S3, C4). Not judged, saying why, when it isn't shaped as a claim, names another day,
+ * was told from another history than the file pinned under the watch's name, or counts other rows than the node's
+ * snapshot holds; else the source judged by a clean copy of the claim, only its own fields.
+ */
+export function judgeClaim(c: Record<string, unknown>, at: ClaimAt, facts: ClaimFacts): Judged {
+  const { node, origin, file, day } = at;
+  const problem = claimProblem(c);
+  if (problem) return { node, unjudged: `the claim for ${origin} ${problem}` };
+  const claim = c as unknown as StoryClaim;
+  if (typeof day !== 'string' || claim.day !== day) return { node, unjudged: `the claim is of ${claim.day}, the run of ${day === undefined ? 'no day' : String(day)}` };
+  if (claim.history.path !== file) return { node, unjudged: `the claim was told from ${claim.history.path}, not ${file}` };
+  const pin = facts.pinned(file);
+  if (!pin) return { node, unjudged: `${file} isn't pinned in the engine` };
+  if (pin.sha256 !== claim.history.sha256 || pin.bytes !== claim.history.bytes) return { node, unjudged: `the claim's ${file} isn't the one pinned in the engine` };
+  const rows = facts.rows(node);
+  if (rows !== claim.rows) return { node, unjudged: `the claim counts ${fmt(claim.rows)} rows of ${origin}, the snapshot holds ${fmt(rows)}` };
+  // A clean copy: only the claim's own fields reach the record.
+  return { node, claim: { by: 'story', source: claim.source, day: claim.day, state: claim.state, below: claim.below, head: claim.head, build: claim.build, history: { path: claim.history.path, sha256: claim.history.sha256, bytes: claim.history.bytes }, rows: claim.rows } };
+}
+
+/**
+ * Each watched source of a plan judged by its claim (ADR 0009 §3, `judgeClaim`), or not judged when there is no claim
+ * for it, or more than one. Not judged holds.
  */
 export function judgeClaims(plan: Pick<FlowPlan, 'nodes' | 'parameters' | 'publish'>, claims: readonly unknown[] | undefined, facts: ClaimFacts): Judged[] {
   const pub = plan.publish;
@@ -154,19 +187,7 @@ export function judgeClaims(plan: Pick<FlowPlan, 'nodes' | 'parameters' | 'publi
     const mine = (claims ?? []).filter((c): c is Record<string, unknown> => isRecord(c) && typeof c.source === 'string' && c.source.toLowerCase() === origin.toLowerCase());
     if (mine.length === 0) return { node, unjudged: `no claim for ${origin}` };
     if (mine.length > 1) return { node, unjudged: `${mine.length} claims for ${origin}` };
-    const c = mine[0]!;
-    const problem = claimProblem(c);
-    if (problem) return { node, unjudged: `the claim for ${origin} ${problem}` };
-    const claim = c as unknown as StoryClaim;
-    if (typeof day !== 'string' || claim.day !== day) return { node, unjudged: `the claim is of ${claim.day}, the run of ${day === undefined ? 'no day' : String(day)}` };
-    if (claim.history.path !== file) return { node, unjudged: `the claim was told from ${claim.history.path}, not ${file}` };
-    const pin = facts.pinned(file);
-    if (!pin) return { node, unjudged: `${file} isn't pinned in the engine` };
-    if (pin.sha256 !== claim.history.sha256 || pin.bytes !== claim.history.bytes) return { node, unjudged: `the claim's ${file} isn't the one pinned in the engine` };
-    const rows = facts.rows(node);
-    if (rows !== claim.rows) return { node, unjudged: `the claim counts ${fmt(claim.rows)} rows of ${origin}, the snapshot holds ${fmt(rows)}` };
-    // A clean copy: only the claim's own fields reach the record.
-    return { node, claim: { by: 'story', source: claim.source, day: claim.day, state: claim.state, below: claim.below, head: claim.head, build: claim.build, history: { path: claim.history.path, sha256: claim.history.sha256, bytes: claim.history.bytes }, rows: claim.rows } };
+    return judgeClaim(mine[0]!, { node, origin, file, day }, facts);
   });
 }
 

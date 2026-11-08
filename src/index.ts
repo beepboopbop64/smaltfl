@@ -11,7 +11,7 @@ import type { ParamValue } from './core/sqltext.js';
 
 export { canonicalJSON } from './core/canonical.js';
 export { hashOf, hex, sha256, sha256Hex, unhex, utf8 } from './core/hash.js';
-export { DOCUMENT_FORMATS, HOLD_KINDS, documentFormat, validateDocument, withoutDisplay } from './core/document.js';
+export { DOCUMENT_FORMATS, HOLD_KINDS, documentFormat, sourceOf, validateDocument, withoutDisplay } from './core/document.js';
 export type {
   AggregateStep,
   DatasetDef,
@@ -57,8 +57,14 @@ export { DECIDE, DECIDE_OPTIONS, checkAction, checkDecision, covers, readView, w
 export type { ActionCheck, ActionRule, ColumnRule, DecideOption, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
 export type { ActRequest, ActionType, Edit, LinkType, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
 export { glossOf, meaningOf, propertyOf } from './core/ontology.js';
-export { claimHolds, countedChecks, dayClaim, decisionFor, flowStory, heldOutputs, holdsOf, inputsKey, inputsOf, judgeClaims, pausesOf, pauseState, reachOf, sameKeys, stagedKeys, standingFor, tripped, waitingOf } from './core/hold.js';
-export type { ClaimFacts, DecideAbout, Decided, HeldAbout, HistoryRef, Hold, Inputs, Judged, Pause, ReleaseAbout, StoryClaim } from './core/hold.js';
+// What holds a run, what waits, and what the record decided (ADR 0009): one group a line, so that changes to one part
+// don't touch the others' lines.
+export { claimHolds, dayClaim, flowStory } from './core/hold.js';
+export { countedChecks, holdsOf, judgeClaim, judgeClaims, tripped } from './core/hold.js';
+export { heldOutputs, reachOf, stagedKeys, waitingOf } from './core/hold.js';
+export { decisionFor, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, standingFor } from './core/hold.js';
+export type { ClaimAt, ClaimFacts, HistoryRef, Hold, Judged, StoryClaim } from './core/hold.js';
+export type { DecideAbout, Decided, HeldAbout, Inputs, Pause, ReleaseAbout } from './core/hold.js';
 export { PLUGIN_NAME } from './core/protocol.js';
 export type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunOptions, RunResult, VerifyCheck, VerifyLevel, VerifyOptions, VerifyResult } from './core/protocol.js';
 export type { ParamType, ParamValue } from './core/sqltext.js';

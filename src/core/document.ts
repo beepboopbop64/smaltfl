@@ -622,6 +622,24 @@ export function takeOut(doc: FlowDocument, id: string): FlowDocument | undefined
   };
 }
 
+/**
+ * The source an input stands for, read through fill steps (ADR 0009 amendment 1 S1, C7): a fill step passes its source's
+ * rows through on any day it fills nothing, so what reads it reads that source. A fill step's first input, resolved the
+ * same way; undefined for any other step; and an id no step has, as it is (in a valid document, a source's). The kind
+ * is compared as text, so this reads documents of builds that know the step.
+ */
+export function sourceOf(doc: Pick<FlowDocument, 'steps'>, id: string): string | undefined {
+  let at = id;
+  for (let hops = 0; hops <= doc.steps.length; hops++) {
+    const st = doc.steps.find((s) => s.id === at);
+    if (!st) return at;
+    const kind: string = st.kind;
+    if (kind !== 'fill' || st.inputs.length === 0) return undefined;
+    at = st.inputs[0]!;
+  }
+  return undefined;
+}
+
 /** The document without display-only fields (its layout, groups and profiles): what the flow hash covers. */
 export function withoutDisplay(doc: FlowDocument): Omit<FlowDocument, 'layout' | 'groups' | 'profiles'> {
   const { layout: _layout, groups: _groups, profiles: _profiles, ...rest } = doc;

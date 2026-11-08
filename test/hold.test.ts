@@ -4,7 +4,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { FlowDocument, PublishDef } from '../src/core/document.js';
+import { sourceOf, type FlowDocument, type PublishDef, type StepDef } from '../src/core/document.js';
 import { HistoryRanges } from '../src/core/history.js';
 import {
   claimHolds,
@@ -16,6 +16,7 @@ import {
   holdsOf,
   inputsKey,
   inputsOf,
+  judgeClaim,
   judgeClaims,
   lastPublished,
   pausesOf,
@@ -171,6 +172,17 @@ describe('judging a claim against the run (ADR 0009 §3)', () => {
   it('judges nothing for a plan without watches', async () => {
     expect(judgeClaims(await planOf({ hold: ['checks'] }), [claim()], facts())).toEqual([]);
   });
+
+  it('judges one claim where it is told: any node, its day and the watch’s file, as a donor’s will be (amendment 1 S3)', () => {
+    // A donor's claim: its own day, the history pinned under the source's watch, the donor snapshot's rows at its node.
+    const donor = claim({ day: '2023-09-14', state: 'calm', below: false, head: 'A normal Thursday', rows: 118_250 });
+    const at = { node: 7, origin: 'trips', file: 'history.json', day: '2023-09-14' };
+    const rows = facts({ rows: (n) => (n === 7 ? 118_250 : 41_939) });
+    expect(judgeClaim({ ...donor, note: 'from the page' }, at, rows)).toEqual({ node: 7, claim: donor });
+    expect(judgeClaim({ ...donor }, { ...at, day: '2023-09-21' }, rows)).toEqual({ node: 7, unjudged: 'the claim is of 2023-09-14, the run of 2023-09-21' });
+    expect(judgeClaim({ ...donor }, { ...at, node: 0 }, rows)).toEqual({ node: 0, unjudged: 'the claim counts 118,250 rows of trips, the snapshot holds 41,939' });
+    expect(judgeClaim({ ...donor, by: 'page' }, at, rows)).toEqual({ node: 7, unjudged: "the claim for trips isn't a story's claim" });
+  });
 });
 
 describe('what waits (ADR 0009 §4)', () => {
@@ -234,6 +246,27 @@ describe('the flow’s verdict on a day (ADR 0009 §3)', () => {
     expect(countedChecks(doc, h, 'zones')).toBe(false);
     expect(countedChecks(doc, h, undefined)).toBe(false);
     expect(countedChecks({ steps: [{ ...doc.steps[0]!, rules: [{ ...doc.steps[0]!.rules[0]!, check: 'fare_amount > 0' }] }] }, h, 'trips')).toBe(false);
+    // A box in front of the source leaves the checks other rows to count.
+    const boxed = { steps: [{ id: 'trips_box', kind: 'filter' as const, inputs: ['trips'], where: 'true' }, { ...doc.steps[0]!, inputs: ['trips_box'] }] };
+    expect(countedChecks(boxed, h, 'trips')).toBe(false);
+  });
+
+  // A fill step (amendment 1 S1) passes its source's rows through on any day it fills nothing. Its kind isn't one this
+  // build's documents may hold yet, so these steps are written by hand.
+  const fill = (id: string, inputs: string[]) => ({ id, kind: 'fill', inputs }) as unknown as StepDef;
+
+  it('reads the source through its fill step: what the checks count, and what an input stands for (C7)', () => {
+    const h = new HistoryRanges(historyWith({}));
+    const filled = { steps: [fill('trips_filled', ['trips']), { ...doc.steps[0]!, inputs: ['trips_filled'] }] };
+    expect(countedChecks(filled, h, 'trips')).toBe(true);
+    expect(countedChecks(filled, h, 'trips_filled')).toBe(false);
+    expect(sourceOf(filled, 'trips_filled')).toBe('trips');
+    expect(sourceOf(filled, 'trips')).toBe('trips');
+    expect(sourceOf(example, 'trips')).toBe('trips');
+    // Any other step stands for no source, and neither does a fill step that reads one, or a loop.
+    expect(sourceOf(example, 'trips_valid')).toBeUndefined();
+    expect(sourceOf({ steps: [...filled.steps, fill('again', ['trips_valid'])] }, 'again')).toBeUndefined();
+    expect(sourceOf({ steps: [fill('a', ['b']), fill('b', ['a'])] }, 'a')).toBeUndefined();
   });
 });
 
