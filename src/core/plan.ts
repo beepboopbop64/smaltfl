@@ -6,14 +6,19 @@
  * Nobody needs to read it. It is canonical JSON with positional references, built for hashing, optimizing and
  * replaying, and its format is versioned (`smaltflPlan`).
  */
-import type { FlowDocument, HoldKind, ParameterDef, StepDef } from './document.js';
-import { HOLD_KINDS, validateDocument, withoutDisplay } from './document.js';
+import { calendarProblems, resolveCalendar, type Calendar } from './calendar.js';
+import type { FlowDocument, HoldKind, ParameterDef, StepDef, WatchDef } from './document.js';
+import { HOLD_KINDS, isGeneralWatch, validateDocument, withoutDisplay } from './document.js';
 import { hashOf } from './hash.js';
+import { propertyOf, VERDICT_MARKS, type Ontology } from './ontology.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { bindParameters, quoteIdent, SqlTextError, withoutTrailingSemicolons } from './sqltext.js';
 
-/** The formats this version runs: 0, and 1 for a plan that says what holds its publication (ADR 0009, E10 plan/1). */
-export const PLAN_FORMATS = [0, 1] as const;
+/**
+ * The formats this version runs: 0; 1 for a plan that says what holds its publication (ADR 0009, E10 plan/1); 2 for one
+ * that also says how its watched sources are judged (ADR 0010 §11, E13 plan/2).
+ */
+export const PLAN_FORMATS = [0, 1, 2] as const;
 export type PlanFormat = (typeof PLAN_FORMATS)[number];
 
 /** A column's static type, as smaltdb reports it (`Statement.columnTypes`). */
@@ -106,8 +111,76 @@ export interface PlanPublish {
   together: boolean;
 }
 
+/**
+ * How a watched source is judged (ADR 0010 §11): every setting filled in, so the plan says it and the flow hash covers
+ * it. `bad`, `newValues` and `after` come from the ontology's properties that apply to the source, each a sorted list of
+ * `[column, …]`: a column's bad codes (sorted), its new values alerting (every serious column: one listing bad codes or
+ * saying so, Q-56), and the column it runs behind with the minutes.
+ */
+export interface WatchPlan {
+  history: string;
+  period: string | null;
+  every: 'day';
+  pattern: 'weekly';
+  donor: 'weekday' | 'nearest';
+  time: string | null;
+  zone: string | null;
+  calendar: boolean;
+  scale: 'fixed' | 'volume';
+  holds: boolean;
+  count: string[] | null;
+  follow: string[] | null;
+  bad: [column: string, ...codes: string[]][];
+  newValues: [column: string, alert: 'alert'][];
+  after: [column: string, of: string, minutes: number][];
+}
+
+/**
+ * plan/2's publish block (ADR 0010 §11, C1): plan/1's, with the flow's calendar resolved, each watch's settings, and what
+ * readers get while a day waits (`meanwhile`) and what closes a pause (`until`), filled in with their defaults (ADR 0009
+ * amendment 1 S5, whose other values the fills add).
+ */
+export interface PlanPublish2 {
+  hold: HoldKind[];
+  period: string | null;
+  together: boolean;
+  calendar: Calendar;
+  watch: [node: number, watch: WatchPlan][];
+  meanwhile: 'last';
+  until: 'decision';
+}
+
+/** A watched source as either plan format says it: its node, its history's file, its period, whether it holds, and in
+ * plan/2 every setting it is judged by (null for a plan/1 watch: the settings every flow had before ADR 0010). */
+export interface PlannedWatch {
+  node: number;
+  history: string;
+  period: string | null;
+  holds: boolean;
+  settings: WatchPlan | null;
+}
+
+/** Whether a plan's publish block is plan/2's. */
+export const isPublish2 = (pub: PlanPublish | PlanPublish2): pub is PlanPublish2 => 'calendar' in pub;
+
+/** A plan's watched sources, in node order, whichever format it is. */
+export function watchesOf(pub: PlanPublish | PlanPublish2 | undefined): PlannedWatch[] {
+  if (!pub) return [];
+  if (isPublish2(pub)) return pub.watch.map(([node, w]) => ({ node, history: w.history, period: w.period, holds: w.holds, settings: w }));
+  return pub.watch.map(([node, history]) => ({ node, history, period: pub.period, holds: true, settings: null }));
+}
+
+/** The parameter a plan's days are named by: its period, else the one every watch names; null when they differ. */
+export function planPeriod(pub: PlanPublish | PlanPublish2 | undefined): string | null {
+  if (!pub) return null;
+  if (pub.period !== null) return pub.period;
+  const named = [...new Set(watchesOf(pub).map((w) => w.period))];
+  return named.length === 1 ? named[0]! : null;
+}
+
 export interface FlowPlan {
-  /** 1 exactly when the plan has `publish` (plan/1); a plan without it is format 0, hashed as plan/0 byte for byte. */
+  /** 1 exactly when the plan has plan/1's `publish`, 2 when it has plan/2's; a plan without it is format 0, hashed as
+   * plan/0 byte for byte. */
   smaltflPlan: PlanFormat;
   /** The document's id, and its hash without display fields (the flow hash). */
   flow: { id: string; hash: string };
@@ -117,8 +190,8 @@ export interface FlowPlan {
   nodes: PlanNode[];
   /** Sorted by name. */
   outputs: PlanOutput[];
-  /** What holds its publication: only in a format-1 plan. */
-  publish?: PlanPublish;
+  /** What holds its publication: only in a format-1 or format-2 plan. */
+  publish?: PlanPublish | PlanPublish2;
 }
 
 export class PlanError extends Error {
@@ -176,8 +249,67 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   // Without a publish block the plan is what it always was, so every plan/0 hash holds (ADR 0009, E10).
   if (!doc.publish) return plan;
   const p = doc.publish;
-  const watch = Object.entries(p.watch ?? {}).map(([id, w]): [number, string] => [index.get(id.toLowerCase())!, typeof w === 'string' ? w : w.history]).sort((a, b) => a[0] - b[0]);
-  return { ...plan, smaltflPlan: 1, publish: { hold: [...new Set(p.hold)].sort(), watch, period: p.period ?? null, together: p.together ?? true } };
+  const hold = [...new Set(p.hold)].sort();
+  const entries = Object.entries(p.watch ?? {}).map(([id, w]) => ({ id, node: index.get(id.toLowerCase())!, w })).sort((a, b) => a.node - b.node);
+  // plan/1 byte for byte unless the document says how a source is judged (ADR 0010 §11): a calendar, a watch given as
+  // an object, or a watched source with a mark that changes verdicts (Q-79), which an older plugin must refuse.
+  if (!judgesItsOwnWay(doc, entries.map((e) => e.id))) {
+    const watch = entries.map((e): [number, string] => [e.node, typeof e.w === 'string' ? e.w : e.w.history]);
+    return { ...plan, smaltflPlan: 1, publish: { hold, watch, period: p.period ?? null, together: p.together ?? true } };
+  }
+  // A flow whose watches are all given as file names keeps the calendar it always had; any other has its block's, or
+  // none (Q-58).
+  const legacy = doc.calendar === undefined && entries.every((e) => !isGeneralWatch(e.w));
+  const calendar = resolveCalendar(doc.calendar, legacy);
+  const watch = entries.map((e): [number, WatchPlan] => [e.node, watchPlan(e.w, e.id, p.period ?? null, doc.ontology)]);
+  return { ...plan, smaltflPlan: 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: 'last', until: 'decision' } };
+}
+
+/** The verdict-changing marks the ontology puts on a source's columns: each column's property for it (`propertyOf`). */
+function marksOn(ontology: Ontology | undefined, source: string): Pick<WatchPlan, 'bad' | 'newValues' | 'after'> {
+  const columns = [...new Set((ontology?.properties ?? []).map((x) => x.column.toLowerCase()))];
+  const props = columns.flatMap((c) => {
+    const p = propertyOf(ontology, source, c);
+    return p ? [p] : [];
+  });
+  const byColumn = <T extends unknown[]>(xs: T[]) => xs.sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0));
+  return {
+    bad: byColumn(props.filter((x) => x.bad?.length).map((x): [string, ...string[]] => [x.column, ...[...x.bad!].sort()])),
+    newValues: byColumn(props.filter((x) => x.bad?.length || x.newValues === 'alert').map((x): [string, 'alert'] => [x.column, 'alert'])),
+    after: byColumn(props.filter((x) => x.after).map((x): [string, string, number] => [x.column, x.after!.of, x.after!.minutes])),
+  };
+}
+
+/** Whether a document judges its watched sources other than every flow did before ADR 0010: a plan/2. */
+function judgesItsOwnWay(doc: FlowDocument, watched: readonly string[]): boolean {
+  if (doc.calendar !== undefined || Object.values(doc.publish?.watch ?? {}).some(isGeneralWatch)) return true;
+  return watched.some((id) => {
+    const m = marksOn(doc.ontology, id);
+    return m.bad.length + m.newValues.length + m.after.length > 0;
+  });
+}
+
+/** A watch's settings, filled in: a file name means the settings every flow had before ADR 0010 (fixed floors, the
+ * weekly pattern, the same weekday's donor), an object its own, each default as ADR 0010 §10 gives it. */
+function watchPlan(w: string | WatchDef, source: string, period: string | null, ontology: Ontology | undefined): WatchPlan {
+  const g = typeof w === 'string' ? null : w;
+  const pattern = g?.pattern ?? 'weekly';
+  const sorted = (xs: readonly string[] | undefined) => (xs ? [...xs].sort() : null);
+  return {
+    history: typeof w === 'string' ? w : w.history,
+    period: g?.period ?? period,
+    every: g?.every ?? 'day',
+    pattern,
+    donor: g?.donor ?? (pattern === 'weekly' ? 'weekday' : 'nearest'),
+    time: g?.time ?? null,
+    zone: g?.zone ?? null,
+    calendar: g?.calendar ?? true,
+    scale: g ? (g.scale ?? 'volume') : 'fixed',
+    holds: g?.holds ?? true,
+    count: sorted(g?.count),
+    follow: sorted(g?.follow),
+    ...marksOn(ontology, source),
+  };
 }
 
 type Base = Pick<NodeBase, 'origin' | 'inputs' | 'storage'>;
@@ -280,9 +412,70 @@ export function validatePlan(plan: unknown): asserts plan is FlowPlan {
     if (names.has(o.name.toLowerCase())) fail(`two outputs named ${o.name}`);
     names.add(o.name.toLowerCase());
   }
-  // Format 0 never holds; format 1 always says what holds it. An older plugin refuses format 1 outright.
+  // Format 0 never holds; formats 1 and 2 always say what holds them. An older plugin refuses each outright.
   if (p.smaltflPlan === 0 && p.publish !== undefined) fail('a format-0 plan has no publish block: a plan that holds is format 1');
   if (p.smaltflPlan === 1) validatePublish(p, fail);
+  if (p.smaltflPlan === 2) validatePublish2(p, fail);
+}
+
+const WATCH_PLAN_FIELDS = ['after', 'bad', 'calendar', 'count', 'donor', 'every', 'follow', 'history', 'holds', 'newValues', 'pattern', 'period', 'scale', 'time', 'zone'];
+
+/** plan/2's publish block: every field there, each one this version reads, each value one it can judge. */
+function validatePublish2(p: FlowPlan, fail: (message: string) => never): void {
+  const pub = p.publish as unknown;
+  if (typeof pub !== 'object' || pub === null || Array.isArray(pub)) return fail('a format-2 plan says what holds it: publish { hold, period, together, calendar, watch, meanwhile, until }');
+  const { hold, period, together, calendar, watch, meanwhile, until, ...rest } = pub as Record<string, unknown>;
+  if (Object.keys(rest).length) fail(`publish has ${Object.keys(rest).join(', ')}, which this version doesn't read`);
+  checkHold(hold, fail);
+  const kinds = hold as string[];
+  const text = (name: unknown) => typeof name === 'string' && Object.hasOwn(p.parameters ?? {}, name) && (typeof p.parameters[name] === 'string' || p.parameters[name] === null);
+  if (period !== null && !text(period)) fail(`publish.period ${String(period)} is not one of the plan's text parameters`);
+  if (typeof together !== 'boolean') fail('publish.together is true or false');
+  // The fills add what readers get meanwhile (fill, complete) and a pause that closes itself (normal).
+  if (meanwhile !== 'last') fail(`publish.meanwhile ${String(meanwhile)} is not one this version reads (last)`);
+  if (until !== 'decision') fail(`publish.until ${String(until)} is not one this version reads (decision)`);
+  const c = calendar as Record<string, unknown> | null;
+  if (typeof c !== 'object' || c === null || !['none', 'us/1', 'us-nyc/1'].includes(c.base as string) || typeof c.zone !== 'string' || calendarProblems({ zone: c.zone }).length || Object.keys(c).sort().join() !== 'base,dates,days,windows,zone')
+    fail('publish.calendar is { base: none, us/1 or us-nyc/1, zone, days, windows, dates }');
+  if ([c!.days, c!.windows, c!.dates].some((x) => !Array.isArray(x) || x.length > 0)) fail("publish.calendar has a flow's own days, which this version can't judge yet");
+  if (!Array.isArray(watch)) fail('publish.watch is a list of [node, watch]');
+  const pairs = watch as unknown[];
+  let holding = 0;
+  pairs.forEach((x, i) => {
+    if (!Array.isArray(x) || x.length !== 2 || !Number.isInteger(x[0]) || typeof x[1] !== 'object' || x[1] === null) fail(`publish.watch[${i}] is [node, watch]`);
+    const [node, w] = x as [number, Record<string, unknown>];
+    if (p.nodes[node]?.op !== 'table') fail(`publish.watch[${i}] watches node ${node}, which isn't a source`);
+    if (i > 0 && !((pairs[i - 1] as [number, unknown])[0] < node)) fail('publish.watch is sorted by node, each node once');
+    const at = `publish.watch[${i}]`;
+    if (Object.keys(w).sort().join() !== WATCH_PLAN_FIELDS.join()) fail(`${at} has ${Object.keys(w).sort().join(', ')}; a watch has exactly ${WATCH_PLAN_FIELDS.join(', ')}`);
+    if (typeof w.history !== 'string' || w.history === '') fail(`${at}.history is a file`);
+    if (w.period === null ? period === null : !text(w.period)) fail(`${at}.period ${String(w.period)} is not one of the plan's text parameters`);
+    if (w.every !== 'day') fail(`${at}.every ${String(w.every)} is not one this version can judge (day)`);
+    if (w.pattern !== 'weekly') fail(`${at}.pattern ${String(w.pattern)} is not one this version can judge (weekly)`);
+    if (w.donor !== 'weekday' && w.donor !== 'nearest') fail(`${at}.donor is weekday or nearest`);
+    if (w.time !== null && typeof w.time !== 'string') fail(`${at}.time is a column or null`);
+    if (w.zone !== null && (typeof w.zone !== 'string' || calendarProblems({ zone: w.zone }).length)) fail(`${at}.zone is a time zone or null`);
+    if (typeof w.calendar !== 'boolean' || typeof w.holds !== 'boolean') fail(`${at}.calendar and holds are true or false`);
+    if (w.scale !== 'fixed' && w.scale !== 'volume') fail(`${at}.scale is fixed or volume`);
+    for (const k of ['count', 'follow'] as const) if (w[k] !== null && (!Array.isArray(w[k]) || (w[k] as unknown[]).some((v) => typeof v !== 'string'))) fail(`${at}.${k} is a list of columns or null`);
+    const rows = (k: string, ok: (r: unknown[]) => boolean) => {
+      if (!Array.isArray(w[k]) || (w[k] as unknown[]).some((r) => !Array.isArray(r) || typeof r[0] !== 'string' || !ok(r))) fail(`${at}.${k} is a list of [column, …]`);
+    };
+    rows('bad', (r) => r.length >= 2 && r.every((v) => typeof v === 'string'));
+    rows('newValues', (r) => r.length === 2 && r[1] === 'alert');
+    rows('after', (r) => r.length === 3 && typeof r[1] === 'string' && typeof r[2] === 'number' && Number.isFinite(r[2]));
+    if (w.holds) holding++;
+  });
+  const judged = kinds.includes('short') || kinds.includes('wrong');
+  if (judged !== holding > 0) fail(judged ? 'publish.hold judges a source (short or wrong), and no watch holds' : 'publish.watch has a watch that holds, and publish.hold judges none');
+}
+
+function checkHold(hold: unknown, fail: (message: string) => never): void {
+  if (!Array.isArray(hold) || hold.length === 0 || hold.some((k) => !(HOLD_KINDS as readonly unknown[]).includes(k))) fail(`publish.hold is a list of ${HOLD_KINDS.join(', ')}`);
+  const kinds = hold as string[];
+  if (kinds.some((k, i) => i > 0 && !(kinds[i - 1]! < k))) fail('publish.hold is sorted, each kind once');
+  if (kinds.includes('short') && kinds.includes('wrong')) fail('publish.hold has short and wrong: one or the other');
+  if (kinds.includes('unlearned') && !kinds.includes('short') && !kinds.includes('wrong')) fail('publish.hold has unlearned without short or wrong');
 }
 
 function validatePublish(p: FlowPlan, fail: (message: string) => never): void {
@@ -290,10 +483,8 @@ function validatePublish(p: FlowPlan, fail: (message: string) => never): void {
   if (typeof pub !== 'object' || pub === null || Array.isArray(pub)) return fail('a format-1 plan says what holds it: publish { hold, watch, period, together }');
   const { hold, watch, period, together, ...rest } = pub as Record<string, unknown>;
   if (Object.keys(rest).length) fail(`publish has ${Object.keys(rest).join(', ')}, which this version doesn't read`);
-  if (!Array.isArray(hold) || hold.length === 0 || hold.some((k) => !(HOLD_KINDS as readonly unknown[]).includes(k))) fail(`publish.hold is a list of ${HOLD_KINDS.join(', ')}`);
+  checkHold(hold, fail);
   const kinds = hold as string[];
-  if (kinds.some((k, i) => i > 0 && !(kinds[i - 1]! < k))) fail('publish.hold is sorted, each kind once');
-  if (kinds.includes('short') && kinds.includes('wrong')) fail('publish.hold has short and wrong: one or the other');
   if (!Array.isArray(watch)) fail('publish.watch is a list of [node, file]');
   const pairs = watch as unknown[];
   pairs.forEach((w, i) => {

@@ -135,6 +135,20 @@ describe('what a story claim holds (ADR 0009 §2, §3)', () => {
     const calm = claim({ state: 'calm', below: false });
     expect(holdsOf(plan, manifestOf(plan), [{ node: 0, claim: calm }, { node: 0, claim: calm }])[0]).toMatchObject({ by: 'unjudged', said: '2 verdicts for trips' });
   });
+
+  it('judges a plan/2 watch by its own period, and holds nothing for one that never holds (ADR 0010 §10)', async () => {
+    const { publish: _p, ...doc } = example;
+    const parameters = [...(doc.parameters ?? []).filter((p) => p.name !== 'day'), DAY_PARAM];
+    const plan2 = (watch: Record<string, unknown>, hold: PublishDef['hold']) => translate({ ...doc, smaltfl: 3, parameters, publish: { hold, watch: { trips: { history: 'history.json', period: 'day', ...watch } as never } } }, { month: '2023-09', day: '2023-09-21' });
+    const told = await plan2({ holds: false }, ['checks']);
+    expect(told.smaltflPlan).toBe(2);
+    expect(judgeClaims(told, [claim()], facts())).toEqual([{ node: 0, claim: claim() }]);
+    expect(holdsOf(told, manifestOf(told), judgeClaims(told, [claim()], facts()))).toEqual([]);
+    expect(holdsOf(told, manifestOf(told), [])).toEqual([]);
+    const holding = await plan2({}, ['checks', 'wrong']);
+    expect(holdsOf(holding, manifestOf(holding), judgeClaims(holding, [claim()], facts()))).toMatchObject([{ by: 'story', origin: 'trips', said: 'Trips fall 95% from 13:00' }]);
+    expect(judgeClaims(holding, [claim({ day: '2023-09-20' })], facts())).toEqual([{ node: 0, unjudged: 'the claim is of 2023-09-20, the run of 2023-09-21' }]);
+  });
 });
 
 describe('judging a claim against the run (ADR 0009 §3)', () => {

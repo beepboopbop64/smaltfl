@@ -26,7 +26,7 @@ import { claimHolds, heldOutputs, holdsOf, inputsKey, judgeClaims, sameKeys, sta
 import { canonicalJSON } from './canonical.js';
 import { consistencyProof, entryLeaf, parseCheckpoint, rootOf, verifyCheckpoint, verifyConsistency, verifyInclusion, verifyRecord, type JSONValue, type LogEntry, type SignedCheckpoint } from './log.js';
 import { manifestHash, planHash, policiesHash, type IdentityCard, type RunManifest } from './manifest.js';
-import { flowHash, type FlowPlan } from './plan.js';
+import { flowHash, planPeriod, watchesOf, type FlowPlan } from './plan.js';
 import { checkDecision, DECIDE_OPTIONS } from './policy.js';
 
 export interface AuditLine {
@@ -268,7 +268,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       rule = may.rule ?? null;
     }
     if (a.option === 'asis' && (typeof e.reason !== 'string' || e.reason.trim() === '')) problems.push('it publishes as is with no reason');
-    const period = held?.plan?.publish?.period ?? null;
+    const period = planPeriod(held?.plan?.publish);
     if (a.under !== undefined) {
       const stands = typeof a.day === 'string' ? standingFor(entries.slice(0, e.seq), a.day, period) : null;
       if (a.option !== 'dont' || stands?.seq !== a.under) problems.push(`it applies decision #${a.under}, which doesn't stand for ${a.day ?? 'a day with no date'}`);
@@ -455,7 +455,7 @@ function heldProblems(about: unknown, plan: FlowPlan, m: RunManifest, problems: 
   const claims = holds.flatMap((h) => (h.by === 'story' && h.claim ? [h.claim] : []));
   const judged = judgeClaims(plan, claims, { rows: (node) => m.nodes.find((n) => n.node === node)?.rows, pinned: (path) => claims.find((c: StoryClaim) => c.history.path === path)?.history });
   for (const h of holds.filter((x) => x.by !== 'checks')) {
-    if (!pub.watch.some(([node]) => node === h.node)) problems.push(`it says ${h.origin} held it, which the plan doesn't watch`);
+    if (!watchesOf(pub).some((w) => w.node === h.node)) problems.push(`it says ${h.origin} held it, which the plan doesn't watch`);
     else if (h.by === 'story') {
       const j = judged.find((x) => x.node === h.node);
       if (!h.claim || !j || 'unjudged' in j) problems.push(`its claim for ${h.origin} doesn't match the run${j && 'unjudged' in j ? `: ${j.unjudged}` : ''}`);

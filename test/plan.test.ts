@@ -4,7 +4,7 @@ import { documentFormat, insertAfter, takeOut, validateDocument, type FlowDocume
 import { renameIdentifier } from '../src/core/sqltext.js';
 import { nodeKey } from '../src/core/keys.js';
 import { shapeOf } from '../src/core/optimize.js';
-import { flowHash, PlanError, translate, validatePlan, type FlowPlan } from '../src/core/plan.js';
+import { flowHash, planPeriod, PlanError, translate, validatePlan, watchesOf, type FlowPlan, type PlanPublish2 } from '../src/core/plan.js';
 import { planHash, planKind } from '../src/core/manifest.js';
 import { canonicalJSON } from '../src/core/canonical.js';
 import { visualFlow } from './fixtures/taxi.js';
@@ -123,7 +123,8 @@ describe('translating into the flow plan', () => {
 
   it('checks plans from elsewhere before trusting them', async () => {
     const plan = await translate(visualFlow());
-    expect(() => validatePlan({ ...plan, smaltflPlan: 2 } as unknown as FlowPlan)).toThrow('format 2, expected 0 or 1');
+    expect(() => validatePlan({ ...plan, smaltflPlan: 3 } as unknown as FlowPlan)).toThrow('format 3, expected 0 or 1 or 2');
+    expect(() => validatePlan({ ...plan, smaltflPlan: 2 } as unknown as FlowPlan)).toThrow('a format-2 plan says what holds it');
     const forward = structuredClone(plan);
     forward.nodes[2]!.inputs = [5];
     expect(() => validatePlan(forward)).toThrow('node 2 reads a node that does not come before it');
@@ -459,5 +460,87 @@ describe('the plan of a flow that holds (plan/1, ADR 0009 E10)', () => {
     expect(bad({ ...plan.publish, period: null })).toThrow('publish.watch needs a period');
     expect(bad({ ...plan.publish, together: 1 })).toThrow('publish.together is true or false');
     expect(bad({ ...plan.publish, until: 'normal' })).toThrow("publish has until, which this version doesn't read");
+  });
+});
+
+describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010 E13)', () => {
+  /** E10's document in the general form: its watch an object, and a calendar with no days. */
+  const v2 = (watch: Record<string, unknown> = { history: 'history.json', donor: 'nearest' }): FlowDocument => ({
+    smaltfl: 3, id: 'v', name: 'V', parameters: [{ name: 'day', type: 'text', default: null }], sources: [{ id: 'trips', table: 'trips_file' }],
+    steps: [{ id: 'trips_valid', kind: 'expectations', inputs: ['trips'], rules: [{ name: 'fare', check: 'fare_amount >= 0', onFail: 'drop' }], maxDropped: 0.1, dataset: {} }],
+    calendar: { base: 'none' },
+    publish: { hold: ['wrong', 'checks'], period: 'day', watch: { trips: watch as unknown as WatchDef } },
+  });
+
+  it('hashes as plan/2, every setting filled in (vector)', async () => {
+    const plan = await translate(v2(), { day: '2023-09-21' });
+    expect(plan.flow.hash).toBe('bed47b2e3bece5da61233c8a069710f7cd5c8959d9a4926e99dadc8d9783b56a');
+    expect(canonicalJSON(plan)).toBe('{"flow":{"hash":"bed47b2e3bece5da61233c8a069710f7cd5c8959d9a4926e99dadc8d9783b56a","id":"v"},"nodes":[{"inputs":[],"op":"table","origin":"trips","table":"trips_file"},{"inputs":[0],"maxDropped":0.1,"op":"expect","origin":"trips_valid","rules":[["fare","fare_amount >= 0","drop"]]}],"outputs":[{"name":"trips_valid","node":1}],"parameters":{"day":"2023-09-21"},"publish":{"calendar":{"base":"none","dates":[],"days":[],"windows":[],"zone":"UTC"},"hold":["checks","wrong"],"meanwhile":"last","period":"day","together":true,"until":"decision","watch":[[0,{"after":[],"bad":[],"calendar":true,"count":null,"donor":"nearest","every":"day","follow":null,"history":"history.json","holds":true,"newValues":[],"pattern":"weekly","period":"day","scale":"volume","time":null,"zone":null}]]},"smaltflPlan":2}');
+    expect(planKind(plan)).toBe('plan/2');
+    expect(await planHash(plan)).toBe('144ec790487930eb6d396769aa15e3e961de54e8133491af9e4d7742259d393f');
+    expect(() => validatePlan(plan)).not.toThrow();
+    // The same document in the legacy form is E10's, plan/1, byte for byte.
+    const { calendar: _c, ...legacy } = v2();
+    expect(await planHash(await translate({ ...legacy, smaltfl: 2, publish: { ...legacy.publish!, watch: { trips: 'history.json' } } }, { day: '2023-09-21' }))).toBe('fc700fdf9d4dd95e71ee083cfee0ddca2ba46dd122b7a840e182234611668fd4');
+    // The donor's default follows the pattern: weekly gives the same weekday.
+    expect(((await translate(v2({ history: 'history.json' }), { day: '2023-09-21' })).publish as PlanPublish2).watch[0]![1].donor).toBe('weekday');
+  });
+
+  it('changes no node: the keys are plan/1’s, so nothing is rebuilt', async () => {
+    const values = { day: '2023-09-21' };
+    const { calendar: _c, ...legacy } = v2();
+    const a = await translate(v2(), values);
+    const b = await translate({ ...legacy, smaltfl: 2, publish: { ...legacy.publish!, watch: { trips: 'history.json' } } }, values);
+    expect(a.nodes).toEqual(b.nodes);
+    expect(await keysOf(a)).toEqual(await keysOf(b));
+  });
+
+  it('is plan/2 for a watched source with a mark that changes verdicts, with the legacy settings, and plan/1 otherwise (Q-79)', async () => {
+    const marked = withOntology({ ...holding(PUBLISH), smaltfl: 3 }, [BAD_RESULT, { column: 'country', title: 'Country', description: 'Where from', newValues: 'alert', datasets: ['trips'] }, { column: 'tpep_dropoff_datetime', title: 'Drop-off', description: 'When', after: { of: 'tpep_pickup_datetime', minutes: 15 } }]);
+    const plan = await translate(marked, { day: '2024-01-15' });
+    expect(plan.smaltflPlan).toBe(2);
+    const pub = plan.publish as PlanPublish2;
+    // A watch given as a file name keeps today's calendar and fixed floors.
+    expect(pub.calendar).toEqual({ base: 'us-nyc/1', zone: 'America/New_York', days: [], windows: [], dates: [] });
+    expect(pub.watch[0]![1]).toMatchObject({ history: 'history.json', scale: 'fixed', donor: 'weekday', pattern: 'weekly', bad: [['payment_type', '4']], newValues: [['country', 'alert'], ['payment_type', 'alert']], after: [['tpep_dropoff_datetime', 'tpep_pickup_datetime', 15]] });
+    expect(() => validatePlan(plan)).not.toThrow();
+    // A mark on another dataset only: the document is format 3, and its plan stays plan/1.
+    const elsewhere = withOntology({ ...holding(PUBLISH), smaltfl: 3 }, [{ ...BAD_RESULT, datasets: ['trips_enriched'] }]);
+    expect((await translate(elsewhere, { day: '2024-01-15' })).smaltflPlan).toBe(1);
+    // A general watch with no calendar block has none (Q-58), whatever the marks.
+    expect(((await translate(general(), { day: '2024-01-15' })).publish as PlanPublish2).calendar.base).toBe('none');
+    expect(((await translate(general({}, { calendar: { base: 'us' } }), { day: '2024-01-15' })).publish as PlanPublish2).calendar.base).toBe('us/1');
+  });
+
+  it('reads each watch the same way in either format', async () => {
+    const one = await translate(holding(PUBLISH), { day: '2024-01-15' });
+    const two = await translate(general({ holds: false, period: 'day' }, { publish: { hold: ['checks'], watch: { trips: { history: 'h.json', holds: false, period: 'day' } } } }), { day: '2024-01-15' });
+    const node = one.nodes.findIndex((n) => n.origin === 'trips');
+    expect(watchesOf(one.publish)).toEqual([{ node, history: 'history.json', period: 'day', holds: true, settings: null }]);
+    expect(watchesOf(two.publish)).toMatchObject([{ node, history: 'h.json', period: 'day', holds: false }]);
+    expect([planPeriod(one.publish), planPeriod(two.publish), planPeriod(undefined)]).toEqual(['day', 'day', null]);
+    expect(watchesOf(undefined)).toEqual([]);
+  });
+
+  it('is checked before it is trusted, and refuses what this version can’t judge', async () => {
+    const plan = await translate(v2(), { day: '2023-09-21' });
+    const pub = plan.publish as PlanPublish2;
+    const w = pub.watch[0]![1];
+    const bad = (publish: unknown) => () => validatePlan({ ...plan, publish } as FlowPlan);
+    expect(bad({ ...pub, breaks: [] })).toThrow("publish has breaks, which this version doesn't read");
+    expect(bad({ ...pub, meanwhile: 'fill' })).toThrow('publish.meanwhile fill is not one this version reads (last)');
+    expect(bad({ ...pub, until: 'normal' })).toThrow('publish.until normal is not one this version reads (decision)');
+    expect(bad({ ...pub, calendar: { ...pub.calendar, base: 'uk/1' } })).toThrow('publish.calendar is { base: none, us/1 or us-nyc/1, zone, days, windows, dates }');
+    expect(bad({ ...pub, calendar: { ...pub.calendar, days: [{ name: 'Patch Tuesday' }] } })).toThrow("publish.calendar has a flow's own days");
+    expect(bad({ ...pub, watch: [[0, { ...w, every: '6h' }]] })).toThrow('publish.watch[0].every 6h is not one this version can judge (day)');
+    expect(bad({ ...pub, watch: [[0, { ...w, pattern: 'none' }]] })).toThrow('publish.watch[0].pattern none is not one this version can judge (weekly)');
+    const { zone: _z, ...short } = w;
+    expect(bad({ ...pub, watch: [[0, short]] })).toThrow('publish.watch[0] has after, bad, calendar, count, donor, every, follow, history, holds, newValues, pattern, period, scale, time; a watch has exactly');
+    expect(bad({ ...pub, watch: [[1, w]] })).toThrow("publish.watch[0] watches node 1, which isn't a source");
+    expect(bad({ ...pub, watch: [[0, { ...w, bad: [['result']] }]] })).toThrow('publish.watch[0].bad is a list of [column, …]');
+    expect(bad({ ...pub, watch: [[0, { ...w, holds: false }]] })).toThrow('publish.hold judges a source (short or wrong), and no watch holds');
+    expect(bad({ ...pub, hold: ['checks', 'unlearned'] })).toThrow('publish.hold has unlearned without short or wrong');
+    // A plan/1 plugin reading plan/2's block refuses its fields by name; and the format must match the block.
+    expect(() => validatePlan({ ...plan, smaltflPlan: 1 })).toThrow("publish has calendar, meanwhile, until, which this version doesn't read");
   });
 });

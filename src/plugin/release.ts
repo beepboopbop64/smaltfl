@@ -18,7 +18,7 @@ import type { Database } from 'smaltdb/engine';
 import type { FlowDocument } from '../core/document.js';
 import { heldOutputs } from '../core/hold.js';
 import { manifestHash, policiesHash, type RunManifest } from '../core/manifest.js';
-import type { FlowPlan } from '../core/plan.js';
+import { planPeriod, type FlowPlan } from '../core/plan.js';
 import { checkDecision, DECIDE_OPTIONS, type DecideOption } from '../core/policy.js';
 import type { ReleaseInput, ReleaseResult } from '../core/protocol.js';
 import { currentOf, ensureStore, findVersion, holdsOfRun, inTransaction, nameInUse, pointDataset, recordRelease, releasesOf, type StoredRelease } from './store.js';
@@ -118,7 +118,7 @@ export async function release(db: Database, input: unknown): Promise<ReleaseResu
         if (currentOf(db, name)?.key !== manifest.outputs[name]!.key) return `the decision leaves out ${name}, which run ${r.run} holds with another version than its name shows`;
       }
       // A release never moves a name back: no later day (or, without a period, no later run) is current for it.
-      const period = plan.publish.period;
+      const period = planPeriod(plan.publish);
       const day = period === null ? null : manifest.parameters[period];
       for (const name of names) {
         const cur = currentOf(db, name);

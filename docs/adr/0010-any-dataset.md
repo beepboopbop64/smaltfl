@@ -609,7 +609,11 @@ mark (Q-79), is plan/2. It is hashed as `SHA-256(UTF-8("smaltfl/plan/2\n" + JCS(
   - `{ history, period, every, pattern, donor, time, zone, calendar, scale, holds, count, follow, bad, newValues, after }`;
   - `donor` is the watch's, or the pattern's default (§3);
   - `bad`, `newValues` and `after` are copied from the ontology's properties that apply to the source (`propertyOf`),
-    each as a sorted list of `[column, …]`; `newValues` lists the serious columns (§4).
+    each as a list of `[column, …]` sorted by column: `bad` as `[column, code, …]` (codes sorted), `newValues` as
+    `[column, "alert"]` for each serious column (§4), `after` as `[column, of, minutes]`;
+  - a watch given as a file name, in a plan/2, has the legacy settings filled in: `scale` `"fixed"`, `pattern`
+    `"weekly"`, `donor` `"weekday"`; and a flow whose watches are all given so, with no calendar block, keeps
+    `us-nyc/1` (§0). A flow with a general watch and no calendar block has `none` (Q-58).
 - **What it changes.** The flow hash and the plan hash cover these settings; node keys don't, so nothing is rebuilt.
   verify's *flow* check translates the document again and must get the same plan.
 - **What stays the same.**
@@ -721,13 +725,18 @@ measured from real files are pinned in `test/measures.test.ts` when they are bui
 - **E13 plan/2.** As in §11.
   - **Vector (test/plan.test.ts):** E10's document, written in the general form, is
     `"smaltfl": 3, "calendar": { "base": "none" }` with
-    `"publish": { "hold": ["wrong","checks"], "period": "day", "watch": { "trips": { "history": "history.json", "pattern": "none" } } }`,
+    `"publish": { "hold": ["wrong","checks"], "period": "day", "watch": { "trips": { "history": "history.json", "donor": "nearest" } } }`,
     with `day` = `2023-09-21`. Its plan is E10's nodes, outputs and parameters with the `publish` of §11, filled in:
-    `meanwhile` `"last"`, `until` `"decision"`, and the watch's `donor` `"nearest"` (from `pattern: none`) and
-    `newValues` `[]`.
-  - Its flow hash and plan/2 hash are computed and pinned by the first commit that builds plan/2, on this shape (Q-70).
-    The design's draft values (flow `fdeda350…bd59`, plan/2 `79671d10…f35f`) were computed on a `publish` without
-    `meanwhile`, `until`, `donor` and `newValues`, and are not the vector.
+    `meanwhile` `"last"`, `until` `"decision"`, the watch's `pattern` `"weekly"`, `scale` `"volume"`, `donor`
+    `"nearest"` as written, and `bad`, `newValues` and `after` `[]`:
+    `"publish":{"calendar":{"base":"none","dates":[],"days":[],"windows":[],"zone":"UTC"},"hold":["checks","wrong"],"meanwhile":"last","period":"day","together":true,"until":"decision","watch":[[0,{"after":[],"bad":[],"calendar":true,"count":null,"donor":"nearest","every":"day","follow":null,"history":"history.json","holds":true,"newValues":[],"pattern":"weekly","period":"day","scale":"volume","time":null,"zone":null}]]},"smaltflPlan":2`.
+    - Its flow hash is `bed47b2e3bece5da61233c8a069710f7cd5c8959d9a4926e99dadc8d9783b56a`.
+    - Its plan/2 hash is `144ec790487930eb6d396769aa15e3e961de54e8133491af9e4d7742259d393f` (checked with `sha256sum` on
+      `smaltfl/plan/2\n` and the plan's canonical JSON).
+  - The first build of plan/2 refuses `pattern: "none"` (phase 1 judges the weekly pattern only), so the vector names its
+    donor rather than taking it from that pattern. The design's draft values (flow `fdeda350…bd59`, plan/2
+    `79671d10…f35f`) were computed on a `publish` without `meanwhile`, `until`, `donor` and `newValues`, and are not the
+    vector.
   - The same document without the general form reproduces E10's plan/1 hash, `fc700fdf…8fd4`.
 - **claim/2** is data in log/1 and `_smaltfl_holds`, not a hash encoding:
   `{ by: "story", v: 2, source, slot, every, state, below, head, build, flow, history: { base, tail }, measured, rows, skip, levels }`.

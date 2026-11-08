@@ -20,7 +20,7 @@ import type { HistoryRanges } from './history.js';
 import type { JSONValue, LogEntry } from './log.js';
 import type { ExpectationResult, RunManifest } from './manifest.js';
 import { newsOf, type Names } from './news.js';
-import type { ExpectNode, FlowPlan } from './plan.js';
+import { watchesOf, type ExpectNode, type FlowPlan } from './plan.js';
 import { DECIDE_OPTIONS, type DecideOption } from './policy.js';
 import { storyOf, type Story } from './story.js';
 
@@ -179,10 +179,8 @@ export function judgeClaim(c: Record<string, unknown>, at: ClaimAt, facts: Claim
  * for it, or more than one. Not judged holds.
  */
 export function judgeClaims(plan: Pick<FlowPlan, 'nodes' | 'parameters' | 'publish'>, claims: readonly unknown[] | undefined, facts: ClaimFacts): Judged[] {
-  const pub = plan.publish;
-  if (!pub) return [];
-  const day = pub.period === null ? undefined : plan.parameters[pub.period];
-  return pub.watch.map(([node, file]): Judged => {
+  return watchesOf(plan.publish).map(({ node, history: file, period }): Judged => {
+    const day = period === null ? undefined : plan.parameters[period];
     const origin = plan.nodes[node]!.origin;
     const mine = (claims ?? []).filter((c): c is Record<string, unknown> => isRecord(c) && typeof c.source === 'string' && c.source.toLowerCase() === origin.toLowerCase());
     if (mine.length === 0) return { node, unjudged: `no claim for ${origin}` };
@@ -221,10 +219,13 @@ export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, m
       const said = counts ? tripped(n, counts) : 'its checks were not counted';
       if (said) out.push({ by: 'checks', node: i, origin: n.origin, said, reaches: reachOf(plan, i) });
     });
-  for (const [node] of pub.watch) {
+  for (const { node, holds } of watchesOf(pub)) {
     const origin = plan.nodes[node]!.origin;
     const mine = judged.filter((j) => j.node === node);
     const j = mine.length === 1 ? mine[0]! : null;
+    // A watch that never holds (ADR 0010 §10, `holds: false`) is told and recorded, and holds nothing, its claim
+    // missing or not.
+    if (!holds) continue;
     if (!j || 'unjudged' in j) out.push({ by: 'unjudged', node, origin, said: j && 'unjudged' in j ? j.unjudged : mine.length ? `${mine.length} verdicts for ${origin}` : `no claim for ${origin}`, reaches: reachOf(plan, node) });
     else if (claimHolds(pub.hold, j.claim)) out.push({ by: 'story', node, origin, said: j.claim.head, reaches: reachOf(plan, node), claim: j.claim });
   }
