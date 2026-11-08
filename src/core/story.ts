@@ -699,9 +699,10 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   })() : null;
   if (shownHero === 'hours' && hoursLabels) heroLabels.push(hoursLabels.cut, hoursLabels.floor, hoursLabels.missing, hoursLabels.ghost);
   // The amount line carries the day's count and its usual range on every day; a strip of days adds no words.
-  if (gate?.held || gate?.near) {
+  // The checks show on every day with something wrong, passed or not (ADR 0008 §10), and on a near miss.
+  if (gate && (gate.held || gate.near || severity === 'alert')) {
     const g = gateLabels(gate);
-    heroLabels.push(gate.held ? 'Checks held' : 'Checks near the limit', g.share, ...(g.limit ? [g.limit] : []), ...(g.margin ? [g.margin] : []), g.rows, ...(g.usual ? [g.usual] : []));
+    heroLabels.push(gate.held ? 'Checks held' : gate.near ? 'Checks near the limit' : 'Checks passed', g.share, ...(g.limit ? [g.limit] : []), ...(g.margin ? [g.margin] : []), g.rows, ...(g.usual ? [g.usual] : []));
   }
   // What the explained changes are, in words a newcomer has: "shares, times, checks", most first, three at most.
   const kindWord: Partial<Record<Finding['kind'], string>> = { share: 'shares', gone: 'values gone', missing: 'blanks', shape: 'spreads', dropped: 'checks', rule: 'checks', new: 'new values', pair: 'new pairs' };

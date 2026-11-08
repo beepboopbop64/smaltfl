@@ -340,7 +340,7 @@ export function partBar({ left, right, w = 334, aria }: { left: Part; right: Par
 
 /** The reach as an icon: the source, the checks, the outputs; hatched (not built) when the run was held, double-ringed
  * when they were published from a day with something wrong. aria-hidden: the row's words say it. */
-export function reachIcon({ n, state }: { n: number; state: 'held' | 'alert' }): string {
+export function reachIcon({ n, state }: { n: number; state: 'held' | 'published' }): string {
   const boxes = Math.min(3, Math.max(1, n));
   const w = 9 + 6 + 22 + 6 + 22 + 6 + boxes * 25;
   let s = `<svg class="viz reach" width="${w}" height="28" viewBox="0 0 ${w} 28" aria-hidden="true" focusable="false">`;
@@ -351,7 +351,8 @@ export function reachIcon({ n, state }: { n: number; state: 'held' | 'alert' }):
   s += `<line class="${state === 'held' ? 'joint' : 'base'}" x1="65" x2="71" y1="14" y2="14"/>`;
   for (let i = 0; i < boxes; i++) {
     const x = 71 + i * 25;
-    s += state === 'held' ? `<rect class="hatch-box" x="${x}" y="2" width="21" height="24" rx="4"/>` : `<rect class="ring-bad" x="${x - 2}" y="0" width="25" height="28" rx="6"/><rect class="node" x="${x}" y="2" width="21" height="24" rx="4"/>`;
+    // Published: a plain box with a tick, never the severity colour (the row's words say what it was built from).
+    s += state === 'held' ? `<rect class="hatch-box" x="${x}" y="2" width="21" height="24" rx="4"/>` : `<rect class="node" x="${x}" y="2" width="21" height="24" rx="4"/><path class="tick-pub" d="M${x + 5.5} 14.5l3.5 3.5 6.5-7.5"/>`;
   }
   return `${s}</svg>`;
 }

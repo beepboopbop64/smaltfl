@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
-import { shortfall, type EpisodeDay } from '../src/core/days.js';
+import { lacked, reachLabel, shortfall, type EpisodeDay } from '../src/core/days.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
 import { countRange, gateLabels, glanceStrings, partLabel, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
 
@@ -61,6 +61,23 @@ describe.skipIf(!has)('the story on the real history', () => {
     expect(fri.estimate).toBeLessThan(thu.estimate + 120_000);
     expect(sat.estimate).toBeGreaterThan(fri.estimate + 90_000);
     expect(fri.bound).toBeLessThan(fri.estimate);
+  });
+
+  it('says what outputs built from a day with something wrong were built from, and shows its checks (ADR 0008 §10)', () => {
+    const glance = (d: string) => { const s = story(d); return [...glanceStrings(s), reachLabel(s, 3)].reduce((t, x) => t + wordsIn(x), 0); };
+    expect(reachLabel(story('2023-09-21'), 3)).toBe('Outputs built from a short day');
+    expect(reachLabel(story('2023-09-21'), 5)).toBe('5 outputs built from a short day');
+    expect(lacked(story('2023-09-21'))!.long).toBe('Built from a load missing 13:00–24:00');
+    expect(lacked(story('2022-09-17'))!.long).toBe('Built from a load missing 15:00–24:00');
+    expect(reachLabel(story('2022-11-14'), 3)).toBe('Outputs built without Vendor 1');
+    expect(reachLabel(story('2022-11-15'), 3)).toBe('Outputs built without Vendor 1');
+    expect(reachLabel(story('2023-09-22'), 3)).toBe('Outputs not published');
+    expect(lacked(story('2023-09-25'))).toBeNull();
+    // The checks show on every day with something wrong: passed on Sat Sep 17, 2022 and Mon Nov 14, 2022.
+    expect(story('2022-09-17').labels.hero).toContain('Checks passed');
+    expect(story('2022-11-14').labels.hero).toContain('Checks passed');
+    expect(story('2023-09-21').labels.hero).toContain('Checks near the limit');
+    for (const d of ['2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24', '2022-09-17', '2022-09-18', '2022-11-14', '2022-11-15']) expect(glance(d), `${d}: ${[...glanceStrings(story(d)), reachLabel(story(d), 3)].join(' | ')}`).toBeLessThanOrEqual(60);
   });
 
   it('says each split day’s sentence from its own figures', () => {

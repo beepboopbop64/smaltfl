@@ -3,7 +3,7 @@
  * passed, said as such; never a day after it, whatever order the days were run in.
  */
 import { describe, expect, it } from 'vitest';
-import { calendarHead, dayMid, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine, type EpisodeDay } from '../src/core/days.js';
+import { calendarHead, dayMid, lacked, reachLabel, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine, type EpisodeDay } from '../src/core/days.js';
 
 describe('the run a day shows', () => {
   it('is the day’s own newest run when it passed', () => {
@@ -108,5 +108,24 @@ describe('the History calendar’s header', () => {
     expect(calendarHead(all, 825)).toBe('825 days · 9 wrong · 41 unusual');
     // Stopped at the day on screen: the days after it aren't counted, and it says to when.
     expect(calendarHead(all, 825, '2023-09-21')).toBe('825 days to Thu Sep 21 · 9 wrong · 41 unusual');
+  });
+});
+
+describe('what the outputs of a day with something wrong say', () => {
+  const base = { severity: 'alert', split: null, hours: null, amount: { value: 40_000, low: 90_000, expected: 120_000 }, gate: { held: false } };
+  it('names what the load lacked, never "published" alone', () => {
+    expect(lacked({ ...base, hours: { from: 13, to: 23 } })!.long).toBe('Built from a load missing 13:00–24:00');
+    expect(lacked({ ...base, split: { kind: 'vanished', name: 'Vendor 1' } })).toEqual({ short: 'without Vendor 1', long: 'Built without Vendor 1’s trips' });
+    expect(lacked(base)).toEqual({ short: 'from a short day', long: 'Built from a short day (−67% trips)' });
+    expect(lacked({ ...base, amount: { value: 100_000, low: 90_000, expected: 120_000 } })!.short).toBe('from a day with an alert');
+    expect(lacked({ ...base, severity: 'warn' })).toBeNull();
+  });
+
+  it('lets the icon’s boxes carry up to three outputs, and says a held day’s are not published', () => {
+    expect(reachLabel(base, 3)).toBe('Outputs built from a short day');
+    expect(reachLabel(base, 1)).toBe('Output built from a short day');
+    expect(reachLabel(base, 5)).toBe('5 outputs built from a short day');
+    expect(reachLabel({ ...base, gate: { held: true } }, 3)).toBe('Outputs not published');
+    expect(reachLabel({ ...base, severity: 'warn' }, 2)).toBe('Reaches 2 outputs');
   });
 });

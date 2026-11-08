@@ -830,6 +830,14 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-amount > svg { flex: 1; min-width: 0; }
 .vf-amount .vf-info { margin: 14px -6px 0 -28px; }
 .vf-reach .viz.reach { flex: none; margin-right: 6px; }
+.viz .tick-pub { fill: none; stroke: var(--ink); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* The outputs of a day, listed (ADR 0008 §10): each a box, ticked when published, hatched when not. */
+.vf-outlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.vf-outlist button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.vf-outlist .o-box { flex: none; display: inline-grid; place-items: center; width: 20px; height: 22px; border: 1.5px solid var(--ink-2); border-radius: 4px; }
+.vf-outlist .o-box.held { border-color: var(--muted); background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--muted) 55%, transparent) 0 1.2px, transparent 1.2px 4px), var(--surface); }
+.vf-outlist .o-name { flex: 1; font-family: var(--mono); font-size: 13px; }
+.vf-outlist .o-rows { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .vf-headrow { display: flex; align-items: flex-start; gap: 8px; }
 .vf-head { margin: 0; flex: 1; font-size: 20px; line-height: 1.25; font-weight: 650; letter-spacing: -0.01em; color: var(--ink); text-wrap: balance; }
 .vf-head .g { margin-right: 7px; }

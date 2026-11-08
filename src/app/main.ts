@@ -17,7 +17,7 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, t
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { calendarHead, noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, type EpisodeDay } from '../core/days.js';
+import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, type EpisodeDay } from '../core/days.js';
 import { STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, dayStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
@@ -558,7 +558,7 @@ function cardLine(id: string): CardLine {
   // An output the held run didn't build, or one built from a day with something wrong upstream (ADR 0008).
   const out = outputState(id);
   if (out === 'stale') return plain('not published');
-  if (out === 'alert') return plain('built from an alert');
+  if (out === 'alert') return plain(`built ${lacked(storyFor(newsDay()!)!)?.short ?? 'from an alert'}`);
   if (notBuilt(id)) return plain('not built today');
   const view = access(id);
   if (view && !view.open) return plain(`closed to ${personName(state.viewer)}`);
@@ -3089,12 +3089,33 @@ function causeCard(story: Story, card: string): HTMLElement {
     amount ? h('div', { class: 'vf-amount' }, h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, amount), info) : info,
     hero ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, hero) : null,
     story.hero === 'hours' && story.split ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.split.name} and everything else: open`, onclick: () => causeDetail(story, card) }, splitVisual(story)) : null,
-    g && (held || g.near) && story.hero !== 'gate' ? h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', held ? 'Checks held' : 'Checks near the limit'), gateVisual(g, false, gateScale(story))) : null,
-    story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${outs.join(', ')} ${held ? 'were not published from this load' : 'were published from this short day'}.`, onclick: () => select(null) },
-      svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'alert' })), held ? `${outs.length} outputs not published` : `${outs.length} outputs published`, h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
+    // The checks on every day with something wrong, passed or held, and on a near miss (ADR 0008 §10).
+    g && (held || g.near || (story.severity === 'alert' && !calm)) && story.hero !== 'gate' ? h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', held ? 'Checks held' : g.near ? 'Checks near the limit' : 'Checks passed'), gateVisual(g, false, gateScale(story))) : null,
+    // What the day's outputs are: never "published" alone, which reads as good news; a tap names them.
+    story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${reachLabel(story, outs.length)}: ${outs.join(', ')}. Open the list.`, onclick: () => outputsDetail(story, outs) },
+      svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'published' })), reachLabel(story, outs.length), h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
     story.labels.follows ? foldRow(story.labels.follows, story.labels.kinds, story.follows, card, profileOf(card) !== undefined, true) : null,
     story.labels.sameDay ? foldRow(story.labels.sameDay, [], story.sameDay, card, profileOf(card) !== undefined, true) : null,
     anchor && story.primary ? actionsOf(anchor, card, story.primary) : null);
+}
+
+/**
+ * The outputs a day's load reaches, named (ADR 0008 §10): each ticked when published from it, hatched when not, with
+ * its rows, a tap from its own card; one line says what they were built from, or what they keep.
+ */
+function outputsDetail(story: Story, outs: string[]): void {
+  const held = !!story.gate?.held;
+  const l = lacked(story);
+  const keep = held && story.day === viewedDay() ? stoppedWords({ refused: false, origin: story.gate!.step, shown: shownDay(), viewed: story.day }).tail : null;
+  const list = h('ul', { class: 'vf-outlist' }, ...outs.map((o) => {
+    const n = held ? undefined : nodeOf(o);
+    return h('li', {}, h('button', { type: 'button', onclick: () => (document.querySelector('.vf-detail-wrap')?.remove(), select(o)) },
+      h('span', { class: `o-box${held ? ' held' : ''}`, 'aria-hidden': 'true' }, held ? '' : glyphEl('ack', 14)),
+      h('span', { class: 'o-name' }, o),
+      h('span', { class: 'o-rows' }, held ? 'not published' : n?.rows !== undefined ? `${fmtInt(n.rows)} rows` : 'published'),
+      glyphEl('chev', 13)));
+  }));
+  openDetail(reachLabel(story, outs.length), story.severity, [oneLine(held ? (keep ? keep.replace(/^./, (c) => c.toUpperCase()) : null) : (l?.long ?? null)), list]);
 }
 
 /** The health row: five cells, each the worst of its kinds; ↳ where the day's cause groups them. Calm days: one row. */
@@ -3187,6 +3208,18 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     const bar = rowsFromBar();
     if (bar) box.append(bar);
   }
+  // A step after the load, built from a day with something wrong, says what its load lacked above its own rows' news
+  // (ADR 0008 §10): of the day its rows are, the viewed one or, on a held day, the last that passed (itself short, at
+  // times: Thu Sep 21, 2023 under Fri 22).
+  const src = loadSource();
+  const rowsDay = shownDay() ?? newsDay();
+  const fromStory = !kind && src && downstreamOf(src).includes(dataOf(card)) && rowsDay ? storyFor(rowsDay) : null;
+  const short = fromStory && !fromStory.gate?.held ? lacked(fromStory) : null;
+  if (short) box.append(h('div', { class: 'verdict alert' },
+    h('p', { class: 'v-day' }, dayLabel(rowsDay!)),
+    h('h3', { class: 'v-head' }, glyphEl('alert', 16), short.long),
+    h('p', { class: 'v-line' }, `Its load: ${fromStory!.head}`),
+    h('button', { type: 'button', class: 'btn small', onclick: () => select(src!) }, `Open ${src} ›`)));
   if (!kind) await tableNewsFor(id, who);
   const findings = cardNews(card);
   const day = newsDay();
@@ -3196,7 +3229,7 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     const count = (s: Severity) => findings.filter((f) => f.severity === s).length;
     const [alerts, warns, notes] = [count('alert'), count('warn'), count('note')];
     // A day the history follows is judged as a day; a table on its own, as what it holds now.
-    const normal = kind ? 'A normal day' : 'Nothing out of the ordinary';
+    const normal = kind ? 'A normal day' : short ? 'Nothing odd in its own rows' : 'Nothing out of the ordinary';
     const head = alerts ? 'Something’s wrong' : warns ? `${warns === 1 ? 'One thing' : `${warns} things`} to look at` : notes ? `${normal}, with ${notes === 1 ? 'a note' : `${notes} notes`}` : normal;
     const calm = findings.find((f) => f.severity === 'ok');
     const sev = alerts ? 'alert' : warns ? 'warn' : notes ? 'note' : 'ok';

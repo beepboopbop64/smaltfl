@@ -50,7 +50,10 @@ describe('the cause, as a population', () => {
     expect(s.split!.rest.today / s.split!.rest.usual).toBeGreaterThan(0.9);
     expect(s.findings.find((f) => f.kind === 'gone')!.tier).toBe('absorbed');
     // Each part's count against its usual one, said so it can't read as a fraction of it.
-    expect(s.labels.hero).toEqual(['Vendor 1', expect.stringMatching(/^0 · usual ~[\d.]+k$/), 'Everything else', expect.stringMatching(/^[\d,]+ · usual ~[\d.]+k$/)]);
+    expect(s.labels.hero.slice(0, 4)).toEqual(['Vendor 1', expect.stringMatching(/^0 · usual ~[\d.]+k$/), 'Everything else', expect.stringMatching(/^[\d,]+ · usual ~[\d.]+k$/)]);
+    // Something wrong shows its checks, passed or not (ADR 0008 §10), and their words count at a glance.
+    expect(s.labels.hero.slice(4, 6)).toEqual(['Checks passed', '4% of arrived rows dropped']);
+    expect(words(s)).toBeLessThanOrEqual(60);
   });
 
   it('names a part that surged, as unusual, with OK this day as its verb', () => {

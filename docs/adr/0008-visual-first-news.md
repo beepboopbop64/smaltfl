@@ -93,7 +93,7 @@ where about 35,000 are usual, and everything else held.
    over a ghost of a usual day, the short hours' trips dark and never under 3 px so a trickle reads as present and low,
    the trips missing one wash with a dashed edge, labelled "still ~330/h" and "~77k missing"; a strip of days each with
    its own range, four weeks on an amount day and the week on a calm one, an episode's days marked), the gate when it
-   held, what it reaches ("3 outputs not published" or "Reaches 3 outputs"), the folded findings as counted rows ("16
+   held, came near, or the day had something wrong, what it reaches ("Outputs not published", "Outputs built from a short day", never "published" alone; §10), the folded findings as counted rows ("16
    changes this explains", with what they are in words: "shares · values gone · times"; "12 more changes this day")
    that open in place into compact rows, a column's together, three and then "Show all", each today against its usual,
    and one verb with the others behind ⋯. Then a health row of five cells (File, Amount, Hours, Values, Shape: ↳ where
@@ -153,7 +153,15 @@ where about 35,000 are usual, and everything else held.
     is idle, on after its tab closes, and says "Checking every day · 276 of 693" with a bar until every one is checked,
     never a count of wrong days before then ("693 days to Thu Sep 21 · 23 wrong · 36 unusual" after). Days after the
     viewed one are lighter and not counted. A key says what each cell is, and each year's block names its year on its
-    first row. The band's "outside last year" is another measure (days outside their range), said as such.
+    first row. The band's "outside last year" is another measure (days outside their range), said as such. A day with
+    something wrong shows its checks whether they held, came near or passed ("Checks passed", Sat Sep 17, 2022), and
+    says what its outputs are: "Outputs not published" when held, else what they were built from, "Outputs built from
+    a short day" or "Outputs built without Vendor 1", published ones ticked in their icon, not drawn in a severity
+    colour; its boxes carry up to three outputs, so their number is said only past three. A tap lists them, each with
+    its rows and a tap to its card. An output (or a step after the load) built from such a day says what its load
+    lacked above its own rows' news ("Built from a load missing 13:00–24:00", "Its load: Trips fall 95% from 13:00"),
+    for the day its rows are: on a held day the last day that passed, itself short at times. Holding such outputs, and
+    never keeping a day that was itself wrong, change what the flow publishes: an open question (Q-45).
 
 ## Consequences
 

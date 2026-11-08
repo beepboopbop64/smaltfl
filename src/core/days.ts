@@ -101,3 +101,36 @@ export function calendarHead(verdicts: ReadonlyMap<string, string>, total: numbe
   const v = [...verdicts.values()];
   return `${n(total)} days${to ? ` to ${dayMid(to)}` : ''} · ${v.filter((x) => x === 'alert').length} wrong · ${v.filter((x) => x === 'warn').length} unusual`;
 }
+
+/** What an output of a day says of its load: the story's parts it needs. */
+type LoadStory = { severity: string; split: { kind: string; name: string } | null; hours?: { from: number; to: number } | null; amount: { value: number; low: number; expected: number } | null; gate: { held: boolean } | null };
+
+const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
+
+/**
+ * What a load with something wrong lacked, as the outputs built from it say it (ADR 0008 §10): short for the outputs
+ * row ("from a short day", "without Vendor 1"), long for an output's own news ("Built from a load missing
+ * 13:00–24:00"). Null when the day had nothing wrong.
+ */
+export function lacked(s: LoadStory): { short: string; long: string } | null {
+  if (s.severity !== 'alert') return null;
+  if (s.split?.kind === 'vanished') return { short: `without ${s.split.name}`, long: `Built without ${s.split.name}’s trips` };
+  if (s.hours) return { short: 'from a short day', long: `Built from a load missing ${hh(s.hours.from)}–${hh(s.hours.to + 1)}` };
+  if (s.amount && s.amount.value < s.amount.low) {
+    const change = Math.round((1 - s.amount.value / Math.max(1, s.amount.expected)) * 100);
+    return { short: 'from a short day', long: `Built from a short day (−${change}% trips)` };
+  }
+  return { short: 'from a day with an alert', long: 'Built from a day with something wrong' };
+}
+
+/**
+ * The outputs row on a day with something wrong: never "published" alone, which reads as good news. Held: "Outputs
+ * not published"; else what they were built from: "Outputs built from a short day", "Outputs built without Vendor 1".
+ * Its icon draws a box for each of up to three outputs, so their number is said only past three ("5 outputs …").
+ */
+export function reachLabel(s: LoadStory, n: number): string {
+  const outs = n > 3 ? `${n} outputs` : n === 1 ? 'Output' : 'Outputs';
+  if (s.gate?.held) return `${outs} not published`;
+  const l = lacked(s);
+  return l ? `${outs} built ${l.short}` : `Reaches ${n > 3 ? outs : `${n} output${n === 1 ? '' : 's'}`}`;
+}
