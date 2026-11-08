@@ -229,7 +229,9 @@ published. Cached check counts must still hold. And older builds must refuse wha
       card), and once decided "⚑ as is · Thu 21" or "✕ unpublished · Wed 20".
     - **The cause card** keeps its head and its visual. Its reach row reads "‖ Paused · 3 outputs waiting", and its one
       verb is **Decide**; "Tell the source" moves behind ⋯. Someone who may not decide sees "Paused · waiting on Owner"
-      in the row itself, with no verb: a line of its own would take Sat Sep 18, 2022 to 61 words at a glance. Once
+      in the row itself, with no verb: a line of its own would take Sat Sep 18, 2022 to 61 words at a glance. A tap on
+      the row lists the waiting outputs, and then "What readers get ›" opens the decision sheet read only: its rows
+      greyed and "Only Owner decides" in place of the button. Once
       decided, the row becomes the receipt, the day's mark before it ("⚑ Published as is · Owner · 09:40", "✕ Not
       published · under Fri's decision"), and the story's verbs stay behind ⋯. The day after an episode says what
       became of its days, what still waits first ("Thu as is · Fri–Sun not published"), and its strip marks them.

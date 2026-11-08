@@ -3535,7 +3535,7 @@ function pauseRow(r: RunRecord, story: Story | null): { reach: HTMLElement; verb
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
   const l = pauseLines({ state: now.state, outputs: waiting.length, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, may, deciders: deciders() });
   const reach = h('div', { class: 'vf-pause' },
-    h('button', { type: 'button', class: `vf-reach ${now.state}`, 'aria-label': `${l.reach}${waiting.length ? `: ${waiting.join(', ')}` : ''}. Open the list.`, onclick: () => waitingDetail(r, l.reach) },
+    h('button', { type: 'button', class: `vf-reach ${now.state}`, 'aria-label': `${l.reach}${waiting.length ? `: ${waiting.join(', ')}` : ''}. Open the list.`, onclick: () => waitingDetail(r, l.reach, !may && now.state === 'waiting' ? () => decisionSheet(r, story) : null) },
       now.state === 'waiting' ? svgNode(reachIcon({ n: waiting.length, state: 'held' })) : h('span', { class: 'vf-mark' }, glyphEl(PAUSE_MARK[now.state], 14)), l.reach, h('span', { class: 'vf-chev' }, glyphEl('chev', 14))));
   const verb = l.verb ? h('button', { type: 'button', class: 'vf-primary vf-decide', 'aria-label': `Decide what readers get${dayOfRun(r) ? ` for ${dayMid(dayOfRun(r)!)}` : ''}`, onclick: () => decisionSheet(r, story) }, l.verb) : null;
   return { reach, verb };
@@ -3551,8 +3551,9 @@ function deciders(): string {
 /** A time of day, "09:40". */
 const clock = (at: string) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-/** The outputs a held day keeps back, each waiting with its staged rows and a tap to its card. */
-function waitingDetail(r: RunRecord, label: string): void {
+/** The outputs a held day keeps back, each waiting with its staged rows and a tap to its card; for someone who may not
+ * decide, a tap on to the decision sheet, read only: what readers would get, and who decides. */
+function waitingDetail(r: RunRecord, label: string, options: (() => void) | null = null): void {
   const now = pauseOf(r);
   const list = h('ul', { class: 'vf-outlist' }, ...r.result.waiting.filter((x) => isOwner() || visible(x)).map((o) => h('li', {}, h('button', { type: 'button', onclick: () => (document.querySelector('.vf-detail-wrap')?.remove(), select(o)) },
     h('span', { class: `o-box${now?.state === 'asis' ? '' : ' held'}`, 'aria-hidden': 'true' }, now?.state === 'asis' ? glyphEl('ack', 14) : ''),
@@ -3561,7 +3562,8 @@ function waitingDetail(r: RunRecord, label: string): void {
     glyphEl('chev', 13)))));
   const day = dayOfRun(r);
   const shown = readersDay(r);
-  openDetail(label, 'ok', [oneLine(day && now?.state !== 'asis' ? stagedBar(day, shown) : null), list]);
+  const see = options ? h('button', { type: 'button', class: 'vf-see', onclick: options }, 'What readers get', glyphEl('chev', 13)) : null;
+  openDetail(label, 'ok', [oneLine(day && now?.state !== 'asis' ? stagedBar(day, shown) : null), list, see]);
 }
 
 /** What the trips were on a run: its trips source's rows. */
@@ -3617,9 +3619,12 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
     for (const b of Array.from(rowsEl.querySelectorAll<HTMLElement>('.vf-option'))) b.setAttribute('aria-checked', String(b.dataset.option === option));
     for (const b of Array.from(scopes.querySelectorAll<HTMLButtonElement>('.vf-seg-b'))) {
       b.setAttribute('aria-checked', String(b.dataset.scope === scope));
-      b.disabled = b.dataset.scope === 'untilPass' && (option === 'asis' || !day);
+      b.disabled = !anyone || (b.dataset.scope === 'untilPass' && (option === 'asis' || !day));
     }
-    for (const b of Array.from(chips.querySelectorAll<HTMLElement>('.vf-reason'))) b.setAttribute('aria-checked', String(b.textContent === reason));
+    for (const b of Array.from(chips.querySelectorAll<HTMLButtonElement>('.vf-reason'))) {
+      b.setAttribute('aria-checked', String(b.textContent === reason));
+      b.disabled = !anyone;
+    }
     go.disabled = !option || (option === 'asis' && !reason);
     go.textContent = goLabel(option, scope, n, day);
   };
