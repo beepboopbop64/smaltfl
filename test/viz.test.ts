@@ -414,6 +414,11 @@ describe('a held day’s options, drawn as what readers get (ADR 0009 §12)', ()
     const off = decisionRow({ mark: 'flag', label: 'Publish as is', number: 'Mon 25 is published', cause: 'hours', rows: { cause: 'hours', hours: thu }, scale, off: true, aria: 'Publish as is: not possible' });
     expect(off).toMatch(/^<svg class="viz decide-row off"/);
     expect(off).toContain('data-off="true"');
+    // Under a head that carries the mark, the row draws none, and its words start at the left edge.
+    const bare = decisionRow({ mark: null, label: '41,939 trips', number: '', cause: 'hours', rows: { cause: 'hours', hours: thu }, scale, aria: 'Thu Sep 21: 41,939 trips' });
+    expect(bare).not.toContain('class="g ');
+    expect(bare).toContain('<text x="0" y="15" class="opt-l">41,939 trips</text>');
+    expect(bare).not.toContain('opt-n');
   });
 
   it('marks a decided day at 14 px by shape: ⚑ a flag on its pole, ✕ a box crossed out', () => {

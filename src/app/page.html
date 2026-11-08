@@ -949,6 +949,25 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-hash { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 #status > .g { flex: none; margin-right: 6px; vertical-align: -2px; }
 .held-pill { display: inline-flex; align-items: center; gap: 4px; }
+/* The record of decisions (ADR 0009 §12): the paused days by month, each its date and mark; a tap opens its card. */
+.paused-days { display: grid; gap: 10px; margin-bottom: 12px; }
+.ribbon { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.rb-month { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.rb-m { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 2px; }
+.rb-day { display: inline-flex; align-items: center; gap: 3px; min-height: 36px; min-width: 44px; padding: 0 8px; border: 1.5px solid var(--edge); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.rb-day[aria-pressed="true"] { border-color: var(--smalt); box-shadow: inset 0 0 0 1.5px var(--smalt); }
+.rb-card { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.rb-head { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 16px; }
+.rb-who { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+.rb-where { justify-self: start; background: none; border: 0; padding: 0; color: var(--smalt); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.rb-hashes { display: grid; gap: 2px; } .rb-hashes p { margin: 0; }
+.rec-marked { display: inline-flex; align-items: flex-start; gap: 5px; } .rec-marked > svg { flex: none; margin-top: 2px; }
+/* The decision sheet's options, each drawn (viz.ts decisionRow): the drawing fills the row. */
+.vf-option.drawn { display: block; padding: 10px 12px 8px; }
+.vf-option.drawn svg.decide-row { width: 100%; height: auto; }
+.vf-pause .vf-reach.asis, .vf-pause .vf-reach.dont { gap: 6px; }
+.vf-pause .vf-mark { display: inline-flex; flex: none; }
+.card-mark .g-wall { fill: var(--ink-2); } .card-mark .g-box, .card-mark .g-x { stroke: var(--ink-2); }
 .vf-acts .f-form { flex-basis: 100%; }
 /* The health row: its heading once, five cells that each open what they measured (ADR 0008 §6). */
 .vf-healthwrap { display: grid; gap: 4px; }
@@ -1059,6 +1078,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 
   <section class="view" id="view-runs" aria-label="Runs" hidden>
     <p class="lede">Every run records, by hash, the flow and the plan it ran, the files it read (as the engine saw their bytes), every dataset it stored, and the data's list it came from. Everything that happens to the flow goes into one record, signed by this browser, that an auditor can check without trusting it. Verify a run to check its hashes, recompute it, or decode its files again.</p>
+    <div class="panel paused-days" id="paused-days" hidden></div>
     <div class="panel record" id="record"></div>
     <ul class="runs" id="runs-list"></ul>
   </section>

@@ -19,9 +19,10 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, dayMid, dayShort, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
+import { afterLine, decidedLines, decisionDrawing, goLabel, pauseLines, ribbonOf, sheetText, type SheetText } from '../core/decision.js';
 import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, stagedKeys, standingFor, type DecideAbout, type HistoryRef, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { CELL_KINDS, CELL_NAMES, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
-import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
+import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
 import { checkDecision, covers, readView, wrapRead, type DecideOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
@@ -219,6 +220,8 @@ const fmtCompact = (n: number) => (Math.abs(n) < 10000 ? fmtInt(n) : Math.abs(n)
 
 /** A held day's mark (ADR 0009 §12): ‖ paused, ⚑ published as is, ✕ not published. */
 const PAUSE_MARK: Record<PauseState, VizMark> = { waiting: 'held', asis: 'flag', dont: 'closed' };
+/** What a card's mark says to a screen reader, before its line. */
+const CARD_SAID: Record<PauseState, string> = { waiting: 'Paused, ', asis: 'Published as is, ', dont: 'Not published, ' };
 
 function setStatus(text: string, bad = false, run?: { n: number; state: 'done' | 'held' | 'failed' | 'refused'; mark?: PauseState | null }): void {
   const el = $('status');
@@ -461,6 +464,8 @@ interface CardLine {
   text: string;
   tone: 'drop' | 'add' | 'same';
   badge?: string;
+  /** A held day's mark before the line, 14 px (ADR 0009 §12): ‖ waiting, ⚑ published as is, ✕ not published. */
+  mark?: PauseState;
 }
 
 /** A run, ready to look into: its typed plan, where each stored node is, and each node's entry in the manifest. */
@@ -674,10 +679,10 @@ function cardLine(id: string): CardLine {
   // paused, an output that waits says what readers see meanwhile, and after a decision what became of it (ADR 0009).
   const out = outputState(id);
   if (out === 'stale') return plain('not published');
-  // Four words that fit the card (ADR 0008 §12): "‖ waits · shows Wed 20", "✕ unpublished · Wed 20".
-  if (out === 'waiting') return plain(`‖ waits · ${showsDay(id) ? `shows ${dayShort(showsDay(id)!)}` : 'none shown'}`);
-  if (out === 'dont') return plain(showsDay(id) ? `✕ unpublished · ${dayShort(showsDay(id)!)}` : '✕ not published');
-  if (out === 'asis') return plain(dayOfRun(onScreen()) ? `⚑ as is · ${dayShort(dayOfRun(onScreen())!)}` : '⚑ published as is');
+  // The day's mark, drawn, then words that fit the card (ADR 0008 §12): "‖ waits · shows Wed 20", "✕ unpublished · Wed 20".
+  if (out === 'waiting') return { text: `waits · ${showsDay(id) ? `shows ${dayShort(showsDay(id)!)}` : 'none shown'}`, tone: 'same', mark: 'waiting' };
+  if (out === 'dont') return { text: showsDay(id) ? `unpublished · ${dayShort(showsDay(id)!)}` : 'not published', tone: 'same', mark: 'dont' };
+  if (out === 'asis') return { text: dayOfRun(onScreen()) ? `as is · ${dayShort(dayOfRun(onScreen())!)}` : 'published as is', tone: 'same', mark: 'asis' };
   if (out === 'alert') return plain(`built ${lacked(storyFor(newsDay()!)!)?.short ?? 'from an alert'}`);
   if (notBuilt(id)) return plain('not built today');
   const view = access(id);
@@ -1343,7 +1348,7 @@ function renderCanvas(): void {
     if (extra.health === 'alert' || extra.health === 'warn') classes.push(`sev-${extra.health}`);
     const guard = extra.shield ? ` ${extra.shield === 'muted' ? 'Rules limit who sees it' : `${personName(state.viewer)} sees part of it`}.` : '';
     const told = (extra.health === 'alert' || extra.health === 'warn' ? ` News: ${SEV_LABEL[extra.health].toLowerCase()}.` : '') + (extra.seal === 'ok' ? ' Sealed: checked back to the bytes.' : extra.seal === 'bad' ? ' Integrity: broken.' : '');
-    const g = s('g', { class: ['card', ...classes].join(' '), 'data-card': key, tabindex: 0, role: 'button', 'aria-label': `${name}: ${kind}. ${line.text}.${guard}${told}` });
+    const g = s('g', { class: ['card', ...classes].join(' '), 'data-card': key, tabindex: 0, role: 'button', 'aria-label': `${name}: ${kind}. ${line.mark ? CARD_SAID[line.mark] : ''}${line.text}.${guard}${told}` });
     g.append(s('rect', { class: 'box', x, y, width: cardW, height: cardH, rx: 9 }));
     // Its seal: checked back to the bytes (a tick), or broken (a cross); beside the news dot.
     if (extra.seal) {
@@ -1365,7 +1370,15 @@ function renderCanvas(): void {
     }
     g.append(s('text', { class: 'kind', x: x + 12, y: y + 18 }, fit(kind, Math.floor(chars * 1.15))));
     g.append(s('text', { class: 'name', x: x + 12, y: y + 36 }, fit(name, chars)));
-    g.append(s('text', { class: 'what', x: x + 12, y: y + 53 }, fit(line.text, Math.floor(chars * 1.12) - (extra.shield ? 1 : 0))));
+    // A held day's mark before the line, a shape at 14 px (ADR 0009 §12), the words after it.
+    if (line.mark) {
+      const m = svgNode(glyph(PAUSE_MARK[line.mark], 14));
+      m.setAttribute('x', String(x + 11));
+      m.setAttribute('y', String(y + 42));
+      m.classList.add('card-mark');
+      g.append(m);
+    }
+    g.append(s('text', { class: 'what', x: x + 12 + (line.mark ? 17 : 0), y: y + 53 }, fit(line.text, Math.floor(chars * 1.12) - (extra.shield ? 1 : 0) - (line.mark ? 2 : 0))));
     // Ports: data comes into an input from outside the flow, and leaves an output as a published dataset.
     const cy = y + cardH / 2;
     if (extra.port === 'in') {
@@ -2971,7 +2984,12 @@ function heroOf(story: Story): Element | null {
   if (story.hero === 'calm') {
     // After an episode, its days carry their marks: held at the checks, or published with something wrong.
     const rec = story.recovery;
-    const days = stripOf({ of: 'trips' }, day, 7).map((d) => (rec && d.day >= rec.from && d.day <= rec.to ? { ...d, sev: 'alert' as const, mark: (rec.held.includes(d.day) ? 'held' : 'alert') as VizMark } : d));
+    // Under a flow that holds, each by what became of it: ‖ waiting, ⚑ published as is, ✕ not published (ADR 0009 §12).
+    const fate = (d: string): VizMark => {
+      const f = state.doc.publish ? dayFate(d) : null;
+      return f && f !== 'published' ? PAUSE_MARK[f] : rec!.held.includes(d) && !state.doc.publish ? 'held' : 'alert';
+    };
+    const days = stripOf({ of: 'trips' }, day, 7).map((d) => (rec && d.day >= rec.from && d.day <= rec.to ? { ...d, sev: 'alert' as const, mark: fate(d.day) } : d));
     return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, key: STRIP_KEY, aria: `Trips the seven days to ${dayLabel(day)}, each against its own usual range${rec ? `; ${rec.held.length ? `${rec.held.length} held at the checks` : ''}${rec.held.length && rec.published.length ? ', ' : ''}${rec.published.length ? `${rec.published.length} published with something wrong` : ''}` : ''}.` })) : null;
   }
   return null;
@@ -3448,7 +3466,7 @@ function causeCard(story: Story, card: string): HTMLElement {
     story.chip ? h('button', { type: 'button', class: 'vf-chip-btn', 'aria-label': `${story.chip}${ep ? `: ${ep.trend.map((d) => `${WEEKDAY_NAMES[dateOf(d.day).getUTCDay()]!.slice(0, 3)} ${Math.round((d.trips / Math.max(1, d.expected)) * 100)}% of a usual day`).join(', ')}${ep.short ? `; about ${fmtInt(ep.short.estimate)} trips short so far` : ''}` : ''}. Open.`, onclick: () => causeDetail(story, card) },
       ep && ep.trend.length > 1 ? svgNode(trendPips({ days: ep.trend })) : '', story.chip, glyphEl('chev', 13)) : null,
     told ? h('p', { class: 'vf-told' }, glyphEl('ack', 14), told) : null,
-    story.labels.after ? h('p', { class: 'vf-after' }, story.labels.after) : null,
+    afterOf(story) ? h('p', { class: 'vf-after' }, afterOf(story)) : null,
     amount ? h('div', { class: 'vf-amount' }, h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, amount), info) : info,
     hero ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, hero) : null,
     story.hero === 'hours' && story.split ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.split.name} and everything else: open`, onclick: () => causeDetail(story, card) }, splitVisual(story)) : null,
@@ -3463,7 +3481,28 @@ function causeCard(story: Story, card: string): HTMLElement {
       svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'published' })), reachLabel(story, outs.length), h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
     story.labels.follows ? foldRow(story.labels.follows, story.labels.kinds, story.follows, card, profileOf(card) !== undefined, true) : null,
     story.labels.sameDay ? foldRow(story.labels.sameDay, [], story.sameDay, card, profileOf(card) !== undefined, true) : null,
-    anchor && (primary || paused?.verb) ? actionsOf(anchor, card, primary, paused?.verb) : paused?.verb ? h('div', { class: 'vf-acts' }, paused.verb) : null);
+    // A day paused leads with its one verb, Decide, every verb of the story behind ⋯, and keeps them there once decided:
+    // the receipt says what was done (ADR 0009 §12).
+    paused ? (anchor ? actionsOf(anchor, card, null, paused.verb) : paused.verb ? h('div', { class: 'vf-acts' }, paused.verb) : null) : anchor && primary ? actionsOf(anchor, card, primary) : null);
+}
+
+/**
+ * The line under the day after an episode (ADR 0008 §6): under a flow that holds, what became of its days (ADR 0009
+ * §12), "Thu as is · Fri–Sun not published", what still waits first; the days not run here left out. Otherwise the
+ * story's own, from the history's gate.
+ */
+function afterOf(story: Story): string | null {
+  const rec = story.recovery;
+  if (!rec || !state.doc.publish) return story.labels.after;
+  const days: string[] = [];
+  for (let d = rec.from; d <= rec.to; d = new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) days.push(d);
+  return afterLine(days.map((d) => ({ day: d, state: dayFate(d) })));
+}
+
+/** What became of a day under a flow that holds: paused or decided, published, or null when it wasn't run here and the
+ * record has no pause of it. */
+function dayFate(day: string): PauseState | 'published' | null {
+  return dayPause(day) ?? (state.runs.some((x) => dayOfRun(x) === day) ? 'published' : null);
 }
 
 /** Whether the source was told on an earlier day of the episode a day is part of. */
@@ -3482,26 +3521,23 @@ function toldOf(story: Story): string | null {
 const NO_STORY = { severity: 'ok', split: null, amount: null, gate: null } as const;
 
 /**
- * A held day's row (ADR 0009 §12): what its outputs wait for, or what became of them, a tap from their list; under it,
- * once decided, who decided and when; and its one verb, Decide, or, for someone who may not decide, whom it waits on.
+ * A held day's row (ADR 0009 §12): what its outputs wait for, a tap from their list, and its one verb, Decide; for
+ * someone who may not decide, whom it waits on, in the row itself; once decided, the receipt in its place, the day's
+ * mark before it: who decided and when, or the standing decision it came under. Its words are core/decision.ts
+ * pauseLines', counted in the card's budget.
  */
 function pauseRow(r: RunRecord, story: Story | null): { reach: HTMLElement; verb: HTMLElement | null } {
   const now = pauseOf(r)!;
   const waiting = r.result.waiting.filter((x) => isOwner() || visible(x));
-  const label = reachLabel(story ?? NO_STORY, waiting.length, now.state);
   const d = now.pause?.decision ?? null;
   const under = d?.about.under !== undefined ? ledger?.entries[d.about.under] : undefined;
   const underDay = (under?.about as { day?: string } | undefined)?.day;
-  const reach = h('div', { class: 'vf-pause' },
-    h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${label}: ${waiting.join(', ')}. Open the list.`, onclick: () => waitingDetail(r, label) },
-      svgNode(reachIcon({ n: waiting.length, state: now.state === 'asis' ? 'published' : 'held' })), label, h('span', { class: 'vf-chev' }, glyphEl('chev', 14))),
-    d && now.state !== 'waiting' ? h('p', { class: 'vf-receipt' }, glyphEl(PAUSE_MARK[now.state], 14), `${personName(d.by)} · ${underDay ? `under ${dayShort(underDay).split(' ')[0]}’s decision` : clock(d.at)}`) : null,
-    now.pause?.otherBuild ? h('p', { class: 'vf-sub' }, 'Decided under another build: decide it again here') : null);
-  if (now.state !== 'waiting') return { reach, verb: null };
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
-  const verb = may
-    ? h('button', { type: 'button', class: 'vf-primary vf-decide', 'aria-label': `Decide what readers get${dayOfRun(r) ? ` for ${dayMid(dayOfRun(r)!)}` : ''}`, onclick: () => decisionSheet(r, story) }, 'Decide')
-    : h('p', { class: 'vf-waiting-on' }, `Waiting on ${deciders()}`);
+  const l = pauseLines({ state: now.state, outputs: waiting.length, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, may, deciders: deciders() });
+  const reach = h('div', { class: 'vf-pause' },
+    h('button', { type: 'button', class: `vf-reach ${now.state}`, 'aria-label': `${l.reach}${waiting.length ? `: ${waiting.join(', ')}` : ''}. Open the list.`, onclick: () => waitingDetail(r, l.reach) },
+      now.state === 'waiting' ? svgNode(reachIcon({ n: waiting.length, state: 'held' })) : h('span', { class: 'vf-mark' }, glyphEl(PAUSE_MARK[now.state], 14)), l.reach, h('span', { class: 'vf-chev' }, glyphEl('chev', 14))));
+  const verb = l.verb ? h('button', { type: 'button', class: 'vf-primary vf-decide', 'aria-label': `Decide what readers get${dayOfRun(r) ? ` for ${dayMid(dayOfRun(r)!)}` : ''}`, onclick: () => decisionSheet(r, story) }, l.verb) : null;
   return { reach, verb };
 }
 
@@ -3514,13 +3550,6 @@ function deciders(): string {
 
 /** A time of day, "09:40". */
 const clock = (at: string) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-
-/** How long a day has waited, "Waiting 2 h". */
-function waited(since: string | undefined): string | null {
-  if (!since) return null;
-  const min = Math.max(0, (Date.now() - new Date(since).getTime()) / 60000);
-  return `Waiting ${min < 1 ? '<1 min' : min < 60 ? `${Math.round(min)} min` : min < 48 * 60 ? `${Math.round(min / 60)} h` : `${Math.round(min / 1440)} days`}`;
-}
 
 /** The outputs a held day keeps back, each waiting with its staged rows and a tap to its card. */
 function waitingDetail(r: RunRecord, label: string): void {
@@ -3542,9 +3571,12 @@ const tripsOf = (r: RunRecord | undefined) => r?.result.manifest.nodes.find((n) 
 let sheetStale = false;
 
 /**
- * The decision sheet (ADR 0009 §12): each option as what readers would get, one row each (its mark, at most four words,
- * one number), the scope, a reason a tap away, and a button that names the result beside the hash of what goes out.
- * Someone who may not decide sees the rows greyed, and who decides. A receipt follows the decision.
+ * The decision sheet (ADR 0009 §12): each option a row drawn as what readers would get, all on one scale, the cause
+ * picking the drawing as it picks the hero (core/decision.ts decisionDrawing, viz.ts decisionRow): its mark, at most four
+ * words and one number over the rows, the axis once under the last. Then the scope, a reason a tap away, and a button
+ * that names the result beside the first 8 hex of what goes out. Someone who may not decide sees the rows greyed, and
+ * who decides. A receipt takes the button's place after the decision. Its words are core/decision.ts sheetText's, 45
+ * at most at a glance.
  */
 function decisionSheet(r: RunRecord, story: Story | null): void {
   const day = dayOfRun(r) ?? null;
@@ -3556,48 +3588,53 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
   let option: DecideOption | null = null;
   let scope: 'day' | 'untilPass' = 'day';
   let reason: string | null = null;
-  const unjudged = r.result.holds.some((x) => x.by === 'unjudged');
-  const optionRow = (o: DecideOption, label: string, number: string, off: boolean) => h('button', { type: 'button', role: 'radio', class: 'vf-option', 'data-option': o, 'aria-checked': 'false', disabled: off || !can[o].allowed, onclick: () => ((option = o), sync()) },
-    glyphEl(o === 'asis' ? 'flag' : 'closed', 16), h('span', { class: 'vf-opt-l' }, label), h('span', { class: 'vf-opt-n' }, number));
-  const rows = h('div', { class: 'vf-options', role: 'radiogroup', 'aria-label': 'What readers get' },
-    optionRow('asis', 'Publish as is', later ? `${dayShort(later)} is published` : fmtInt(tripsOf(r) ?? 0), !!later),
-    optionRow('dont', 'Don’t publish', shown ? `${dayShort(shown)} · ${fmtInt(tripsOf(state.names.get(r.result.waiting[0] ?? '')) ?? 0)}` : 'nothing shown', false));
-  const seg = (s: 'day' | 'untilPass', label: string) => h('button', { type: 'button', role: 'radio', class: 'vf-seg-b', 'data-scope': s, 'aria-checked': String(scope === s), onclick: () => ((scope = s), sync()) }, label);
-  const scopes = h('div', { class: 'vf-seg', role: 'radiogroup', 'aria-label': 'For' }, seg('day', 'This day'), seg('untilPass', 'Until a day passes'));
-  const chips = h('div', { class: 'vf-reasons', role: 'radiogroup', 'aria-label': 'Why' }, ...[...(unjudged ? ['No history'] : []), 'Real change', 'Source confirmed', 'Known outage'].map((x) =>
+  const pause = pauseOf(r)?.pause ?? null;
+  const opened = pause ? ledger?.entries[pause.opened]?.at : undefined;
+  const rows = tripsOf(r) ?? 0;
+  const kept = shown ? (tripsOf(state.names.get(r.result.waiting[0] ?? Object.keys(r.result.manifest.outputs)[0] ?? '')) ?? null) : null;
+  const readers = shown && kept !== null ? { day: shown, rows: kept } : null;
+  const draw = decisionDrawing(history, story, day ?? '', readers?.day ?? null, { day: rows, readers: readers?.rows ?? null });
+  const t: SheetText = sheetText({
+    day, waited: opened ? (Date.now() - Date.parse(opened)) / 60000 : null, otherBuild: !!pause?.otherBuild, outputs: n, rows, readers, later,
+    part: draw.part, ticks: draw.ticks.map(([, x]) => x), unjudged: r.result.holds.some((x) => x.by === 'unjudged'), hash: r.result.hash, may: anyone, deciders: deciders(), head: story?.head ?? null,
+  });
+  const optionRow = (o: SheetText['options'][number], last: boolean) => {
+    const off = o.off || !can[o.option].allowed;
+    const asis = o.option === 'asis';
+    return h('button', { type: 'button', role: 'radio', class: 'vf-option drawn', 'data-option': o.option, 'aria-checked': 'false', 'aria-label': o.aria, disabled: off, onclick: () => ((option = o.option), sync()) },
+      svgNode(decisionRow({ mark: asis ? 'flag' : 'closed', label: o.label, number: o.number, cause: draw.cause, rows: asis ? draw.asis : draw.dont, usual: asis ? draw.usual : null, short: draw.short, other: !asis, scale: draw.scale, part: asis ? draw.part : null, ticks: last ? draw.ticks : [], off, aria: o.aria })));
+  };
+  const rowsEl = h('div', { class: 'vf-options', role: 'radiogroup', 'aria-label': 'What readers get' }, ...t.options.map((o, i) => optionRow(o, i === t.options.length - 1)));
+  const seg = (sc: 'day' | 'untilPass', label: string) => h('button', { type: 'button', role: 'radio', class: 'vf-seg-b', 'data-scope': sc, 'aria-checked': String(scope === sc), onclick: () => ((scope = sc), sync()) }, label);
+  const scopes = h('div', { class: 'vf-seg', role: 'radiogroup', 'aria-label': 'For' }, seg('day', t.scopes[0]), seg('untilPass', t.scopes[1]));
+  const chips = h('div', { class: 'vf-reasons', role: 'radiogroup', 'aria-label': 'Why' }, ...t.chips.map((x) =>
     h('button', { type: 'button', role: 'radio', class: 'vf-reason', 'aria-checked': 'false', onclick: () => ((reason = reason === x ? null : x), sync()) }, x)));
-  const go = h('button', { type: 'button', class: 'vf-primary vf-go', disabled: true, onclick: () => void submit() }, 'Decide');
-  const hash = h('code', { class: 'vf-hash', title: `Manifest ${r.result.hash}` }, `${r.result.hash.slice(0, 4)} ${r.result.hash.slice(4, 8)}`);
-  const foot = h('div', { class: 'vf-go-row' }, anyone ? go : h('p', { class: 'vf-waiting-on' }, `Only ${deciders()} decides`), hash);
+  const go = h('button', { type: 'button', class: 'vf-primary vf-go', disabled: true, onclick: () => void submit() }, t.go[0]!);
+  const hash = h('code', { class: 'vf-hash', title: `Manifest ${r.result.hash}`, 'aria-label': `What goes out: manifest ${r.result.hash.slice(0, 8)}` }, t.hash);
+  const foot = h('div', { class: 'vf-go-row' }, t.denied ? h('p', { class: 'vf-waiting-on' }, t.denied) : go, hash);
   const sync = () => {
     if (option === 'asis') scope = 'day';
-    for (const b of Array.from(rows.querySelectorAll<HTMLElement>('.vf-option'))) b.setAttribute('aria-checked', String(b.dataset.option === option));
+    for (const b of Array.from(rowsEl.querySelectorAll<HTMLElement>('.vf-option'))) b.setAttribute('aria-checked', String(b.dataset.option === option));
     for (const b of Array.from(scopes.querySelectorAll<HTMLButtonElement>('.vf-seg-b'))) {
       b.setAttribute('aria-checked', String(b.dataset.scope === scope));
       b.disabled = b.dataset.scope === 'untilPass' && (option === 'asis' || !day);
     }
     for (const b of Array.from(chips.querySelectorAll<HTMLElement>('.vf-reason'))) b.setAttribute('aria-checked', String(b.textContent === reason));
     go.disabled = !option || (option === 'asis' && !reason);
-    go.textContent = option === 'asis' ? `Publish as is · ${plural(n, 'output')}` : option === 'dont' ? `Don’t publish ${day ? dayShort(day) : 'this run'}${scope === 'untilPass' ? ' on' : ''}` : 'Decide';
+    go.textContent = goLabel(option, scope, n, day);
   };
   const submit = async () => {
     if (!option) return;
     go.disabled = true;
-    const chosen = option;
-    const entry = await decide(r, chosen, scope, reason);
+    const entry = await decide(r, option, scope, reason);
     if (!entry) return sync();
     const now = pauseOf(r);
-    const out = now?.state === 'asis' ? 'Published as is' : now?.state === 'dont' ? 'Not published' : 'Decided, not yet published';
-    foot.replaceChildren(h('p', { class: 'vf-receipt' }, glyphEl(PAUSE_MARK[now?.state ?? 'waiting'], 16), `${out} · ${personName(entry.by.as)} · ${clock(entry.at)}`), h('button', { type: 'button', class: 'linkish', onclick: () => (location.hash = '#runs') }, `Record #${entry.seq} ✓`));
+    const l = pauseLines({ state: now?.state ?? 'waiting', outputs: n, who: personName(entry.by.as), at: clock(entry.at), under: null, may: true, deciders: deciders() });
+    foot.replaceChildren(h('p', { class: 'vf-receipt' }, glyphEl(PAUSE_MARK[now?.state ?? 'waiting'], 16), now?.state === 'waiting' ? 'Decided, not yet published' : l.reach), h('button', { type: 'button', class: 'linkish', onclick: () => ((ribbonPick = day), (location.hash = '#runs')) }, `Record #${entry.seq} ✓`));
     for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('.vf-detail .vf-option, .vf-detail .vf-seg-b, .vf-detail .vf-reason'))) b.disabled = true;
   };
-  const pause = pauseOf(r)?.pause;
-  if (!day) scope = 'day';
-  openDetail(`${day ? `${dayMid(day)} · w` : 'W'}hat readers get`, 'ok', [
-    oneLine(waited(pause ? ledger?.entries[pause.opened]?.at : undefined)),
-    scopes, rows, chips, foot]);
+  openDetail(t.title, 'ok', [oneLine(t.status), scopes, rowsEl, chips, foot]);
   document.querySelector('.vf-detail .vf-dhead h3')?.prepend(glyphEl('held', 16));
-  void story;
   sync();
 }
 
@@ -6410,8 +6447,80 @@ function backtestLine(ranges: NormalRanges, m: Metric): HTMLElement | null {
   return h('p', { class: 'foot' }, `Over the year before, ${shortDay(from)}, ${from.slice(0, 4)} to ${shortDay(to)}, ${to.slice(0, 4)}: ${plural(b.ordinary.outside, 'ordinary day')} of ${fmtInt(b.ordinary.days)} (${pct(b.ordinary.outside / b.ordinary.days)}) fell outside their range, and ${b.special.outside} of ${plural(b.special.days, 'holiday')}${holidays.length ? `: ${listed(holidays.slice(0, 4))}${holidays.length > 4 ? ` and ${holidays.length - 4} more` : ''}` : ''}.`);
 }
 
+/** The paused day opened on the Runs view's ribbon. */
+let ribbonPick: string | null = null;
+
+/** Every day the flow on screen held, in this visit or an earlier one, with what became of it. */
+function pausedDays(): { day: string; state: PauseState }[] {
+  const flow = state.runs[0]?.result.manifest.flow.hash;
+  const days = new Set<string>();
+  for (const r of state.runs) {
+    const d = dayOfRun(r);
+    if (d && pauseOf(r)) days.add(d);
+  }
+  for (const p of pauses()) if (p.day && (!flow || p.inputs.flow === flow)) days.add(p.day);
+  return [...days].map((day) => ({ day, state: dayPause(day) })).filter((x): x is { day: string; state: PauseState } => x.state !== null);
+}
+
+/**
+ * The record of decisions (ADR 0009 §12): the Runs view opens on a ribbon of the paused days, by month, each its date
+ * and its mark; a tap opens its card.
+ */
+function renderRibbon(): void {
+  const box = document.getElementById('paused-days');
+  if (!box) return;
+  const days = pausedDays();
+  box.hidden = !days.length;
+  if (!days.length) return void box.replaceChildren();
+  if (ribbonPick && !days.some((d) => d.day === ribbonPick)) ribbonPick = null;
+  box.replaceChildren(
+    h('p', { class: 'eyebrow' }, 'Paused days'),
+    h('div', { class: 'ribbon', role: 'group', 'aria-label': 'Paused days: tap one for its decision' }, ...ribbonOf(days).map((g) => h('div', { class: 'rb-month' },
+      h('span', { class: 'rb-m' }, g.month),
+      ...g.days.map((d) => h('button', { type: 'button', class: `rb-day ${d.state}`, 'aria-pressed': String(ribbonPick === d.day), 'aria-label': `${dayMid(d.day)}: ${PAUSE_PILL[d.state]}`, onclick: () => ((ribbonPick = ribbonPick === d.day ? null : d.day), renderRibbon()) },
+        h('span', { class: 'rb-date' }, d.date), glyphEl(PAUSE_MARK[d.state], 14)))))),
+    ribbonPick ? decidedCard(ribbonPick) : '');
+}
+
+/**
+ * A paused day's card on the Runs view: its head and mark, its rows drawn small, who decided how long after it was held
+ * and why, and where it is in the record; its hashes one tap further. A day still waiting says how long, and opens the
+ * day to decide it.
+ */
+function decidedCard(day: string): HTMLElement {
+  const st = dayPause(day) ?? 'waiting';
+  const run = state.runs.find((x) => dayOfRun(x) === day);
+  const flow = state.runs[0]?.result.manifest.flow.hash;
+  const p = (run ? pauseByInputs(run.inputs) : null) ?? pauses().filter((x) => x.day === day && (!flow || x.inputs.flow === flow)).at(-1) ?? null;
+  const d = p?.decision ?? null;
+  const opened = p ? ledger?.entries[p.opened] : undefined;
+  const underDay = d?.about.under !== undefined ? (ledger?.entries[d.about.under]?.about as { day?: string } | undefined)?.day : undefined;
+  const minutes = opened ? ((d ? Date.parse(d.at) : Date.now()) - Date.parse(opened.at)) / 60000 : null;
+  const l = decidedLines({ day, state: st, who: d ? personName(d.by) : null, minutes, reason: d?.reason ?? null, run: run?.result.run ?? p?.run ?? null, seq: d?.seq ?? null, under: underDay ? dayShort(underDay).split(' ')[0]! : null });
+  // The day's own rows, small, as the decision sheet draws them.
+  const k = history ? history.file.days.indexOf(day) : -1;
+  const rows = tripsOf(run) ?? (k >= 0 ? history!.file.rows[k]! : null);
+  const story = history && historyOpen() && k >= 0 ? storyFor(day) : null;
+  const draw = rows !== null ? decisionDrawing(history, story, day, null, { day: rows, readers: null }) : null;
+  const decide = d ? ledger?.entries[d.seq] : undefined;
+  const released = d ? ledger?.entries.find((e) => e.kind === 'release' && (e.about as { decision?: number }).decision === d.seq && (e.about as { outcome?: string }).outcome === 'applied') : undefined;
+  const at = loads.list.findIndex((x) => x.day === day);
+  const hashes = h('div', { class: 'rb-hashes', hidden: true },
+    p ? h('p', { class: 'rec-root' }, 'Manifest: ', hash4(p.manifest, 'manifest hash')) : '',
+    decide ? h('p', { class: 'rec-root' }, `Decision #${decide.seq}: `, hash4(entryLeaf(decide), 'decision’s record leaf')) : '',
+    released ? h('p', { class: 'rec-root' }, `Release #${released.seq}: `, hash4(entryLeaf(released), 'release’s record leaf')) : '');
+  return h('div', { class: 'rb-card' },
+    h('h3', { class: 'rb-head' }, glyphEl(PAUSE_MARK[st], 16), l.head),
+    draw ? svgNode(decisionRow({ mark: null, label: `${fmtInt(rows!)} trips`, number: '', cause: draw.cause, rows: draw.asis, usual: draw.usual, short: draw.short, scale: draw.scale, part: draw.part, ticks: draw.ticks, aria: `${dayMid(day)}: ${fmtInt(rows!)} trips${story ? `, ${story.head}` : ''}` })) : '',
+    l.who ? h('p', { class: 'rb-who' }, l.who) : '',
+    l.where ? h('button', { type: 'button', class: 'linkish rb-where', 'aria-expanded': 'false', onclick: (e: Event) => { hashes.hidden = !hashes.hidden; (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!hashes.hidden)); } }, l.where) : '',
+    hashes,
+    st === 'waiting' && at >= 0 ? h('button', { type: 'button', class: 'btn small', onclick: () => { location.hash = '#flow'; void useLoad(at); } }, `Open ${dayShort(day)} ›`) : '');
+}
+
 function renderRuns(): void {
   renderRecord();
+  renderRibbon();
   const list = $('runs-list');
   if (state.runs.length === 0) {
     list.replaceChildren(h('li', { class: 'panel' }, h('p', { class: 'foot' }, state.failed ? state.failed.message : 'The first run starts as soon as the data is loaded.')));
@@ -6963,6 +7072,15 @@ const KIND_WORD: Record<string, (e: { about: Record<string, unknown>; by: { as: 
 };
 const ROUTINE = new Set(['file', 'sign']);
 
+/** A record line's mark (ADR 0009 §12): ‖ a held run, ⚑ or ✕ a decision, ⚑ an applied release. */
+function recordMark(e: { kind: string; about: unknown }): VizMark | null {
+  const a = e.about as { outcome?: string; option?: string };
+  if (e.kind === 'run' && a.outcome === 'held') return 'held';
+  if (e.kind === 'decide') return a.option === 'asis' ? 'flag' : 'closed';
+  if (e.kind === 'release' && a.outcome === 'applied') return 'flag';
+  return null;
+}
+
 function renderRecord(): void {
   const box = document.getElementById('record');
   if (!box) return;
@@ -6979,7 +7097,8 @@ function renderRecord(): void {
   const routine = recent.filter((e) => ROUTINE.has(e.kind)).length;
   const line = (e: (typeof recent)[number]) => {
     const say = KIND_WORD[e.kind];
-    return h('li', {}, h('span', { class: 'seq' }, `#${e.seq}`), h('span', {}, say ? say(e as never) : e.kind), h('span', { class: 'when' }, `${new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${personName(e.by.as)}`));
+    const mark = recordMark(e);
+    return h('li', {}, h('span', { class: 'seq' }, `#${e.seq}`), h('span', { class: mark ? 'rec-marked' : '' }, mark ? glyphEl(mark, 14) : '', say ? say(e as never) : e.kind), h('span', { class: 'when' }, `${new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${personName(e.by.as)}`));
   };
   const pick = h('input', { type: 'file', accept: '.json,application/json', hidden: true }) as HTMLInputElement;
   pick.addEventListener('change', () => void checkAgainst(pick.files?.[0]));

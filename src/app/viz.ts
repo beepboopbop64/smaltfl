@@ -1067,9 +1067,9 @@ export function stripBar({ v, low, high, ymax, sev }: { v: number; low: number |
  * hours, a part's or the rest's missing trips, the day below its range) is absent, a wash with a dashed edge, and
  * nothing else is dashed; no rows at all (nothing published) is one dashed frame. A count that isn't zero is never under
  * 3 px. `ticks` draws the shared axis under the rows, on the sheet's last row only; `off` greys a row that can't be
- * chosen.
+ * chosen. Without a mark (a card whose head carries it), the words start at the left edge.
  */
-export function decisionRow(o: { mark: Mark; label: string; number: string; cause: DrawCause; rows: ReaderRows | null; usual?: ReaderRows | null; short?: readonly [number, number] | null; other?: boolean; scale: number; part?: string | null; ticks?: readonly (readonly [number, string])[]; off?: boolean; aria: string; w?: number }): string {
+export function decisionRow(o: { mark: Mark | null; label: string; number: string; cause: DrawCause; rows: ReaderRows | null; usual?: ReaderRows | null; short?: readonly [number, number] | null; other?: boolean; scale: number; part?: string | null; ticks?: readonly (readonly [number, string])[]; off?: boolean; aria: string; w?: number }): string {
   const w = o.w ?? 300;
   const partH = o.cause === 'split' && o.part && !o.other ? 14 : 0;
   const top = 28 + partH;
@@ -1080,9 +1080,9 @@ export function decisionRow(o: { mark: Mark; label: string; number: string; caus
   const scale = Math.max(1, o.scale);
   const fill = o.other ? 'hatch-col' : 'ink-strong';
   let s = open(w, h, o.aria, `data-y0="0" data-cause="${o.cause}"${o.off ? ' data-off="true"' : ''}`).replace('class="viz"', `class="viz decide-row${o.off ? ' off' : ''}"`);
-  s += `<g transform="translate(0 2)">${glyph(o.mark, 16)}</g>`;
-  s += `<text x="24" y="15" class="opt-l">${esc(o.label)}</text>`;
-  s += `<text x="${w}" y="15" text-anchor="end" class="opt-n">${esc(o.number)}</text>`;
+  if (o.mark) s += `<g transform="translate(0 2)">${glyph(o.mark, 16)}</g>`;
+  s += `<text x="${o.mark ? 24 : 0}" y="15" class="opt-l">${esc(o.label)}</text>`;
+  if (o.number) s += `<text x="${w}" y="15" text-anchor="end" class="opt-n">${esc(o.number)}</text>`;
   if (!o.rows) {
     // Nothing for readers: the whole day absent.
     s += `<rect class="absent" x="0.75" y="${top}" width="${f1(w - 1.5)}" height="${drawH}" rx="3"/>`;
