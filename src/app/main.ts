@@ -17,6 +17,7 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, t
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
+import { noRowsBefore, rowsFrom, shownRun, stoppedLine as stoppedWords } from '../core/days.js';
 import { STRIP_KEY, approx, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, dayStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
@@ -132,6 +133,18 @@ function viewDoc(): FlowDocument {
   };
 }
 
+/**
+ * A published dataset's rows as the viewer may read them, from the run on screen (on a held day, the last day before
+ * it that passed, not whatever ran last), as a subquery, or null when closed.
+ */
+async function readOutput(name: string): Promise<string | null> {
+  const run = latest();
+  if (!run || !state.engine) return null;
+  const insp = await inspect(run);
+  const o = insp.plan.outputs.find((x) => x.name === name);
+  return o ? readIn(insp, o.node) : readDataset(name);
+}
+
 /** A stored dataset's rows as the viewer may read them, as a subquery, or null when closed. */
 const readDataset = (name: string): string | null => {
   const view = access(name);
@@ -209,7 +222,27 @@ function syncHead(): void {
 
 const steps = () => new Map(state.doc.steps.map((st) => [st.id, st]));
 const sourceIds = () => new Set(state.doc.sources.map((src) => src.id));
-const latest = () => state.runs[0];
+/**
+ * The run on screen (ADR 0008 §10): the viewed day's own, or after a held or refused run the latest day before it that
+ * passed, never a later day's. Every view reads its rows through this one.
+ */
+const latest = (): RunRecord | undefined => {
+  const viewed = loads.list.length > 1 ? loads.list[loads.at]?.day : undefined;
+  const k = shownRun(state.runs.map((r) => (r.load !== undefined ? loads.list[r.load]?.day : undefined)), viewed);
+  return k < 0 ? undefined : state.runs[k];
+};
+/** The day of the run on screen, where runs are by day. */
+const shownDay = (): string | undefined => {
+  const r = latest();
+  return r?.load !== undefined ? loads.list[r.load]?.day : undefined;
+};
+/** The day on screen: the load picked in the strip. */
+const viewedDay = (): string | undefined => (loads.list.length > 1 ? loads.list[loads.at]?.day : undefined);
+/** The date bar for rows on screen that are another day's, or null. */
+const rowsFromBar = (): HTMLElement | null => {
+  const text = rowsFrom(shownDay(), viewedDay());
+  return text ? h('p', { class: 'rows-from', role: 'note' }, text) : null;
+};
 const nodeOf = (id: string): ManifestNode | undefined => latest()?.result.manifest.nodes.find((n) => n.origin === id);
 
 const KIND: Record<string, string> = { sql: 'SQL', filter: 'FILTER', formula: 'FORMULAS', select: 'SELECT', join: 'JOIN', aggregate: 'AGGREGATE', expectations: 'CHECKS' };
@@ -432,11 +465,14 @@ async function changeOf(insp: Inspection, i: number, who = state.viewer): Promis
 }
 
 let changesRun = 0;
+/** The run the steps' changes were worked out for: the run on screen, whose day may change without a run passing. */
+let changesFor = '';
 
 /** Work out every step's change for the latest run, as the viewer reads it; each card updates as its own arrives. */
 async function computeChanges(): Promise<void> {
   const run = latest();
   if (!run || !state.engine) return;
+  changesFor = run.result.hash;
   const token = ++changesRun;
   state.changes = new Map();
   try {
@@ -523,6 +559,7 @@ function cardLine(id: string): CardLine {
   const out = outputState(id);
   if (out === 'stale') return plain('not published');
   if (out === 'alert') return plain('built from an alert');
+  if (notBuilt(id)) return plain('not built today');
   const view = access(id);
   if (view && !view.open) return plain(`closed to ${personName(state.viewer)}`);
   const n = nodeOf(id);
@@ -549,6 +586,12 @@ function shortHead(story: Story): string {
   if (story.hero === 'gate' && story.gate) return `held · ${fmtInt(story.gate.dropped)} of ${fmtInt(story.gate.rows)}`;
   return story.head.split(/\s+/).length <= 4 ? story.head : story.head.split(/\s+/).slice(0, 4).join(' ');
 }
+
+/**
+ * A step after the one that held, or after a refused file: nothing of it was built from the day's load, so its card
+ * says so instead of another day's counts (ADR 0008 §10).
+ */
+const notBuilt = (id: string): boolean => !!state.failed?.origin && state.failed.origin !== id && downstreamOf(state.failed.origin).includes(id);
 
 /** An output on the day: not published (its run was held or refused upstream), built from a day with something wrong
  * upstream, or neither. */
@@ -1230,6 +1273,7 @@ function renderCanvas(): void {
     if (cday && id === loadSource() && storyFor(cday)?.severity === 'alert') classes.push('cause');
     const os = outputState(id);
     if (os) classes.push(os === 'stale' ? 'not-published' : 'from-alert');
+    else if (notBuilt(id)) classes.push('not-published');
     else if (readable && !readable.open) classes.push('closed');
     else if (n) classes.push(n.status);
     if (state.selected === id) classes.push('selected');
@@ -1980,9 +2024,14 @@ async function renderDrill(card: string): Promise<void> {
   await useLookups(who);
   if (token !== drill.token) return;
   try {
-    const content = latest() && state.engine ? await TABS[tab](card, id, who) : h('p', { class: 'foot' }, 'Run the flow to see its data.');
+    // A held day with no day before it that passed in this visit has no rows to show: its news still says the day.
+    const viewed = viewedDay();
+    const none = !latest() && state.runs.length && viewed ? noRowsBefore(viewed) : 'Run the flow to see its data.';
+    const content = state.engine && (latest() || (tab === 'news' && state.failed)) ? await TABS[tab](card, id, who) : h('p', { class: 'foot' }, none);
     if (token !== drill.token) return;
-    panel.replaceChildren(content);
+    // Rows of another day carry that day, full width, over the whole panel (ADR 0008 §10).
+    const bar = showsRunRows(card, tab) ? rowsFromBar() : null;
+    panel.replaceChildren(...(bar ? [bar] : []), content);
     panel.removeAttribute('aria-busy');
     // The news is known now for a table measured on opening it: its badge on the tab.
     sheet.querySelector('.drill-head')?.replaceWith(drillHead(card, tabs, tab));
@@ -1994,6 +2043,19 @@ async function renderDrill(card: string): Promise<void> {
   } catch (e) {
     if (token === drill.token) panel.replaceChildren(h('p', { class: 'status bad' }, message(e)));
   }
+}
+
+/**
+ * Whether a tab shows the rows of the run on screen, all of it, rather than the history's figures for the day: those
+ * carry the date bar when the run is another day's. Only what the daily load reaches changes from day to day (the
+ * weather and the zones are the same rows on every run). News and Dropped place their own bar, under the day's own
+ * figures.
+ */
+function showsRunRows(card: string, tab: Tab): boolean {
+  const id = dataOf(card);
+  const src = loadSource();
+  if (!src || (id !== src && !downstreamOf(src).includes(id))) return false;
+  return tab !== 'news' && tab !== 'dropped' && tab !== 'history';
 }
 
 /** The sheet's head: the card, where it sits in the flow, the day, and the tabs. */
@@ -2022,15 +2084,14 @@ function drillHead(card: string, tabs: Tab[], tab: Tab): HTMLElement {
 /** A run that stopped on this load, said from any tab: what stopped it, and whose rows are on screen. */
 function stoppedLine(card: string, tab: Tab): HTMLElement | null {
   if (!state.failed) return null;
-  const was = latest()?.load;
-  const shown = was !== undefined ? loads.list[was]?.day : undefined;
   const now = loads.list[loads.at]?.day;
-  // One line: what stopped it, and whose rows are on screen (ADR 0008: a state, said short).
-  const showing = shown && shown !== now ? ` · showing ${WEEKDAY_NAMES[dateOf(shown).getUTCDay()]!.slice(0, 3)} ${dateOf(shown).getUTCDate()}` : '';
+  // One line: what stopped it, and what the outputs keep (ADR 0008: a state, said short; the panels showing those rows
+  // carry their own day).
+  const said = stoppedWords({ refused: !!state.failed.file, origin: state.failed.origin, shown: shownDay(), viewed: now ?? '' });
   return h('p', { class: 'stopped-line', role: 'status' },
     state.failed.file ? '' : glyphEl('held', 13),
-    h('b', {}, state.failed.file ? 'File refused' : state.failed.origin ? `Held at ${state.failed.origin}` : 'The run stopped'),
-    showing,
+    h('b', {}, said.lead),
+    now ? ` · ${said.tail}` : '',
     tab !== 'news' ? h('button', { type: 'button', class: 'linkish', onclick: () => openTab(card, 'news') }, ' Why ›') : null);
 }
 
@@ -2217,6 +2278,8 @@ async function dataTab(card: string, id: string, who: string): Promise<HTMLEleme
 /** A column's mark on its row: the news about it (its glyph and the number that moved; ↳ in grey when the day's cause
  * explains it), or a ring when a number of it is outside its range without being news. */
 function colMark(id: string, p: Profile, out: readonly Judged[]): HTMLElement | null {
+  // The day's marks, never beside another day's rows (ADR 0008 §10).
+  if (rowsFrom(shownDay(), viewedDay())) return null;
   // The hours the trips fall are the pickup times': that column carries the day's cause.
   const day = newsDay();
   const story = day && historyOf(id) === 'trips' ? storyFor(day) : null;
@@ -2236,6 +2299,8 @@ function colMark(id: string, p: Profile, out: readonly Judged[]): HTMLElement | 
 }
 
 function columnFlag(id: string, p: Profile): { severity: Severity; title: string } | null {
+  // Never beside another day's rows (ADR 0008 §10).
+  if (rowsFrom(shownDay(), viewedDay())) return null;
   const f = idNews(id).find((x) => x.columns?.includes(p.name) && x.severity !== 'ok');
   return f ? { severity: f.severity, title: f.title } : null;
 }
@@ -2250,7 +2315,10 @@ async function columnsTab(card: string, id: string, who: string): Promise<HTMLEl
   if (!q) return h('p', { class: 'foot' }, 'Closed.');
   const meanings = meaningsOf(id);
   const types = new Map(insp.plan.nodes[i]!.schema!.map(([c, t]) => [c, t as string]));
-  const day = newsDay();
+  // Rows of another day (a held day's last day that passed) are told as they are, under their date bar: the day's own
+  // marks and badges aren't put beside them (ADR 0008 §10: never two days in one panel).
+  const stale = !!rowsFrom(shownDay(), viewedDay());
+  const day = stale ? undefined : newsDay();
   const normalDay = day && historyOf(id) === 'trips' ? day : undefined;
   const open = drill.column.get(card);
   const flags = (column: string) => q.suggestions.filter((x) => x.column === column && x.failing > 0).map((x) => `${x.check} flags ${plural(x.failing, 'row')}`);
@@ -2260,7 +2328,7 @@ async function columnsTab(card: string, id: string, who: string): Promise<HTMLEl
   const story = day && historyOf(id) === 'trips' ? storyFor(day) : null;
   const rank = (p: Profile) => {
     if (story?.hero === 'hours' && /pickup/i.test(p.name) && p.kind === 'time') return -1;
-    const f = idNews(id).find((x) => x.columns?.includes(p.name) && x.severity !== 'ok') as Told | undefined;
+    const f = stale ? undefined : (idNews(id).find((x) => x.columns?.includes(p.name) && x.severity !== 'ok') as Told | undefined);
     return !f ? 3 : f.tier === 'cause' || f.tier === 'standalone' ? SEV_RANK[f.severity] : 2.5;
   };
   const ordered = [...q.profiles].map((p, k) => ({ p, k, r: rank(p) })).sort((a, b) => a.r - b.r || a.k - b.k).map((x) => x.p);
@@ -2299,8 +2367,8 @@ async function columnsTab(card: string, id: string, who: string): Promise<HTMLEl
 /** A column's story, in order: what it is, how full, its shape or values, what is normal for it, what is new, and what to do. */
 function columnStory(card: string, id: string, p: Profile, q: Quality, type: string, m: PropertyType | undefined, normal: ColumnNormal | undefined, flags: string[]): Child[] {
   const out: Child[] = [columnCard(p, type, undefined, undefined, flags, m, normal)];
-  // The day's news about it, with what can be done.
-  for (const f of idNews(id).filter((x) => x.columns?.includes(p.name) && x.severity !== 'ok')) out.push(findingCard(f, card));
+  // The day's news about it, with what can be done: only beside the day's own rows.
+  if (!rowsFrom(shownDay(), viewedDay())) for (const f of idNews(id).filter((x) => x.columns?.includes(p.name) && x.severity !== 'ok')) out.push(findingCard(f, card));
   // Its history, where the history keeps it: its share missing, and its median.
   if (history && historyOf(id) === 'trips') {
     const metrics: { m: Metric; label: string; fmt: (v: number) => string }[] = [];
@@ -2861,8 +2929,8 @@ function lineageVisual(g: Gate): Element | null {
 /** The gate, told in visuals: the share against the limit and the rows against a day like it, each rule, what it held. */
 function gateBlocks(g: Gate, day: string, countMax?: number): (Node | null)[] {
   const wd = WEEKDAY_NAMES[dateOf(day).getUTCDay()]!;
-  const was = latest()?.load;
-  const shown = was !== undefined ? loads.list[was]?.day : undefined;
+  // What the outputs keep: said only of the day on screen, whose held run left them so.
+  const keep = day === viewedDay() ? stoppedWords({ refused: false, origin: g.step, shown: shownDay(), viewed: day }).tail : null;
   // Said from the figures: "most rows were missing" only when under half the rows a day like it has arrived.
   const trips = rangesOf({ of: 'trips' })?.at(day);
   const arrived = trips ? g.rows / Math.max(1, trips.expected) : null;
@@ -2871,7 +2939,7 @@ function gateBlocks(g: Gate, day: string, countMax?: number): (Node | null)[] {
     g.held && g.usual && g.dropped < g.usual.low && why ? oneLine(`Fewer rows dropped than on a usual ${wd}; ${why}.`) : null,
     block('Dropped, and the limit', gateVisual(g, true, countMax)),
     block('Rows each rule failed', rulesVisual(g)),
-    g.held ? block('What it held back', lineageVisual(g), shown && shown !== day ? h('p', { class: 'vf-sub' }, `last published ${WEEKDAY_NAMES[dateOf(shown).getUTCDay()]!.slice(0, 3)} ${dateOf(shown).getUTCDate()}`) : null) : null,
+    g.held ? block('What it held back', lineageVisual(g), keep ? h('p', { class: 'vf-sub' }, keep.replace(/^./, (c) => c.toUpperCase())) : null) : null,
   ];
 }
 
@@ -3099,21 +3167,22 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     box.append(...(kind === 'checks' ? checksNews(card, story) : storyNews(card, story)));
     return box;
   }
-  // The run on this load stopped: a gate held (a check dropping more than it may), and what is on screen is the last
-  // run that finished. The day's news, from the history, still follows.
+  // The run on this load stopped: a gate held (a check dropping more than it may), so nothing after it was built from
+  // this load, and the rows below are the last day that passed, under their date bar (ADR 0008 §10).
   if (state.failed) {
-    const was = latest()?.load;
-    const shown = was !== undefined ? loads.list[was]?.day : undefined;
-    const now = loads.list[loads.at]?.day;
-    const still = shown && shown !== now ? `: the rows on screen are still ${dayLabel(shown)}’s` : '';
+    const now = viewedDay();
     const refused = state.failed.file;
-    box.append(h('div', { class: 'verdict alert stopped' },
+    const origin = state.failed.origin;
+    const after = !origin || downstreamOf(origin).includes(dataOf(card));
+    const g = storyDay ? storyFor(storyDay)?.gate : null;
+    const said = g?.held && g.step === origin ? gateLabels(g) : null;
+    if (after) box.append(h('div', { class: 'verdict alert stopped' },
       h('p', { class: 'v-day' }, now ? dayLabel(now) : ''),
-      h('h3', { class: 'v-head' }, refused ? 'This day’s file was refused' : state.failed.origin ? `The run stopped at ${state.failed.origin}` : 'The run stopped'),
-      h('p', { class: 'v-line' }, refused
-        ? `${describeFile(refused).detail} Nothing ran on it${still}. It is the integrity gate working: only bytes that hash to what the data’s list publishes are used.`
-        : `${state.failed.message.replace(/\.$/, '')}. Nothing after it was built from this load${still}. It is the flow’s own gate working: a load this far off is held back rather than published.`),
-      state.failed.origin && state.failed.origin !== dataOf(card) ? h('button', { type: 'button', class: 'btn small', onclick: () => select(state.failed!.origin!) }, `Open ${state.failed.origin} ›`) : null));
+      h('h3', { class: 'v-head' }, glyphEl('held', 16), refused ? 'Not built: the file was refused' : origin ? `Not built: held at ${origin}` : 'The run stopped'),
+      h('p', { class: 'v-line' }, refused ? describeFile(refused).title : said ? `${said.share}${said.limit ? ` · ${said.limit}` : ''}` : state.failed.message),
+      origin && origin !== dataOf(card) ? h('button', { type: 'button', class: 'btn small', onclick: () => select(origin) }, `Open ${origin} ›`) : null));
+    const bar = rowsFromBar();
+    if (bar) box.append(bar);
   }
   if (!kind) await tableNewsFor(id, who);
   const findings = cardNews(card);
@@ -3277,10 +3346,9 @@ async function droppedTab(card: string, id: string, who: string): Promise<HTMLEl
   // The rows on screen: this load's run, or, when the checks held it, the last run that finished, labelled as such.
   const panel = await changePanel(id, who);
   if (panel) {
-    const was = latest()?.load;
-    const shown = was !== undefined ? loads.list[was]?.day : undefined;
-    const stale = !!state.failed && shown && shown !== loads.list[loads.at]?.day;
-    box.append(h('div', { class: `part did${stale ? ' stale' : ''}` }, stale ? h('p', { class: 'vf-stale' }, `Rows of ${dayLabel(shown!)}’s run`) : null, panel.box));
+    // Rows of another day under a full-width date bar: the gate above is the day's own, never mixed with them.
+    const bar = rowsFromBar();
+    box.append(h('div', { class: `part did${bar ? ' stale' : ''}` }, bar, panel.box));
   }
   return box;
 }
@@ -4580,21 +4648,23 @@ async function renderResults(): Promise<void> {
   // Only what the viewer can read: an output closed to them isn't listed, and a result built on one isn't shown.
   const outputs = Object.entries(run.result.manifest.outputs).filter(([name]) => visible(name));
   const owner = isOwner();
+  // On a held day the outputs keep the last day before it that passed: said over them (ADR 0008 §10).
   $('datasets').replaceChildren(
+    rowsFromBar() ?? '',
     outputs.length
       ? h('ul', { class: 'runs' }, ...outputs.map(([name, d]) => h('li', {}, h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: () => select(name) }, name), owner ? h('span', { class: 'foot num' }, `${fmtInt(d.rows)} rows`) : null, h('span', { class: 'hash' }, short(d.content))))))
       : h('p', { class: 'foot' }, `No output is open to ${personName(state.viewer)}.`),
   );
   try {
-    const zh = readDataset('zone_hour');
+    const zh = await readOutput('zone_hour');
     $('zones-panel').hidden = !zh;
     if (zh) {
       const zones = await engine.query(
         `SELECT pu_zone AS zone, pu_borough AS borough, sum(trips) AS trips, round(sum(avg_duration_min * trips) / sum(trips), 1) AS minutes, round(sum(avg_speed_mph * trips) / sum(trips), 1) AS mph FROM (${zh}) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 8`,
       );
-      $('zones-table').replaceChildren(table(zones.columns, zones.rows, undefined, false, meaningsOf('zone_hour')));
+      $('zones-table').replaceChildren(rowsFromBar() ?? '', table(zones.columns, zones.rows, undefined, false, meaningsOf('zone_hour')));
     }
-    const we = readDataset('weather_effect');
+    const we = await readOutput('weather_effect');
     $('effect-panel').hidden = !we;
     if (!we) return;
     // A day's load has each hour once: a wet hour has no dry one at its time of day to set against. With daily
@@ -4884,7 +4954,7 @@ async function renderOntology(): Promise<void> {
   const counts = new Map<string, number | null>();
   if (latest() && engine) {
     for (const t of types) {
-      const sql = readDataset(t.dataset);
+      const sql = await readOutput(t.dataset);
       counts.set(t.id, sql ? Number((await engine.query(`SELECT count(*) FROM (${sql})`)).rows[0]![0]) : null);
     }
   }
@@ -4910,7 +4980,7 @@ async function renderOntology(): Promise<void> {
   if (!t || !engine || !latest()) {
     objects.replaceChildren(h('p', { class: 'foot' }, latest() ? 'Choose an object type to see its objects.' : 'Run the flow to see the objects.'));
   } else {
-    const sql = readDataset(t.dataset);
+    const sql = await readOutput(t.dataset);
     const head = h('div', {}, h('h2', {}, t.name), h('p', { class: 'sub' }, `${t.description ?? ''} Read as ${personName(state.viewer)}.`));
     if (!sql) {
       objects.replaceChildren(head, h('p', { class: 'status bad' }, `Closed to ${personName(state.viewer)}: ${access(t.dataset)?.reason}.`));
@@ -5256,6 +5326,13 @@ async function runLoad(k: number): Promise<void> {
   renderLoads();
 }
 
+/** When the run on screen changed without a run passing (a held or refused day), its columns and changes follow it. */
+function syncShown(): void {
+  const r = latest();
+  if (!r || r.result.hash === changesFor) return;
+  void learnColumns().then(() => computeChanges());
+}
+
 /** A load whose file was refused: it doesn't run, the last good run stays on screen, and every sheet says why. */
 function refuse(k: number, e: unknown): void {
   const l = loads.list[k]!;
@@ -5268,6 +5345,7 @@ function refuse(k: number, e: unknown): void {
   state.failed = { origin: loadSource(), message: `${said.title}. ${said.detail}`, file: check };
   attempts++;
   setStatus(`${dayLabel(l.day)}: ${said.title}.`, check.class !== 'not-checked', { n: attempts, state: 'refused' });
+  syncShown();
   renderLoads();
   renderCanvas();
   if (state.selected) void renderSheet();
@@ -5323,6 +5401,8 @@ function healthOf(card: string): Severity | undefined {
   // The trips' card carries the day's mark; their profile is grouped under it, without a mark of its own.
   if (story && kind === 'trips') return profileOf(card) ? undefined : story.severity;
   if (story?.gate?.held && kind === 'checks') return 'alert';
+  // Nothing of it was built from the day: no dot from another day's rows.
+  if (notBuilt(dataOf(card))) return undefined;
   const news = cardNews(card);
   return news.length ? news.reduce((w, f) => (SEV_RANK[f.severity] < SEV_RANK[w] ? f.severity : w), 'ok' as Severity) : undefined;
 }
@@ -5692,6 +5772,8 @@ async function run(): Promise<void> {
   } finally {
     state.running = false;
     $<HTMLButtonElement>('run').disabled = false;
+    // A held run leaves on screen the last day before it that passed, which may not be the run counted last.
+    syncShown();
     renderCanvas();
     renderRuns();
     if (state.selected) void renderSheet();

@@ -133,6 +133,16 @@ where about 35,000 are usual, and everything else held.
    their ranges): Sep 11–16, 2022 become notes, Sep 7–10 stay unusual. Over Jan 2023 to Jan 2024 no day changes; over
    2022 to Jan 2024, 8 days go from unusual to notes (those six and Jan 10 and 13, 2022, weeks of fewer trips).
 
+10. **A day shows that day** (src/core/days.ts). Loads arrive one a day, as a feed brings them, and the flow publishes
+    only a run that passes, so after a held or refused run its outputs keep the last day that passed. Every view reads
+    one run: the viewed day's own, else the newest run of the latest day before it that passed in this visit, never a
+    later day's (stepping to Tue 26 and back to Sat 23 shows Thu 21's rows, not Tue 26's; a day reached straight from
+    the episode's first shows that first day, said so). The held line says what stopped the run and what the outputs
+    keep ("‖ Held at trips_valid · outputs keep Thu 21"); a panel whose rows are another day's carries that day as a
+    full-width hatched bar ("Rows from Thu Sep 21 · the last day that passed"), under the day's own figures where a
+    panel has both (the gate, then the last day's dropped rows), and the day's marks and badges are never put beside
+    those rows. A step after the one that held says "not built today", hatched, with no dot or seal from another day.
+
 ## Consequences
 
 - news.ts finds; story.ts tells. newsOf no longer folds findings ("Likely from …" is gone); its titles and details
