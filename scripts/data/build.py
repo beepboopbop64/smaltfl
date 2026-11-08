@@ -42,6 +42,11 @@ EPISODES = [
     ('September 2022', '2022-09-14', '2022-09-20', 'The records stop part way through Saturday the 17th, and hold almost no trips on Sunday.'),
     ('November 2022', '2022-11-12', '2022-11-21', 'A week with about a quarter fewer trips than the weeks around it, every day.'),
 ]
+# Days a paused day may be filled from (ADR 0009 §7): for each episode day that is off, the same weekday before it that
+# the history says nothing wrong of (Sep 21–24, 2023 from Sep 14–17; Sep 17–18, 2022 from Sep 10–11; Nov 14–18, 2022
+# from Nov 7, Nov 1 (Nov 8 was off), Nov 9–11). The nearest good day before or after is already among the episodes'.
+DONORS = ['2022-09-10', '2022-09-11', '2022-11-01', '2022-11-07', '2022-11-09', '2022-11-10', '2022-11-11',
+          '2023-09-14', '2023-09-15', '2023-09-16', '2023-09-17']
 TLC = 'https://d37ci6vzurychx.cloudfront.net'
 WEATHER = 'https://archive-api.open-meteo.com/v1/archive'
 # One point per district (ADR 0002 §2): the centre of each borough, and Newark airport. Names as the zone lookup has them.
@@ -171,7 +176,7 @@ def main() -> None:
     for name, lo, hi, _ in EPISODES:
         d0 = datetime.fromisoformat(lo)
         episode_days[name] = [(d0 + timedelta(days=d)).date().isoformat() for d in range((datetime.fromisoformat(hi) - d0).days + 1)]
-    wanted = {d for days in episode_days.values() for d in days}
+    wanted = {d for days in episode_days.values() for d in days} | set(DONORS)
     schemas = []
 
     # The history: every day of the month and the 27 before it, a file a day in WORK (not published), in this month's
@@ -254,6 +259,7 @@ def main() -> None:
         'loads': {
             'days': load_days,
             'episodes': [{'name': name, 'about': about, 'days': episode_days[name]} for name, _, _, about in EPISODES],
+            'donors': sorted(DONORS),
             'weather': 'weather/open-meteo_loads.csv',
             'method': "every trip picked up on the day (tpep_pickup_datetime, local time), in file order; an episode's days in the month's columns",
         },
@@ -275,7 +281,7 @@ by hand. Each run replaces this branch with one new commit. Sizes, row counts an
 | `weather/open-meteo_{MONTH}.csv` | Hourly weather for one point per district, New York local time |
 | `weather/open-meteo_loads.csv` | The same, for the loads' days and the day either side (the app) |
 | `samples/` | Seeded samples: 10k rows (test fixtures), 100k, and the month's first week |
-| `loads/` | Daily loads: every trip picked up on each day of the month, and on the days of a few real incidents (in this month's columns), one file a day (the app) |
+| `loads/` | Daily loads: every trip picked up on each day of the month, on the days of a few real incidents, and on the days a paused day may be filled from (`loads.donors` in the manifest; in this month's columns), one file a day (the app) |
 | `history.json` | Each day's numbers from {history['days'][0]} to {history['days'][-1]}: trips, what the trip checks drop (each rule's failures), each column's values present, median and quantiles, the coded columns' values alone and in pairs and the zones (when each was first and last seen), the trips by hour, the weather, and each month's file's own columns, for each day's normal range and its news (the app) |
 
 **Sources and terms.** Trip records and the zone lookup are published by the NYC Taxi and Limousine Commission
