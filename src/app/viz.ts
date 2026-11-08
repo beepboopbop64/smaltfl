@@ -134,12 +134,15 @@ export function splitRows({ rows, w = 334, aria }: { rows: SplitRow[]; w?: numbe
 
 /**
  * Trips by pickup hour: 24 columns, today's count (ink) over the usual count that hour (ghost). In the short hours
- * (`cut` to `to`) the trips that came are dark and never thinner than 3 px, so a trickle reads as present and low, not
- * as the end of the file; above each, up to the usual count, the trips missing are drawn as missing (a wash with a
- * dashed edge) and counted on the chart. A rule marks the first short hour; the floor after it and the ghost are
- * labelled on the chart.
+ * (`cut` to `to`) the trips that came are one dark ribbon, never under 5 px, so a trickle reads as trips still coming
+ * and not as the end of the file; above it, up to the usual count, the trips missing are one wash with a dashed edge
+ * that stops 3 px short of the trickle (never a dashed line along the baseline, which would read
+ * as nothing), counted on the chart. A rule marks the first short hour; the trickle carries its rate on a bracket above
+ * it (`floorLabel`, "still ~330/h"), and the ghost is labelled. When the hours before the fall ran well off a usual
+ * day's, a bracket over them says by how much (`beforeLabel`, "~8k above usual"), so the trips missing from the fall
+ * and the whole day's change can both be read true.
  */
-export function hourBars(o: { got: readonly number[]; usual: readonly number[]; w?: number; barsH?: number; cut?: number; to?: number; cutLabel?: string; floorLabel?: string; missingLabel?: string; ghostLabel?: string; aria: string; pick?: number }): string {
+export function hourBars(o: { got: readonly number[]; usual: readonly number[]; w?: number; barsH?: number; cut?: number; to?: number; cutLabel?: string; floorLabel?: string; missingLabel?: string; ghostLabel?: string; beforeLabel?: string | null; aria: string; pick?: number }): string {
   const w = o.w ?? 334;
   const barsH = o.barsH ?? 64;
   const top = 16;
@@ -151,33 +154,62 @@ export function hourBars(o: { got: readonly number[]; usual: readonly number[]; 
   const y = (v: number) => (v / ymax) * barsH;
   const short = (i: number) => o.cut !== undefined && o.to !== undefined && i >= o.cut && i <= o.to;
   const MIN = 3;
+  const TRICKLE = 5;
+  const gh = (i: number) => { const got = o.got[i] ?? 0; return got > 0 ? Math.max(short(i) ? TRICKLE : MIN, y(got)) : 0; };
   let s = open(w, h, o.aria, 'data-y0="0"');
-  // The trips missing in the short hours: one area under the usual hours' skyline, a wash with a dashed edge.
+  // The trips missing in the short hours: one area under the usual hours' skyline and above the trips that came (3 px
+  // clear of them), a wash; its dashed edge runs up its sides and along the skyline, never along the trickle.
   if (o.cut !== undefined && o.to !== undefined) {
-    let d = `M${f1(o.cut * cw + 0.75)} ${base}`;
-    for (let i = o.cut; i <= o.to; i++) d += `V${f1(base - y(Math.max(o.usual[i] ?? 0, o.got[i] ?? 0)))}H${f1((i + 1) * cw - (i === o.to ? 0.75 : 0))}`;
-    s += `<path class="absent" d="${d}V${base}Z"/>`;
+    const x0 = (i: number) => f1(i * cw + (i === o.cut ? 0.75 : 0));
+    const x1 = (i: number) => f1((i + 1) * cw - (i === o.to ? 0.75 : 0));
+    const hi = (i: number) => f1(base - y(Math.max(o.usual[i] ?? 0, o.got[i] ?? 0)));
+    const lo = (i: number) => f1(base - gh(i) - 3);
+    let up = '';
+    for (let i = o.cut; i <= o.to; i++) up += `${i === o.cut ? 'M' : 'L'}${x0(i)} ${hi(i)}H${x1(i)}`;
+    let down = '';
+    for (let i = o.to; i >= o.cut; i--) down += `L${x1(i)} ${lo(i)}H${x0(i)}`;
+    s += `<path class="absent-fill" d="${up}${down}Z"/>`;
+    s += `<path class="absent-edge" d="M${x0(o.cut)} ${lo(o.cut)}L${up.slice(1)}L${x1(o.to)} ${lo(o.to)}"/>`;
   }
   for (let i = 0; i < 24; i++) {
     const x0 = i * cw + 1.25;
-    const got = o.got[i] ?? 0;
-    const gh = got > 0 ? Math.max(MIN, y(got)) : 0;
     if (!short(i)) s += `<path class="ghost" d="${colPath(x0, base, bw, y(o.usual[i] ?? 0))}"/>`;
-    s += `<path class="${o.pick === i || short(i) ? 'ink-strong' : 'ink'}" d="${colPath(x0 + (short(i) ? 0.75 : 1.5), base, bw - (short(i) ? 1.5 : 3), gh, 1.5)}"/>`;
+    if (!short(i)) s += `<path class="${o.pick === i ? 'ink-strong' : 'ink'}" d="${colPath(x0 + 1.5, base, bw - 3, gh(i), 1.5)}"/>`;
+  }
+  // The trickle: one dark ribbon over the short hours, its top each hour's count (5 px at least), unbroken, so it reads
+  // as trips still coming at a low rate, never as a row of dashes.
+  if (o.cut !== undefined && o.to !== undefined) {
+    let d = `M${f1(o.cut * cw + 0.75)} ${base}`;
+    for (let i = o.cut; i <= o.to; i++) d += `V${f1(base - gh(i))}H${f1((i + 1) * cw - (i === o.to ? 0.75 : 0))}`;
+    s += `<path class="ink-strong trickle" d="${d}V${base}Z"/>`;
   }
   s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
   if (o.cut !== undefined) {
     const cx = o.cut * cw;
     s += `<line class="cut-bad" x1="${f1(cx)}" x2="${f1(cx)}" y1="${top - 3}" y2="${base}"/>`;
     if (o.cutLabel) s += `<text x="${f1(cx - 4)}" y="${top - 5}" text-anchor="end" class="lbl-bad">${esc(o.cutLabel)}</text>`;
-    const span = o.got.slice(o.cut, (o.to ?? 23) + 1);
-    const floorY = base - Math.max(MIN, y(Math.max(0, ...span))) - 5;
-    if (o.floorLabel) s += `<text x="${f1(cx + 5)}" y="${f1(floorY)}" class="lbl-b lbl-halo">${esc(o.floorLabel)}</text>`;
+    const end = o.to ?? 23;
+    let trickle = 0;
+    for (let i = o.cut; i <= end; i++) trickle = Math.max(trickle, gh(i));
+    const barTop = base - Math.max(MIN, trickle);
+    // The trickle's rate sits above it on a bracket that spans its hours, clear of the ribbon and of the wash's edge.
+    const floorY = barTop - 11;
+    if (o.floorLabel) {
+      s += `<path class="brace" d="M${f1(cx + 2.5)} ${f1(barTop - 4)}V${f1(barTop - 7)}H${f1((end + 1) * cw - 2.5)}V${f1(barTop - 4)}"/>`;
+      s += `<text x="${f1(cx + 5)}" y="${f1(floorY)}" class="lbl-b lbl-halo">${esc(o.floorLabel)}</text>`;
+    }
     if (o.missingLabel && o.to !== undefined) {
       const wanted = o.usual.slice(o.cut, o.to + 1);
       const mid = [...wanted].sort((a, b) => a - b)[wanted.length >> 1] ?? 0;
       const my = Math.min(floorY - 16, base - y(mid) / 2);
       s += `<text x="${f1(((o.cut + o.to + 1) / 2) * cw)}" y="${f1(my)}" text-anchor="middle" class="lbl-bad lbl-halo">${esc(o.missingLabel)}</text>`;
+    }
+    // The hours before the fall, bracketed along the plot's top, and how far they ran off a usual day's.
+    if (o.beforeLabel && o.cut > 2) {
+      const width = o.beforeLabel.length * 6.4;
+      const room = cx - 4 - (o.cutLabel ? o.cutLabel.length * 7 + 8 : 0);
+      s += `<path class="brace" d="M1.5 ${top + 1.5}V${top - 1.5}H${f1(cx - 3)}V${top + 1.5}"/>`;
+      s += `<text x="1.5" y="${width <= room ? top - 5 : top + 12}" class="lbl-m lbl-halo">${esc(o.beforeLabel)}</text>`;
     }
   }
   if (o.ghostLabel) s += `<text x="${w}" y="${top - 5}" text-anchor="end" class="lbl-m">${esc(o.ghostLabel)}</text>`;
@@ -233,6 +265,8 @@ export function gateBars(o: { rows: number; dropped: number; limit: number | nul
   const h = cy + cbH + 16;
   let s = open(w, h, o.aria, 'data-y0="0"');
   s += `<text x="0" y="12" class="lbl-b">${esc(o.shareLabel)}</text>`;
+  // The gap to the limit, always: on the zoom when there is one, else at the share's row's end.
+  if (!zoom && o.marginLabel) s += `<text x="${w}" y="12" text-anchor="end" class="lbl-m">${esc(o.marginLabel)}</text>`;
   s += `<rect class="track" x="0" y="${sy}" width="${w}" height="${sbH}" rx="2"/>`;
   if (end) s += `<path class="ink-strong" d="${barPath(0, sy, end, sbH, 2)}"/>`;
   if (limit !== null) s += tick(x(limit), sy, sbH);
@@ -276,10 +310,11 @@ export function gateBars(o: { rows: number; dropped: number; limit: number | nul
  * The day's count on a track from 0: the number large, in its severity when the amount is the news; its usual range as
  * a band with an edge; today a dot. One chart, so the first numbers on the screen are drawn, not said.
  */
-export function amountLine(o: { value: number; low: number; high: number; valueLabel: string; bandLabel: string; changeLabel?: string; sev?: 'alert' | 'warn' | null; aria: string; w?: number }): string {
+export function amountLine(o: { value: number; low: number; high: number; valueLabel: string; bandLabel: string; changeLabel?: string; changeWindow?: string; sev?: 'alert' | 'warn' | null; aria: string; w?: number }): string {
   const w = o.w ?? 334;
-  // The count's width, roughly (32 px tabular digits, "trips", the change): the range's words go under it if they'd meet.
-  const countEnd = [...o.valueLabel].reduce((t, c) => t + (/\d/.test(c) ? 19.2 : 9), 0) + 39 + (o.changeLabel ? 8 + o.changeLabel.length * 10.5 : 0);
+  // The count's width, roughly (32 px tabular digits, "trips", the change and its window): the range's words go under
+  // it if they'd meet.
+  const countEnd = [...o.valueLabel].reduce((t, c) => t + (/\d/.test(c) ? 19.2 : 9), 0) + 39 + (o.changeLabel ? 8 + o.changeLabel.length * 10.5 : 0) + (o.changeLabel && o.changeWindow ? 6 + o.changeWindow.length * 7 : 0);
   const below = countEnd + 8 > w - 30 - o.bandLabel.length * 6.4;
   const h = below ? 76 : 62;
   const ty = below ? 60 : 46;
@@ -287,14 +322,16 @@ export function amountLine(o: { value: number; low: number; high: number; valueL
   const max = Math.ceil(raw / 10_000) * 10_000 || 1;
   const x = (v: number) => (v / max) * (w - 8) + 4;
   let s = open(w, h, o.aria, 'data-y0="0"');
-  s += `<text x="0" y="30" class="count${o.sev === 'alert' ? ' count-bad' : ''}">${esc(o.valueLabel)}<tspan class="count-unit" dx="6">trips</tspan>${o.changeLabel ? `<tspan class="count-chg${o.sev ? ` chg-${o.sev}` : ''}" dx="8">${esc(o.changeLabel)}</tspan>` : ''}</text>`;
+  // The change says its window in small type before it when the head speaks of part of the day ("whole day −65%").
+  s += `<text x="0" y="30" class="count${o.sev === 'alert' ? ' count-bad' : ''}">${esc(o.valueLabel)}<tspan class="count-unit" dx="6">trips</tspan>${o.changeLabel ? `${o.changeWindow ? `<tspan class="count-unit" dx="8">${esc(o.changeWindow)}</tspan>` : ''}<tspan class="count-chg${o.sev ? ` chg-${o.sev}` : ''}" dx="${o.changeWindow ? 4 : 8}">${esc(o.changeLabel)}</tspan>` : ''}</text>`;
   s += `<text x="${w - 30}" y="${below ? 47 : 30}" text-anchor="end" class="lbl-m">${esc(o.bandLabel)}</text>`;
   s += `<line class="base" x1="4" x2="${w - 4}" y1="${ty}" y2="${ty}"/>`;
   // The band shows past the dot (its 11 px and 4 more) however narrow the range; its ends stand above and below the
   // dot's halo, so a dot on an end never hides it (Sat Jan 6, 2024: 97,117 just inside 94k).
   const [b0, b1] = bandSpan(x(o.low), x(o.high), o.value < o.low || o.value > o.high ? x(o.value) : null, 15, 4, w - 4);
   s += `<rect class="ghost-2 edge" x="${f1(b0)}" y="${ty - 5}" width="${f1(b1 - b0)}" height="10" rx="3"/>`;
-  s += `<path class="band-end" d="M${f1(b0 + 0.75)} ${ty - 9}V${ty + 9}M${f1(b1 - 0.75)} ${ty - 9}V${ty + 9}"/>`;
+  // Its ends stand 2 px past the band in its own soft edge, never a heavy tick: a range is not a limit (ADR 0008 §7).
+  s += `<path class="band-end" d="M${f1(b0 + 0.5)} ${ty - 7}V${ty + 7}M${f1(b1 - 0.5)} ${ty - 7}V${ty + 7}"/>`;
   s += `<circle class="dot${o.sev ? ` dot-${o.sev}` : ''}" cx="${f1(x(o.value))}" cy="${ty}" r="5.5"/>`;
   const k = (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v));
   s += `<text x="4" y="${h - 1}" class="tick" aria-hidden="true">0</text><text x="${w - 4}" y="${h - 1}" text-anchor="end" class="tick" aria-hidden="true">${k(max)}</text>`;
@@ -307,21 +344,26 @@ export interface Part {
   usual: number;
   label: string;
   sev?: 'alert' | 'warn' | null;
+  /** The trips beyond its usual count, said under them ("+6k over usual"), for the part whose surge is the news. */
+  overLabel?: string | null;
 }
 
 /**
- * The split on one count scale: the named part on the left, everything else on the right, end to end. Each part's slot
- * is its usual or today's count, whichever is more, outlined; today fills it from its start (3 px at least). Rows missing
- * today are a dashed outline on a wash; trips beyond the usual count run past a usual notch (sticking out above and
- * below the bar) as an outlined box, 6 px at least, never dashed.
+ * The split on one count scale: the named part on the left, everything else on the right, end to end, 6 px apart.
+ * Each part's slot is its usual or today's count, whichever is more, outlined; today fills it from its start (3 px at
+ * least). Rows missing today are a dashed outline on a wash; trips beyond the usual count are real trips, filled in a
+ * lighter tone of the part's ink past a usual notch (sticking out above and below the bar), never hollow or dashed, and
+ * said under them when they are the news ("+6k over usual"). A sliver of them (under 6 px) takes no notch, so a few
+ * px of four marks never tangle into a shape like ‖.
  */
 export function partBar({ left, right, w = 334, aria }: { left: Part; right: Part; w?: number; aria: string }): string {
   // The count labels sit on y 26; the bar starts low enough that a usual notch (5 px past the bar) clears their
   // descenders ("10,518": the notch never runs through the comma).
-  const h = 62;
+  const said = left.overLabel || right.overLabel;
+  const h = said ? 74 : 62;
   const by = 36;
   const bh = 20;
-  const gap = 4;
+  const gap = 6;
   const slot = (p: Part) => Math.max(p.today, p.usual, 1);
   const total = slot(left) + slot(right);
   const scale = (w - gap) / total;
@@ -336,17 +378,24 @@ export function partBar({ left, right, w = 334, aria }: { left: Part; right: Par
       if (usual - today > 3) s += `<rect class="absent" x="${f1(x0 + today + 1)}" y="${by + 1}" width="${f1(usual - today - 2)}" height="${bh - 2}" rx="2"/>`;
     } else {
       s += `<rect class="ink-strong" x="${f1(x0)}" y="${by}" width="${f1(Math.max(2, usual))}" height="${bh}" rx="2"/>`;
-      if (today - usual > 1) {
-        const ow = Math.min(Math.max(6, today - usual - 2), end - (x0 + usual + 2));
-        s += `<rect class="over" x="${f1(x0 + usual + 2.75)}" y="${by + 0.75}" width="${f1(Math.max(1, ow - 1.5))}" height="${bh - 1.5}" rx="2"/>`;
-        s += `<line class="usual-end" x1="${f1(x0 + usual + 1)}" x2="${f1(x0 + usual + 1)}" y1="${by - 5}" y2="${by + bh + 5}"/>`;
+      const over = Math.min(today - usual, end - (x0 + usual));
+      if (over > 0.5) {
+        const notch = over >= 6;
+        s += `<rect class="over" x="${f1(x0 + usual + (notch ? 2 : 0))}" y="${by}" width="${f1(Math.max(1, over - (notch ? 2 : 0)))}" height="${bh}" rx="2"/>`;
+        if (notch) s += `<line class="usual-end" x1="${f1(x0 + usual + 1)}" x2="${f1(x0 + usual + 1)}" y1="${by - 3}" y2="${by + bh + 3}"/>`;
+        if (p.overLabel) {
+          const mid = x0 + usual + over / 2;
+          const half = p.overLabel.length * 3.2;
+          const x = Math.max(half, Math.min(w - half, mid));
+          s += `<text x="${f1(x)}" y="${by + bh + 15}" text-anchor="middle" class="lbl-m">${esc(p.overLabel)}</text>`;
+        }
       }
     }
     return sw;
   };
   const lw = slot(left) * scale;
-  draw(left, 0, lw + gap - 1);
-  draw(right, lw + gap, w + 4);
+  draw(left, 0, lw);
+  draw(right, lw + gap, w);
   // A part's mark sits against its name on the outer side (before the left one, after the right one), so it never
   // floats on a guess at how wide the name is set.
   const name = (p: Part, x: number, anchor: 'start' | 'end') =>
@@ -537,10 +586,16 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
     const cx = gx + i * cw + cw / 2;
     const same = new Date(`${d.day}T00:00:00Z`).getUTCDay() === wd;
     const vy = d.v !== null ? Math.min(y(d.v), base - TICK) : null;
+    // Each band 9 px at least, so a narrow range still shows above and below the day's tick; the tick 2 px on a band
+    // under 12 px; and the band's edge drawn again over the tick, so a value on the edge never hides which side it is.
+    let edge = '';
+    let tick = TICK;
     if (d.low !== null && d.high !== null) {
       const outside = !d.notRun && d.v !== null && (d.v > d.high || d.v < d.low);
-      const [t, b] = bandSpan(y(d.high), y(d.low), outside ? vy : null, TICK + 4, top - 4, base);
+      const [t, b] = bandSpan(y(d.high), y(d.low), outside ? vy : null, 9, top - 4, base);
       s += `<rect class="${same ? 'ghost-2' : 'ghost'}" x="${f1(cx - bw / 2)}" y="${f1(t)}" width="${f1(bw)}" height="${f1(b - t)}" rx="2"/>`;
+      edge = `<rect class="band-line" x="${f1(cx - bw / 2)}" y="${f1(t)}" width="${f1(bw)}" height="${f1(b - t)}" rx="2"/>`;
+      if (b - t < 12) tick = 2;
     }
     if (d.notRun) {
       s += `<rect class="notrun" x="${f1(cx - bw / 2 - 2.5)}" y="${top - 6}" width="${f1(bw + 5)}" height="${base - top + 8}" rx="3"/>`;
@@ -548,7 +603,8 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
     }
     const inside = d.v !== null && d.low !== null && d.high !== null && d.v >= d.low && d.v <= d.high;
     const sev = inside ? null : d.sev;
-    if (vy !== null) s += `<rect class="${sev ? `sev-${sev}-fill` : 'ink'}" x="${f1(cx - bw / 2 - 1)}" y="${f1(vy - TICK / 2)}" width="${f1(bw + 2)}" height="${TICK}" rx="1"/>`;
+    if (vy !== null) s += `<rect class="${sev ? `sev-${sev}-fill` : 'ink'}" x="${f1(cx - bw / 2 - 1)}" y="${f1(vy - tick / 2)}" width="${f1(bw + 2)}" height="${tick}" rx="1"/>`;
+    s += edge;
     const ms = d.marks?.length ? d.marks : d.mark ? [d.mark] : [];
     ms.forEach((m, j) => {
       const x0 = cx - (ms.length * 14 + (ms.length - 1) * 2) / 2 + j * 16;
@@ -771,6 +827,8 @@ export interface Step {
   /** 'total', 'down' or 'up': how it is drawn. */
   kind: 'total' | 'down' | 'up';
   sev?: 'alert' | 'warn';
+  /** A step within its own usual range: a neutral grey step, never the dashed wash of trips missing. */
+  usual?: boolean;
 }
 
 /** A name in lines of at most `chars` characters, by its words, two lines at most (the second cut with … if need be). */
@@ -815,9 +873,11 @@ export function waterfall({ steps, w = 334, h = 172, aria }: { steps: readonly S
     const cx = i * cw + cw / 2;
     const yt = y(Math.max(b.from, b.to));
     const yb = y(Math.min(b.from, b.to));
-    s += `<rect class="${i === 0 && b.kind === 'total' ? 'ghost-2 edge' : b.kind === 'total' ? 'ink-strong' : b.kind === 'down' ? 'absent' : 'ink'}" x="${f1(cx - bw / 2)}" y="${f1(yt)}" width="${f1(bw)}" height="${f1(Math.max(MIN_MARK, yb - yt))}" rx="2"/>`;
+    // Trips missing are a dashed wash only for a step really short; one within its usual range is a neutral grey step.
+    const cls = i === 0 && b.kind === 'total' ? 'ghost-2 edge' : b.kind === 'total' ? 'ink-strong' : b.usual ? 'wf-usual' : b.kind === 'down' ? 'absent' : 'ink';
+    s += `<rect class="${cls}" x="${f1(cx - bw / 2)}" y="${f1(yt)}" width="${f1(bw)}" height="${f1(Math.max(MIN_MARK, yb - yt))}" rx="2"/>`;
     if (i < n - 1) s += `<line class="link" x1="${f1(cx + bw / 2)}" x2="${f1(cx + cw - bw / 2)}" y1="${f1(y(b.to))}" y2="${f1(y(b.to))}"/>`;
-    s += `<text x="${f1(cx)}" y="${f1(yt - 6)}" text-anchor="middle" class="${b.kind === 'down' ? 'lbl-bad' : 'lbl-b'}">${esc(b.label)}</text>`;
+    s += `<text x="${f1(cx)}" y="${f1(yt - 6)}" text-anchor="middle" class="${b.kind === 'down' && !b.usual ? 'lbl-bad' : b.usual ? 'lbl-m' : 'lbl-b'}">${esc(b.label)}</text>`;
     names[i]!.forEach((line, j) => {
       s += `<text x="${f1(cx)}" y="${f1(base + 15 + j * 12)}" text-anchor="middle" class="tick" aria-hidden="true">${esc(line)}</text>`;
     });
@@ -963,8 +1023,8 @@ export function effectBars(o: { groups: readonly { head: string; rows: readonly 
 
 /**
  * A count bar from 0 that shows where it passes its usual range: ink to the range's top, a notch there standing out
- * above and below the bar, and the rows beyond it an outlined box (6 px at least), as the part bar draws trips beyond
- * usual. Within or under its range it is one bar. `cls` is the bar's own class ('ink-outline' for a rule that warns).
+ * above and below the bar, and the rows beyond it filled in a lighter tone (6 px at least), as the part bar draws trips
+ * beyond usual. Within or under its range it is one bar. `cls` is the bar's own class ('ink-outline' for a rule that warns).
  */
 function countPast(o: { y: number; h: number; end: number; high: number | null; cls: string; r?: number }): string {
   const r = o.r ?? 1.5;

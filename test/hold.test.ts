@@ -208,7 +208,7 @@ describe('the flow’s verdict on a day (ADR 0009 §3)', () => {
   const claimOn = (trouble: Parameters<typeof historyWith>[0]) => dayClaim(new HistoryRanges(historyWith(trouble)), doc, HISTORY, DAY, 'trips', 'abc123');
 
   it('tells a day that falls at an hour, and one a vendor left, as wrong and short', () => {
-    expect(claimOn({ [DAY]: { stopAt: 13 } })).toEqual({ by: 'story', source: 'trips', day: DAY, state: 'wrong', below: true, head: 'Trips fall 98% from 13:00', build: 'abc123', history: HISTORY, rows: 44_219 });
+    expect(claimOn({ [DAY]: { stopAt: 13 } })).toEqual({ by: 'story', source: 'trips', day: DAY, state: 'wrong', below: true, head: 'Trips fall to ~110/h from 13:00', build: 'abc123', history: HISTORY, rows: 44_219 });
     expect(claimOn({ [DAY]: { vendorGone: true } })).toMatchObject({ state: 'wrong', below: true, head: 'Vendor 1 sent almost nothing', rows: 72_784 });
   });
 

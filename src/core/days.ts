@@ -71,12 +71,13 @@ export function readersSee(published: string | null | undefined, day: string | n
 /**
  * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Staged Thu 21 ·
  * readers see Wed 20", "… · readers see Mon 18 · 3 days old", or "… · nothing published yet". Null when the day is the
- * one published. A day a later one has passed since is no longer staged for readers: "Not published · superseded by Tue
- * 26" (a later day can't close it, ADR 0009 §5, but it can no longer be what readers see).
+ * one published. A day a later one has passed since is no longer staged for readers, and is said as it stood then,
+ * naming no later day (ADR 0008 §10): "Not published · readers kept Thu 21" (`then`, the last day published before it),
+ * or "Not published" when that isn't known here.
  */
-export function stagedBar(day: string, published: string | null | undefined): string | null {
+export function stagedBar(day: string, published: string | null | undefined, then?: string | null): string | null {
   if (published === day) return null;
-  if (published && published > day) return `Not published · superseded by ${dayShort(published)}`;
+  if (published && published > day) return `Not published${then && then < day ? ` · readers kept ${dayShort(then)}` : ''}`;
   return `Staged ${dayShort(day)} · ${readersSee(published, day)}`;
 }
 
@@ -205,4 +206,27 @@ export function reachLabel(s: LoadStory, n: number, pause?: PauseState): string 
   if (s.gate?.held) return `${outs} not published`;
   const l = lacked(s);
   return l ? `${outs} built ${l.short}` : `Reaches ${n > 3 ? outs : `${n} output${n === 1 ? '' : 's'}`}`;
+}
+
+const MID = (day: string) => `${MON[at(day).getUTCMonth()]} ${at(day).getUTCDate()}`;
+
+/**
+ * How a day's range was judged, in two sentences built from what it was learned from (ADR 0008 §11): the same weekday
+ * in the weeks before, the day last year (one day, or the days around it), both, or a holiday from itself last year;
+ * never a comparison that wasn't made ("no data a year ago" when the history doesn't reach back a year). The second
+ * gives the band, and says so when it is wide (more than half its middle across), with the reason the inputs show: a
+ * holiday among the days it learns from, else guesses that have missed by a lot.
+ */
+export function judgedWords(o: { weekday: string; weeks: readonly string[]; year: readonly string[]; holiday: string | null; special: boolean; band: string; low: number; high: number; expected: number; holidayIn: boolean }): [string, string] {
+  const year = o.year.length === 1 ? `${MID(o.year[0]!)} last year` : o.year.length ? `the ${o.year.length} days around it last year` : '';
+  const weeks = o.weeks.length ? `the ${o.weeks.length} ${o.weekday}s before` : '';
+  const when = o.year.length ? ` (${MID(o.year[0]!)})` : '';
+  const first = o.special
+    ? `${o.holiday ? `${o.holiday} is judged against itself` : 'Judged against its day'} last year${when}, moved by how this year has compared lately.`
+    : weeks && year ? `Judged against ${weeks} and ${year}, weighted by how well each guesses.`
+      : weeks ? `Judged against ${weeks}; no data a year ago.`
+        : year ? `Judged against ${year} alone.` : 'No days before it to judge it by.';
+  const wide = o.expected > 0 && (o.high - o.low) / o.expected > 0.5;
+  const second = `The band is that guess give or take its typical misses: ${o.band} for this ${o.special ? 'day' : o.weekday}${wide ? `; wide: ${o.holidayIn ? 'holidays in the days it learns from' : 'its guesses have missed by a lot lately'}` : ''}.`;
+  return [first, second];
 }

@@ -52,7 +52,7 @@ describe('the cause, as a population', () => {
     // Each part's count against its usual one, said so it can't read as a fraction of it.
     expect(s.labels.hero.slice(0, 4)).toEqual(['Vendor 1', expect.stringMatching(/^0 · usual ~[\d.]+k$/), 'Everything else', expect.stringMatching(/^[\d,]+ · usual ~[\d.]+k$/)]);
     // Something wrong shows its checks, passed or not (ADR 0008 §10), and their words count at a glance.
-    expect(s.labels.hero.slice(4, 6)).toEqual(['Checks passed', '4% of arrived rows dropped']);
+    expect(s.labels.hero.slice(4, 6)).toEqual(['Checks passed', '4.0% of arrived rows dropped']);
     expect(words(s)).toBeLessThanOrEqual(60);
   });
 
@@ -93,15 +93,17 @@ describe('the cause, as a time', () => {
   it('leads with the hour the trips fall, and folds what follows from it', () => {
     const s = story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } });
     expect(s.hero).toBe('hours');
-    // Where the fall applies, in the head; that the trips go on, and what is missing, on the chart.
-    expect(s.head).toMatch(/^Trips fall 9\d% from 13:00$/);
+    // Where the fall applies, and the rate the trips fell to, in the head; that they go on, and what is missing, on the
+    // chart.
+    expect(s.head).toMatch(/^Trips fall to ~[\d,]+\/h from 13:00$/);
+    expect(s.head.match(/~[\d,]+\/h/)![0]).toBe(s.hoursLabels!.floor.replace(/^still /, ''));
     expect(s.hours).toMatchObject({ from: 13, to: 23 });
     expect(s.hoursLabels).toMatchObject({ cut: '13:00', ghost: 'usual Wednesday' });
     expect(s.hoursLabels!.floor).toMatch(/^still ~[\d,]+\/h$/);
     expect(s.hoursLabels!.missing).toMatch(/^~[\d.]+k missing$/);
     expect(s.labels.hero.slice(0, 4)).toEqual([s.hoursLabels!.cut, s.hoursLabels!.floor, s.hoursLabels!.missing, s.hoursLabels!.ghost]);
-    // The day's own change sits on the amount line, since the head's fall is the hours'.
-    expect(s.labels.amount).toEqual([expect.stringMatching(/ trips$/), expect.stringMatching(/^−\d+%$/), expect.stringMatching(/^usual /)]);
+    // The day's own change sits on the amount line, since the head's fall is the hours', named as the whole day's.
+    expect(s.labels.amount).toEqual([expect.stringMatching(/ trips$/), expect.stringMatching(/^whole day −\d+%$/), expect.stringMatching(/^usual /)]);
     expect(s.primary).toBe('incident');
     // The vendors' mix moved with it, within what the cause moved: folded as the same day's, told as a note.
     const mix = s.findings.find((f) => f.key === 'share:VendorID=1')!;
@@ -196,35 +198,30 @@ describe('the words at a glance', () => {
     expect(countLabel({ today: 10_518, usual: 4_508, low: null, high: null })).toBe('10,518 · usual ~4.5k');
   });
 
-  it('labels a waterfall at one precision, so its labels add up as read', () => {
-    // A usual 115,240 less 110,480 and 143 is 4,617: at thousands, 5k isn't 4,617; at tenths, 115.2 − 110.5 − 0.143 ≈ 4.6.
-    expect(stepLabels(115_240, [-110_480, -143], 4_617)).toEqual({ start: '115.2k', steps: ['−110.5k', '−143'], end: '4.6k' });
-    // 115.3 − 110.5 − 0.143 is 4.66, not 4.6: whole numbers, which add up.
-    expect(stepLabels(115_276, [-110_500, -143], 4_633)).toEqual({ start: '115,276', steps: ['−110,500', '−143'], end: '4,633' });
-    // 119k − 77k − 26 is 42k as read: thousands add up.
-    expect(stepLabels(119_431, [-77_466, -26], 41_939)).toEqual({ start: '119k', steps: ['−77k', '−26'], end: '42k' });
-    // Thousands when they add up and say each step within 5%.
-    expect(stepLabels(120_000, [-60_000, 2_000], 62_000)).toEqual({ start: '120k', steps: ['−60k', '+2k'], end: '62k' });
-    // A tenth that is .0 is said, so every label reads at the same place.
-    expect(stepLabels(103_040, [-45_020, 1_100], 59_120).steps[0]).toBe('−45.0k');
-    // A step under a thousand is said whole beside thousands, and still adds up as read.
-    expect(stepLabels(100_049, [-50_049, 49], 50_049)).toEqual({ start: '100k', steps: ['−50k', '+49'], end: '50k' });
-    expect(stepLabels(100_000, [], 100_000)).toEqual({ start: '100k', steps: [], end: '100k' });
+  it('labels a waterfall in one format, whole counts that add up as read and end on the count its card prints', () => {
+    expect(stepLabels(115_240, [-110_480, -143], 4_617)).toEqual({ start: '115,240', steps: ['−110,480', '−143'], end: '4,617' });
+    expect(stepLabels(119_431, [-77_466, -26], 41_939)).toEqual({ start: '119,431', steps: ['−77,466', '−26'], end: '41,939' });
+    expect(stepLabels(120_000, [-60_000, 2_000], 62_000)).toEqual({ start: '120,000', steps: ['−60,000', '+2,000'], end: '62,000' });
+    expect(stepLabels(100_000, [], 100_000)).toEqual({ start: '100,000', steps: [], end: '100,000' });
   });
 
-  it('labels the gate’s two bars by what they count, and says a margin within two points of the limit', () => {
+  it('labels the gate’s two bars by what they count, at one decimal (two within a point of its limit), with the gap to it', () => {
     const gate = (dropped: number, rows: number, limit: number | null = 0.1): Gate => ({ step: 'trips_valid', rows, dropped, share: dropped / rows, limit, held: limit !== null && dropped / rows > limit, near: false, usual: { expected: 5000, low: 3800, high: 5400 }, rules: [] });
-    // Just over: the share and its margin to the same decimals, so one is the other less the limit.
-    expect(gateLabels(gate(442, 4229))).toEqual({ said: '10.45%', share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
-    expect(gateLabels(gate(4004, 41_939))).toMatchObject({ share: '9.55% of arrived rows dropped', margin: '0.45 pt under' });
-    // Within two points, a whole point and more is said to a tenth; past them, no margin and the share as before.
-    expect(gateLabels(gate(1150, 10_000)).margin).toBe('1.5 pt over');
-    expect(gateLabels(gate(2116, 4633))).toMatchObject({ share: '46% of arrived rows dropped', margin: null });
-    // Never a margin of nothing, nor a share printed as its limit.
+    // Just over: the share and its margin to the same decimals, so one is the other less the limit; zoomed.
+    expect(gateLabels(gate(442, 4229))).toEqual({ said: '10.45%', share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', zoom: true, rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
+    expect(gateLabels(gate(4004, 41_939))).toMatchObject({ share: '9.55% of arrived rows dropped', margin: '0.45 pt under', zoom: true });
+    // Past a point from it, a tenth; zoomed within two points.
+    expect(gateLabels(gate(1150, 10_000))).toMatchObject({ said: '11.5%', margin: '1.5 pt over', zoom: true });
+    // Far past it, still a tenth and the gap said, not zoomed: Fri Sep 22, 2023's 45.67%.
+    expect(gateLabels(gate(2116, 4633))).toMatchObject({ share: '45.7% of arrived rows dropped', margin: '35.7 pt over', zoom: false });
+    // Far under it: Tue Nov 15, 2022's 4.61%, as the canvas says it.
+    expect(gateLabels(gate(461, 10_000))).toMatchObject({ said: '4.6%', margin: '5.4 pt under', zoom: false });
+    // Never a margin of nothing, nor a share printed as its limit, nor a share of something as 0.0%.
     const hair = gateLabels(gate(100_004, 1_000_000));
     expect(hair.margin).toBe('0.0004 pt over');
     expect(hair.share).not.toMatch(/^10(\.0+)?%/);
-    expect(gateLabels(gate(500, 4000, null))).toMatchObject({ limit: null, margin: null, share: '13% of arrived rows dropped' });
+    expect(gateLabels(gate(3, 10_000)).said).toBe('<0.1%');
+    expect(gateLabels(gate(500, 4000, null))).toMatchObject({ limit: null, margin: null, zoom: false, share: '12.5% of arrived rows dropped' });
   });
 
   it('says a rule’s usual one way, and orders the rules one way (tabs #12)', () => {

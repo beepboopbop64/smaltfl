@@ -40,43 +40,68 @@ describe('the news’s charts', () => {
     expect(widths[0]).toBeGreaterThan(0);
   });
 
-  it('draws the hours after a fall as present but low, and the trips missing as missing, counted', () => {
+  it('draws the hours after a fall as a trickle still coming, the trips missing as missing, and labels the trickle above it', () => {
     const got = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 40));
     const svg = hourBars({ got, usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~40/h', missingLabel: '~55k missing', ghostLabel: 'usual Thursday', aria: 'Trips by hour: they fall 99% from 13:00' });
-    // Each short hour's bar is at least 3 px tall, though 40 of 5,000 would be under 1 px.
-    const tall = [...svg.matchAll(/<path class="ink-strong" d="M[\d.]+ ([\d.]+)V[\d.]+Q[\d.]+ ([\d.]+)/g)].map((m) => Number(m[1]) - Number(m[2]));
-    expect(tall).toHaveLength(11);
-    for (const t of tall) expect(t).toBeGreaterThanOrEqual(3 - 1e-9);
-    // One area for what is missing, a wash with a dashed edge, and its count and the floor in words on the chart.
-    expect(svg.match(/class="absent"/g)).toHaveLength(1);
+    // The short hours' trips are one unbroken dark ribbon, 5 px at least each hour though 40 of 5,000 is under 1 px:
+    // never a row of separate dashes on the baseline.
+    const ribbon = svg.match(/<path class="ink-strong trickle" d="([^"]+)"/)![1]!;
+    const tops = [...ribbon.matchAll(/V([\d.]+)H/g)].map((m) => Number(m[1]));
+    const base = Number(ribbon.match(/^M[\d.]+ ([\d.]+)/)![1]);
+    expect(tops).toHaveLength(11);
+    for (const t of tops) expect(base - t).toBeGreaterThanOrEqual(5 - 1e-9);
+    expect(svg.match(/class="ink-strong"/g) ?? []).toHaveLength(0);
+    // The trips missing: one wash, and its dashed edge drawn apart, which never runs along the baseline or the trickle.
+    expect(svg.match(/class="absent-fill"/g)).toHaveLength(1);
+    const edge = svg.match(/<path class="absent-edge" d="([^"]+)"/)![1]!;
+    const ys = [...edge.matchAll(/[ML][\d.]+ ([\d.]+)/g)].map((m) => Number(m[1]));
+    for (const y of ys) expect(y).toBeLessThanOrEqual(base - 5 - 3 + 1e-9);
+    expect(svg).not.toMatch(/class="absent"/);
+    // The trickle's rate on a bracket above it, clear of it; what is missing in words.
     expect(svg).toContain('~55k missing');
-    expect(svg).toContain('still ~40/h');
+    const label = svg.match(/<text x="[\d.]+" y="([\d.]+)" class="lbl-b lbl-halo">still ~40\/h</)!;
+    expect(Number(label[1])).toBeLessThanOrEqual(base - 5 - 10);
+    expect(svg.match(/class="brace"/g)).toHaveLength(1);
     // Without a span, no missing area: a finding's own small chart draws ghosts only.
     expect(hourBars({ got, usual, cut: 13, aria: 'Trips by hour' })).not.toContain('absent');
+    // The hours before the fall, bracketed and said, when given.
+    const before = hourBars({ got, usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~40/h', beforeLabel: '~8.3k above usual', aria: 'Trips by hour' });
+    expect(before).toContain('~8.3k above usual');
+    expect(before.match(/class="brace"/g)).toHaveLength(2);
   });
 
   it('puts the day’s change on the amount line when it is given', () => {
     const svg = amountLine({ value: 41939, low: 89028, high: 160128, valueLabel: '41,939', bandLabel: 'usual 89k–160k', changeLabel: '−65%', sev: 'alert', aria: '41,939 trips, −65%' });
     expect(svg).toContain('class="count-chg chg-alert" dx="8">−65%</tspan>');
     expect(amountLine({ value: 1, low: 0, high: 2, valueLabel: '1', bandLabel: 'usual 0–2', aria: 'one trip' })).not.toContain('count-chg');
+    // Beside a head about part of the day, the change says its window in small type before it.
+    expect(amountLine({ value: 41939, low: 89028, high: 160128, valueLabel: '41,939', bandLabel: 'usual 89k–160k', changeLabel: '−65%', changeWindow: 'whole day', sev: 'alert', aria: '41,939 trips, whole day −65%' })).toContain('<tspan class="count-unit" dx="8">whole day</tspan><tspan class="count-chg chg-alert" dx="4">−65%</tspan>');
   });
 
-  it('draws trips beyond the usual count as an outlined box past a notch, 6 px at least', () => {
-    const svg = partBar({ left: { name: 'Flex Fare', today: 10518, usual: 4508, label: '10,518 · usual ~4.5k', sev: 'warn' }, right: { name: 'Everything else', today: 69_500, usual: 68_486, label: '69,500 · usual ~68.5k' }, aria: 'Flex Fare 10,518 against about 4,508' });
+  it('draws trips beyond the usual count filled past a notch, said under them, and a sliver of them without a notch', () => {
+    const svg = partBar({ left: { name: 'Flex Fare', today: 10518, usual: 4508, label: '10,518 · usual ~4.5k', sev: 'warn', overLabel: '+6k over usual' }, right: { name: 'Everything else', today: 69_500, usual: 68_486, label: '69,500 · usual ~68.5k' }, aria: 'Flex Fare 10,518 against about 4,508' });
     const overs = [...svg.matchAll(/<rect class="over" x="[\d.]+" y="[\d.]+" width="([\d.]+)"/g)].map((m) => Number(m[1]));
+    // Both parts' extra trips are drawn, filled (the class has a fill, never a hollow box); the rest's 1,014 are a
+    // sliver of about 4 px, which takes no notch, so the slivers never tangle into a shape like ‖.
     expect(overs).toHaveLength(2);
-    // The rest's 1,014 extra trips are 4 px at this scale: drawn as 6 px (less its outline).
-    expect(Math.min(...overs)).toBeGreaterThanOrEqual(4.5 - 1e-9);
-    expect(svg.match(/class="usual-end"/g)).toHaveLength(2);
+    expect(svg.match(/class="usual-end"/g)).toHaveLength(1);
+    expect(svg).toContain('+6k over usual');
     // Each usual notch stays clear of the count labels over the bar, their descenders (a comma, ~3 px) included.
     const labels = [...svg.matchAll(/<text x="[\d.]+" y="([\d.]+)" text-anchor="(?:start|end)" class="lbl-m">/g)].map((m) => Number(m[1]));
     const notches = [...svg.matchAll(/class="usual-end" x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)" y2="([\d.]+)"/g)].map((m) => [Number(m[1]), Number(m[2])] as const);
     expect(labels).toHaveLength(2);
-    expect(notches).toHaveLength(2);
-    for (const [y1, y2] of notches) {
-      for (const y of labels) expect(y1, `notch from ${y1}, label on ${y}`).toBeGreaterThanOrEqual(y + 4);
-      expect(y2).toBeLessThanOrEqual(62);
-    }
+    for (const [y1] of notches) for (const y of labels) expect(y1, `notch from ${y1}, label on ${y}`).toBeGreaterThanOrEqual(y + 4);
+    // The parts sit 6 px apart, so a 3 px sliver of one never reads as a second wall beside the other.
+    const slots = [...svg.matchAll(/<rect class="slot" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    expect(slots[1]![0]! - (slots[0]![0]! + slots[0]![1]!)).toBeGreaterThanOrEqual(6 - 0.11);
+  });
+
+  it('draws a waterfall step within its usual range neutral, never as trips missing', () => {
+    const svg = waterfall({ steps: [{ name: 'Usual', label: '114,913', value: 114_913, total: true, kind: 'total' }, { name: 'Everything else', label: '−110,137', value: -110_137, kind: 'down', sev: 'alert' }, { name: 'Flex Fare', label: '−143', value: -143, kind: 'down', usual: true }, { name: 'Today', label: '4,633', value: 4_633, total: true, kind: 'total' }], aria: 'From a usual day to this one' });
+    expect(svg.match(/class="absent"/g)).toHaveLength(1);
+    expect(svg).toContain('class="wf-usual"');
+    expect(svg).toMatch(/class="lbl-m">−143</);
+    expect(svg).toMatch(/class="lbl-bad">−110,137</);
   });
 
   it('marks earlier days in a strip, and gives axes ends that don’t jump', () => {
@@ -152,10 +177,14 @@ describe('the news’s charts', () => {
     const svg = dayStrip({ days: [{ day: '2022-11-11', v: 130_000, low: 129_000, high: 131_000 }, { day: '2022-11-12', v: 140_000, low: 129_000, high: 131_000, sev: 'warn' }], aria: 'Trips by day' });
     const bands = [...svg.matchAll(/<rect class="ghost(?:-2)?" x="[\d.]+" y="([\d.]+)" width="[\d.]+" height="([\d.]+)"/g)].map((m) => [Number(m[1]), Number(m[2])]);
     expect(bands).toHaveLength(2);
-    for (const [, hgt] of bands) expect(hgt).toBeGreaterThanOrEqual(7 - 1e-9);
+    // Each band 9 px at least, so a narrow range shows above and below its tick; the tick 2 px on a band that narrow.
+    for (const [, hgt] of bands) expect(hgt).toBeGreaterThanOrEqual(9 - 1e-9);
     // The second day's tick sits above its band: the band's top stays at its true high, under the tick.
-    const ticks = [...svg.matchAll(/<rect class="(?:ink|sev-warn-fill)" x="[\d.]+" y="([\d.]+)" width="[\d.]+" height="3"/g)].map((m) => Number(m[1]));
-    expect(ticks[1]! + 3).toBeLessThanOrEqual(bands[1]![0]! + 1e-9);
+    const ticks = [...svg.matchAll(/<rect class="(?:ink|sev-warn-fill)" x="[\d.]+" y="([\d.]+)" width="[\d.]+" height="2"/g)].map((m) => Number(m[1]));
+    expect(ticks).toHaveLength(2);
+    expect(ticks[1]! + 2).toBeLessThanOrEqual(bands[1]![0]! + 1e-9);
+    // The band's edge is drawn again after the tick, so a value on the edge never hides which side of it it is.
+    expect(svg.indexOf('class="band-line"')).toBeGreaterThan(svg.indexOf('class="ink"'));
   });
 
   it('colours a day’s tick by where it sits: plain inside its own band, its severity only outside', () => {

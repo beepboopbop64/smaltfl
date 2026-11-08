@@ -42,7 +42,7 @@ describe.skipIf(!has)('the flow’s verdict on the real history (ADR 0009 §3)',
   }, 120_000);
 
   it('tells the owner’s examples by their cause', () => {
-    expect(dayClaim(h!, doc, ref, '2023-09-21', 'trips', 'dev')).toMatchObject({ state: 'wrong', below: true, head: 'Trips fall 95% from 13:00', rows: 41_939 });
+    expect(dayClaim(h!, doc, ref, '2023-09-21', 'trips', 'dev')).toMatchObject({ state: 'wrong', below: true, head: 'Trips fall to ~330/h from 13:00', rows: 41_939 });
     expect(dayClaim(h!, doc, ref, '2022-11-15', 'trips', 'dev')).toMatchObject({ state: 'wrong', below: true, head: 'Vendor 1 sent almost nothing' });
     expect(dayClaim(h!, doc, ref, '2023-09-20', 'trips', 'dev')).toMatchObject({ below: false });
     expect(claimHolds(['checks', 'wrong'], dayClaim(h!, doc, ref, '2023-09-20', 'trips', 'dev')!)).toBe(false);

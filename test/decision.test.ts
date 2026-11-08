@@ -95,8 +95,8 @@ describe('the decision sheet’s words (ADR 0009 §12: 45 at a glance)', () => {
   it('says on the Publish row what it overrides when the checks held the day too, and the button names it', () => {
     // Fri Sep 22, 2023: 4,633 arrived, the checks dropped 46% against their 10% limit, 2,517 left.
     const fri = sheetText({ ...thu, day: '2023-09-22', rows: 4_633, reach: 2_517, readers: { day: '2023-09-21', rows: 41_939 }, checks: { share: 0.4567, limit: 0.1 }, part: 'Flex Fare · 4,613', missing: null, cut: null, ticks: ['0', '115k'] });
-    expect(fri.options[0]).toMatchObject({ number: '4,633 trips', sub: '2,517 after checks', warn: 'Overrides checks: 46% dropped (limit 10%)' });
-    expect(fri.options[0]!.aria).toContain('this overrides its checks, which held it: 46% dropped (limit 10%)');
+    expect(fri.options[0]).toMatchObject({ number: '4,633 trips', sub: '2,517 after checks', warn: 'Overrides checks: 45.7% dropped (limit 10%)' });
+    expect(fri.options[0]!.aria).toContain('this overrides its checks, which held it: 45.7% dropped (limit 10%)');
     expect(fri.go.asis).toBe('Publish over the checks · 3 outputs');
     // Near the limit, the share to the decimals that keep it off the limit (Sun Sep 18, 2022: 10.45%).
     expect(sheetText({ ...thu, checks: { share: 0.1045, limit: 0.1 } }).options[0]!.warn).toBe('Overrides checks: 10.45% dropped (limit 10%)');
@@ -220,7 +220,7 @@ describe('the cause card’s pause row, the day after an episode, and the record
     const g = { step: 'trips_valid', rows: 41_939, dropped: 4_004, share: 0.0955, limit: 0.1, held: false, near: true, usual: { low: 3_700, high: 9_100, expected: 6_000 } };
     // Thu Sep 21, 2023: near its limit and under it, so fine: one line, its share as its bars say it.
     expect(pausedChecks(g)).toEqual({ full: false, line: 'Checks passed: 9.55% dropped' });
-    expect(pausedChecks({ ...g, share: 0.06, near: false })).toEqual({ full: false, line: 'Checks passed: 6% dropped' });
+    expect(pausedChecks({ ...g, share: 0.06, near: false })).toEqual({ full: false, line: 'Checks passed: 6.0% dropped' });
     expect(pausedChecks({ ...g, held: true, near: false, share: 0.4567 })).toEqual({ full: true, line: null });
     expect(pausedChecks(null)).toEqual({ full: false, line: null });
   });

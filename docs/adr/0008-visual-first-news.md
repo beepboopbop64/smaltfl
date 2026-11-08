@@ -68,13 +68,16 @@ where about 35,000 are usual, and everything else held.
    differently from one past it because bad rows came. On such a day the verb is "Tell the source", not "Add a check".
    New count metrics (`count`, `droppedRows`, `ruleRows`, scale `count`) give those rows their usual ranges; metrics are
    not hashed, so no encoding changes. A gate within one point below its limit is drawn too ("near"), and a share is
-   never printed equal to the limit it passed or missed. Each bar says what it counts ("46% of arrived rows dropped",
+   never printed equal to the limit it passed or missed; a share of the checks is printed to one decimal everywhere,
+   two within a point of the limit, and its gap to the limit with it, in the sheet always and on the card where the
+   checks held or came near ("45.7% … 35.7 pt over"). Each bar says what it counts ("46% of arrived rows dropped",
    "2,116 rows dropped"); the limit is a tall solid tick and the share's end a pointer (‖ only ever means held). Within
    two points of the limit the share is drawn again on a printed zoom (0–20% for a 10% limit) and its margin said to
    the share's own decimals ("10.45% … 0.45 pt over"); on the full bar its end sits 3 px clear of the tick on its side.
 
 5. **Words.** A head is at most six words and carries the number or the time ("Only Flex Fare records arrived", "Trips
-   fall 95% from 13:00", "Vendor 1 sent almost nothing", "Normal for MLK Day"); a finding's title at most eight, with
+   fall to ~330/h from 13:00": a fall that runs to the day's end is headed by the rate the trips fell to, so it can't
+   read as the file cut off; "Vendor 1 sent almost nothing", "Normal for MLK Day"); a finding's title at most eight, with
    its measured number and value names ("Payment type Credit card: 0.2% (usually 75–80%)"), and as a head it leaves its
    "(usually …)" to the visual under it when six words won't hold it; its detail at most one sentence of twenty words,
    shown only on tap, every word of it from the figures with a tolerance ("as usual" only within 5% of usual and inside
@@ -90,33 +93,49 @@ where about 35,000 are usual, and everything else held.
    "Nothing to do · Thu published short, Fri–Sun held", a held load being never published and nothing waiting on a
    person to release it; never the weather, §11), the day's count on a line with its usual range (the
    amount line, under the head on every day, carrying the day's own change, "−65%", when the count is outside its
-   range and the head doesn't say it), one visual chosen by the cause (the part and the rest on one bar at one scale,
-   today's ink over a dashed usual, so a part that held and a rest that stopped read at their real sizes, each labelled
-   "10,518 · usual ~4.5k" so it can't read as a fraction, trips beyond usual an outlined box past a notch; 24 hour bars
-   over a ghost of a usual day, the short hours' trips dark and never under 3 px so a trickle reads as present and low,
-   the trips missing one wash with a dashed edge, labelled "still ~330/h" and "~77k missing"; a strip of days each with
-   its own range, four weeks on an amount day and the week on a calm one, an episode's days marked), the gate when it
+   range and the head doesn't say it, named "whole day −65%" beside a head about the hours from a fall), one visual
+   chosen by the cause (the part and the rest on one bar at one scale, 6 px apart, today's ink over a dashed usual, so a
+   part that held and a rest that stopped read at their real sizes, each labelled "10,518 · usual ~4.5k" so it can't
+   read as a fraction, trips beyond usual real trips filled in a lighter tone of the ink past a thin notch, said under
+   them when the surge is the news, "+6k over usual", a sliver of them under 6 px taking no notch; 24 hour bars over a
+   ghost of a usual day, the short hours' trips one dark ribbon never under 5 px so a trickle reads as present and low,
+   its rate on a bracket above it ("still ~330/h"), the trips missing one wash 3 px clear of it whose dashed edge runs
+   up its sides and along the usual skyline, never along the trickle, labelled "~77k missing", and when the hours before
+   the fall ran a twentieth of the day or more off usual, a bracket over them saying by how much ("~8.3k above usual",
+   Sat Sep 17, 2022, so ~52k missing and the whole day's −42% are both read true); a day told by its hours shows the
+   part and the rest beside them only when the part moved too; a strip of days each with its own range, 9 px at least,
+   its tick 2 px on a band under 12 px and the band's edge drawn over the tick, four weeks on an amount day and the week
+   on a calm one, an episode's days marked), the gate when it
    held, came near, or the day had something wrong, what it reaches ("Paused · 3 outputs waiting" on a day held, ADR 0009 §12; "Outputs built from a short day", never "published" alone; §10), the folded findings as counted rows ("16
    changes this explains", with what they are in words: "shares · values gone · times"; "12 more this day" under it,
    "12 more changes this day" alone) that open in place into compact rows, a column's together, three and then "Show
    all", each today against its usual, and one verb with the others behind ⋯. The health row (§11) sits in the card,
    after its visuals and before the gate. Then at most two more stories, and counted rows for the rest and the notes,
-   each row carrying the mark its findings carry in the health row. A tap opens a sheet that is visual too: a waterfall from a usual day to this one (a long name wraps), the
+   each row carrying the mark its findings carry in the health row. A tap opens a sheet that is visual too, its
+   sections in the cause's order (a day told by its hours leads with them): a waterfall from a usual day to this one (a
+   long name wraps; on a day told by its hours, its steps the same windows as the hour chart, "before 15:00" and "from
+   15:00"; a step within its own usual range a neutral grey step, never the dashed wash of trips missing), the
    part's own days (its axis printed, each day's tick coloured only when outside that day's range, and, where its count
    has no range of its own, the range its split is judged on: New Year's Day 2024's Flex Fare at 2.3k–8.6k), its
-   column's composition usual and today (the part labelled, over the bar when it's narrow, a vendor named beside its
+   column's composition usual and today only when the part's own count moved (a part that held reads as a share that
+   surged when the rest fell: Thu Sep 21, 2023's Flex Fare, 3.9% to 11.1% on its usual 4,657 trips), its count beside
+   its share ("Flex Fare 13.0% · 10,518") (the part labelled, over the bar when it's narrow, a vendor named beside its
    code, "Vendor 1 · Creative Mobile", as the hero bar names it too; a value gone today takes no width and is named
    under its bar), the split in one sentence; the episode's hours, its readout first saying
    the fall as the head does ("Thu from 13:00: 3,679 trips · usual ~80k (−95%)") and its shortfall an estimate with
    its bound ("~375k fewer (≥270k)"), never the bound alone; the checks rule by rule against their usual rows, on one
    count scale over an incident's days so far, and the outputs the held run didn't publish. Numbers that sit beside a
-   difference are rounded finely enough to subtract ("~68.5k" beside "+2k"); a waterfall's labels share one place,
-   the coarsest at which they add up as read and each is within 5% of its count ("119k −77k −26 → 42k"), else whole
-   numbers ("114,913 −110,137 −143 → 4,633").
+   difference are rounded finely enough to subtract ("~68.5k" beside "+2k"); a waterfall's labels are whole counts in
+   one format on every day, adding up exactly and ending on the count the card prints ("114,913 −110,137 −143 →
+   4,633"; never "Today 6k" beside a head's 5,732).
 
 7. **Marks** carry severity by shape and fill first and colour third (the tokens' hues are too close in greyscale):
    something wrong is a filled hexagon with "!", unusual an outlined triangle on a wash, a note a small dot, ok no mark,
-   held ‖, explained ↳, marked as expected ✓. Folded findings keep their shape in grey. Counts start at zero; shares sit
+   held ‖, explained ↳, marked as expected ✓. Folded findings keep their shape in grey. A number outside its range
+   without being news is a shape, a ring, never a severity's colour; the day picked on a History chart takes its
+   verdict's colour, the one its News, the strip and the calendar give it. A range's ends and a usual notch are soft,
+   thin and in the band's own edge; only a real limit is a heavy tick. Counts start at zero (a History chart of a count
+   too: Thu Sep 21, 2023's 41,939 never sits on a floor of 37k); shares sit
    on 0–100% or a printed zoom; each day draws its own range; usual is a light ghost behind today's ink, its edge 3:1
    against the card in both themes (tracks and control borders too; hairlines 1.8:1), never thinner than today's mark
    and 4 px more, grown away from a value outside it so the gap stays true. A strip of days carries a one-line key
@@ -155,14 +174,14 @@ where about 35,000 are usual, and everything else held.
     Nothing after the viewed day is drawn as known: the episode's hours run from its first day to the viewed one (Sep 21
     shows Thu, Sep 22 Thu–Fri, the viewed day framed and its readout first: "Fri: 4,633 trips · usual ~115k (−96%)"),
     its shortfall counts those days only, the day it began as its head counts it (Sep 21: "~77k fewer", as its hour
-    chart's "~77k missing"); a History chart draws the days after it lighter, their bands (made from days before) but no
-    value, and a tap picks no later day; the loads strip leaves them unmarked, a band and no count, whatever the visit
+    chart's "~77k missing"); a History chart, its weather and its calendar end at the viewed day, drawing no band,
+    guess, rain or month after it; the loads strip leaves them unmarked, a band and no count, whatever the visit
     ran. The episode chips keep a mark: they are how to get to the incidents, each marked by its worst day (ADR 0009 §12). The History calendar gives each day the
     verdict its News tells (the same story, findings marked as expected left so, a refused file first), the viewed
     day's at once, ringed apart from its own colour; it checks the days to the viewed one a few at a time while the page
     is idle, on after its tab closes, and says "Checking every day · 276 of 693" with a bar until every one is checked,
     never a count of wrong days before then ("693 days to Thu Sep 21 · 23 wrong · 36 unusual" after). Days after the
-    viewed one are lighter and not counted. A key says what each cell is, and each year's block names its year on its
+    viewed one are neither drawn nor counted. A key says what each cell is, and each year's block names its year on its
     first row. The band's "outside last year" is another measure (days outside their range), said as such. A day with
     something wrong shows its checks whether they held, came near or passed ("Checks passed", Sat Sep 17, 2022), their
     sheet titled with the share their bars say and marked as the checks are (wrong when held, unusual when near the
@@ -201,7 +220,10 @@ where about 35,000 are usual, and everything else held.
     and its verb moves to "Open an incident", "Tell the source again" behind ⋯; each verb's accessible name and title
     say what it does and whom it reaches. "How it's judged" draws what the day's range is learned from, inside its
     frame: the six weekdays before as dots, the day last year as a diamond with its date, each group named, and today's
-    band and value; two sentences, the rest of the method behind "More on the method"; "About this flow" says the same.
+    band and value; two sentences built from what was used (days.judgedWords: "the 6 Saturdays before; no data a year
+    ago" in September 2022, "the 3 days around it last year", a holiday named against itself last year), the band said
+    wide when it is more than half its middle across, with the reason its inputs show; the rest of the method behind
+    "More on the method"; "About this flow" says the same.
     The sheet's head fits 390 px: the day on its own row, no arrow past the first or last load; what it reads and what
     reads it under it, each chip cut short and two or more folded into one ("‹ 2 inputs"); the tabs scrolled to the one
     chosen, their edges faded while tabs lie past them. A held gate is said from its figures wherever its message would

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { wordsIn } from '../src/core/story.js';
-import { calendarHead, dayMid, heldLoadLine, lacked, readersSee, reachLabel, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine, toldLine, type EpisodeDay } from '../src/core/days.js';
+import { calendarHead, dayMid, heldLoadLine, judgedWords, lacked, readersSee, reachLabel, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine, toldLine, type EpisodeDay } from '../src/core/days.js';
 
 describe('the run a day shows', () => {
   it('is the day’s own newest run when it passed', () => {
@@ -170,8 +170,11 @@ describe('a held day’s own rows, staged (ADR 0009 §12)', () => {
     expect(stagedBar('2023-09-21', null)).toBe('Staged Thu 21 · nothing published yet');
     // Published as is: its rows are what readers see, and no bar.
     expect(stagedBar('2023-09-21', '2023-09-21')).toBeNull();
-    // A later day passed since: the day is no longer staged for readers, and says what superseded it.
-    expect(stagedBar('2023-09-23', '2023-09-26')).toBe('Not published · superseded by Tue 26');
+    // A later day passed since: the day is no longer staged for readers, and is said as it stood then, naming no
+    // later day (ADR 0008 §10): what readers kept while it waited.
+    expect(stagedBar('2023-09-23', '2023-09-26', '2023-09-21')).toBe('Not published · readers kept Thu 21');
+    expect(stagedBar('2023-09-23', '2023-09-26')).toBe('Not published');
+    expect(stagedBar('2023-09-23', '2023-09-26', '2023-09-26')).toBe('Not published');
   });
 
   it('say how old the day readers see is once it is two days or more before the day held', () => {
@@ -195,5 +198,26 @@ describe('a source told during an episode (ADR 0008 §11)', () => {
     expect(toldLine(log, '2023-09-21', '2023-09-21')).toBeNull();
     // A note before the episode began is another episode's.
     expect(toldLine([{ day: '2023-09-20', act: 'notify' }], '2023-09-21', '2023-09-23')).toBeNull();
+  });
+});
+
+describe('how a day’s range was judged (ADR 0008 §11)', () => {
+  const base = { weekday: 'Saturday', band: '91k–118k', low: 91_000, high: 118_000, expected: 103_000, holiday: null, special: false, holidayIn: false };
+  it('says only the comparisons it made', () => {
+    // Sep 2022: the history starts in Oct 2021, so there is no day a year ago to judge by.
+    const sixWeeks = ['2022-09-10', '2022-09-03', '2022-08-27', '2022-08-20', '2022-08-13', '2022-08-06'];
+    expect(judgedWords({ ...base, weeks: sixWeeks, year: [] })).toEqual(['Judged against the 6 Saturdays before; no data a year ago.', 'The band is that guess give or take its typical misses: 91k–118k for this Saturday.']);
+    // Nov 2022: three days around it last year, not "the day".
+    expect(judgedWords({ ...base, weeks: sixWeeks, year: ['2021-11-06', '2021-11-13', '2021-11-20'] })[0]).toBe('Judged against the 6 Saturdays before and the 3 days around it last year, weighted by how well each guesses.');
+    expect(judgedWords({ ...base, weeks: sixWeeks, year: ['2021-11-13'] })[0]).toBe('Judged against the 6 Saturdays before and Nov 13 last year, weighted by how well each guesses.');
+    // A holiday from itself last year, named and dated, so it can be seen the band was made for it.
+    expect(judgedWords({ ...base, weekday: 'Monday', weeks: [], year: ['2023-01-16'], holiday: 'Martin Luther King Jr. Day', special: true })[0]).toBe('Martin Luther King Jr. Day is judged against itself last year (Jan 16), moved by how this year has compared lately.');
+  });
+
+  it('says a band is wide, and why, from the days it learns from', () => {
+    const wide = { ...base, weekday: 'Wednesday', band: '78k–159k', low: 78_000, high: 159_000, expected: 118_000, weeks: ['2024-01-10', '2024-01-03', '2023-12-27'], year: [] };
+    expect(judgedWords({ ...wide, holidayIn: true })[1]).toBe('The band is that guess give or take its typical misses: 78k–159k for this Wednesday; wide: holidays in the days it learns from.');
+    expect(judgedWords({ ...wide, holidayIn: false })[1]).toMatch(/; wide: its guesses have missed by a lot lately\.$/);
+    expect(judgedWords({ ...base, weeks: ['2022-09-10'], year: [] })[1]).not.toMatch(/wide/);
   });
 });

@@ -18,10 +18,10 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, QUANTILES, type His
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { calendarHead, heldLoadLine, dayMid, dayShort, lacked, noRowsBefore, reachLabel, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
+import { calendarHead, heldLoadLine, dayMid, dayShort, judgedWords, lacked, noRowsBefore, reachLabel, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
 import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, receiptLines, ribbonOf, runFigures, sheetText, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, stagedKeys, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
-import { CELL_KINDS, CELL_NAMES, HEALTH_HEAD, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
+import { CELL_KINDS, CELL_NAMES, HEALTH_HEAD, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
@@ -358,7 +358,7 @@ const rowsFromBar = (): HTMLElement | null => {
   if (text) return h('p', { class: 'rows-from', role: 'note' }, text);
   const r = latest();
   const day = dayOfRun(r);
-  const staged = r && day && !isPublished(r) ? stagedBar(day, readersDay(r)) : null;
+  const staged = r && day && !isPublished(r) ? stagedBar(day, readersDay(r), keptThen(day)) : null;
   return staged ? h('p', { class: 'rows-from staged', role: 'note' }, staged) : null;
 };
 
@@ -403,6 +403,17 @@ const isPublished = (r: RunRecord): boolean => {
 
 /** The day of the version a name shows readers now, or null when nothing is published under it. */
 const showsDay = (name: string): string | null => dayOfRun(state.names.get(name)) ?? null;
+
+/** The last day before `day` whose run was published in this visit: what readers kept while `day` waited, as it stood
+ * then, for a day a later one has passed since (days.stagedBar). */
+function keptThen(day: string): string | null {
+  let best: string | null = null;
+  for (const x of state.runs) {
+    const d = dayOfRun(x);
+    if (d && d < day && isPublished(x) && (!best || d > best)) best = d;
+  }
+  return best;
+}
 
 /** The day readers see in place of a run's: what the first output it holds back shows. */
 function readersDay(r: RunRecord): string | null {
@@ -2364,7 +2375,8 @@ function drillHead(card: string, tabs: Tab[], tab: Tab): HTMLElement {
   // A day held carries its mark on the News tab too (ADR 0009 §12), where its story is told or an output waits on it.
   const viewed = viewedDay();
   const held = viewed ? dayPause(viewed) : null;
-  const pm = held && (story || outputState(id) === held) ? held : null;
+  // Its mark there too where the step held the day (the checks at trips_valid), as the trips' News carries it.
+  const pm = held && (story || outputState(id) === held || onScreen()?.result.holds.some((x) => x.origin === id)) ? held : null;
   return h('div', { class: 'drill-head' },
     h('div', { class: 'drill-title' },
       h('div', { style: 'flex:1;min-width:0' }, h('p', { class: 'eyebrow' }, profileOf(card) ? `PROFILE · OF ${id.toUpperCase()}` : kindLabel(id)), h('h2', {}, card)),
@@ -2534,7 +2546,10 @@ function miniDist(p: Profile, meaning?: PropertyType): SVGSVGElement | HTMLEleme
   // A key: every value different, nothing to draw.
   if (p.facts.distinct >= p.facts.present && p.facts.present > 20) return h('span', { class: 'mini-none' }, 'every value different');
   if (p.top?.length) {
-    const top = p.top.slice(0, 3);
+    // Shares of all the rows, blanks included, as the day's news counts them: one denominator on the row (a column 0.4%
+    // filled says its top value at 0.3%, never at the 71% of the few rows it fills).
+    const filled = p.facts.present / Math.max(1, p.facts.rows);
+    const top = p.top.slice(0, 3).map((t) => ({ ...t, share: t.share * filled }));
     let x = 0;
     const svg = s('svg', { viewBox: `0 0 ${W} 8`, class: 'mini tops', 'aria-hidden': 'true' }) as SVGSVGElement;
     top.forEach((t, k) => {
@@ -2553,7 +2568,8 @@ function miniDist(p: Profile, meaning?: PropertyType): SVGSVGElement | HTMLEleme
     };
     // A tie is said as one, never as one value's lead: "all equal", or "3 tie · 17%".
     const tie = tieOf(p);
-    const said = tie === 'all' ? 'all equal' : tie > 1 ? `${tie === p.top.length && p.facts.distinct > tie ? `${tie}+` : tie} tie · ${Math.round(p.top[0]!.share * 100)}%` : `${name(top[0]!)} · ${Math.round(top[0]!.share * 100)}%`;
+    const share = (x: number) => (x >= 0.1 ? `${Math.round(x * 100)}%` : shareSaid(x));
+    const said = tie === 'all' ? 'all equal' : tie > 1 ? `${tie === p.top.length && p.facts.distinct > tie ? `${tie}+` : tie} tie · ${share(top[0]!.share)}` : `${name(top[0]!)} · ${share(top[0]!.share)}`;
     return h('span', { class: 'mini-tops' }, svg, h('span', { class: 'mini-label' }, said));
   }
   return null;
@@ -2644,15 +2660,44 @@ function colMark(id: string, p: Profile, out: readonly Judged[]): HTMLElement | 
     const m = sevMark(story.severity);
     return h('span', { class: `cr-mark ${story.severity}`, 'aria-label': story.head }, m ? glyphEl(m, 13) : null, h('span', {}, clockText(story.hours.from * 60)));
   }
-  const f = idNews(id).find((x) => x.columns?.includes(p.name) && x.severity !== 'ok') as Told | undefined;
+  const f = colNews(id, p);
   if (f) {
     const folded = f.tier === 'absorbed' || f.tier === 'follows' || f.tier === 'sameDay';
-    const said = f.value !== undefined && f.range && (f.kind === 'share' || f.kind === 'missing' || f.kind === 'gone') ? (f.value === 0 ? 'none' : shareWords(f.value, f.range.low, f.range.high).value) : '';
-    const dir = f.value !== undefined && f.range ? (f.value > f.range.high ? '▲' : f.value < f.range.low ? '▼' : '') : '';
     const m: VizMark = folded ? 'explained' : f.severity === 'alert' ? 'alert' : f.severity === 'warn' ? 'warn' : 'note';
-    return h('span', { class: `cr-mark ${folded ? 'explained' : f.severity}`, 'aria-label': f.title }, glyphEl(m, 13), dir || said ? h('span', {}, `${dir}${said}`) : null);
+    return h('span', { class: `cr-mark ${folded ? 'explained' : f.severity}`, 'aria-label': f.title }, glyphEl(m, 13));
   }
   return out.length ? h('span', { class: 'cr-mark ring', 'aria-label': 'outside its range, not news' }, h('i', {})) : null;
+}
+
+/** The day's news about a column, beside the day's own rows only (ADR 0008 §10). */
+function colNews(id: string, p: Profile): Told | undefined {
+  if (rowsFrom(shownDay(), viewedDay())) return undefined;
+  return idNews(id).find((x) => x.columns?.includes(p.name) && x.severity !== 'ok') as Told | undefined;
+}
+
+/**
+ * What a column's news says on its row, under its bar: the value it is about by name and both of its numbers, today's
+ * and its usual, over all the day's rows as the bar's are, the arrow after them saying which way ("Curb Mobility: 40.6%
+ * · usual 72–76% ▼"; never "▼41%" beside another value's bar, nor "▲99%" for a level of 99%). News with no value of its
+ * own says its title. Null without news.
+ */
+function colSaid(id: string, p: Profile): string | null {
+  if (historyOf(id) === 'trips' && storyFor(newsDay() ?? '')?.hero === 'hours' && /pickup/i.test(p.name) && p.kind === 'time') return null;
+  const f = colNews(id, p);
+  if (!f) return null;
+  if (f.value !== undefined && f.range && (f.kind === 'share' || f.kind === 'missing' || f.kind === 'gone')) {
+    const mem = f.members?.find((x) => x.column === p.name) ?? f.members?.[0];
+    const value = mem?.value ?? f.values?.[0] ?? 'null';
+    const raw = f.kind === 'missing' || value === 'null' ? 'blank' : mem?.label || NEWS_NAMES.label(p.name, JSON.parse(value) as unknown);
+    // A company said short, as the bar above names its value ("Curb Mobility", not "Curb Mobility, LLC").
+    const name = /,?\s+(LLC|L\.L\.C\.|Inc\.?|Ltd\.?|Corp\.?)$/i.test(raw) ? shortWho(raw) : raw;
+    const share = mem?.share ?? f.value;
+    const range = mem?.range ?? f.range;
+    const w = shareWords(share, range.low, range.high);
+    const dir = share > range.high ? ' ▲' : share < range.low ? ' ▼' : '';
+    return `${name}: ${share === 0 ? 'none' : w.value} · usual ${w.range}${dir}`;
+  }
+  return f.title;
 }
 
 function columnFlag(id: string, p: Profile): { severity: Severity; title: string } | null {
@@ -2700,7 +2745,8 @@ async function columnsTab(card: string, id: string, who: string): Promise<HTMLEl
       h('span', { class: 'cr-name' }, h('b', {}, m?.title ?? p.name), m ? h('span', { class: 'cr-code' }, p.name) : null),
       h('span', { class: 'cr-dist' }, miniDist(p, m) ?? h('span', { class: 'mini-none' }, p.kind)),
       h('span', { class: 'cr-stat' }, filled < 1 ? `${pct(filled)} filled` : 'all filled'),
-      colMark(id, p, out));
+      colMark(id, p, out),
+      ((said) => (said ? h('span', { class: 'cr-said' }, said) : null))(colSaid(id, p)));
     const toggle = (show: boolean) => {
       row.setAttribute('aria-expanded', String(show));
       detail.hidden = !show;
@@ -2728,8 +2774,8 @@ function colKey(list: HTMLElement): HTMLElement | null {
   const has = (sel: string) => !!list.querySelector(sel);
   const text = list.textContent ?? '';
   const items: Child[] = [];
-  if (has('.cr-mark.explained')) items.push(h('span', { class: 'ck-i' }, glyphEl('explained', 13), 'the day’s cause'));
-  if (/[▲▼]/.test(text)) items.push(h('span', { class: 'ck-i' }, '▲▼ today vs usual'));
+  if (has('.cr-mark.explained')) items.push(h('span', { class: 'ck-i' }, glyphEl('explained', 13), 'follows from the day’s news'));
+  if (/[▲▼]/.test(text)) items.push(h('span', { class: 'ck-i' }, '▲▼ above or below usual'));
   if (has('.cr-mark.ring')) items.push(h('span', { class: 'ck-i' }, h('span', { class: 'cr-mark ring', 'aria-hidden': 'true' }, h('i', {})), 'outside its range'));
   return items.length ? h('p', { class: 'col-key', 'aria-label': 'Key' }, ...items) : null;
 }
@@ -3037,7 +3083,7 @@ function splitVisual(story: Story): Element | null {
   const sev = story.severity === 'alert' || story.severity === 'warn' ? story.severity : 'warn';
   const partMoved = sp.kind !== 'held';
   return svgNode(partBar({
-    left: { name: partLabel(sp), today: sp.part.today, usual: sp.part.usual, label: countLabel(sp.part), sev: partMoved ? sev : null },
+    left: { name: partLabel(sp), today: sp.part.today, usual: sp.part.usual, label: countLabel(sp.part), sev: partMoved ? sev : null, overLabel: overLabel(sp) },
     right: { name: 'Everything else', today: sp.rest.today, usual: sp.rest.usual, label: countLabel(sp.rest), sev: partMoved ? null : sev },
     aria: `${partLabel(sp)} records: ${fmtInt(sp.part.today)}, where about ${fmtInt(sp.part.usual)} is usual. Everything else: ${fmtInt(sp.rest.today)}, where about ${fmtInt(sp.rest.usual)} is usual.`,
   }));
@@ -3051,8 +3097,10 @@ function amountVisual(story: Story): Element | null {
   const volume = story.findings.find((f) => f.kind === 'volume');
   const sev = volume && (volume.was === 'alert' || volume.was === 'warn') ? volume.was : null;
   // The day's own change, when the story puts it on the line (outside its range, and not already in the head).
-  const change = story.labels.amount.find((l) => /^[+−]\d+%$/.test(l));
-  return svgNode(amountLine({ value: a.value, low: a.low, high: a.high, valueLabel: fmtInt(a.value), bandLabel: `usual ${compact(a.low)}–${compact(a.high)}`, changeLabel: change, sev, aria: `${fmtInt(a.value)} trips on ${dayLabel(story.day)}${change ? `, ${change} against a usual ${wd}` : ''}, where a usual ${wd} has ${fmtInt(a.low)} to ${fmtInt(a.high)}.` }));
+  // Beside a head about the hours from a fall, it says its window ("whole day −65%").
+  const said = story.labels.amount.map((l) => /^(?:(.+) )?([+−]\d+%)$/.exec(l)).find((m) => !!m);
+  const change = said?.[2];
+  return svgNode(amountLine({ value: a.value, low: a.low, high: a.high, valueLabel: fmtInt(a.value), bandLabel: `usual ${compact(a.low)}–${compact(a.high)}`, changeLabel: change, changeWindow: said?.[1], sev, aria: `${fmtInt(a.value)} trips on ${dayLabel(story.day)}${change ? `, ${said?.[1] ? `${said[1]} ` : ''}${change} against a usual ${wd}` : ''}, where a usual ${wd} has ${fmtInt(a.low)} to ${fmtInt(a.high)}.` }));
 }
 
 /** The hero of a story's cause card: the one visual its cause calls for. */
@@ -3067,8 +3115,8 @@ function heroOf(story: Story): Element | null {
     const want = hr.usual.slice(hr.from, hr.to + 1).reduce((a, b) => a + b, 0);
     const fall = Math.round((1 - had / Math.max(1, want)) * 100);
     return svgNode(hourBars({
-      got: hr.got, usual: hr.usual, cut: hr.from, to: hr.to, cutLabel: l.cut, floorLabel: l.floor, missingLabel: l.missing, ghostLabel: l.ghost,
-      aria: `Trips by hour, ${dayLabel(day)}, against a usual ${wd}: from ${clockText(hr.from * 60)} they fall ${fall}% but don't stop, ${fmtInt(had)} trips where about ${fmtInt(want)} is usual, ${l.floor.replace('/h', ' an hour')}.`,
+      got: hr.got, usual: hr.usual, cut: hr.from, to: hr.to, cutLabel: l.cut, floorLabel: l.floor, missingLabel: l.missing, ghostLabel: l.ghost, beforeLabel: l.before,
+      aria: `Trips by hour, ${dayLabel(day)}, against a usual ${wd}: from ${clockText(hr.from * 60)} they fall ${fall}% but don't stop, ${fmtInt(had)} trips where about ${fmtInt(want)} is usual, ${l.floor.replace('/h', ' an hour')}${l.before ? `; before ${clockText(hr.from * 60)}, ${l.before}` : ''}.`,
     }));
   }
   if ((story.hero === 'amount' || story.hero === 'finding') && story.cause?.kind === 'volume') {
@@ -3133,7 +3181,8 @@ function gateVisual(g: Gate, big = false, countMax?: number): Element {
   const l = gateLabels(g);
   return svgNode(gateBars({
     rows: g.rows, dropped: g.dropped, limit: g.limit, usual: g.usual ? { low: g.usual.low, high: g.usual.high } : null, big, countMax,
-    shareLabel: l.share, limitLabel: l.limit, marginLabel: l.margin, zoom: l.margin !== null,
+    // The gap to the limit: in the sheet always; on the card where the checks held or came near (story.labels.gate).
+    shareLabel: l.share, limitLabel: l.limit, marginLabel: big || g.held || l.zoom ? l.margin : null, zoom: l.zoom,
     countLabel: [l.rows, l.usual ?? ''],
     aria: `${g.held ? `Held at ${g.step}` : `The checks at ${g.step}`}: ${l.share}${g.limit !== null ? ` against a ${Math.round(g.limit * 100)}% limit` : ''}${l.margin ? `, ${l.margin.replace('pt', 'points')}` : ''}${pastLimit && !g.held ? ', past it' : ''}; ${l.rows} of ${fmtInt(g.rows)}${g.usual ? `, where a day like it drops ${fmtInt(g.usual.low)} to ${fmtInt(g.usual.high)}` : ''}.`,
   }));
@@ -3213,29 +3262,40 @@ function causeDetail(story: Story, card: string): void {
   const day = story.day;
   const body: (Node | null)[] = [];
   const sp = story.split;
-  const steps = splitSteps(story);
-  if (sp && story.amount && steps) {
-    // Its labels at one precision, so they add up as read (stepLabels: "119k −77k −26 → 42k").
-    const [usual, moved, other, today] = steps;
+  // The sections in the cause's order: a day told by its hours leads with them, and its waterfall counts the same
+  // windows as its hour chart and amount line (story.fallSteps: before the fall, from it, the whole day).
+  const byHours = story.hero === 'hours';
+  if (byHours && (story.hours || story.episode)) body.push(hoursDetail(story));
+  const steps = (byHours ? fallSteps(story) : null) ?? splitSteps(story);
+  if (story.amount && steps) {
+    // Its labels whole counts, so they add up as read and end on the count the card prints (stepLabels).
+    const [usual, moved, other, today] = steps as [DayStep, DayStep, DayStep, DayStep];
     const way = (v: number) => `${v >= 0 ? '+' : '−'}${fmtInt(Math.abs(v))}`;
+    const kind = (x: DayStep) => (x.value >= 0 ? 'up' as const : 'down' as const);
     body.push(block('From a usual day to this one', svgNode(waterfall({
       steps: [
         { ...usual, total: true, kind: 'total' },
-        { ...moved, kind: moved.value >= 0 ? 'up' : 'down', sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined },
-        { ...other, kind: other.value >= 0 ? 'up' : 'down' },
+        { ...moved, kind: kind(moved), ...(moved.usual ? {} : { sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined }) },
+        { ...other, kind: kind(other), ...(byHours && !other.usual ? { sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined } : {}) },
         { ...today, total: true, kind: 'total' },
       ],
-      aria: `From a usual day's ${fmtInt(usual.value)} trips to ${fmtInt(today.value)}: ${moved.name} ${way(moved.value)}, ${other.name} ${way(other.value)}.`,
+      aria: `From a usual day's ${fmtInt(usual.value)} trips to ${fmtInt(today.value)}: ${moved.name} ${way(moved.value)}${moved.usual ? ' (within its usual range)' : ''}, ${other.name} ${way(other.value)}${other.usual ? ' (within its usual range)' : ''}.`,
     }))));
+  }
+  if (sp && story.amount) {
     const part = stripOf({ of: 'count', column: sp.column, value: sp.value }, day, 28, story.severity);
     const at = part.at(-1);
     if (part.length) body.push(block(`${sp.name}, day by day`, svgNode(dayStrip({ days: part, h: 88, labels: stripLabels(part), key: STRIP_KEY, unit: '/day', aria: `${sp.name} records day by day for four weeks to ${dayLabel(day)}, each against its own usual range${at?.v !== null && at?.v !== undefined ? `: ${fmtInt(at.v)} on ${dayLabel(day)}${at.low !== null && at.high !== null ? `, where ${fmtInt(at.low)} to ${fmtInt(at.high)} is usual` : ''}` : ''}.` }))));
-    const comp = compositionOf(sp.column, day, sp.value, [partLabel(sp), sp.name]);
+    // Its column's shares, usual and today, only when the part's own count moved: a part that held reads as a share
+    // that surged when the rest fell (Thu Sep 21, 2023: Flex Fare 3.9% → 11.1% on its usual 4,657 trips). Its count is
+    // on its segment, beside its share.
+    const partOff = sp.part.low !== null && sp.part.high !== null ? sp.part.today < sp.part.low || sp.part.today > sp.part.high : Math.abs(sp.part.today / Math.max(1, sp.part.usual) - 1) > 0.1;
+    const comp = partOff ? compositionOf(sp.column, day, sp.value, [partLabel(sp), sp.name], [approx(sp.part.usual), fmtInt(sp.part.today)]) : null;
     if (comp) body.push(block(`${NEWS_NAMES.column(sp.column)}, usual and today`, comp));
     body.push(oneLine(splitSentence(story)));
     if (sp.blank.length) body.push(h('div', { class: 'vf-chips' }, h('span', { class: 'vf-chip' }, `${sp.blank.length} fields blank on these trips`)));
   }
-  if (story.hours || story.episode) body.push(hoursDetail(story));
+  if (!byHours && (story.hours || story.episode)) body.push(hoursDetail(story));
   if (story.hero === 'amount' || story.hero === 'calm') {
     const days = stripOf({ of: 'trips' }, day, 56, story.severity);
     if (days.length) body.push(block('Trips, eight weeks', svgNode(dayStrip({ days, h: 90, labels: stripLabels(days), key: STRIP_KEY, unit: '/day', aria: `Trips day by day for eight weeks to ${dayLabel(day)}.` }))));
@@ -3505,7 +3565,7 @@ const shareSaid = (x: number) => (x === 0 ? '0%' : x < 0.001 ? '<0.1%' : pct(x))
 
 /** A coded column's values as two 100% bars, usual and today, the moved value dark and labelled by `names` (in the
  * usual bar, then today's: "Vendor 1 · Creative Mobile 29.3%", "Vendor 1 <0.1%"). */
-function compositionOf(column: string, day: string, moved?: string, names?: [string, string]): Element | null {
+function compositionOf(column: string, day: string, moved?: string, names?: [string, string], counts?: [string, string]): Element | null {
   const vh = history?.file.values?.[column];
   if (!vh?.counts || !history) return null;
   const k = history.file.days.indexOf(day);
@@ -3517,8 +3577,8 @@ function compositionOf(column: string, day: string, moved?: string, names?: [str
   const [first, again] = names ?? (moved !== undefined ? [name(moved), name(moved)] : ['', '']);
   return svgNode(composition({
     bars: [
-      { label: 'usual', parts: parts.map((p) => ({ name: p.v, share: p.usual, text: name(p.v), ...(p.v === moved ? { callout: `${first} ${shareSaid(p.usual)}` } : {}) })) },
-      { label: 'today', parts: parts.map((p) => ({ name: p.v, share: p.today, text: name(p.v), gone: p.today === 0 && p.usual > 0.002, ...(p.v === moved ? { callout: `${again} ${shareSaid(p.today)}` } : {}) })) },
+      { label: 'usual', parts: parts.map((p) => ({ name: p.v, share: p.usual, text: name(p.v), ...(p.v === moved ? { callout: `${first} ${shareSaid(p.usual)}${counts ? ` · ~${counts[0]}` : ''}` } : {}) })) },
+      { label: 'today', parts: parts.map((p) => ({ name: p.v, share: p.today, text: name(p.v), gone: p.today === 0 && p.usual > 0.002, ...(p.v === moved ? { callout: `${again} ${shareSaid(p.today)}${counts ? ` · ${counts[1]}` : ''}` } : {}) })) },
     ],
     moved, aria: `${NEWS_NAMES.column(column)}: ${parts.map((p) => `${name(p.v)} ${shareSaid(p.today)} today, usually ${shareSaid(p.usual)}`).join('; ')}.`,
   }));
@@ -3566,12 +3626,16 @@ function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): v
       aria: `${what === 'trips' ? 'Trips' : 'Rows dropped'}: ${weeks ? `the ${weeks.from.length} ${wd}s before (${weeks.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}${weeks && year ? ' and ' : ''}${year ? `the day last year (${year.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}: today's range from them, ${fmtInt(r.low)} to ${fmtInt(r.high)}${value !== null ? `; today ${fmtInt(value)}` : ''}.`,
     })));
   }
-  // Two sentences, as the picture has it; the rules for shares, levels and quantiles are a tap further.
+  // Two sentences, as the picture has it, from what this day's range was learned from (days.judgedWords); the rules for
+  // shares, levels and quantiles are a tap further.
+  const said = r && day ? (() => {
+    const weeks = r.guesses.find((g) => g.by === 'weeks')?.from.map((x) => x.day) ?? [];
+    const year = r.guesses.find((g) => g.by === 'year')?.from.map((x) => x.day) ?? [];
+    return judgedWords({ weekday: wd, weeks, year, holiday: holidayOf(day) ?? null, special: !!r.special, band: band.replace(/^usual /, ''), low: r.low, high: r.high, expected: r.expected, holidayIn: weeks.some((d) => !!holidayOf(d) || !!seasonOf(d)) });
+  })() : null;
   body.push(
-    oneLine(r?.special
-      ? `A holiday is judged against itself last year, moved by how this year has compared with last year lately.`
-      : `A day is judged against the same weekday in the six weeks before and the day last year, weighted by how well each guesses.`),
-    oneLine(r ? `The band is that guess give or take its typical misses: ${band.replace(/^usual /, '')} for this ${r.special ? 'day' : wd}.` : 'The band is that guess give or take its typical misses.'),
+    oneLine(said?.[0] ?? 'A day is judged against the same weekday in the weeks before and the day last year, weighted by how well each guesses.'),
+    oneLine(said?.[1] ?? 'The band is that guess give or take its typical misses.'),
     h('details', { class: 'fold vf-more-method' }, h('summary', {}, 'More on the method'),
       h('p', { class: 'vf-sub' }, 'A share or a level is told only a typical miss past its band’s edge. Shares are over all trips, blanks included; quantiles come from a 2,000-row sample; hours count trips before the checks.')));
   openDetail(of === 'dropped' ? 'How the rows dropped are judged' : 'How it’s judged', 'ok', body);
@@ -3681,7 +3745,9 @@ function causeCard(story: Story, card: string): HTMLElement {
     after,
     amount ? h('div', { class: 'vf-amount' }, h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, amount), info) : info,
     hero ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, hero) : null,
-    story.hero === 'hours' && story.split ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.split.name} and everything else: open`, onclick: () => causeDetail(story, card) }, splitVisual(story)) : null,
+    // On a day told by its hours, the part and the rest only when the part moved too: a part that held within its range
+    // (Flex Fare on Thu Sep 21, 2023) is told in the detail, never beside the fall as a second story.
+    story.hero === 'hours' && story.split && story.split.kind !== 'held' ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.split.name} and everything else: open`, onclick: () => causeDetail(story, card) }, splitVisual(story)) : null,
     // The weather after the numbers, as a plain note: context, never a cause, and nothing to tap (ADR 0008 §6).
     story.labels.context ? h('p', { class: 'vf-wx' }, story.labels.context) : null,
     // A day paused says so under its visual, its one verb with it, before the health row and the checks, so deciding is
@@ -3845,7 +3911,7 @@ function waitingDetail(r: RunRecord, label: string, options: (() => void) | null
   const others = now?.state === 'waiting' ? inFlowOrder(Object.keys(r.result.manifest.outputs).filter((o) => !r.result.waiting.includes(o) && (isOwner() || visible(o)))) : [];
   const upToDate = others.length ? h('div', { class: 'vf-block' }, h('p', { class: 'vf-bh' }, `${others.length} other${others.length === 1 ? '' : 's'} up to date`), h('ul', { class: 'vf-outlist' }, ...others.map((o) => h('li', {}, h('button', { type: 'button', onclick: () => (document.querySelector('.vf-detail-wrap')?.remove(), select(o)) },
     h('span', { class: 'o-box', 'aria-hidden': 'true' }, glyphEl('ack', 14)), h('span', { class: 'o-name' }, o), h('span', { class: 'o-rows' }, 'as published'), glyphEl('chev', 13)))))) : null;
-  openDetail(label, 'ok', [oneLine(day && now?.state !== 'asis' ? stagedBar(day, shown) : null), waitingList(r), upToDate, see]);
+  openDetail(label, 'ok', [oneLine(day && now?.state !== 'asis' ? stagedBar(day, shown, keptThen(day)) : null), waitingList(r), upToDate, see]);
 }
 
 /** Whether the viewer reads every row of a dataset (columns aside): only then is its whole count theirs to see. */
@@ -3874,7 +3940,7 @@ function readersSheet(r: RunRecord): void {
   const day = dayOfRun(r);
   // Whom it waits on, at the top, with Ask, as the decision sheet read only says it.
   const waits: HTMLElement = h('div', { class: 'vf-waits-on' }, h('p', {}, glyphEl('held', 14), h('b', {}, `${readersSee(readersDay(r), null).replace(/^./, (c) => c.toUpperCase())} until ${deciders()} decides`)), h('button', { type: 'button', class: 'linkish vf-ask', 'aria-label': `Ask ${deciders()} to decide: a note to send or copy`, onclick: () => askPanel(r, waits) }, 'Ask ›'));
-  openDetail(`${day ? `${dayMid(day)} · w` : 'W'}hat readers get`, 'ok', [waits, oneLine(day ? stagedBar(day, readersDay(r)) : null), waitingList(r)]);
+  openDetail(`${day ? `${dayMid(day)} · w` : 'W'}hat readers get`, 'ok', [waits, oneLine(day ? stagedBar(day, readersDay(r), keptThen(day)) : null), waitingList(r)]);
   document.querySelector('.vf-detail')?.classList.add('readonly');
   document.querySelector('.vf-detail .vf-dhead h3')?.prepend(glyphEl('held', 16));
 }
@@ -4532,10 +4598,10 @@ async function historyTab(card: string, id: string, who: string): Promise<HTMLEl
       sel));
   }
   if (ranges) {
-    const monday = mondayOf(day);
-    const days = daysFrom(dayPlus(monday, -49), dayPlus(monday, 6));
-    // The days up to this one: those after it are drawn lighter, with no value (ADR 0008 §10).
-    const seen = days.filter((d) => d <= day);
+    // Eight weeks ending on this day, and nothing after it: no band, guess or value of a day that hasn't come (ADR 0008
+    // §10).
+    const days = daysFrom(dayPlus(day, -55), day);
+    const seen = days;
     const fmt = metricFormat(choice.m);
     const focus = historyFocus.get(card) && seen.includes(historyFocus.get(card)!) ? historyFocus.get(card)! : day;
     const pick = (d: string) => {
@@ -4545,7 +4611,10 @@ async function historyTab(card: string, id: string, who: string): Promise<HTMLEl
     const gate = gateStep();
     const limit = choice.m.of === 'dropped' && gate?.limit != null ? gate.limit : undefined;
     const bt = backtestLine(ranges, choice.m);
-    box.append(bandChart(ranges, days, focus, choice.m.of === 'trips' ? (v) => fmtCompact(v).replace('.0k', 'k') : fmt, pick, limit, day) ?? '',
+    // The day picked takes its verdict's colour (the one its News, the calendar and the strip give it) when its number is
+    // outside its range; "outside" alone is a shape, a ring, never a severity's colour (ADR 0008 §7).
+    const verdict = verdictOf(focus)?.severity;
+    box.append(bandChart(ranges, days, focus, choice.m.of === 'trips' ? (v) => fmtCompact(v).replace('.0k', 'k') : fmt, pick, limit, day, verdict === 'alert' || verdict === 'warn' ? verdict : undefined) ?? '',
       h('div', { class: 'vf-key', 'aria-hidden': 'true' },
         h('span', {}, h('i', { class: 'k-band' }), 'usual'), h('span', {}, h('i', { class: 'k-exp' }), 'guess'), h('span', {}, h('i', { class: 'k-out' }), 'outside'),
         h('span', {}, h('i', { class: 'k-focus' }), 'this day'), h('span', {}, h('i', { class: 'k-hol' }), 'holiday'), limit !== undefined ? h('span', {}, h('i', { class: 'k-limit' }), 'limit') : null),
@@ -4599,7 +4668,8 @@ function tripChoices(): { key: string; label: string; m: Metric }[] {
 /** The weather of the weeks around the day: rain and snow a day, and the hours on record. */
 function weatherHistory(day: string): HTMLElement {
   const w = history!.file.weather!;
-  const days = daysFrom(dayPlus(mondayOf(day), -49), dayPlus(mondayOf(day), 6));
+  // Eight weeks ending on the day: the weather of days after it isn't known on it (ADR 0008 §10).
+  const days = daysFrom(dayPlus(day, -55), day);
   const at = days.map((d) => history!.file.days.indexOf(d));
   const [W, H, B] = [340, 120, 16];
   const max = Math.max(5, ...at.map((k) => (k < 0 ? 0 : (w.precip[k] ?? 0))));
@@ -4612,11 +4682,10 @@ function weatherHistory(day: string): HTMLElement {
     const hgt = (rain / max) * H;
     svg.append(s('rect', { class: `wx${snow >= 1 ? ' snow' : ''}${days[i] === day ? ' focus' : ''}`, x: (i * step + 0.5).toFixed(1), y: (H - hgt).toFixed(1), width: Math.max(1, step - 1).toFixed(1), height: Math.max(rain ? 1 : 0, hgt).toFixed(1) }));
   });
-  // The day marked under the axis, and the days after it lighter: it is the day on screen, not the last one.
+  // The day marked under the axis, at the chart's end; its date is the key's, so no end label sits under the mark.
   const fi = days.indexOf(day);
   if (fi >= 0) svg.append(s('path', { class: 'wx-caret', d: `M${(fi * step + step / 2 - 4).toFixed(1)} ${H + 9}l4 -6 4 6z` }));
-  days.forEach((d, i) => d > day && svg.append(s('rect', { class: 'wx-after', x: (i * step).toFixed(1), y: 0, width: step.toFixed(1), height: H })));
-  svg.append(s('text', { class: 'tick', x: 2, y: 10 }, `${max.toFixed(0)} mm`), s('text', { class: 'tick', x: 2, y: H + B - 3 }, shortDay(days[0]!)), s('text', { class: 'tick', x: W - 2, y: H + B - 3, 'text-anchor': 'end' }, shortDay(days.at(-1)!)));
+  svg.append(s('text', { class: 'tick', x: 2, y: 10 }, `${max.toFixed(0)} mm`), s('text', { class: 'tick', x: 2, y: H + B - 3 }, shortDay(days[0]!)), s('line', { class: 'wx-base', x1: 0, x2: W, y1: H + 0.5, y2: H + 0.5 }));
   const k = history!.file.days.indexOf(day);
   const short = w.boroughs.filter((_, b) => (w.hours[k]?.[b] ?? 0) < 24);
   return h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, 'Rain and snow, day by day'), svg,
@@ -4668,12 +4737,12 @@ function calendarView(): HTMLElement {
   const key = `${checksAsCounted()}|${dataLog.version}|${[...hiddenTripColumns()].sort().join(',')}`;
   if (calendar.key !== key) (calendar.sev.clear(), (calendar.key = key), (calendar.busy = false));
   const days = file.days.slice(file.warmup);
-  const months = [...new Set(days.map((d) => d.slice(0, 7)))].reverse();
   // The day on screen carries its News verdict at once, whatever is still being checked; the days after it haven't
-  // arrived (ADR 0008 §10): drawn lighter, with no verdict, and not counted.
+  // arrived (ADR 0008 §10): not drawn and not counted, the newest month on top being the day's own.
   const today = newsDay();
   if (today && days.includes(today)) calendar.sev.set(today, calendarSeverity(today));
   const upTo = today ? days.filter((d) => d <= today) : days;
+  const months = [...new Set(upTo.map((d) => d.slice(0, 7)))].reverse();
   const counted = () => new Map(upTo.flatMap((d) => (calendar.sev.has(d) ? [[d, calendar.sev.get(d)!] as const] : [])));
   const box = h('div', { class: 'vf-cal part' });
   const draw = () => {
@@ -4692,11 +4761,10 @@ function calendarView(): HTMLElement {
       svg += `<text x="0" y="${y + cell - 1}" class="tick">${m.slice(5, 7) === '12' || r === 0 ? m : m.slice(5, 7)}</text>`;
       for (let d = 1; d <= 31; d++) {
         const day = `${m}-${String(d).padStart(2, '0')}`;
-        if (!file.days.includes(day) || day < days[0]!) continue;
-        const later = !!today && day > today;
-        const sv = later ? undefined : calendar.sev.get(day);
+        if (!file.days.includes(day) || day < days[0]! || (today && day > today)) continue;
+        const sv = calendar.sev.get(day);
         const x = left + (d - 1) * (cell + gap);
-        const cls = later ? 'cal-after' : sv === 'alert' ? 'cal-alert' : sv === 'warn' ? 'cal-warn' : sv ? 'cal-ok' : 'cal-wait';
+        const cls = sv === 'alert' ? 'cal-alert' : sv === 'warn' ? 'cal-warn' : sv ? 'cal-ok' : 'cal-wait';
         svg += `<rect class="${cls}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" data-day="${day}"/>`;
         // The day on screen: a ring around its cell, apart from the cell's own verdict.
         if (day === today) ring = `<rect class="cal-now" x="${x - 1.5}" y="${y - 1.5}" width="${cell + 3}" height="${cell + 3}" rx="3"/>`;
@@ -4727,8 +4795,7 @@ function calendarView(): HTMLElement {
   // A key: what each cell is, as the cells draw it.
   const key2 = h('div', { class: 'vf-key cal-key', 'aria-hidden': 'true' },
     h('span', {}, h('i', { class: 'k-cal ok' }), 'normal'), h('span', {}, h('i', { class: 'k-cal warn' }), 'unusual'), h('span', {}, h('i', { class: 'k-cal alert' }), 'wrong'),
-    h('span', {}, h('i', { class: 'k-cal wait' }), 'not checked yet'), today ? h('span', {}, h('i', { class: 'k-cal now' }), 'this day') : null,
-    upTo.length < days.length ? h('span', {}, h('i', { class: 'k-cal after' }), 'after it') : null);
+    h('span', {}, h('i', { class: 'k-cal wait' }), 'not checked yet'), today ? h('span', {}, h('i', { class: 'k-cal now' }), 'this day') : null);
   box.append(head, chart, key2, said);
   // Every day is checked, a few at a time when the page is idle, newest first, and the checking goes on when the tab
   // closes, so the header only ever counts days that were checked.
@@ -6424,7 +6491,10 @@ function verdictOf(day: string): Finding | undefined {
   const story = history && historyOpen() && history.file.days.includes(day) ? storyFor(day) : null;
   return story ? { key: `story:${day}`, kind: story.cause?.kind ?? 'calm', severity: story.severity, score: 100, title: story.head, detail: story.chip ?? '', look: 'news', acts: [] } : undefined;
 }
-const VERDICT_WORD: Record<Severity, string> = { alert: 'something’s wrong', warn: 'unusual', note: 'a normal day', ok: 'a normal day' };
+// A day with notes says its head when the head isn't a calm one ("Busier than usual for days", Sep 14, 2022), as its
+// News does: never "a normal day" beside a count outside its range.
+const VERDICT_WORD: Record<Severity, string> = { alert: 'something’s wrong', warn: 'unusual', note: 'with a note', ok: 'a normal day' };
+const saysHead = (f: Finding) => f.severity === 'alert' || f.severity === 'warn' || (f.severity === 'note' && !/^(A normal |Normal for |Back to normal)/.test(f.title));
 
 /** The load now, in a sentence: its day, its trips, its verdict and the first thing to know. */
 function loadSummary(): string {
@@ -6490,7 +6560,7 @@ function renderLoads(): void {
     const pm = later ? null : dayPause(l.day);
     const held = !later && !absent && !state.doc.publish && !!(history && historyOpen() && storyFor(l.day)?.gate?.held);
     const range = tripsRanges?.at(l.day);
-    const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : absent ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: not run` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}${counted ? `: ${fmtInt(l.rows)} trips` : ''}${top ? `, ${VERDICT_WORD[top.severity]}${top.severity === 'alert' || top.severity === 'warn' ? `: ${top.title}` : ''}` : ''}${held ? ', held' : ''}${pm ? PAUSE_SAID[pm] : ''}${r ? '' : ', not run yet'}`;
+    const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : absent ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: not run` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}${counted ? `: ${fmtInt(l.rows)} trips` : ''}${top ? `, ${VERDICT_WORD[top.severity]}${saysHead(top) ? `: ${top.title}` : ''}` : ''}${held ? ', held' : ''}${pm ? PAUSE_SAID[pm] : ''}${r ? '' : ', not run yet'}`;
     return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', later ? 'later' : '', absent ? 'notrun' : '', holidayOf(l.day) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
@@ -6839,7 +6909,7 @@ const normalView = { metric: 'trips' as 'trips' | 'dropped', focus: '' };
 const backtests = new Map<string, Backtest>();
 
 /** Days as a band chart: the normal range a band, the guess a lighter solid line, the number a dot. Tap for a day. */
-function bandChart(ranges: NormalRanges, days: readonly string[], focus: string, fmt: (v: number) => string, pick: (day: string) => void, limit?: number, today?: string): SVGSVGElement | null {
+function bandChart(ranges: NormalRanges, days: readonly string[], focus: string, fmt: (v: number) => string, pick: (day: string) => void, limit?: number, today?: string, focusSev?: 'alert' | 'warn'): SVGSVGElement | null {
   const [W, H, L, R, T, B] = [340, 172, 38, 6, 8, 26];
   // A day after the one on screen has its band (made from the days before it) but no value: it hasn't arrived.
   const pts = days.map((d) => ({ d, v: today && d > today ? null : ranges.value(d), r: ranges.at(d) }));
@@ -6847,7 +6917,10 @@ function bandChart(ranges: NormalRanges, days: readonly string[], focus: string,
   if (!all.length) return null;
   let [lo, hi] = [Math.min(...all), Math.max(...all)];
   const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.05 || 1;
-  lo = ranges.scale === 'level' ? lo - pad : Math.max(0, lo - pad);
+  // A count starts at zero (ADR 0008 §7): on a floor above it, a day of a third of its trips (Thu Sep 21, 2023: 41,939)
+  // sits on the plot's edge and reads as none. A share or a level is zoomed to where its days are, and says so with a
+  // break on its axis when its floor isn't zero.
+  lo = ranges.scale === 'count' ? 0 : ranges.scale === 'level' ? lo - pad : Math.max(0, lo - pad);
   hi += pad;
   const step = (W - L - R) / pts.length;
   const X = (i: number) => L + (i + 0.5) * step;
@@ -6857,6 +6930,8 @@ function bandChart(ranges: NormalRanges, days: readonly string[], focus: string,
   for (const t of niceTicks(lo, hi, 4)) {
     svg.append(s('line', { class: 'grid', x1: L, x2: W - R, y1: Y(t).toFixed(1), y2: Y(t).toFixed(1) }), s('text', { class: 'tick', x: L - 4, y: (Y(t) + 3).toFixed(1), 'text-anchor': 'end' }, fmt(t)));
   }
+  // A zoomed share: a break at the foot of its axis, so its floor can't read as zero.
+  if (ranges.scale === 'share' && lo > 0) svg.append(s('path', { class: 'axis-brk', d: `M${L - 6} ${H - B - 1}l4 -3 4 3M${L - 6} ${H - B - 5}l4 -3 4 3` }));
   // Weeks: a line before each Monday, every other one named.
   let named = 0;
   pts.forEach((p, i) => {
@@ -6891,7 +6966,7 @@ function bandChart(ranges: NormalRanges, days: readonly string[], focus: string,
   pts.forEach((p, i) => {
     if (p.v === null) return;
     const off = p.r ? ranges.place(p.r, p.v) !== 'within' : false;
-    svg.append(s('circle', { class: ['pt', off ? 'out' : '', p.r ? '' : 'bare', p.d === focus ? 'focus' : ''].filter(Boolean).join(' '), cx: X(i).toFixed(1), cy: Y(p.v).toFixed(1), r: p.d === focus ? 4 : off ? 3.4 : 2.3 }));
+    svg.append(s('circle', { class: ['pt', off ? 'out' : '', p.r ? '' : 'bare', p.d === focus ? 'focus' : '', p.d === focus && off && focusSev ? `v-${focusSev}` : ''].filter(Boolean).join(' '), cx: X(i).toFixed(1), cy: Y(p.v).toFixed(1), r: p.d === focus ? 4.5 : off ? 3.2 : 2.3 }));
   });
   // The days after the one on screen lighter, as the weather's are: it is the day on screen, not the last one.
   const after = today ? days.findIndex((d) => d > today) : -1;

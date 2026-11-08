@@ -343,7 +343,7 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .spark .band { fill: var(--smalt); opacity: 0.15; }
 .spark .spark-now { font-weight: 600; fill: var(--ink); }
 .spark .line { fill: none; stroke: var(--ink-2); stroke-width: 1.4; }
-.spark .pt { fill: var(--ink-2); } .spark .pt.out { fill: var(--warn); } .spark .pt.focus { stroke: var(--smalt); stroke-width: 2; }
+.spark .pt { fill: var(--ink-2); } .spark .pt.out { fill: var(--surface); stroke: var(--ink); stroke-width: 1.4; } .spark .pt.focus { stroke: var(--smalt); stroke-width: 2; }
 .spark .tick { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
 .did .change { margin: 0; }
 /* Data: a grid, each column's distribution on top of it. */
@@ -378,10 +378,12 @@ table.grid td.n { text-align: left; }
 .col-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 8px; font-size: 12px; color: var(--ink-2); }
 .col-key .ck-i { display: inline-flex; align-items: center; gap: 4px; }
 .col-item { display: grid; gap: 6px; }
-.col-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; grid-template-areas: "name dist chip" "name stat chip"; gap: 2px 10px; align-items: center; text-align: left; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 8px 10px; font: inherit; color: inherit; min-height: 52px; }
+.col-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; grid-template-areas: "name dist chip" "name stat chip" "said said said"; gap: 2px 10px; align-items: center; text-align: left; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 8px 10px; font: inherit; color: inherit; min-height: 52px; }
 .col-row[aria-expanded="true"] { border-color: var(--smalt); }
 .cr-name { grid-area: name; display: grid; } .cr-name b { font-size: 13.5px; } .cr-code { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
 .cr-dist { grid-area: dist; } .cr-stat { grid-area: stat; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+/* The column's news under its bar: the value by name, today and usual, which way. */
+.cr-said { grid-area: said; font-size: 11.5px; color: var(--ink-2); margin-top: 2px; }
 .cr-chip { grid-area: chip; font-family: var(--mono); font-size: 10px; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; background: var(--warn-wash); color: var(--warn); }
 .cr-chip.alert { background: var(--bad-wash); color: var(--bad); }
 .col-detail { display: grid; gap: 10px; padding: 4px 2px 12px; }
@@ -581,7 +583,7 @@ th.hit, td.hit { background: var(--warn-wash); }
 .vf-key i { display: inline-block; width: 12px; height: 8px; border-radius: 2px; }
 .vf-key .k-band { background: color-mix(in srgb, var(--smalt) 18%, var(--surface)); }
 .vf-key .k-exp { height: 0; border-top: 1.5px solid color-mix(in srgb, var(--smalt) 60%, var(--surface)); border-radius: 0; }
-.vf-key .k-out { width: 8px; border-radius: 50%; background: var(--warn); }
+.vf-key .k-out { width: 8px; height: 8px; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--ink); box-sizing: border-box; }
 .vf-key .k-focus { width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--smalt); box-sizing: border-box; }
 .vf-key .k-hol { height: 3px; background: var(--smalt); opacity: 0.7; }
 .vf-key .k-limit { height: 0; border-top: 1.5px solid var(--bad); border-radius: 0; }
@@ -621,14 +623,19 @@ th.hit, td.hit { background: var(--warn-wash); }
    Dashes mean absent, and nothing else. */
 .bandchart { display: block; width: 100%; height: auto; touch-action: manipulation; cursor: pointer; }
 .bandchart .grid { stroke: var(--line); stroke-width: 1; }
+.bandchart .axis-brk { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+.bandchart .wx-base { stroke: var(--hair); stroke-width: 1; }
 .bandchart .week { stroke: var(--line); stroke-width: 1; opacity: 0.6; }
 .bandchart .tick { font-family: var(--mono); font-size: 9px; fill: var(--muted); }
 .bandchart .band { fill: var(--smalt); opacity: 0.16; }
 .bandchart .expected { fill: none; stroke: color-mix(in srgb, var(--smalt) 60%, var(--surface)); stroke-width: 1.4; }
 .bandchart .pt { fill: var(--ink-2); }
 .bandchart .pt.bare { fill: var(--muted); opacity: 0.55; }
-.bandchart .pt.out { fill: var(--warn); stroke: var(--surface); stroke-width: 1; }
+/* Outside its range is a shape, a ring, never a severity's colour; the day picked takes its verdict's colour when its
+   number is outside (ADR 0008 §7). */
+.bandchart .pt.out { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
 .bandchart .pt.focus { stroke: var(--smalt); stroke-width: 2.2; }
+.bandchart .pt.focus.v-alert { fill: var(--bad); } .bandchart .pt.focus.v-warn { fill: var(--warn); }
 .bandchart .hol { fill: var(--violet, var(--smalt)); opacity: 0.7; }
 .bandchart .hol.season { opacity: 0.3; }
 .load.holiday.season::after { opacity: 0.3; }
@@ -814,6 +821,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .tag { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
 .viz .ghost { fill: var(--ghost); stroke: var(--edge); stroke-width: 1; } .viz .ghost-2 { fill: var(--ghost-2); stroke: var(--edge); stroke-width: 1; }
 .viz .ghost.flat { stroke: none; }
+.viz .band-line { fill: none; stroke: var(--edge); stroke-width: 1; }
 .viz .skyline { fill: none; stroke: var(--edge); stroke-width: 1; stroke-linejoin: round; }
 .viz .track { fill: var(--ghost); stroke: var(--edge); stroke-width: 1; }
 .viz .ink { fill: var(--ink-2); } .viz .ink-strong { fill: var(--ink); }
@@ -821,13 +829,15 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .base, .viz .hair { stroke: var(--hair); stroke-width: 1; }
 .viz .link { stroke: var(--hair); stroke-width: 1; }
 .viz .leader { stroke: var(--ink-2); stroke-width: 1; }
+.viz .brace { fill: none; stroke: var(--ink-2); stroke-width: 1.2; }
 .viz .pointer { fill: var(--ink); }
 .viz .zoom-wedge { fill: var(--sunk); }
 .viz text.key { font-size: 11px; }
 .viz .cut { stroke: var(--ink); stroke-width: 1.5; }
 .viz .line { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
-.viz .usual-end { stroke: var(--ink-2); stroke-width: 2; }
-.viz .band-end { stroke: var(--edge); stroke-width: 1.5; fill: none; }
+/* A usual count's end and a range's ends are soft (thin, the band's own edge); only a real limit is a heavy tick. */
+.viz .usual-end { stroke: var(--edge); stroke-width: 1.2; }
+.viz .band-end { stroke: var(--edge); stroke-width: 1; fill: none; }
 .viz .wx-bar.snow { fill: var(--teal-fill); } .viz .wx-bar.rain { fill: var(--smalt); opacity: 0.55; }
 .viz .joint { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; }
 .viz .brk { fill: none; stroke: var(--muted); stroke-width: 1.2; }
@@ -838,6 +848,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .limit { fill: var(--ink); stroke: var(--surface); stroke-width: 2; paint-order: stroke; } .viz .wall { fill: var(--ink); }
 .viz .sev-alert-fill { fill: var(--bad); } .viz .sev-warn-fill { fill: var(--warn); }
 .viz .wf-down { fill: var(--bad); } .viz .wf-up { fill: var(--ghost-2); }
+.viz .wf-usual { fill: var(--ghost-2); stroke: var(--edge); stroke-width: 1; }
 .viz text.count { font-size: 32px; font-weight: 650; fill: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .viz text.count.count-bad { fill: var(--bad); }
 .viz .count-unit { font-size: 14px; font-weight: 400; fill: var(--muted); letter-spacing: 0; }
@@ -848,9 +859,13 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz text.lbl-bad { fill: var(--bad); font-weight: 600; }
 .viz .slot { fill: none; stroke: var(--edge); stroke-width: 1; }
 .viz .absent { fill: var(--bad-wash); stroke: var(--bad); stroke-width: 1.5; stroke-dasharray: 4 2.5; }
+/* The trips missing over short hours: the wash, and its dashed edge drawn apart, up its sides and along the usual skyline
+   only, so no dashed line runs along the trickle of trips that still came. */
+.viz .absent-fill { fill: var(--bad-wash); } .viz .absent-edge { fill: none; stroke: var(--bad); stroke-width: 1.5; stroke-dasharray: 4 2.5; stroke-linejoin: round; }
 /* A day not run in this visit: absent, neutral (no severity), dashed. */
 .viz .notrun { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 2.5; }
-.viz .over { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+/* Trips beyond usual: real trips, filled in a lighter tone of the ink (never hollow, which reads as absent). */
+.viz .over { fill: color-mix(in srgb, var(--ink) 52%, var(--surface)); }
 .viz .ring-bad { fill: none; stroke: var(--bad); stroke-width: 1.5; }
 .viz .port { fill: var(--smalt); }
 .viz .bracket { fill: none; stroke: var(--bad); stroke-width: 1.4; }
@@ -872,6 +887,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz text.part-l { font-size: 11.5px; }
 .viz.off text, .viz.off text.opt-l { fill: var(--muted); }
 .viz.off .ink-strong, .viz.off .ink, .viz.off .g-wall { fill: var(--muted); } .viz.off .absent { fill: none; stroke: var(--muted); }
+.viz.off .absent-fill { fill: none; } .viz.off .absent-edge { stroke: var(--muted); }
 .ld-bar { margin: 2px auto 0; }
 /* the cause card, the health row, stories and rows */
 .news-tab:has(.vf-card) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }

@@ -89,8 +89,10 @@ export interface Story {
   amount: { value: number; low: number; high: number; expected: number; change: number | null } | null;
   split: Split | null;
   hours: Finding['hours'] | null;
-  /** The hour chart's words: the first short hour, the trips an hour after it, the trips missing, the ghost's day. */
-  hoursLabels: { cut: string; floor: string; missing: string; ghost: string } | null;
+  /** The hour chart's words: the first short hour, the trips an hour after it, the trips missing, the ghost's day; and,
+   * when the hours before the fall ran well off a usual day's, by how much ("~8k above usual"), so the trips missing
+   * from the fall and the whole day's change can both be read true (Sat Sep 17, 2022: ~52k missing, the day −42%). */
+  hoursLabels: { cut: string; floor: string; missing: string; ghost: string; before: string | null } | null;
   gate: Gate | null;
   /** The finding the head is about, when there is one. */
   cause: Told | null;
@@ -180,6 +182,10 @@ export function approx(n: number): string {
 /** A part's count against its usual one, so it can't read as a fraction of it: "10,518 · usual ~4.5k". */
 export const countLabel = (c: Count) => `${fmtInt(c.today)} · usual ~${approx(c.usual)}`;
 
+/** The trips a part that surged has beyond its usual count, said under them on its bar ("+6k over usual"); null for
+ * any other split (a part that held a little above its usual is within its range, and isn't news). */
+export const overLabel = (sp: Pick<Split, 'kind' | 'part'>) => (sp.kind === 'surged' && sp.part.today > sp.part.usual ? `+${compact(sp.part.today - sp.part.usual)} over usual` : null);
+
 /** The split's part as its visuals name it: its name, and who a code names beside it ("Vendor 1 · Creative Mobile"). */
 export const partLabel = (sp: Pick<Split, 'name' | 'who'>) => (sp.who ? `${sp.name} · ${sp.who}` : sp.name);
 
@@ -244,19 +250,23 @@ export const NEAR_LIMIT = 0.02;
  * they dropped against the rows a day like it drops ("2,116 rows dropped", "usual 3.2k–7.7k"). `said` is the share alone,
  * for a head over those bars ("Passed: 8.6% dropped", never 9% over a bar that says 8.6%).
  */
-export function gateLabels(g: Gate): { said: string; share: string; limit: string | null; margin: string | null; rows: string; usual: string | null } {
+export function gateLabels(g: Gate): { said: string; share: string; limit: string | null; margin: string | null; zoom: boolean; rows: string; usual: string | null } {
   const off = g.limit === null ? null : g.share - g.limit;
   const pts = off === null ? 0 : Math.abs(off) * 100;
-  const near = off !== null && off !== 0 && Math.abs(off) <= NEAR_LIMIT;
-  // Near the limit, the share and its margin are said to the same decimals, so one is the other less the limit.
-  let dec = pts < 1 ? 2 : 1;
-  while (near && Number(pts.toFixed(dec)) === 0 && dec < 4) dec++;
-  const share = near ? `${(g.share * 100).toFixed(dec)}%` : pastLimit(g.share, g.limit);
+  // One rule wherever a share of the checks is printed: one decimal, two within a point of the limit, more only when it
+  // would read as the limit itself; and the gap to the limit always, to the same decimals, so one is the other less the
+  // limit ("45.7% … 35.7 pt over", "9.55% … 0.45 pt under", "4.6% … 5.4 pt under").
+  let dec = off !== null && Math.abs(off) <= 0.01 ? 2 : 1;
+  while (off !== null && off !== 0 && (Number(pts.toFixed(dec)) === 0 || Number((g.share * 100).toFixed(dec)) === Math.round(g.limit! * 1e6) / 1e4) && dec < 4) dec++;
+  // A share that isn't nothing never prints as 0.0% (ADR 0008 §12).
+  const share = g.share > 0 && Number((g.share * 100).toFixed(dec)) === 0 ? '<0.1%' : `${(g.share * 100).toFixed(dec)}%`;
   return {
     said: share,
     share: `${share} of arrived rows dropped`,
     limit: g.limit !== null ? `limit ${Math.round(g.limit * 100)}%` : null,
-    margin: near ? `${pts.toFixed(dec)} pt ${off! > 0 ? 'over' : 'under'}` : null,
+    margin: off !== null && off !== 0 ? `${pts.toFixed(dec)} pt ${off > 0 ? 'over' : 'under'}` : null,
+    // Within two points of the limit the share is drawn again on a zoom, its margin said there.
+    zoom: off !== null && off !== 0 && Math.abs(off) <= NEAR_LIMIT,
     rows: `${fmtInt(g.dropped)} rows dropped`,
     usual: g.usual ? `usual ${compact(g.usual.low)}–${compact(g.usual.high)}` : null,
   };
@@ -683,9 +693,16 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const season = seasonOf(day);
   const calmHead = holiday ? `Normal for ${SHORT_HOLIDAY[holiday] ?? holiday}` : season ? `Normal for ${(SHORT_HOLIDAY[season] ?? season).replace(/^Holiday season$/, 'the holidays')}` : `A normal ${weekdayOf(day)}`;
   const pctShort = (x: number) => `${Math.round(x * 100)}%`;
+  // The trips an hour after a fall that runs to the day's end: they fall to a trickle and don't stop (Thu Sep 21, 2023
+  // kept ~330 an hour), which the head says so the fall can't read as the file cut off.
+  const perHour = hoursF?.hours ? (() => {
+    const { got, from, to } = hoursF.hours;
+    const per = got.slice(from, to + 1).reduce((a, b) => a + b, 0) / Math.max(1, to - from + 1);
+    return per >= 100 ? Number(per.toPrecision(2)) : Math.round(per);
+  })() : null;
   let head: string;
   if (o.refused) head = 'File refused: bytes don’t match';
-  else if (hero === 'hours' && hoursF) head = hoursF.title;
+  else if (hero === 'hours' && hoursF) head = hoursF.hours && hoursF.hours.to === 23 && perHour !== null ? `Trips fall to ~${fmtInt(perHour)}/h from ${clock(hoursF.hours.from)}` : hoursF.title;
   else if (hero === 'split' && split) {
     const restRatio = split.rest.today / Math.max(1, split.rest.usual);
     const partRatio = split.part.today / Math.max(1, split.part.usual);
@@ -779,26 +796,34 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
 
   // The labels at a glance.
   const heroLabels: string[] = [];
-  if (shownHero === 'split' && split) heroLabels.push(partLabel(split), countLabel(split.part), 'Everything else', countLabel(split.rest));
+  if (shownHero === 'split' && split) heroLabels.push(partLabel(split), countLabel(split.part), 'Everything else', countLabel(split.rest), ...(overLabel(split) ? [overLabel(split)!] : []));
   if (shownHero === 'finding' && population && popShare) heroLabels.push(population.name, popShare.value, `usually ${popShare.range}`);
   // The hour chart: the hour they fall, what still came an hour after it (they don't stop: Sep 21, 2023 kept ~330 an
   // hour), what is missing against a usual day, and which day that is.
+  // The hours before a fall that runs to the day's end are said only when they ran a twentieth of the day or more off a
+  // usual day's: then the trips missing from the fall and the whole day's change differ by them, and the chart says so.
   const hoursLabels = hoursF?.hours ? (() => {
     const { got, usual, from, to } = hoursF.hours;
-    const had = got.slice(from, to + 1).reduce((a, b) => a + b, 0);
-    const want = usual.slice(from, to + 1).reduce((a, b) => a + b, 0);
-    const per = had / Math.max(1, to - from + 1);
-    const said = per >= 100 ? Number(per.toPrecision(2)) : Math.round(per);
-    return { cut: clock(from), floor: `${to === 23 ? 'still ' : ''}~${fmtInt(said)}/h`, missing: `~${compact(Math.max(0, want - had))} missing`, ghost: `usual ${weekdayOf(day)}` };
+    const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
+    const had = sum(got.slice(from, to + 1));
+    const want = sum(usual.slice(from, to + 1));
+    // What the hours before the fall add to the day's change, as the detail's waterfall counts them (fallSteps).
+    const off = amount ? fallParts(hoursF.hours, amount)?.before ?? 0 : 0;
+    const before = amount && Math.abs(off) >= 0.05 * amount.expected ? `~${compact(Math.abs(off))} ${off > 0 ? 'above' : 'below'} usual` : null;
+    return { cut: clock(from), floor: `${to === 23 ? 'still ' : ''}~${fmtInt(perHour ?? 0)}/h`, missing: `~${compact(Math.max(0, want - had))} missing`, ghost: `usual ${weekdayOf(day)}`, before };
   })() : null;
-  if (shownHero === 'hours' && hoursLabels) heroLabels.push(hoursLabels.cut, hoursLabels.floor, hoursLabels.missing, hoursLabels.ghost);
+  if (shownHero === 'hours' && hoursLabels) heroLabels.push(hoursLabels.cut, hoursLabels.floor, hoursLabels.missing, hoursLabels.ghost, ...(hoursLabels.before ? [hoursLabels.before] : []));
+  // Beside the hours, the part and the rest only when the part moved too (a part that held is told in the detail).
+  if (shownHero === 'hours' && split && split.kind !== 'held') heroLabels.push(partLabel(split), countLabel(split.part), 'Everything else', countLabel(split.rest));
   // The amount line carries the day's count and its usual range on every day; a strip of days adds no words.
   // The checks show on every day with something wrong, passed or not (ADR 0008 §10), and on a near miss.
   // Its words close the hero's labels (`labels.gate` repeats them), so a paused card can draw the checks its own way.
   const gateWords: string[] = [];
   if (gate && (gate.held || gate.near || severity === 'alert')) {
     const g = gateLabels(gate);
-    gateWords.push(gate.held ? 'Checks held' : gate.near ? 'Checks near the limit' : 'Checks passed', g.share, ...(g.limit ? [g.limit] : []), ...(g.margin ? [g.margin] : []), g.rows, ...(g.usual ? [g.usual] : []));
+    // The gap to the limit on the card where the checks held or came near it; one that passed far under it is drawn
+    // so, and its gap is said in its sheet.
+    gateWords.push(gate.held ? 'Checks held' : gate.near ? 'Checks near the limit' : 'Checks passed', g.share, ...(g.limit ? [g.limit] : []), ...(g.margin && (gate.held || g.zoom) ? [g.margin] : []), g.rows, ...(g.usual ? [g.usual] : []));
     heroLabels.push(...gateWords);
   }
   // What the explained changes are, in words a newcomer has: "shares, times, checks", most first, three at most.
@@ -815,8 +840,9 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     cause, stories, more, follows, sameDay, absorbed, notes, context: weather,
     episode, recovery, health, primary,
     labels: {
-      // The day's own change sits on the amount line when its count is outside its range and the head doesn't say it.
-      amount: amount ? [`${fmtInt(amount.value)} trips`, ...(amount.change !== null && hero !== 'amount' && cause?.kind !== 'volume' ? [changeLabel(amount.change)] : []), `usual ${compact(amount.low)}–${compact(amount.high)}`] : [],
+      // The day's own change sits on the amount line when its count is outside its range and the head doesn't say it;
+      // beside a head about the hours from a fall, it says its window ("whole day −65%"), so it can't fight the head.
+      amount: amount ? [`${fmtInt(amount.value)} trips`, ...(amount.change !== null && hero !== 'amount' && cause?.kind !== 'volume' ? [`${hero === 'hours' ? 'whole day ' : ''}${changeLabel(amount.change)}`] : []), `usual ${compact(amount.low)}–${compact(amount.high)}`] : [],
       hero: heroLabels,
       gate: gateWords,
       follows: follows.length ? `${follows.length} ${follows.length === 1 ? 'change' : 'changes'} this explains` : null,
@@ -838,30 +864,28 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
 }
 
 /**
- * A waterfall's labels at one precision: a total, its steps and the total they come to, said in thousands to the place
- * the finest of them needs, so the labels, read back, add up within half their last digit ("119k −77k −26 → 42k",
- * "115.2k −110.5k −143 → 4.6k"; never "119k" beside a "−77.4k"), and each is within 5% of what it shows (never "5k"
- * for 4,633). A count under a thousand is said whole; when no place of thousands adds up, every label is whole
- * ("114,913 −110,137 −143 → 4,633").
+ * A waterfall's labels: every one a whole count with its thousands separated, so they add up exactly as read, the day's
+ * total is the number its card's head and amount line print (5,732, never "6k" beside it), and every day's waterfall
+ * reads in the one format ("114,913 −110,137 −143 → 4,633"; never "123k" one day and "134,617" the next).
  */
 export function stepLabels(start: number, steps: readonly number[], end: number): { start: string; steps: string[]; end: string } {
-  const signed = (v: number, text: string) => `${v >= 0 ? '+' : '−'}${text}`;
-  for (const dec of [0, 1]) {
-    const unit = 10 ** (3 - dec);
-    const back = (v: number) => (Math.abs(v) < 1000 ? Math.round(v) : Math.sign(v) * Number((Math.abs(v) / 1000).toFixed(dec)) * 1000);
-    const say = (v: number) => (Math.abs(v) < 1000 ? String(Math.round(Math.abs(v))) : `${(Math.abs(v) / 1000).toFixed(dec)}k`);
-    const adds = Math.abs(back(start) + steps.reduce((t, v) => t + back(v), 0) - back(end)) <= unit / 2;
-    const near = [start, ...steps, end].every((v) => Math.abs(back(v) - v) <= 0.05 * Math.abs(v));
-    if (adds && near) return { start: say(start), steps: steps.map((v) => signed(v, say(v))), end: say(end) };
-  }
-  return { start: fmtInt(start), steps: steps.map((v) => signed(v, fmtInt(Math.abs(v)))), end: fmtInt(end) };
+  const signed = (v: number) => `${v >= 0 ? '+' : '−'}${fmtInt(Math.abs(v))}`;
+  return { start: fmtInt(start), steps: steps.map(signed), end: fmtInt(end) };
 }
+
+/** A step from a usual day to this one: its name, its count, its label, and whether it stayed within its own usual
+ * range (drawn neutral, never as trips missing: ADR 0008 §6). */
+export interface DayStep { name: string; value: number; label: string; usual?: boolean }
+
+/** Whether a count stayed within its usual range: inside it where it has one, else within a tenth of its usual. */
+const inRange = (c: Count) => (c.low !== null && c.high !== null ? c.today >= c.low && c.today <= c.high : Math.abs(c.today / Math.max(1, c.usual) - 1) <= 0.1);
 
 /**
  * The split as steps from a usual day to this one: the usual count, the side that moved, the other side, and today's
- * count (which the steps come to), each labelled at one precision (stepLabels). Null without a split.
+ * count (which the steps come to), each labelled at one precision (stepLabels). A side within its own usual range is
+ * marked so (it is drawn neutral). Null without a split.
  */
-export function splitSteps(s: Pick<Story, 'split' | 'amount'>): { name: string; value: number; label: string }[] | null {
+export function splitSteps(s: Pick<Story, 'split' | 'amount'>): DayStep[] | null {
   const sp = s.split;
   if (!sp || !s.amount) return null;
   const held = sp.kind === 'held';
@@ -871,10 +895,46 @@ export function splitSteps(s: Pick<Story, 'split' | 'amount'>): { name: string; 
   const other = held ? sp.part.today - part : sp.rest.today - rest;
   const usual = part + rest;
   const l = stepLabels(usual, [moved, other], s.amount.value);
+  const kept = held ? sp.part : sp.rest;
   return [
     { name: 'Usual', value: usual, label: l.start },
     { name: held ? 'Everything else' : sp.name, value: moved, label: l.steps[0]! },
-    { name: held ? sp.name : 'Everything else', value: other, label: l.steps[1]! },
+    { name: held ? sp.name : 'Everything else', value: other, label: l.steps[1]!, ...(inRange(kept) ? { usual: true } : {}) },
+    { name: 'Today', value: s.amount.value, label: l.end },
+  ];
+}
+
+/**
+ * A fall that runs to the day's end, as two parts of the day's change against its guess: the trips missing from the
+ * hour it fell (the hour chart's "~52k missing": today's trips from that hour less a usual day's), and the rest of the
+ * change, which the hours before it make (Sat Sep 17, 2022: +8.3k, a morning busier than usual). They add up to the
+ * day's change exactly. Null when the fall stops before the day ends.
+ */
+export function fallParts(hours: NonNullable<Finding['hours']>, amount: { value: number; expected: number }): { before: number; after: number } | null {
+  const { got, usual, from, to } = hours;
+  if (to !== 23) return null;
+  const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
+  const after = Math.round(sum(got.slice(from)) - sum(usual.slice(from)));
+  return { after, before: amount.value - Math.round(amount.expected) - after };
+}
+
+/**
+ * A day told by the hour its trips fell, as steps from a usual day to this one: the usual count, the hours before the
+ * fall, the hours from it, and today's count, labelled at one precision (stepLabels), so the waterfall says the same
+ * windows as the hour chart and the amount line ("~52k missing" from 15:00, "~8.3k above usual" before it, the whole
+ * day −42%). The hours before are context, drawn neutral. Null on a day not told so.
+ */
+export function fallSteps(s: Pick<Story, 'hours' | 'amount'>): DayStep[] | null {
+  if (!s.hours || !s.amount) return null;
+  const p = fallParts(s.hours, s.amount);
+  if (!p) return null;
+  const usual = Math.round(s.amount.expected);
+  const l = stepLabels(usual, [p.before, p.after], s.amount.value);
+  const at = clock(s.hours.from);
+  return [
+    { name: 'Usual', value: usual, label: l.start },
+    { name: `before ${at}`, value: p.before, label: l.steps[0]!, usual: true },
+    { name: `from ${at}`, value: p.after, label: l.steps[1]! },
     { name: 'Today', value: s.amount.value, label: l.end },
   ];
 }

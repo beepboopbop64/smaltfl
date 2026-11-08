@@ -9,7 +9,7 @@ import { newsOf, type Names } from '../src/core/news.js';
 import { lacked, reachLabel, shortfall, type EpisodeDay } from '../src/core/days.js';
 import { afterLine, decisionDrawing, pausedGlance, pauseLines, sheetText, sheetWords } from '../src/core/decision.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
-import { CELL_KINDS, countRange, gateHead, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, splitSteps, storyOf, wordsIn } from '../src/core/story.js';
+import { CELL_KINDS, countRange, fallParts, fallSteps, gateHead, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, splitSteps, storyOf, wordsIn } from '../src/core/story.js';
 
 const HISTORY = new URL('../dist/app/data/history.json', import.meta.url);
 const has = existsSync(HISTORY) && (JSON.parse(readFileSync(HISTORY, 'utf8')) as HistoryFile).days.length > 400;
@@ -29,15 +29,36 @@ describe.skipIf(!has)('the story on the real history', () => {
   const h = file ? new HistoryRanges(file) : null;
   const story = (day: string) => storyOf(h!, day, newsOf(h!, day, names), { names, step: 'trips_valid', limit: 0.1 });
 
-  it('tells Thu Sep 21, 2023 as the hour the trips fall', () => {
+  it('tells Thu Sep 21, 2023 as the hour the trips fall, to the trickle that still came', () => {
     const s = story('2023-09-21');
-    expect(s.head).toBe('Trips fall 95% from 13:00');
+    // The head says the rate the trips fell to, so the fall can't read as the file cut off (~330 an hour still came).
+    expect(s.head).toBe('Trips fall to ~330/h from 13:00');
     expect(s.split).toMatchObject({ kind: 'held', name: 'Flex Fare' });
     // The trips go on after the fall (~330 an hour), the missing trips are counted, and the day's own change is on
-    // the amount line; the detail's sentence says the others fell from 13:00, never that they almost stopped.
-    expect(s.hoursLabels).toEqual({ cut: '13:00', floor: 'still ~330/h', missing: '~77k missing', ghost: 'usual Thursday' });
-    expect(s.labels.amount).toEqual(['41,939 trips', '−65%', 'usual 89k–160k']);
+    // the amount line, named as the whole day's so it can't fight the head; the morning ran close to usual (no label).
+    // The detail's sentence says the others fell from 13:00, never that they almost stopped.
+    expect(s.hoursLabels).toEqual({ cut: '13:00', floor: 'still ~330/h', missing: '~77k missing', ghost: 'usual Thursday', before: null });
+    expect(s.labels.amount).toEqual(['41,939 trips', 'whole day −65%', 'usual 89k–160k']);
     expect(splitSentence(s)).toBe('Flex Fare as usual (4,657; usual 2.8k–5.4k); everything else fell from 13:00 (37,282; usual ~115k).');
+  });
+
+  it('names each figure of an hour-fall day by its window, and the detail’s waterfall says the same (Sat Sep 17, 2022)', () => {
+    const s = story('2022-09-17');
+    expect(s.head).toBe('Trips fall to ~270/h from 15:00');
+    // ~52k missing from 15:00; the morning ~8.3k above a usual Saturday's; the whole day −42%: they add up.
+    expect(s.hoursLabels).toMatchObject({ missing: '~52k missing', before: '~8.3k above usual' });
+    expect(s.labels.amount).toEqual(['59,501 trips', 'whole day −42%', 'usual 91k–118k']);
+    const steps = fallSteps(s)!;
+    expect(steps.map((x) => x.name)).toEqual(['Usual', 'before 15:00', 'from 15:00', 'Today']);
+    expect(steps.map((x) => x.label)).toEqual(['103,349', '+8,283', '−52,131', '59,501']);
+    expect(steps[1]!.usual).toBe(true);
+    expect(steps[0]!.value + steps[1]!.value + steps[2]!.value).toBe(steps[3]!.value);
+    expect(fallParts(s.hours!, s.amount!)).toEqual({ before: 8_283, after: -52_131 });
+    // A gap that ends before midnight is told by its window, with no waterfall of its own.
+    expect(fallSteps(story('2022-01-29'))).toBeNull();
+    // A part that held within its range is drawn neutral in its split's waterfall: Fri Sep 22, 2023's Flex Fare.
+    expect(splitSteps(story('2023-09-22'))![2]).toMatchObject({ name: 'Flex Fare', usual: true });
+    expect(splitSteps(story('2023-09-22'))![1]!.usual).toBeUndefined();
   });
 
   it('counts an episode’s shortfall only to the day on screen, the day it began as its head does (ADR 0008 §10)', () => {
@@ -170,7 +191,7 @@ describe.skipIf(!has)('the story on the real history', () => {
       expect(s.labels.amount[1], day).toMatch(/^\+1\d%$/);
     }
     // The incident after them is told as before.
-    expect(story('2022-09-17').head).toBe('Trips fall 96% from 15:00');
+    expect(story('2022-09-17').head).toBe('Trips fall to ~270/h from 15:00');
   });
 
   it('names the episode a calm day comes after, and says nothing is left to do', () => {
@@ -213,6 +234,9 @@ describe.skipIf(!has)('the story on the real history', () => {
     const s = story('2024-01-01');
     expect(s.head).toBe('Flex Fare records 2.3× usual');
     expect(s.state).toBe('unusual');
+    // Its trips beyond usual are said under them, and the day stays within its 45 words.
+    expect(s.labels.hero).toContain('+6k over usual');
+    expect(glanceStrings(s).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(45);
   });
 
   it('prints every number on a label as the value it shows: rounded, or within 5% after a ~', () => {
@@ -229,24 +253,29 @@ describe.skipIf(!has)('the story on the real history', () => {
         expect(Math.abs(shown - v), `${label}: ${shown} for ${v}`).toBeLessThanOrEqual(Math.max(unit / 2, loose ? 0.05 * v : 0) + 1e-9);
       });
     };
-    for (const day of ['2023-09-22', '2022-11-15', '2024-01-01', '2023-09-21', '2022-09-18', '2023-10-29']) {
+    for (const day of ['2023-09-22', '2022-11-15', '2024-01-01', '2023-09-21', '2022-09-18', '2023-10-29', '2022-09-17']) {
       const s = story(day);
-      const [part, partNum, , restNum] = s.split ? s.labels.hero : [];
+      const [part, partNum, , restNum, over] = s.split ? s.labels.hero : [];
       if (s.split && s.hero === 'split') {
         expect(part).toBe(partLabel(s.split));
         said(partNum!, s.split.part.today, s.split.part.usual);
         said(restNum!, s.split.rest.today, s.split.rest.usual);
+        // A surge's trips beyond usual, said under them (New Year's Day 2024: "+6k over usual").
+        if (s.split.kind === 'surged') said(over!, s.split.part.today - s.split.part.usual);
       }
       said(s.labels.amount[0]!, s.amount!.value);
       said(s.labels.amount.at(-1)!, s.amount!.low, s.amount!.high);
-      // The day's change, when the amount line carries it: against the guess, rounded.
-      const change = s.labels.amount.find((l) => /^[+−]\d+%$/.test(l));
+      // The day's change, when the amount line carries it ("whole day −65%" beside an hour head): against the guess.
+      const change = s.labels.amount.find((l) => /^(whole day )?[+−]\d+%$/.test(l));
       if (change) said(change, Math.abs(s.amount!.value / s.amount!.expected - 1) * 100);
       if (s.hoursLabels && s.hours) {
         const { got, usual, from, to } = s.hours;
         const had = got.slice(from, to + 1).reduce((a, b) => a + b, 0);
         said(s.hoursLabels.floor, had / (to - from + 1));
         said(s.hoursLabels.missing, usual.slice(from, to + 1).reduce((a, b) => a + b, 0) - had);
+        // The head's rate is the floor's ("Trips fall to ~330/h from 13:00"), its hour the cut's.
+        if (to === 23) said(s.head.replace(/ from .*$/, ''), had / (to - from + 1));
+        if (s.hoursLabels.before) said(s.hoursLabels.before, Math.abs(fallParts(s.hours, s.amount!)!.before));
       }
       if (s.gate?.held || s.gate?.near) {
         // Each of the gate's labels is on the screen, and says its own number: the share of the rows that arrived,
@@ -294,10 +323,14 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('labels the gate’s two bars, and says a margin within two points of the limit to the share’s decimals', () => {
     // Sun Sep 18, 2022: held at 10.45% of 4,229 rows against a 10% limit; Thu Sep 21, 2023: 9.55%, just under.
-    expect(gateLabels(story('2022-09-18').gate!)).toEqual({ said: '10.45%', share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
+    expect(gateLabels(story('2022-09-18').gate!)).toEqual({ said: '10.45%', share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', zoom: true, rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
     expect(gateLabels(story('2023-09-21').gate!)).toMatchObject({ share: '9.55% of arrived rows dropped', margin: '0.45 pt under', rows: '4,004 rows dropped' });
-    // Far past it, no margin and no zoom: Fri Sep 22, 2023.
-    expect(gateLabels(story('2023-09-22').gate!)).toMatchObject({ share: '46% of arrived rows dropped', margin: null, rows: '2,116 rows dropped' });
+    // Far past it, no zoom, but its gap said so no one has to subtract: Fri Sep 22, 2023, on its card too (it held).
+    expect(gateLabels(story('2023-09-22').gate!)).toMatchObject({ share: '45.7% of arrived rows dropped', margin: '35.7 pt over', zoom: false, rows: '2,116 rows dropped' });
+    expect(story('2023-09-22').labels.gate).toContain('35.7 pt over');
+    // Far under it and passed, its gap said in its sheet, not on the card: Tue Nov 15, 2022 at 4.6%, as the canvas says.
+    expect(gateLabels(story('2022-11-15').gate!)).toMatchObject({ said: '4.6%', margin: '5.4 pt under' });
+    expect(story('2022-11-15').labels.gate).not.toContain('5.4 pt under');
     expect(glanceStrings(story('2022-09-18')).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(60);
     // The sheet a tap on the gate opens is titled with the share its bars say.
     expect(gateHead(story('2022-09-18').gate!)).toBe('Held at trips_valid: 10.45% dropped');

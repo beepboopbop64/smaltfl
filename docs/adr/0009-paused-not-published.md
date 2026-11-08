@@ -319,8 +319,9 @@ published. Cached check counts must still hold. And older builds must refuse wha
       day that published after held days says what readers now see ("Mon Sep 25 passed: published; readers now see Mon
       25 · ends #26"). These are words for the record's existing entries: no entry kind or field changes. A day held
       again, or run again with nothing waiting, is a routine line, marked with what became of its day.
-    - **Status words say the state.** A day not published that a later day has passed since says so in its own views
-      ("Not published · superseded by Tue 26"), never "Staged … · readers see Tue 26"; the checks' sheet says the steps
+    - **Status words say the state.** A day not published that a later day has passed since says so in its own views,
+      as it stood then and naming no later day (ADR 0008 §10): "Not published · readers kept Thu 21", never "Staged … ·
+      readers see Tue 26" nor "superseded by Tue 26"; the checks' sheet says the steps
       after them were "built, not published" under a flow that holds, and which day the outputs keep ("Outputs keep Mon
       18"); a source file matched to the data's list is "Sealed: this file matches the source's list", not "the bytes
       published".
