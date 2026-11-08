@@ -448,6 +448,8 @@ export interface DerivedAbout {
   day: string | null;
   inputs: Inputs;
   holds: RunHold[];
+  /** Its held outputs whose staged key isn't the one their name showed, as a held run's entry says. */
+  waiting: string[];
   keys: Record<string, string>;
   from: RunRef;
   repair: Repair;

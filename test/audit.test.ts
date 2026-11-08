@@ -10,18 +10,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FlowRecord } from '../src/app/record.js';
-import { auditBag, type EngineHolds, type EngineName, type EngineRelease } from '../src/core/audit.js';
+import { auditBag, type EngineHolds, type EngineName, type EngineRelease, type EngineRepairs } from '../src/core/audit.js';
 import { buildBag, type BagFile } from '../src/core/bag.js';
 import { canonicalJSON } from '../src/core/canonical.js';
 import { withoutDisplay } from '../src/core/document.js';
-import { heldOutputs, inputsOf, stagedKeys, type DecideAbout, type HeldAbout, type ReleaseAbout } from '../src/core/hold.js';
+import { heldOutputs, inputsOf, stagedKeys, type DecideAbout, type DerivedAbout, type HeldAbout, type ReleaseAbout, type StoryClaim } from '../src/core/hold.js';
+import { repairDocument, type Repair } from '../src/core/fill.js';
 import { entryLeaf, type JSONValue, type LogEntry } from '../src/core/log.js';
 import { policiesHash, type RunManifest } from '../src/core/manifest.js';
 import { flowHash, type FlowPlan } from '../src/core/plan.js';
 import { sha256Hex } from '../src/core/hash.js';
 import { zip } from '../src/core/zip.js';
 import { findVersion, pointDataset } from '../src/plugin/store.js';
-import { pinFile, releaseRun, runFlow, type FlowDocument, type PublishDef, type RunResult } from '../src/index.js';
+import { insertAfter, pinFile, releaseRun, runFlow, type FlowDocument, type PublishDef, type RunResult } from '../src/index.js';
 import { loadFixture, makeTrips, visualFlow } from './fixtures/taxi.js';
 import { openEngine, SMALTDB } from './helpers/engine.js';
 import { installFakeIndexedDB } from './helpers/fake-idb.js';
@@ -520,5 +521,155 @@ describe('an audit bag with a day held, decided and released (ADR 0009 §11)', (
     const amended = await decide(s, thu.r, thu.keys, 'owner', { option: 'dont' }, null, first.seq);
     const rel = await release(s, thu.r, first, thu.keys);
     expect(failed(await auditBag(await pausedBag(s)))).toContain(`release #${rel.entry.seq}: 3 outputs of run ${thu.r.run} released, citing decision #${first.seq}: its decision, #${first.seq}, was amended by #${amended.seq} before it`);
+  });
+});
+
+// ------------------------------------------------------------------ a day filled, and the fill withdrawn (ADR 0009 amendment 1 S11)
+
+describe('an audit bag with a day filled (amendment 1 S11, Q-61)', () => {
+  const TYPES = 'VendorID INTEGER, tpep_pickup_datetime TEXT, tpep_dropoff_datetime TEXT, passenger_count INTEGER, trip_distance REAL, PULocationID INTEGER, DOLocationID INTEGER, payment_type INTEGER, fare_amount REAL, tip_amount REAL, tolls_amount REAL, total_amount REAL';
+  /** The fixture's trips moved to a day, keeping their hours; Thu 11's stop at 13:00. */
+  const tripsOn = (day: string, seed: number, cut = 24) => makeTrips(800, seed).map((t) => [t[0], `${day}${t[1].slice(10)}`, `${day}${t[2].slice(10)}`, ...t.slice(3)]).filter((t) => Number(String(t[1]).slice(11, 13)) < cut);
+  const DAYS: Record<string, unknown[][]> = { '2024-01-10': tripsOn('2024-01-10', 10), '2024-01-11': tripsOn('2024-01-11', 11, 13), '2024-01-04': tripsOn('2024-01-04', 4), '2024-01-12': tripsOn('2024-01-12', 12) };
+  const load = (db: Engine, table: string, day: string) => {
+    db.exec(`DELETE FROM ${table}`);
+    db.exec('BEGIN');
+    const st = db.prepare(`INSERT INTO ${table} VALUES (${'?, '.repeat(11)}?)`);
+    for (const row of DAYS[day]!) st.run(row as never);
+    db.exec('COMMIT');
+  };
+  const LEAF = (e: LogEntry) => entryLeaf(e);
+
+  /** Wed 10 published, Thu 11 held short, filled from Thu 4 (decided, derived, released), all in the record. */
+  async function filled() {
+    const flow = `filled-${Math.random().toString(36).slice(2)}`;
+    const db = openEngine();
+    db.exec(`CREATE TABLE day_trips(${TYPES})`);
+    db.exec(`CREATE TABLE day_trips_donor(${TYPES})`);
+    const bytes = enc.encode(`{"history":"${flow}"}`);
+    const history = { path: `history-${flow}.json`, sha256: await sha256Hex(bytes), bytes: bytes.byteLength };
+    await pinFile(db, history.path, bytes, history.sha256);
+    const base: FlowDocument = {
+      smaltfl: 2, id: flow, name: 'Filled', parameters: [{ name: 'day', type: 'text', default: null }], sources: [{ id: 'trips', table: 'day_trips' }],
+      steps: [
+        { id: 'trips_valid', kind: 'expectations', inputs: ['trips'], rules: [{ name: 'fare', check: 'fare_amount >= 0', onFail: 'drop' }] },
+        { id: 'trip_hours', kind: 'aggregate', inputs: ['trips_valid'], groupBy: [{ name: 'hour', expr: 'substr(tpep_pickup_datetime, 12, 2)' }], measures: [{ name: 'trips', expr: 'count(*)' }, { name: 'filled_from', expr: 'max(filled_from)' }], dataset: {} },
+      ],
+      policies: { principals: [{ id: 'owner', name: 'Owner', owner: true }], rules: [] },
+      publish: { hold: ['short'], watch: { trips: history.path }, period: 'day' },
+    };
+    const doc = insertAfter(base, 'trips', { id: 'trips_filled', kind: 'fill', inputs: ['trips'], time: 'tpep_pickup_datetime', shift: ['tpep_pickup_datetime', 'tpep_dropoff_datetime'] });
+    const rec = await FlowRecord.open(flow);
+    await rec.append('flow', 'owner', { before: null, after: await flowHash(doc), doc: await rec.keep('flow', withoutDisplay(doc)) });
+    const claim = (day: string, over: Partial<StoryClaim> = {}): StoryClaim => ({ by: 'story', source: 'trips', day, state: 'calm', below: false, head: 'A normal day', build: 'dev', history, rows: DAYS[day]!.length, ...over });
+    const s = { db, doc, rec, history, claim };
+    const runDay = async (day: string, c: StoryClaim) => {
+      load(db, 'day_trips', day);
+      const r = await runFlow(db, doc, { smaltdb: SMALTDB, parameters: { day }, claims: [c], log: rec.head() });
+      const inputs = inputsOf(r.manifest) as unknown as JSONValue;
+      if (r.holds.length === 0) return { r, entry: await keepRun(rec, db, r.manifest, r.hash, r.run, { day, inputs }), keys: {} as Record<string, string> };
+      const keys = stagedKeys(r.manifest, r.waiting.length ? Object.keys(r.manifest.outputs) : []);
+      const held = { day, inputs: inputsOf(r.manifest), holds: r.holds, waiting: r.waiting, keys };
+      return { r, entry: await keepRun(rec, db, r.manifest, r.hash, r.run, { ...(held as unknown as Record<string, JSONValue>), outcome: 'held' }), keys };
+    };
+    const wed = await runDay('2024-01-10', claim('2024-01-10'));
+    const thu = await runDay('2024-01-11', claim('2024-01-11', { state: 'wrong', below: true, head: 'Trips fall to trickle from 13:00' }));
+    load(db, 'day_trips_donor', '2024-01-04');
+    const donorClaim = claim('2024-01-04', { source: 'trips_donor' });
+    const draft: Repair = { kind: 'fill', step: 'trips_filled', source: 'trips', missing: { time: 'tpep_pickup_datetime', hours: [13, 23] }, donor: { rule: 'weekday', direction: 'before', day: '2024-01-04', file: { path: 'day_trips_donor', sha256: '0'.repeat(64), bytes: 0 }, claim: donorClaim } };
+    const derivedDoc = repairDocument(doc, draft);
+    const r = await runFlow(db, derivedDoc, { smaltdb: SMALTDB, parameters: { day: '2024-01-11' }, claims: [claim('2024-01-11', { state: 'wrong', below: true, head: 'Trips fall to trickle from 13:00' }), donorClaim], stage: true, from: { run: thu.r.run, manifest: thu.r.hash }, log: rec.head() });
+    const donorNode = r.manifest.nodes.find((n) => n.origin === 'trips_donor')!;
+    const repair: Repair = { ...draft, donor: { ...draft.donor!, file: { path: 'day_trips_donor', sha256: donorNode.content!, bytes: donorNode.rows! } } };
+    const keys = stagedKeys(r.manifest, Object.keys(r.manifest.outputs));
+    const derivedAbout: DerivedAbout = { run: r.run, manifest: r.hash, outcome: 'derived', day: '2024-01-11', inputs: inputsOf(r.manifest), holds: [...r.holds, ...r.derived!.holds], waiting: r.waiting, keys, from: { run: thu.r.run, manifest: thu.r.hash }, repair };
+    const derived = await keepRun(rec, db, r.manifest, r.hash, r.run, { ...(derivedAbout as unknown as Record<string, JSONValue>), doc: await rec.keep('flow', withoutDisplay(derivedDoc)) });
+    const decision = await decide(s, thu.r, thu.keys, 'owner', { option: 'fill', repair, derived: { run: r.run, manifest: r.hash, keys } }, null);
+    const out = await releaseRun(db, { run: r.run, manifest: r.hash, keys, option: 'fill', actor: 'owner', reason: null, decision: LEAF(decision), from: { run: thu.r.run, manifest: thu.r.hash }, repair });
+    expect(out).toMatchObject({ outcome: 'applied', why: null });
+    const relAbout: ReleaseAbout = { run: r.run, manifest: r.hash, outputs: keys, decision: decision.seq, leaf: LEAF(decision), outcome: out.outcome, why: out.why, from: { run: thu.r.run, manifest: thu.r.hash }, repair, filled: out.filled ?? 0 };
+    const rel = await rec.append('release', 'owner', relAbout as unknown as JSONValue);
+    return { ...s, wed, thu, r, derived, decision, out, rel, keys, repair };
+  }
+  /** The bag, with what the engine kept of the fills. */
+  const fillBag = pausedBag;
+  const withRepairs = async (s: { db: Engine; rec: FlowRecord }, change: (r: EngineRepairs) => void = () => {}, tweak: (payload: BagFile[]) => void = () => {}) => {
+    const names = (await s.db.callPlugin('smaltfl', 'names', [])) as { repairs: EngineRepairs };
+    change(names.repairs);
+    return fillBag(s, (payload) => {
+      payload.push({ path: 'engine/repairs.json', bytes: enc.encode(JSON.stringify(names.repairs)) });
+      tweak(payload);
+    });
+  };
+
+  it('holds: the derived run checked against its held run, its decision, its release, and the engine’s repairs', async () => {
+    const s = await filled();
+    const report = await auditBag(await withRepairs(s), s.rec.latest());
+    expect(failed(report)).toEqual([]);
+    const lines = report.lines.map((l) => l.what);
+    expect(lines).toContainEqual(expect.stringMatching(new RegExp(`^run ${s.r.run} \\(#${s.derived.seq}\\): manifest [0-9a-f]{16}… holds, with its plan and flow document; read no files; held by trips \\(Trips fall to trickle from 13:00\\), trips_filled \\(fills 13:00–23:59 from 2024-01-04\\), 1 output waiting; fills trips from 2024-01-04, repairing run ${s.thu.r.run}$`)));
+    expect(lines).toContainEqual(`decision #${s.decision.seq}: fill from 2024-01-04 for 2024-01-11, by owner, on run ${s.thu.r.run}'s keys`);
+    expect(lines).toContainEqual(`release #${s.rel.seq}: 1 output of run ${s.r.run} released, citing decision #${s.decision.seq}`);
+    expect(lines).toContainEqual(expect.stringMatching(new RegExp(`^trip_hours: content [0-9a-f]{16}…, in release entry #${s.rel.seq} proven in the record, as the held run its release published made it$`)));
+  });
+
+  it('holds once the fill is withdrawn, the names back on Wed 10; and fails a withdrawal that points elsewhere or amends nothing', async () => {
+    const s = await filled();
+    const withdraw = await decide(s, s.thu.r, s.thu.keys, 'owner', { option: 'dont' }, null, s.decision.seq);
+    const out = await releaseRun(s.db, { run: s.r.run, manifest: s.r.hash, keys: s.keys, option: 'dont', actor: 'owner', reason: null, decision: LEAF(withdraw), withdraws: s.out.release });
+    expect(out.outcome).toBe('applied');
+    const back = { trip_hours: s.wed.r.manifest.outputs.trip_hours!.key };
+    const about = (more: Partial<ReleaseAbout> = {}): ReleaseAbout => ({ run: s.r.run, manifest: s.r.hash, outputs: back, decision: withdraw.seq, leaf: LEAF(withdraw), outcome: 'applied', why: null, withdraws: s.rel.seq, ...more });
+    const rel = await s.rec.append('release', 'owner', about() as unknown as JSONValue);
+    const report = await auditBag(await withRepairs(s));
+    expect(failed(report)).toEqual([]);
+    expect(report.lines.map((l) => l.what)).toContain(`decision #${withdraw.seq}: don't publish (withdraws the fill) for 2024-01-11, by owner, on run ${s.thu.r.run}'s keys`);
+    expect(report.lines.map((l) => l.what)).toContain(`release #${rel.seq}: release #${s.rel.seq} withdrawn: 1 output back, citing decision #${withdraw.seq}`);
+    // A withdrawal recorded as pointing the names at the fill itself, and one whose decision amends nothing.
+    const wrong = await s.rec.append('release', 'owner', about({ outputs: s.keys }) as unknown as JSONValue);
+    const loose = await decide(s, s.thu.r, s.thu.keys, 'owner', { option: 'dont' }, null);
+    const unamended = await s.rec.append('release', 'owner', about({ decision: loose.seq, leaf: LEAF(loose) }) as unknown as JSONValue);
+    const f = failed(await auditBag(await withRepairs(s)));
+    expect(f).toContain(`release #${wrong.seq}: release #${s.rel.seq} withdrawn: 1 output back, citing decision #${withdraw.seq}: it doesn't point trip_hours back to what it showed before the fill`);
+    expect(f).toContain(`release #${unamended.seq}: release #${s.rel.seq} withdrawn: 1 output back, citing decision #${loose.seq}: its decision, #${loose.seq}, doesn't amend the fill's decision, #${s.decision.seq}`);
+  });
+
+  it('fails a derived run that isn’t its held run’s repair, a donor on a day its rule doesn’t allow, and a donor claim that says something wrong', async () => {
+    const s = await filled();
+    const forged = (change: (a: DerivedAbout) => void) => (payload: BagFile[]) => {
+      const f = payload.find((x) => x.path === 'record/entries.jsonl')!;
+      const lines = new TextDecoder().decode(f.bytes).split('\n');
+      const k = lines.findIndex((l) => l.includes('"outcome":"derived"'));
+      const e = JSON.parse(lines[k]!) as LogEntry;
+      change(e.about as unknown as DerivedAbout);
+      lines[k] = canonicalJSON(e as never);
+      f.bytes = enc.encode(lines.join('\n'));
+    };
+    // Each forgery changes a signed entry: the record fails too, and the derived run's line says what is wrong.
+    const line = (r: Awaited<ReturnType<typeof auditBag>>) => failed(r).find((l) => l.startsWith(`run ${s.r.run} (#${s.derived.seq})`)) ?? '';
+    expect(line(await auditBag(await withRepairs(s, undefined, forged((a) => (a.repair.missing = { time: 'tpep_pickup_datetime', hours: [12, 23] })))))).toContain(`its document isn't run ${s.thu.r.run}'s repaired by its repair`);
+    expect(line(await auditBag(await withRepairs(s, undefined, forged((a) => (a.repair.donor!.direction = 'after')))))).toContain("its donor, 2024-01-04, isn't the same weekday after it within four weeks");
+    expect(line(await auditBag(await withRepairs(s, undefined, forged((a) => (a.from = { run: s.wed.r.run, manifest: s.wed.r.hash })))))).toContain(`it repairs run ${s.wed.r.run} (${s.wed.r.hash.slice(0, 16)}…), which the record doesn't hold before it`);
+    const wrongDonor = failed(await auditBag(await withRepairs(s, (x) => {
+      const j = x.derived[0]!.donors[0]!;
+      if ('claim' in j) j.claim = { ...j.claim, state: 'wrong', head: 'Vendor 1 sent almost nothing' };
+    })));
+    expect(wrongDonor.join('\n')).toContain("its donor's claim says something wrong: Vendor 1 sent almost nothing");
+    expect(wrongDonor.join('\n')).toContain("the engine's holds for it as a derived run aren't what its plan and its donors hold");
+  });
+
+  it('fails a release whose decision doesn’t name its keys, and one that moved the names back past a later day', async () => {
+    const s = await filled();
+    const forged = await decide(s, s.thu.r, s.thu.keys, 'owner', { option: 'fill', repair: s.repair, derived: { run: s.r.run, manifest: s.r.hash, keys: { trip_hours: 'f'.repeat(64) } } }, null, s.decision.seq);
+    const rel = await s.rec.append('release', 'owner', { run: s.r.run, manifest: s.r.hash, outputs: s.keys, decision: forged.seq, leaf: LEAF(forged), outcome: 'applied', why: null } as unknown as JSONValue);
+    expect(failed(await auditBag(await withRepairs(s)))).toContain(`release #${rel.seq}: 1 output of run ${s.r.run} released, citing decision #${forged.seq}: its keys aren't those of the derived run its decision names`);
+    // Fri 12 published, then a refill of Thu 11 recorded as applied: it would move the names back.
+    const t = await filled();
+    load(t.db, 'day_trips', '2024-01-12');
+    const fri = await runFlow(t.db, t.doc, { smaltdb: SMALTDB, parameters: { day: '2024-01-12' }, claims: [t.claim('2024-01-12')], log: t.rec.head() });
+    await keepRun(t.rec, t.db, fri.manifest, fri.hash, fri.run, { day: '2024-01-12', inputs: inputsOf(fri.manifest) as unknown as JSONValue });
+    const again = await decide(t, t.thu.r, t.thu.keys, 'owner', { option: 'fill', repair: t.repair, derived: { run: t.r.run, manifest: t.r.hash, keys: t.keys } }, null, t.decision.seq);
+    const late = await t.rec.append('release', 'owner', { run: t.r.run, manifest: t.r.hash, outputs: t.keys, decision: again.seq, leaf: LEAF(again), outcome: 'applied', why: null, from: { run: t.thu.r.run, manifest: t.thu.r.hash }, repair: t.repair } as unknown as JSONValue);
+    expect(failed(await auditBag(await withRepairs(t)))).toContain(`release #${late.seq}: 1 output of run ${t.r.run} released, citing decision #${again.seq}: it moved the names back past 2024-01-12, published before it`);
   });
 });

@@ -627,7 +627,7 @@ describe('what holds a derived run (amendment 1 S4, S10)', () => {
 
 /** A derived run's entry: Thu 21 filled, run `run`, repairing held run 41. */
 const derivedRun = (day: string, run: number, donor: string | null = '2023-09-14'): LogEntry =>
-  entry('run', { run, manifest: SHA(String(run % 10)), outcome: 'derived', day, inputs: { ...inputs(day), flow: SHA('g') }, holds: [], keys: { zone_hour: `kz-${run}` }, from: { run: 41, manifest: SHA('1') }, repair: repairOf(donor) } satisfies DerivedAbout);
+  entry('run', { run, manifest: SHA(String(run % 10)), outcome: 'derived', day, inputs: { ...inputs(day), flow: SHA('g') }, holds: [], waiting: ['zone_hour'], keys: { zone_hour: `kz-${run}` }, from: { run: 41, manifest: SHA('1') }, repair: repairOf(donor) } satisfies DerivedAbout);
 const repairOf = (donor: string | null): Repair => ({ kind: donor ? 'fill' : 'complete', step: 'trips_filled', source: 'trips', missing: { time: 'tpep_pickup_datetime', hours: [13, 23] }, donor: donor ? { rule: 'weekday', direction: 'before', day: donor, file: { path: `loads/${donor}.parquet`, sha256: SHA('b'), bytes: 1 }, claim: donorClaim({ day: donor }) } : null });
 const fillDecide = (day: string, donor: string | null, scope: DecideAbout['scope'] = 'day', more: Partial<DecideAbout> = {}, entryMore: Partial<LogEntry> = {}) =>
   decide(day, 41, donor ? 'fill' : 'complete', scope, { repair: repairOf(donor), derived: { run: 42, manifest: SHA('2'), keys: { zone_hour: 'kz-42' } }, ...more }, entryMore);

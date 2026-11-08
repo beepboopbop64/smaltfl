@@ -14,6 +14,14 @@
  * decision in the record. What held a run is read from the engine (engine/holds.json) as well as from the record: a
  * run the engine held, recorded as published, fails, and its outputs need a release all the same.
  *
+ * A day filled, or published with the part that arrived (ADR 0009 amendment 1 S11), is checked through its derived
+ * run as a held run is, and against the held run it repairs: its document is that run's repaired by the decision's
+ * repair, it read the same snapshot of the watched source, and its donor's file is in the list, on a day the rule's
+ * direction allows within four weeks, with a claim that says nothing wrong, told from the held run's history. A
+ * release of it names the derived run and keys its decision names (`derived`), and never moves the names back past a
+ * later day; a withdrawal (Q-61) amends the fill's decision and points each name back to what it showed before the
+ * fill. What the engine kept of the fills (engine/repairs.json) agrees with the record.
+ *
  * A bag carries its own card and its own data list, so on its own it shows only that it is consistent with itself:
  * anyone can make a bag that is. What ties it to someone is what the auditor brings: a checkpoint they kept, the
  * signer's fingerprint from its owner, and the data list from the data branch (`git show <commit>:MANIFEST.json`).
@@ -22,7 +30,9 @@
 import { checkBag, readBagInfo, type BagFile } from './bag.js';
 import type { FlowDocument } from './document.js';
 import { sha256Hex } from './hash.js';
-import { claimHolds, heldOutputs, holdsOf, inputsKey, judgeClaims, sameKeys, standingFor, type DecideAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type StoryClaim } from './hold.js';
+import { daysBetween } from './calendar.js';
+import { DONOR_WINDOW, repairDocument, type Repair } from './fill.js';
+import { claimHolds, donorGood, heldOutputs, holdsOf, inputsKey, judgeClaims, lastPublished, sameKeys, standingFor, type DecideAbout, type DerivedAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type RunHold, type StoryClaim } from './hold.js';
 import { canonicalJSON } from './canonical.js';
 import { consistencyProof, entryLeaf, parseCheckpoint, rootOf, verifyCheckpoint, verifyConsistency, verifyInclusion, verifyRecord, type JSONValue, type LogEntry, type SignedCheckpoint } from './log.js';
 import { manifestHash, planHash, policiesHash, type IdentityCard, type RunManifest } from './manifest.js';
@@ -66,6 +76,17 @@ export interface EngineHolds {
   manifest: string;
   holds: Hold[];
   judged: Judged[];
+}
+
+/**
+ * What the engine kept of the fills (engine/repairs.json, ADR 0009 amendment 1 S11): each derived run with the held
+ * run it repairs, what held it besides its day's holds and its donors as judged; each applied release of one, with its
+ * repair and what each name showed before it; and each withdrawal.
+ */
+export interface EngineRepairs {
+  derived: { run: number; manifest: string; from: { run: number; manifest: string }; holds: RunHold[]; donors: Judged[]; filled: number | null }[];
+  repairs: { release: number; run: number; from: { run: number; manifest: string }; repair: Repair; before: Record<string, { key: string; run: number } | null> }[];
+  withdrawals: { release: number; withdraws: number }[];
 }
 
 /** A release as the engine keeps it (engine/releases.json): what was asked, and what came of it. */
@@ -145,6 +166,129 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
   if (list) say(!info.get('data-manifest-sha256') || info.get('data-manifest-sha256') === listHash, `the data's list hashes to ${listHash!.slice(0, 16)}…, as bag-info says${yours ? '' : `; check it is the data branch's with \`${how} | sha256sum\`, or pass \`${how} > list.json\` with --list list.json`}`);
   if (yours) say(yours === listHash, yours === listHash ? 'the data\'s list is the one you gave: the data branch\'s' : `the data's list in the bag is ${listHash ?? 'missing'}, not the one you gave (${yours})`);
 
+  // The held run's own claim for its day, from its entry's story hold or what the engine judged it by.
+  const heldClaim = (entry: LogEntry, manifest: string): StoryClaim | null => {
+    const story = ((entry.about as Partial<HeldAbout>).holds ?? []).find((h) => h.by === 'story' && h.claim)?.claim;
+    const judged = engineHolds.get(manifest)?.judged.find((j) => 'claim' in j);
+    return story ?? (judged && 'claim' in judged ? judged.claim : null);
+  };
+
+  /**
+   * What is wrong with a derived run's entry (ADR 0009 amendment 1 S11), pushed onto `problems`, and what it is, said:
+   * held as a held run is, of the held run it repairs (in the record before it, the same day), its document that run's
+   * repaired, the same snapshot of the watched source, and its donor's file, day and claim.
+   */
+  const derivedProblems = async (e: LogEntry, plan: FlowPlan, m: RunManifest, problems: string[]): Promise<string> => {
+    const a = e.about as Partial<DerivedAbout>;
+    const repair = a.repair;
+    if (!isRecord(a.from) || typeof a.from.manifest !== 'string' || !isRecord(repair)) {
+      problems.push('it names no held run it repairs, or no repair');
+      return '';
+    }
+    const said = heldProblems(a, plan, m, problems);
+    const held = runs.get(a.from.manifest);
+    if (!held || (held.entry.about as { outcome?: string }).outcome !== 'held' || held.entry.seq > e.seq) {
+      problems.push(`it repairs run ${a.from.run} (${shortHash(a.from.manifest)}), which the record doesn't hold before it`);
+      return said;
+    }
+    const hm = held.manifest;
+    const period = planPeriod(plan.publish);
+    const day = period !== null && typeof m.parameters[period] === 'string' ? (m.parameters[period] as string) : null;
+    if (!hm || day === null || hm.parameters[period!] !== day) problems.push(`it isn't of run ${a.from.run}'s day`);
+    const fromDoc = hm ? flowOf(flows, hm.flow.hash) : null;
+    if (!fromDoc) problems.push(`run ${a.from.run}'s flow document isn't in the bag, so its repair can't be checked`);
+    else {
+      try {
+        if ((await flowHash(repairDocument(fromDoc, repair))) !== m.flow.hash) problems.push(`its document isn't run ${a.from.run}'s repaired by its repair`);
+      } catch (err) {
+        problems.push(`its repair doesn't apply to run ${a.from.run}'s flow: ${(err as Error).message}`);
+      }
+    }
+    const source = (x: RunManifest | null) => x?.nodes.find((n) => n.op === 'table' && n.origin.toLowerCase() === repair.source.toLowerCase())?.content;
+    if (!source(m) || source(m) !== source(hm)) problems.push(`it read another ${repair.source} than run ${a.from.run}`);
+    if (repair.donor) {
+      const donor = repair.donor;
+      const fill = plan.nodes.find((n) => n.op === 'fill' && n.origin === repair.step);
+      const node = m.nodes.find((n) => n.node === (fill && fill.inputs.length === 2 ? fill.inputs[1] : -1));
+      if ((node?.file?.sha256 ?? node?.content) !== donor.file.sha256) problems.push(`its donor didn't read the ${donor.day} file its repair names`);
+      if (day) {
+        const away = daysBetween(donor.day, day);
+        const fits = (donor.direction === 'before' ? away > 0 : away < 0) && Math.abs(away) <= DONOR_WINDOW && (donor.rule !== 'weekday' || Math.abs(away) % 7 === 0);
+        if (!fits) problems.push(`its donor, ${donor.day}, isn't ${donor.rule === 'weekday' ? 'the same weekday' : 'a day'} ${donor.direction} it within four weeks`);
+      }
+      const judged = engineRepairs?.derived.find((d) => d.manifest === a.manifest)?.donors.find((j) => j.node === node?.node);
+      const claim = judged && 'claim' in judged ? judged.claim : donor.claim;
+      if (judged && 'unjudged' in judged) problems.push(`its donor wasn't judged: ${judged.unjudged}`);
+      else if (!isRecord(claim) || !donorGood(claim)) problems.push(`its donor's claim says something wrong${isRecord(claim) ? `: ${claim.head}` : ''}`);
+      const told = heldClaim(held.entry, a.from.manifest);
+      if (told && isRecord(claim) && claim.history?.sha256 !== told.history.sha256) problems.push(`its donor's claim was told from another history than run ${a.from.run}'s`);
+    }
+    return `${said}; ${repair.donor ? `fills ${repair.source} from ${repair.donor.day}` : `the part of ${repair.source} that arrived`}, repairing run ${a.from.run}`;
+  };
+
+  /** What each name showed just before entry `seq`, from the record: the versions each publication pointed. */
+  const shownBefore = (seq: number): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const x of entries.slice(0, seq)) {
+      const a = x.about as Omit<Partial<ReleaseAbout>, 'outcome'> & { outcome?: string; manifest?: string };
+      if (x.kind === 'run' && a.outcome === 'ok' && typeof a.manifest === 'string') for (const [name, o] of Object.entries(runs.get(a.manifest)?.manifest?.outputs ?? {})) out[name] = o.key;
+      else if (x.kind === 'release' && a.outcome === 'applied' && isKeys(a.outputs)) Object.assign(out, a.outputs);
+    }
+    return out;
+  };
+
+  /** What is wrong with the release of a fill or the part that arrived: it releases the derived run its decision names,
+   * with its keys, made by its decision's repair, of its decision's held run, and never moves a name back. */
+  const remedyReleaseProblems = (e: LogEntry, a: ReleaseAbout, cited: LogEntry, decision: DecideAbout): string[] => {
+    const problems: string[] = [];
+    const named = decision.derived;
+    if (!named) problems.push(`its decision, #${cited.seq}, names no derived run to release`);
+    else {
+      if (a.manifest !== named.manifest) problems.push(`it releases run ${a.run}, not the derived run its decision names`);
+      if (!isKeys(a.outputs) || !sameKeys(a.outputs, named.keys)) problems.push("its keys aren't those of the derived run its decision names");
+      const run = runs.get(a.manifest);
+      const ra = run?.entry.about as Partial<DerivedAbout> | undefined;
+      if (!run || ra?.outcome !== 'derived' || run.entry.seq > e.seq) problems.push(`it releases run ${a.run} (${shortHash(a.manifest)}), which the record doesn't hold as a derived run before it`);
+      else {
+        if (ra.from?.manifest !== decision.manifest) problems.push(`run ${a.run} repairs another run than its decision decides`);
+        const repair = isRecord(a.repair) ? a.repair : decision.repair;
+        if (canonicalJSON((ra.repair ?? null) as unknown as JSONValue) !== canonicalJSON((repair ?? null) as unknown as JSONValue)) problems.push(`run ${a.run} wasn't made by its decision's repair`);
+        if (!run.manifest || Object.entries(a.outputs).some(([n, k]) => run.manifest!.outputs[n]?.key !== k)) problems.push(`its keys aren't the ones run ${a.run} made`);
+      }
+    }
+    const since = entries.slice(cited.seq + 1, e.seq).find((x) => x.kind === 'decide' && (x.amends === cited.seq || (isRecord(x.about) && isInputs(x.about.inputs) && inputsKey(x.about.inputs) === inputsKey(decision.inputs))));
+    if (since) problems.push(`its decision, #${cited.seq}, was ${since.amends === cited.seq ? 'amended' : 'decided again'} by #${since.seq} before it`);
+    const period = planPeriod(runs.get(decision.manifest)?.plan?.publish);
+    const shown = lastPublished(entries.slice(0, e.seq), period);
+    if (a.outcome === 'applied' && decision.day && shown && shown > decision.day) problems.push(`it moved the names back past ${shown}, published before it`);
+    return problems;
+  };
+
+  /** What is wrong with a withdrawal (Q-61): it takes back an applied release of a fill or a part, amends that fill's
+   * decision, takes back every name it released, points each back to what it showed before the fill, and never moves a
+   * name back past a later day. */
+  const withdrawalProblems = (e: LogEntry, a: ReleaseAbout, cited: LogEntry): string[] => {
+    const problems: string[] = [];
+    const taken = entries[a.withdraws!];
+    const was = taken?.about as unknown as ReleaseAbout | undefined;
+    if (!taken || taken.kind !== 'release' || taken.seq >= e.seq || was?.outcome !== 'applied' || !remedyOf(entries[was.decision])) {
+      problems.push(`it withdraws #${String(a.withdraws)}, which isn't an earlier applied release of a fill or a part`);
+      return problems;
+    }
+    if (cited.amends !== was.decision) problems.push(`its decision, #${cited.seq}, doesn't amend the fill's decision, #${was.decision}`);
+    if (!isKeys(a.outputs) || !sameKeys(Object.fromEntries(Object.keys(a.outputs).map((n) => [n, ''])), Object.fromEntries(Object.keys(was.outputs).map((n) => [n, ''])))) problems.push(`it doesn't take back every name release #${taken.seq} released`);
+    else {
+      const before = shownBefore(taken.seq);
+      const wrong = Object.entries(a.outputs).filter(([name, key]) => before[name] !== key).map(([name]) => name);
+      if (wrong.length) problems.push(`it doesn't point ${wrong.join(', ')} back to what ${wrong.length === 1 ? 'it' : 'they'} showed before the fill`);
+    }
+    const decision = cited.about as unknown as DecideAbout;
+    const period = planPeriod(runs.get(decision.manifest)?.plan?.publish);
+    const shown = lastPublished(entries.slice(0, e.seq), period);
+    if (a.outcome === 'applied' && decision.day && shown && shown > decision.day) problems.push(`it moved the names back past ${shown}, published before it`);
+    return problems;
+  };
+
   // Every run the record names.
   const blobs = new Map(files.filter((f) => f.path.startsWith(`${top}/data/blobs/`)).map((f) => [f.path.slice(`${top}/data/blobs/`.length).replace(/\.json$/, ''), f]));
   const plans = new Map(files.filter((f) => f.path.startsWith(`${top}/data/engine/plans/`)).map((f) => [f.path.split('/').pop()!.replace(/\.json$/, ''), f]));
@@ -169,8 +313,9 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
   const engineHolds = new Map((json<EngineHolds[]>('data/engine/holds.json') ?? []).map((x) => [x.manifest, x]));
   // The runs that made something, published or held, by their manifest's hash: what decisions, releases and proofs cite.
   const runs = new Map<string, { entry: LogEntry; manifest: RunManifest | null; plan: FlowPlan | null; ok: boolean }>();
-  for (const e of entries.filter((x) => x.kind === 'run' && ['ok', 'held'].includes(String((x.about as { outcome?: string } | null)?.outcome)))) {
-    const a = e.about as { run: number; manifest: string; blob: string; outcome: 'ok' | 'held' };
+  const engineRepairs = json<EngineRepairs>('data/engine/repairs.json');
+  for (const e of entries.filter((x) => x.kind === 'run' && ['ok', 'held', 'derived'].includes(String((x.about as { outcome?: string } | null)?.outcome)))) {
+    const a = e.about as { run: number; manifest: string; blob: string; outcome: 'ok' | 'held' | 'derived' };
     const b = blobs.get(`manifest-${a.blob}`);
     if (!b) {
       say(false, `run ${a.run} (#${e.seq}): its manifest isn't in the bag`);
@@ -184,14 +329,15 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     const plan = plans.get(m.plan);
     const typed = plan ? (JSON.parse(text(plan.bytes)) as FlowPlan) : null;
     if (typed && (await planHash(typed)) !== m.plan) problems.push("its plan doesn't hash to what the manifest says");
-    if (!plan && (m.smaltflRun === 1 || a.outcome === 'held')) problems.push("its plan isn't in the bag, so what it ran can't be checked");
-    // A held run: its holds are what its manifest's counts and its claims hold, and the keys it names are its own.
-    const said = a.outcome === 'held' && typed ? heldProblems(e.about, typed, m, problems) : '';
+    if (!plan && (m.smaltflRun === 1 || a.outcome !== 'ok')) problems.push("its plan isn't in the bag, so what it ran can't be checked");
+    // A held run: its holds are what its manifest's counts and its claims hold, and the keys it names are its own. A
+    // derived run is held as a held run is, and checked against the held run it repairs.
+    const said = a.outcome === 'held' && typed ? heldProblems(e.about, typed, m, problems) : a.outcome === 'derived' && typed ? await derivedProblems(e, typed, m, problems) : '';
     // Recorded as published: a plan that holds on its checks must not have counts that hold it.
     if (a.outcome === 'ok' && typed?.publish && checksHolds(typed, m).length) problems.push("it was recorded as published, and its manifest's counts hold it");
     // What the engine kept of what held it: what its manifest and its judged sources hold, and what the record says.
     const kept = engineHolds.get(a.manifest);
-    if (kept && typed) problems.push(...engineHoldsProblems(kept, e.about, typed, m, a.outcome));
+    if (kept && typed) problems.push(...engineHoldsProblems(kept, e.about, typed, m, a.outcome === 'derived' ? 'derived' : a.outcome, engineRepairs?.derived.find((d) => d.manifest === a.manifest)));
     const flow = flows.get(m.flow.hash);
     if (flow && (await flowHash(JSON.parse(text(flow.bytes)) as FlowDocument)) !== m.flow.hash) problems.push("its flow document doesn't hash to what the manifest says");
     const read = m.nodes.filter((n) => n.file);
@@ -225,8 +371,10 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
   const heldBy = (manifest: string | undefined): Set<string> | null => {
     const run = manifest === undefined ? undefined : runs.get(manifest);
     if (!run) return null;
-    const a = run.entry.about as Partial<HeldAbout> & { outcome?: string };
+    const a = run.entry.about as Omit<Partial<HeldAbout>, 'outcome'> & { outcome?: string };
     const out = new Set<string>();
+    // A derived run holds every output until a decision releases it.
+    if (a.outcome === 'derived') for (const k of Object.keys(run.manifest?.outputs ?? {})) out.add(k);
     if (a.outcome === 'held') {
       if (isKeys(a.keys)) for (const k of Object.keys(a.keys)) out.add(k);
       if (run.plan) for (const k of heldOutputs(run.plan, Array.isArray(a.holds) ? a.holds : [])) out.add(k);
@@ -268,10 +416,12 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       rule = may.rule ?? null;
     }
     if (a.option === 'asis' && (typeof e.reason !== 'string' || e.reason.trim() === '')) problems.push('it publishes as is with no reason');
+    const remedy = a.option === 'fill' || a.option === 'complete';
+    if (remedy && (!isRecord(a.repair) || (a.repair as Repair).kind !== a.option)) problems.push(`it ${a.option === 'fill' ? 'fills' : 'publishes the part that arrived'} with no repair of that kind`);
     const period = planPeriod(held?.plan?.publish);
     if (a.under !== undefined) {
       const stands = typeof a.day === 'string' ? standingFor(entries.slice(0, e.seq), a.day, period) : null;
-      if (a.option !== 'dont' || stands?.seq !== a.under) problems.push(`it applies decision #${a.under}, which doesn't stand for ${a.day ?? 'a day with no date'}`);
+      if (a.option === 'asis' || stands?.seq !== a.under || stands.about.option !== a.option) problems.push(`it applies decision #${a.under}, which doesn't stand for ${a.day ?? 'a day with no date'}`);
     }
     if (e.amends !== null) {
       const amended = entries[e.amends];
@@ -279,7 +429,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       if (!amended || amended.kind !== 'decide' || amended.seq >= e.seq || !isInputs(was?.inputs) || inputsKey(was.inputs) !== inputsKey(a.inputs)) problems.push(`it amends #${e.amends}, which isn't an earlier decision of the same day`);
     }
     allowed.set(e.seq, problems.length === 0);
-    const option = a.option === 'asis' ? 'publish as is' : "don't publish";
+    const option = a.option === 'asis' ? 'publish as is' : a.option === 'fill' ? `fill from ${(a.repair as Repair | undefined)?.donor?.day ?? 'another day'}` : a.option === 'complete' ? 'publish the part that arrived' : e.amends !== null && remedyOf(entries[e.amends]) ? "don't publish (withdraws the fill)" : "don't publish";
     say(problems.length === 0, `${where}: ${option}${a.scope === 'untilPass' ? ' until a later day passes' : ''} for ${a.day ?? `run ${a.run}`}, by ${e.by.as}${a.under !== undefined ? `, under #${a.under}` : ''}${problems.length ? `: ${problems.join('; ')}` : `${rule ? ` (rule ${rule})` : ''}, on run ${a.run}'s keys`}`);
   }
 
@@ -299,7 +449,10 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     const decision = cited?.about as unknown as DecideAbout | undefined;
     if (!cited || cited.kind !== 'decide' || cited.seq >= e.seq) problems.push(`it cites #${a.decision}, which isn't a decision before it`);
     else if (entryLeaf(cited) !== a.leaf) problems.push(`it cites #${a.decision} by the leaf ${shortHash(a.leaf)}, which isn't that entry's`);
-    else {
+    else if (decision?.option === 'fill' || decision?.option === 'complete' || (decision?.option === 'dont' && Number.isInteger(a.withdraws))) {
+      if (allowed.get(cited.seq) === false) problems.push(`its decision, #${a.decision}, doesn't hold`);
+      problems.push(...(decision.option === 'dont' ? withdrawalProblems(e, a, cited) : remedyReleaseProblems(e, a, cited, decision)));
+    } else {
       if (decision?.option !== 'asis') problems.push(`its decision, #${a.decision}, doesn't publish`);
       if (allowed.get(cited.seq) === false) problems.push(`its decision, #${a.decision}, doesn't hold`);
       // Still the day's decision when it is released: none amends it, and no other decision of its day follows it.
@@ -314,8 +467,9 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
         else if (!run.manifest || Object.entries(a.outputs).some(([name, key]) => run.manifest!.outputs[name]?.key !== key)) problems.push(`its keys aren't the ones run ${a.run} made`);
       }
     }
-    if (a.outcome === 'applied' && problems.length === 0) releasedBy.set(e.seq, a);
-    say(problems.length === 0, `${where}: ${a.outcome === 'applied' ? `${Object.keys(a.outputs).length} output${Object.keys(a.outputs).length === 1 ? '' : 's'} of run ${a.run} released` : `refused (${a.why ?? 'no reason given'})`}, citing decision #${a.decision}${problems.length ? `: ${problems.join('; ')}` : ''}`);
+    if (a.outcome === 'applied' && problems.length === 0 && !Number.isInteger(a.withdraws)) releasedBy.set(e.seq, a);
+    const what = Number.isInteger(a.withdraws) ? `release #${String(a.withdraws)} withdrawn: ${Object.keys(a.outputs).length} output${Object.keys(a.outputs).length === 1 ? '' : 's'} back` : `${Object.keys(a.outputs).length} output${Object.keys(a.outputs).length === 1 ? '' : 's'} of run ${a.run} released`;
+    say(problems.length === 0, `${where}: ${a.outcome === 'applied' ? what : `refused (${a.why ?? 'no reason given'})`}, citing decision #${a.decision}${problems.length ? `: ${problems.join('; ')}` : ''}`);
   }
 
   // Each dataset's proof: its run entry is in the record, and the run's manifest made that dataset with that content.
@@ -352,14 +506,37 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
   const engineReleases = json<EngineRelease[]>('data/engine/releases.json') ?? [];
   if (names !== undefined) {
     const decided = new Map(entries.filter((e) => e.kind === 'decide').map((e) => [entryLeaf(e), e]));
+    const backs = new Map((engineRepairs?.withdrawals ?? []).map((w) => [w.release, w.withdraws]));
     for (const r of engineReleases.filter((x) => x.outcome === 'applied')) {
       const d = r.decision ? decided.get(r.decision) : undefined;
       const run = r.manifest ? runs.get(r.manifest) : undefined;
+      const outcome = run ? (run.entry.about as { outcome?: string }).outcome : undefined;
+      const about = d?.about as unknown as DecideAbout | undefined;
       const problems: string[] = [];
       if (!d) problems.push("it cites a decision that isn't in the record");
-      else if (!sameKeys(r.names, (d.about as unknown as DecideAbout).outputs ?? {})) problems.push(`its names aren't decision #${d.seq}'s, with its keys`);
-      if (!run || (run.entry.about as { outcome?: string }).outcome !== 'held') problems.push("the run it released isn't held in the record");
+      else if (backs.has(r.id)) {
+        // A withdrawal: a decision not to publish, naming what the release it takes back released.
+        const taken = engineReleases.find((x) => x.id === backs.get(r.id));
+        if (about?.option !== 'dont') problems.push(`its decision, #${d.seq}, isn't a decision not to publish`);
+        if (!taken || taken.outcome !== 'applied' || !sameKeys(r.names, taken.names)) problems.push(`it doesn't take back what release ${String(backs.get(r.id))} released`);
+      } else if (outcome === 'derived') {
+        if (!about?.derived || !sameKeys(r.names, about.derived.keys)) problems.push(`its names aren't the derived run decision #${d.seq} names, with its keys`);
+      } else if (!sameKeys(r.names, about?.outputs ?? {})) problems.push(`its names aren't decision #${d.seq}'s, with its keys`);
+      if (!run || (outcome !== 'held' && outcome !== 'derived')) problems.push("the run it released isn't held in the record");
       if (problems.length) say(false, `engine release ${r.id} (run ${r.run}): ${problems.join('; ')}`);
+    }
+    // The fills the engine kept: each release of a derived run, by a derived run of the record that repairs the same
+    // held run; each withdrawal, of such a release.
+    if (engineRepairs) {
+      const repaired = new Set(engineRepairs.repairs.map((x) => x.release));
+      for (const x of engineRepairs.repairs) {
+        const d = engineRepairs.derived.find((y) => y.run === x.run);
+        const run = d ? runs.get(d.manifest) : undefined;
+        const a = run?.entry.about as Partial<DerivedAbout> | undefined;
+        if (!d || !run || a?.outcome !== 'derived' || a.from?.manifest !== x.from.manifest) say(false, `engine repair ${x.release} (run ${x.run}): its derived run isn't the record's, repairing run ${x.from.run}`);
+        else if (canonicalJSON(a.repair as unknown as JSONValue) !== canonicalJSON(x.repair as unknown as JSONValue)) say(false, `engine repair ${x.release} (run ${x.run}): its repair isn't the one the record's derived run was made by`);
+      }
+      for (const w of engineRepairs.withdrawals) if (!repaired.has(w.withdraws)) say(false, `engine withdrawal ${w.release}: release ${w.withdraws} isn't a release of a fill or a part`);
     }
     let shown = 0;
     for (const n of names) {
@@ -369,7 +546,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       if (!run) problems.push(`it shows run ${n.run}'s version, ${n.manifest ? `and the record has no run ${shortHash(n.manifest)}` : 'and the engine has no run by that number'}`);
       else if (run.manifest && run.manifest.outputs[n.name]?.key !== n.key) problems.push(`it shows the key ${shortHash(n.key)}, which its run didn't make for it`);
       if (run && heldBy(n.manifest)?.has(n.name)) {
-        const rel = engineReleases.find((r) => r.outcome === 'applied' && r.run === n.run && r.manifest === n.manifest && r.names[n.name] === n.key && !!r.decision && decided.has(r.decision));
+        const rel = engineReleases.find((r) => r.outcome === 'applied' && !backs.has(r.id) && r.run === n.run && r.manifest === n.manifest && r.names[n.name] === n.key && !!r.decision && decided.has(r.decision));
         if (!rel) problems.push(`it shows run ${n.run}'s version, which ${(run.entry.about as { outcome?: string }).outcome === 'held' ? 'the record holds as held' : 'the engine held'}, with no release citing a decision in the record`);
       }
       if (problems.length) say(false, `${n.name} (engine): ${problems.join('; ')}`);
@@ -409,7 +586,7 @@ function flowOf(flows: Map<string, BagFile>, hash: string): FlowDocument | null 
  * sources hold (each claim judged again against the manifest), and what the record says of the run: held by the same
  * holds, or, recorded as published, held by none.
  */
-function engineHoldsProblems(kept: EngineHolds, about: unknown, plan: FlowPlan, m: RunManifest, outcome: 'ok' | 'held'): string[] {
+function engineHoldsProblems(kept: EngineHolds, about: unknown, plan: FlowPlan, m: RunManifest, outcome: 'ok' | 'held' | 'derived', derived?: EngineRepairs['derived'][number]): string[] {
   const problems: string[] = [];
   const holds = Array.isArray(kept.holds) ? kept.holds : [];
   const judged = Array.isArray(kept.judged) ? kept.judged.filter(isRecord) as Judged[] : [];
@@ -421,6 +598,12 @@ function engineHoldsProblems(kept: EngineHolds, about: unknown, plan: FlowPlan, 
     if (judged.some((j) => 'claim' in j && !same(again.find((k) => k.node === j.node), j))) problems.push("the claims the engine judged it by don't match it");
     if (!same(holdsOf(plan, m, judged), holds)) problems.push("the engine's holds for it aren't what its manifest and its judged sources hold");
     if (outcome === 'held' && !same((about as Partial<HeldAbout>).holds ?? [], holds)) problems.push("the holds the record names aren't the ones the engine kept");
+    // A derived run: what holds it besides, computed again from its plan and its donors as the engine judged them.
+    if (outcome === 'derived' && derived) {
+      const fills = holdsOf(plan, m, judged, { derived: true, donors: derived.donors }).filter((h) => h.by === 'derived' || h.by === 'donor');
+      if (!same(fills, derived.holds)) problems.push("the engine's holds for it as a derived run aren't what its plan and its donors hold");
+      if (!same((about as Partial<DerivedAbout>).holds ?? [], [...holds, ...derived.holds])) problems.push("the holds the record names aren't the ones the engine kept");
+    }
   } catch (e) {
     problems.push(`what the engine kept of what held it can't be read: ${(e as Error).message}`);
   }
@@ -447,14 +630,14 @@ function heldProblems(about: unknown, plan: FlowPlan, m: RunManifest, problems: 
     problems.push("it was held, and its plan doesn't hold");
     return '';
   }
-  const holds = Array.isArray(a.holds) ? (a.holds as Hold[]) : [];
+  const holds = Array.isArray(a.holds) ? (a.holds as RunHold[]) : [];
   if (holds.length === 0) problems.push('it was held, and names nothing that held it');
   const checks = checksHolds(plan, m);
   const stated = holds.filter((h) => h.by === 'checks');
   if (JSON.stringify(checks.map((h) => [h.node, h.said])) !== JSON.stringify(stated.map((h) => [h.node, h.said]))) problems.push("the checks it says held it aren't what its manifest's counts hold");
   const claims = holds.flatMap((h) => (h.by === 'story' && h.claim ? [h.claim] : []));
   const judged = judgeClaims(plan, claims, { rows: (node) => m.nodes.find((n) => n.node === node)?.rows, pinned: (path) => claims.find((c: StoryClaim) => c.history.path === path)?.history });
-  for (const h of holds.filter((x) => x.by !== 'checks')) {
+  for (const h of holds.filter((x) => x.by === 'story' || x.by === 'unjudged')) {
     if (!watchesOf(pub).some((w) => w.node === h.node)) problems.push(`it says ${h.origin} held it, which the plan doesn't watch`);
     else if (h.by === 'story') {
       const j = judged.find((x) => x.node === h.node);
@@ -471,7 +654,13 @@ function heldProblems(about: unknown, plan: FlowPlan, m: RunManifest, problems: 
   else if (missing.length) problems.push(`it names no staged key for ${missing.join(', ')}, which it held`);
   const waiting = Array.isArray(a.waiting) ? a.waiting : [];
   if (waiting.some((w) => typeof w !== 'string' || !Object.hasOwn(keys, w))) problems.push('it says an output waits that it names no key for');
-  return `; held by ${holds.map((h) => `${h.origin} (${h.by === 'checks' ? 'its checks' : h.by === 'story' ? h.said : 'not judged'})`).join(', ')}, ${waiting.length} output${waiting.length === 1 ? '' : 's'} waiting`;
+  return `; held by ${holds.map((h) => `${h.origin} (${h.by === 'checks' ? 'its checks' : h.by === 'unjudged' ? 'not judged' : h.said})`).join(', ')}, ${waiting.length} output${waiting.length === 1 ? '' : 's'} waiting`;
+}
+
+/** Whether an entry is a decision to fill, or to publish the part that arrived. */
+function remedyOf(e: LogEntry | undefined): boolean {
+  const o = e?.kind === 'decide' && isRecord(e.about) ? e.about.option : null;
+  return o === 'fill' || o === 'complete';
 }
 
 /** A checkpoint's size and root, said. */
