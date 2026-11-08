@@ -10,6 +10,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { readDataList } from '../src/app/datalist.js';
 import { Database } from 'smaltdb/engine';
 import io from '@smaltdb/io';
 import external from '@smaltdb/external';
@@ -18,7 +19,7 @@ import smaltfl from '../src/plugin/index.js';
 import type { HistoryFile } from '../src/core/history.js';
 import { samePeriod, settingsFor } from '../src/core/measures.js';
 import { measureLoad, pinFile, translate } from '../src/index.js';
-import { EXAMPLE_SOURCES, pinnedDdl } from '../examples/sources.js';
+import { EXAMPLE_DATA, EXAMPLE_SOURCES, pinnedDdl } from '../examples/sources.js';
 import { exampleDoc } from './helpers/example.js';
 
 const DATA = new URL('../dist/app/data/', import.meta.url);
@@ -29,7 +30,7 @@ interface Listed { day: string; file: string; sha256: string; rows: number }
 describe.skipIf(!has)('a load measured is the history\'s day (ADR 0010 §6)', () => {
   it('tells every number the history keeps of each load', async () => {
     const h = read('history.json') as HistoryFile;
-    const list = read('loads.json') as { loads: Listed[]; episodes: { loads: Listed[] }[]; donors?: Listed[] };
+    const list = readDataList(read('loads.json'), EXAMPLE_DATA) as unknown as { loads: Listed[]; episodes: { loads: Listed[] }[]; donors?: Listed[] };
     const all = [...list.loads, ...list.episodes.flatMap((e) => e.loads), ...(list.donors ?? [])];
     const picked = process.env.SMALTFL_REAL === 'all' ? all : [list.loads[0]!, list.loads[14]!, list.loads.at(-1)!, ...list.episodes.map((e) => e.loads[1] ?? e.loads[0]!), (list.donors ?? [])[0], (list.donors ?? []).at(-1)].filter((l): l is Listed => !!l);
     expect(picked.length).toBeGreaterThanOrEqual(6);

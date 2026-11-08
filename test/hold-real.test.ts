@@ -6,6 +6,8 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { readDataList } from '../src/app/datalist.js';
+import { EXAMPLE_DATA } from '../examples/sources.js';
 import type { FlowDocument } from '../src/core/document.js';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { claimHolds, countedChecks, dayClaim, type StoryClaim } from '../src/core/hold.js';
@@ -75,7 +77,7 @@ describe.skipIf(!has)('the flow’s verdict on the real history (ADR 0009 §3)',
   });
 
   it('counts, for every load, the rows of the day’s file: else every day would be held as not judged', () => {
-    const loads = read('loads.json') as { loads: { day: string; rows: number }[]; episodes: { loads: { day: string; rows: number }[] }[] };
+    const loads = readDataList(read('loads.json'), EXAMPLE_DATA);
     const all = [...loads.loads, ...loads.episodes.flatMap((e) => e.loads)];
     expect(all).toHaveLength(57);
     for (const l of all) expect(file!.rows[file!.days.indexOf(l.day)], l.day).toBe(l.rows);

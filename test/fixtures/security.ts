@@ -23,8 +23,8 @@ import { random } from '../../src/core/quality.js';
 export const SECURITY_DAYS: string[] = [];
 for (let d = '2022-10-01'; d <= '2024-12-31'; d = plusDays(d, 1)) SECURITY_DAYS.push(d);
 
-type Dist = Record<string, number>;
-interface Segment { n: number; hours: number[]; dist: Record<string, Dist> }
+export type Dist = Record<string, number>;
+export interface Segment { n: number; hours: number[]; dist: Record<string, Dist> }
 const CODED = ['result', 'method', 'country', 'ua_family'] as const;
 
 const BASE: Record<string, Dist> = {
@@ -71,12 +71,23 @@ export const PLANTED = {
   hydra: '2024-11-29',
 } as const;
 
-export function securityHistory(o: SecurityOptions = {}): HistoryFile {
-  const rnd = random(o.seed ?? 7);
+/** One day's plan: its segments (each with its rows, its hours and its values' shares) and the hours a collector was down. */
+export interface SecurityDay {
+  day: string;
+  segs: Segment[];
+  outage?: number[];
+}
+
+/** Every day's plan, from the seed: the history and the rows (`securityRows`) are both drawn from it. */
+export function securityDays(o: SecurityOptions = {}): SecurityDay[] {
+  return planDays(o, random(o.seed ?? 7));
+}
+
+function planDays(o: SecurityOptions, rnd: () => number): SecurityDay[] {
   const WD = o.flat ? [1, 1, 1, 1, 1, 1, 1] : [0.8, 1.02, 1.03, 1.03, 1.02, 0.97, 0.8];
   const inc = o.incidents !== false;
   const scale = o.scale ?? 1;
-  const days: { segs: Segment[]; outage?: number[] }[] = [];
+  const days: SecurityDay[] = [];
   for (const [k, day] of SECURITY_DAYS.entries()) {
     const wd = WD[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
     const n = 200_000 * scale * wd * (1 + 0.1 * (k / 365)) * Math.exp(0.03 * gauss(rnd));
@@ -103,8 +114,14 @@ export function securityHistory(o: SecurityOptions = {}): HistoryFile {
     const segs: Segment[] = [{ n: n * (mfaGone ? 0.75 : 1), hours: norm(HUMAN), dist }];
     if (inc && day === PLANTED.burst) segs.push({ n: 150_000 * scale, hours: onlyHours([2, 3, 4]), dist: { result: { fail: 0.97, locked: 0.03 }, method: { password: 1 }, country: { RU: 1 }, ua_family: { 'python-requests': 1 } } });
     if (inc && day === PLANTED.hydra) segs.push({ n: 40_000 * scale, hours: onlyHours([20, 21, 22]), dist: { result: { fail: 0.99, locked: 0.01 }, method: { password: 1 }, country: { BR: 1 }, ua_family: { hydra: 1 } } });
-    days.push({ segs, outage: inc && day === PLANTED.outage ? [6, 7, 8, 9, 10, 11] : undefined });
+    days.push({ day, segs, outage: inc && day === PLANTED.outage ? [6, 7, 8, 9, 10, 11] : undefined });
   }
+  return days;
+}
+
+export function securityHistory(o: SecurityOptions = {}): HistoryFile {
+  const rnd = random(o.seed ?? 7);
+  const days = planDays(o, rnd);
   const rows: number[] = [];
   const hours: number[][] = [];
   const dropped: number[] = [];
@@ -218,6 +235,50 @@ function followed(days: readonly (readonly [string, number][])[], daily: boolean
     });
   }
   return out;
+}
+
+/** The columns of a day's sign-in file, as its CSV header has them. */
+export const SIGNIN_COLUMNS = ['event_time', 'result', 'method', 'country', 'ua_family', 'latency_ms', 'user'] as const;
+
+/**
+ * One day's sign-ins as rows (ADR 0010 phase 2: the files the security example's history and loads are made of), drawn
+ * from the day's plan: each hour's rows a Poisson count of the plan's, each row's values by their shares, a time in its
+ * hour, a latency around 180 ms, a user of a few thousand. A few rows fail the checks as the history's counts do: an
+ * unknown result (0.2%), a time on another day (0.1%), no user (0.4%). Seeded by the day, so a day's file is always the
+ * same.
+ */
+export function securityRows(plan: SecurityDay, scale = 1, seed = 7): (string | number | null)[][] {
+  let h = seed;
+  for (const ch of plan.day) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  const rnd = random(h);
+  const pick = (d: Dist) => {
+    let x = rnd() * Object.values(d).reduce((a, b) => a + b, 0);
+    for (const [v, p] of Object.entries(d)) if ((x -= p) <= 0) return v;
+    return Object.keys(d).at(-1)!;
+  };
+  const two = (n: number) => String(n).padStart(2, '0');
+  const out: (string | number | null)[][] = [];
+  for (let hour = 0; hour < 24; hour++) {
+    for (const seg of plan.segs) {
+      const n = poisson(seg.n * scale * seg.hours[hour]! * (plan.outage?.includes(hour) ? 0.02 : 1), rnd);
+      for (let i = 0; i < n; i++) {
+        const r = rnd();
+        const day = r < 0.001 ? plusDays(plan.day, 1) : plan.day;
+        const time = `${day} ${two(hour)}:${two(Math.floor(rnd() * 60))}:${two(Math.floor(rnd() * 60))}`;
+        const result = r > 0.998 ? 'unknown' : pick(seg.dist.result!);
+        const latency = Math.round(180 * Math.exp(0.5 * gauss(rnd)));
+        const user = rnd() < 0.004 ? null : `u${Math.floor(rnd() * 4000)}`;
+        out.push([time, result, pick(seg.dist.method!), pick(seg.dist.country!), pick(seg.dist.ua_family!), latency, user]);
+      }
+    }
+  }
+  return out.sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0));
+}
+
+/** Rows as a CSV file with a header: what the example's loads are. */
+export function csvOf(rows: readonly (readonly (string | number | null)[])[]): string {
+  const cell = (v: string | number | null) => (v === null ? '' : typeof v === 'number' ? String(v) : /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  return `${SIGNIN_COLUMNS.join(',')}\n${rows.map((r) => r.map(cell).join(',')).join('\n')}\n`;
 }
 
 const SECURITY_RULES = [

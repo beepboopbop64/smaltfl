@@ -14,6 +14,7 @@ isn't published.
 """
 import hashlib
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -59,6 +60,10 @@ POINTS = {
     'Staten Island': (40.5795, -74.1502),
     'EWR': (40.6895, -74.1745),
 }
+# The history's columns (scripts/data/history.ts, ADR 0010 §6): the coded columns, counted a day value by value and in
+# pairs (all but `extra`, whose amounts are many), and the zones, followed only for the values new to them.
+CODED = ['VendorID', 'passenger_count', 'RatecodeID', 'store_and_fwd_flag', 'payment_type', 'extra', 'mta_tax', 'improvement_surcharge', 'congestion_surcharge', 'Airport_fee']
+ZONES = ['PULocationID', 'DOLocationID']
 HOURLY = ['temperature_2m', 'precipitation', 'rain', 'snowfall', 'snow_depth', 'wind_speed_10m', 'weather_code']
 SEED = 2024
 
@@ -203,7 +208,14 @@ def main() -> None:
                 shutil.copyfile(days_dir / f'yellow_tripdata_{day}.parquet', OUT / 'loads' / f'yellow_tripdata_{day}.parquet')
         if path.is_relative_to(WORK):
             path.unlink()
-    subprocess.run(['node', 'scripts/data/history.mjs', str(days_dir), str(OUT / 'history.json')], check=True)
+    # The general builder (ADR 0010 §6), on the example's watched trips: each day measured by the plugin's own `measure`,
+    # the taxi's columns named here (the coded ones counted and paired, all but extra; the zones followed for new
+    # values; the trips by pickup hour), the checks' month from each day's slot.
+    day_files = [{'file': str(days_dir / f), 'slot': f[len('yellow_tripdata_'):-len('.parquet')]} for f in sorted(os.listdir(days_dir)) if f.startswith('yellow_tripdata_') and f.endswith('.parquet')]
+    (WORK / 'days.json').write_text(json.dumps(day_files))
+    subprocess.run(['node', 'scripts/data/history.mjs', '--flow', 'examples/nyc-taxis-weather.smaltfl.json', '--watch', 'trips', '--files', str(WORK / 'days.json'),
+                    '--count', ','.join(CODED), '--follow', ','.join(ZONES), '--pair', ','.join(c for c in CODED if c != 'extra'), '--time', 'tpep_pickup_datetime', '--param', 'month={slot:7}',
+                    str(OUT / 'history.json')], check=True)
     history = json.loads((OUT / 'history.json').read_text())
     # Each month's file's own columns, and each day's weather in the city: hours on record per district, Manhattan's
     # rain, snow and temperatures.
@@ -214,7 +226,8 @@ def main() -> None:
     def num(x: str) -> float | None:
         return float(x) if x != '' else None
 
-    weather = {'boroughs': boroughs, 'hours': [], 'precip': [], 'snow': [], 'tmin': [], 'tmax': []}
+    # The place the weather's news names (ADR 0010 §8): the district whose rain, snow and temperatures these are.
+    weather = {'place': 'Manhattan', 'boroughs': boroughs, 'hours': [], 'precip': [], 'snow': [], 'tmin': [], 'tmax': []}
     by_day = {b: {} for b in boroughs}
     for b in boroughs:
         for t, v in hours[b].items():
@@ -258,13 +271,16 @@ def main() -> None:
         },
         'samples': {'seed': SEED, 'method': 'random.Random(seed).sample over row positions, kept in file order'},
         'loads': {
+            # Every load is of the watched source `trips`, one a day: each day is its slot (ADR 0010 §7).
+            'source': 'trips',
+            'every': 'day',
             'days': load_days,
             'episodes': [{'name': name, 'about': about, 'days': episode_days[name]} for name, _, _, about in EPISODES],
             'donors': sorted(DONORS),
             'weather': 'weather/open-meteo_loads.csv',
             'method': "every trip picked up on the day (tpep_pickup_datetime, local time), in file order; an episode's days in the month's columns",
         },
-        'history': {'from': history['days'][0], 'to': history['days'][-1], 'days': len(history['days']), 'method': "each day's trips as a daily load, measured by scripts/data/history.ts: the example's trip checks run on the runtime; the trips profiled as the app's profile box does (exact counts, a median and quantiles from an even sample of 2,000 rows); every row of the coded columns counted, value by value and in pairs, and of the zones; the trips by pickup hour; each day's weather and each month's file's own columns from this script"},
+        'history': {'from': history['days'][0], 'to': history['days'][-1], 'days': len(history['days']), 'format': 'smaltfl-history/3', 'method': "each day's trips as a daily load, measured by scripts/data/history.ts with the plugin's measure (the method a run measures its own load with): the example's trip checks counted; the trips profiled as the app's profile box does (exact counts, a median and quantiles from an even sample of 2,000 rows); every row of the coded columns counted, value by value and in pairs, and of the zones; the trips by pickup hour; each day's weather and each month's file's own columns from this script"},
         'schema': {f.name: str(f.type) for f in table.schema},
         'files': files,
     }

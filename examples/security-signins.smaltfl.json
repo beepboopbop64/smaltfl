@@ -1,0 +1,233 @@
+{
+  "smaltfl": 3,
+  "id": "signins",
+  "name": "Sign-ins",
+  "description": "Sign-ins at work, a day at a time: each day's authentication events checked, counted by hour and result, and the failures by country, judged against the days before. A synthetic log, generated from a fixed seed (scripts/data/security.ts), with incidents planted: the credential-stuffing burst on Tuesday March 12, 2024 is something wrong, and the day pauses.",
+  "parameters": [
+    {
+      "name": "day",
+      "type": "text",
+      "default": null
+    }
+  ],
+  "sources": [
+    {
+      "id": "auth",
+      "table": "auth_file",
+      "description": "The day's authentication events, one file a day"
+    }
+  ],
+  "steps": [
+    {
+      "id": "auth_valid",
+      "kind": "expectations",
+      "inputs": [
+        "auth"
+      ],
+      "rules": [
+        {
+          "name": "known_result",
+          "check": "result IN ('success', 'fail', 'locked')",
+          "onFail": "drop"
+        },
+        {
+          "name": "in_day",
+          "check": "substr(event_time, 1, 10) = :day",
+          "onFail": "drop"
+        },
+        {
+          "name": "has_user",
+          "check": "user IS NOT NULL",
+          "onFail": "warn"
+        }
+      ],
+      "maxDropped": 0.05,
+      "dataset": {
+        "description": "Checked sign-ins"
+      },
+      "description": "Sign-ins with a known result, on the day"
+    },
+    {
+      "id": "signins_by_hour",
+      "kind": "aggregate",
+      "inputs": [
+        "auth_valid"
+      ],
+      "description": "Sign-ins by hour and result",
+      "groupBy": [
+        {
+          "name": "hour",
+          "expr": "CAST(substr(event_time, 12, 2) AS INTEGER)"
+        },
+        "result"
+      ],
+      "measures": [
+        {
+          "name": "signins",
+          "expr": "count(*)"
+        },
+        {
+          "name": "users",
+          "expr": "count(DISTINCT user)"
+        }
+      ],
+      "dataset": {
+        "description": "Sign-ins by hour"
+      }
+    },
+    {
+      "id": "failures_by_country",
+      "kind": "aggregate",
+      "inputs": [
+        "auth_valid"
+      ],
+      "description": "Failed and locked-out sign-ins by country and client",
+      "groupBy": [
+        "country",
+        "ua_family"
+      ],
+      "measures": [
+        {
+          "name": "failures",
+          "expr": "sum(CASE WHEN result IN ('fail', 'locked') THEN 1 ELSE 0 END)"
+        },
+        {
+          "name": "signins",
+          "expr": "count(*)"
+        }
+      ],
+      "dataset": {
+        "description": "Failures by country"
+      }
+    }
+  ],
+  "calendar": {
+    "base": "us"
+  },
+  "ontology": {
+    "objectTypes": [],
+    "linkTypes": [],
+    "actionTypes": [],
+    "nouns": {
+      "auth": {
+        "one": "sign-in",
+        "many": "sign-ins"
+      }
+    },
+    "properties": [
+      {
+        "column": "event_time",
+        "title": "When",
+        "description": "When the sign-in happened (UTC)"
+      },
+      {
+        "column": "result",
+        "title": "Result",
+        "description": "How the sign-in ended",
+        "values": {
+          "success": "Signed in",
+          "fail": "Failed",
+          "locked": "Locked out"
+        },
+        "bad": [
+          "fail",
+          "locked"
+        ]
+      },
+      {
+        "column": "method",
+        "title": "Method",
+        "description": "How the user proved who they are",
+        "values": {
+          "password": "Password",
+          "sso": "Single sign-on",
+          "mfa_push": "MFA push",
+          "passkey": "Passkey",
+          "api_key": "API key"
+        }
+      },
+      {
+        "column": "country",
+        "title": "Country",
+        "description": "Where the sign-in came from",
+        "newValues": "alert"
+      },
+      {
+        "column": "ua_family",
+        "title": "Client",
+        "description": "The software that signed in"
+      },
+      {
+        "column": "latency_ms",
+        "title": "Latency",
+        "description": "How long the sign-in took",
+        "unit": "ms"
+      },
+      {
+        "column": "user",
+        "title": "User",
+        "description": "Who signed in"
+      },
+      {
+        "column": "signins",
+        "title": "Sign-ins",
+        "description": "Sign-ins counted"
+      },
+      {
+        "column": "failures",
+        "title": "Failures",
+        "description": "Failed and locked-out sign-ins"
+      },
+      {
+        "column": "users",
+        "title": "Users",
+        "description": "Different users"
+      },
+      {
+        "column": "hour",
+        "title": "Hour",
+        "description": "The hour of the day (UTC)"
+      }
+    ]
+  },
+  "policies": {
+    "principals": [
+      {
+        "id": "owner",
+        "name": "Owner",
+        "role": "Owns the flow",
+        "owner": true
+      },
+      {
+        "id": "sam",
+        "name": "Sam",
+        "role": "Security analyst"
+      }
+    ],
+    "groups": [],
+    "rules": [
+      {
+        "id": "analysts",
+        "kind": "action",
+        "name": "Sam may decide",
+        "action": "smaltfl:decide",
+        "for": [
+          "sam"
+        ]
+      }
+    ]
+  },
+  "publish": {
+    "hold": [
+      "checks",
+      "wrong"
+    ],
+    "period": "day",
+    "watch": {
+      "auth": {
+        "history": "history.json",
+        "time": "event_time"
+      }
+    }
+  }
+}

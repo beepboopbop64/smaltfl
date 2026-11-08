@@ -1,294 +1,190 @@
 /**
- * The scenario's history: each day's numbers, measured the way the app measures a load, so a day can be judged
- * against its normal range (src/core/normal.ts) and its news told (src/core/news.ts). For every daily file, it runs
- * the example flow's trip checks on the runtime (the trips source and `trips_valid`, as published) and profiles the
- * trips as the app's profile box does: exact counts from the engine, a median and quantiles from an even sample of
- * 2,000 rows. It also counts every row of the coded columns (a vendor, a payment type, a rate code, the surcharges),
- * alone and in pairs, and the pickup and drop-off zones, so it can say when a value or a combination of values was
- * first and last seen and which day brought one never seen before; and the trips by pickup hour, so a day that stops
- * part way through shows. It records the numbers, not the rows.
+ * A watched source's history (ADR 0010 §6): each load's numbers, measured by the plugin's `measure` on the runtime, the
+ * method a run measures its own load with, so a period built offline and the same load measured by its own run are
+ * equal; then folded into a smaltfl-history/3 file (core/measures.ts appendPeriods), as a run's tail is folded onto it.
+ * Everything comes from the flow document and its data list: the watched source and its binding (the file format, the
+ * table), the checks that read it alone (through its fill step), the columns counted value by value, followed for new
+ * values and paired, the time column and zone, and the files, each with its slot.
  *
- *   node scripts/data/history.mjs DAYS_DIR OUT.json
+ *   node scripts/data/history.mjs --flow DOC --watch SOURCE --files LIST.json [--bind DATA.json]
+ *        [--count a,b] [--follow c,d] [--pair a,b] [--time COLUMN] [--zone ZONE] [--param name={slot}|{slot:7}|value] OUT.json
+ *   node scripts/data/history.mjs DAYS_DIR OUT.json      the taxi example, as before: its trips, its legacy columns
  *
- * DAYS_DIR holds `yellow_tripdata_YYYY-MM-DD.parquet`, one file a day, in the example's columns (scripts/data/build.py
- * writes them). The days are measured in parallel, one worker thread a core, each with an engine per day.
+ * LIST.json is `[{ "file": path, "slot": "2024-01-31" }, …]`. DATA.json is the flow's bindings (default
+ * examples/<doc>.data.json). The columns: `--count` (else the watch's `count`, else the ontology's columns that list
+ * values or bad codes), `--follow` (else the watch's `follow`, else its serious columns), `--pair` (else the counted
+ * columns whose values number 20 or fewer, so any two multiply to 400 or fewer). `--param` sets the document's other
+ * parameters for each load, from its slot (the taxi's checks read `:month`). The loads are measured in parallel, one
+ * worker thread a core, each with an engine per load.
  */
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { Database } from 'smaltdb/engine';
 import io from '@smaltdb/io';
 import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../../src/plugin/index.js';
-import { runFlow, sourceOf, type ExpectationsStep, type FlowDocument, type FlowPlan } from '../../src/index.js';
-import { emitColumnFacts, emitRead, emitSample, type EmitContext } from '../../src/core/emit.js';
-import { shapeOf } from '../../src/core/optimize.js';
-import { minuteOfDay, numbersOf, profileColumn, quantile, type Kind } from '../../src/core/quality.js';
-import { type DayError, type HistoryFile, type ValueHistory } from '../../src/core/history.js';
-import { EXAMPLE_SOURCES } from '../../examples/sources.js';
-import example from '../../examples/nyc-taxis-weather.smaltfl.json';
+import { measureLoad, pinFile, translate, type FlowDocument, type WatchDef } from '../../src/index.js';
+import { type DayError, type HistoryFile } from '../../src/core/history.js';
+import { appendPeriods, checksOf, emptyHistory, SAMPLE, type MeasureSettings, type Measures } from '../../src/core/measures.js';
+import { pinnedDdl, type Binding, type DataBindings } from '../../examples/sources.js';
+import type { Kind } from '../../src/core/quality.js';
 
-declare const __SMALTDB_VERSION__: string;
-
-/** The app's sample for a column's shape (src/app/main.ts, SAMPLE). */
-const SAMPLE = 2000;
-const STEP = 'trips_valid';
-const NUMERIC = new Set(['int', 'real', 'num']);
-/** Quantiles kept a day, of a measure or a time (a time's in minutes of the day): as a profile has them. */
-const PS = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
-/** Coded columns with a handful of values: counted a day, value by value, and in pairs (all but `extra`, whose amounts are many). */
-const CODED = ['VendorID', 'passenger_count', 'RatecodeID', 'store_and_fwd_flag', 'payment_type', 'extra', 'mta_tax', 'improvement_surcharge', 'congestion_surcharge', 'Airport_fee'];
-const PAIRED = CODED.filter((c) => c !== 'extra');
-/** Columns of many values, followed only for the values new to them. */
-const ZONES = ['PULocationID', 'DOLocationID'];
 /** Days at the start of the history before anything counts as never seen: at first, everything is. */
 const WARMUP = 28;
+/** A history past this size is too big for a page to fetch and fold (ADR 0010, risks). */
+const LIMIT = 8 * 1024 * 1024;
+/** The taxi example's legacy columns (scripts/data/build.py): the coded columns counted, value by value and in pairs
+ * (all but `extra`, whose amounts are many), the zones followed for new values, the trips by pickup hour. */
+const TAXI = {
+  count: ['VendorID', 'passenger_count', 'RatecodeID', 'store_and_fwd_flag', 'payment_type', 'extra', 'mta_tax', 'improvement_surcharge', 'congestion_surcharge', 'Airport_fee'],
+  follow: ['PULocationID', 'DOLocationID'],
+  pair: ['VendorID', 'passenger_count', 'RatecodeID', 'store_and_fwd_flag', 'payment_type', 'mta_tax', 'improvement_surcharge', 'congestion_surcharge', 'Airport_fee'],
+  time: 'tpep_pickup_datetime',
+};
 
-/** One day's numbers. */
-export interface DayNumbers {
-  day: string;
-  rows: number;
-  /** Rows the checks' drop rules leave out. */
-  dropped: number;
-  /** Each rule's failures, in the step's order. */
-  failed: number[];
-  /** Each column's rows with a value. */
-  present: number[];
-  /** Each column's median in the sample: a number's, or a time's minute of the day; null for anything else. */
-  p50: (number | null)[];
-  kinds: Kind[];
-  /** The columns and their types, the same every day. */
-  schema: [string, string][];
-  /** Each column's quantiles (PS) in the sample, a measure's or a time's, else null. */
-  quantiles: (number[] | null)[];
-  /** Trips by pickup hour. */
-  hours: number[];
-  /** Rows with each value of a coded or zone column, and each pair of coded columns' values: [value as JSON, rows]. */
-  singles: Record<string, [string, number][]>;
-  pairs: Record<string, [string, number][]>;
+interface Job {
+  doc: FlowDocument;
+  source: string;
+  binding: Binding;
+  /** Each load's settings but its slot, and the parameters' templates. */
+  settings: Omit<MeasureSettings, 'slot' | 'checks' | 'counting'>;
+  params: Record<string, string>;
+  files: { file: string; slot: string }[];
 }
 
-const doc = example as unknown as FlowDocument;
-const step: ExpectationsStep = (() => {
-  const found = doc.steps.find((s): s is ExpectationsStep => s.id === STEP && s.kind === 'expectations');
-  if (!found) throw new Error(`the example has no ${STEP} checks`);
-  return found;
-})();
-// The source the checks count: the one they read, or the one their fill step reads (ADR 0009 amendment 1 S1). A fill
-// step fills nothing here, so the history counts what arrived either way, and its file doesn't change.
-const source = step.inputs.length === 1 ? sourceOf(doc, step.inputs[0]!) : undefined;
-if (!source || !doc.sources.some((s) => s.id === source)) throw new Error(`${STEP} doesn't read a source alone`);
-// The checks alone, over the trips. The history counts every day's failures, so a day over the step's limit on
-// dropped rows still runs to the end: the limit stops a run, it doesn't change what the checks count.
-// Format 1: the checks alone hold nothing, so they carry no publish block (ADR 0009 §2: format 2 is only for one).
-const checks: FlowDocument = {
-  smaltfl: 1,
-  id: `${doc.id}-history`,
-  name: `${doc.name}: the trip checks`,
-  parameters: doc.parameters,
-  sources: doc.sources.filter((s) => s.id === source),
-  steps: [{ ...step, inputs: [source], maxDropped: 1 }],
-};
-const trips = EXAMPLE_SOURCES.find((s) => s.file === 'trips.parquet')!;
+/** A parameter's value for a load: `{slot}`, `{slot:N}` (its first N characters), or as written. */
+const valueFor = (template: string, slot: string) => template.replace(/\{slot(?::(\d+))?\}/g, (_, n?: string) => (n ? slot.slice(0, Number(n)) : slot));
 
-async function measure(file: string): Promise<DayNumbers> {
-  const day = /(\d{4}-\d{2}-\d{2})\.parquet$/.exec(file)![1]!;
+/** One load measured: pinned under its binding's name, read through the binding's table, measured by the plugin. */
+async function measure(job: Job, load: { file: string; slot: string }): Promise<Measures> {
   const db = Database.openMemory({ plugins: [io, external, parquet, smaltfl] });
   try {
-    await db.callPlugin('@smaltdb/external', 'registerFile', ['trips.parquet', new Uint8Array(readFileSync(file))]);
-    await db.execAsync(trips.ddl);
-    const run = await runFlow(db, checks, { smaltdb: __SMALTDB_VERSION__, parameters: { month: day.slice(0, 7) } });
-    const e = run.manifest.nodes.find((n) => n.origin === STEP)?.expectations;
-    if (!e) throw new Error(`${day}: no counts from ${STEP}`);
-    // The trips as the run stored them: the plan it typed, and its tables.
-    const plan = JSON.parse(String(db.query('SELECT plan FROM _smaltfl_plans WHERE hash = ?', [run.manifest.plan]).rows[0]![0])) as FlowPlan;
-    const tables = new Map<number, string>();
-    for (const m of run.manifest.nodes) {
-      const t = db.query('SELECT tbl FROM _smaltfl_versions WHERE key = ?', [m.key]).rows[0];
-      if (t) tables.set(m.node, String(t[0]));
-    }
-    const { stored } = shapeOf(plan);
-    const ctx: EmitContext = { table: (i) => (stored.has(i) ? tables.get(i) : undefined), columns: (i) => plan.nodes[i]!.schema!.map(([c]) => c) };
-    const i = plan.nodes.findIndex((n) => n.origin === source);
-    const read = emitRead(plan, i, ctx);
-    const schema = plan.nodes[i]!.schema!;
-    const f = (await db.queryAsync(emitColumnFacts(read, schema.map(([name, type]) => ({ name, numeric: NUMERIC.has(type) }))))).rows[0]!;
-    const rows = Number(f[0]);
-    const sample = rows ? (await db.queryAsync(emitSample(read, schema.map(([c]) => c), Math.ceil(rows / SAMPLE)))).rows : [];
-    const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
-    const kinds: Kind[] = [];
-    const p50: (number | null)[] = [];
-    const present: number[] = [];
-    const quantiles: (number[] | null)[] = [];
-    schema.forEach(([name, type], k) => {
-      const values = sample.map((r) => r[k]);
-      const p = profileColumn(name, type, { rows, present: Number(f[1 + 5 * k]), distinct: Number(f[2 + 5 * k]), min: f[3 + 5 * k], max: f[4 + 5 * k], mean: num(f[5 + 5 * k]) }, values);
-      kinds.push(p.kind);
-      present.push(p.facts.present);
-      const xs = p.kind === 'time' ? values.map(minuteOfDay).filter((x): x is number => x !== null) : NUMERIC.has(type) ? numbersOf('measure', values) : [];
-      xs.sort((a, b) => a - b);
-      p50.push(xs.length ? quantile(xs, 0.5) : null);
-      quantiles.push(xs.length && (p.kind === 'measure' || p.kind === 'time') ? PS.map((q) => Number(quantile(xs, q).toPrecision(6))) : null);
-    });
-    if (rows !== e.rows) throw new Error(`${day}: ${rows} rows profiled, ${e.rows} checked`);
-    // Every row of the coded and zone columns and the pickup time: values alone and in pairs, and trips by hour.
-    const have = new Set(schema.map(([c]) => c));
-    const wanted = [...CODED, ...ZONES, 'tpep_pickup_datetime'].filter((c) => have.has(c));
-    const all = rows ? (await db.queryAsync(emitSample(read, wanted, 1))).rows : [];
-    const at = (c: string) => wanted.indexOf(c);
-    const singles: Record<string, Map<string, number>> = {};
-    const pairs: Record<string, Map<string, number>> = {};
-    const coded = CODED.filter((c) => have.has(c));
-    const paired = PAIRED.filter((c) => have.has(c));
-    for (const c of [...coded, ...ZONES.filter((z) => have.has(z))]) singles[c] = new Map();
-    for (let a = 0; a < paired.length; a++) for (let b = a + 1; b < paired.length; b++) pairs[`${paired[a]}|${paired[b]}`] = new Map();
-    const hours = new Array<number>(24).fill(0);
-    const pick = at('tpep_pickup_datetime');
-    const bump = (m: Map<string, number>, key: string) => m.set(key, (m.get(key) ?? 0) + 1);
-    for (const r of all) {
-      const keys = new Map<string, string>();
-      for (const c of Object.keys(singles)) {
-        const key = JSON.stringify(r[at(c)] ?? null);
-        keys.set(c, key);
-        bump(singles[c]!, key);
-      }
-      for (const name of Object.keys(pairs)) {
-        const [a, b] = name.split('|') as [string, string];
-        bump(pairs[name]!, `[${keys.get(a)},${keys.get(b)}]`);
-      }
-      const t = pick >= 0 ? r[pick] : null;
-      if (typeof t === 'string' && t.length >= 13) hours[Number(t.slice(11, 13))]!++;
-    }
-    const entries = (o: Record<string, Map<string, number>>) => Object.fromEntries(Object.entries(o).map(([k, m]) => [k, [...m.entries()]]));
-    return { day, rows, dropped: e.dropped, failed: e.rules.map((r) => r.failed), present, p50, kinds, schema: schema.map(([c, t]) => [c, t]), quantiles, hours, singles: entries(singles), pairs: entries(pairs) };
+    await pinFile(db, job.binding.file, new Uint8Array(readFileSync(load.file)));
+    await db.execAsync(pinnedDdl(job.binding));
+    const watch = job.doc.publish?.watch?.[job.source];
+    const period = (typeof watch === 'object' ? (watch as WatchDef).period : undefined) ?? job.doc.publish?.period;
+    const values: Record<string, string> = Object.fromEntries(Object.entries(job.params).map(([k, t]) => [k, valueFor(t, load.slot)]));
+    if (period) values[period] = load.slot;
+    const plan = await translate(job.doc, values);
+    const node = plan.nodes.findIndex((n) => n.op === 'table' && n.origin === job.source);
+    const c = checksOf(plan, node, job.doc.steps);
+    return await measureLoad(db, job.binding.table, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null });
   } finally {
     db.close();
   }
 }
 
 async function worker(): Promise<void> {
-  const files = workerData as string[];
-  for (const file of files) {
+  const { job, mine } = workerData as { job: Job; mine: { file: string; slot: string }[] };
+  for (const load of mine) {
     try {
-      parentPort!.postMessage(await measure(file));
+      parentPort!.postMessage(await measure(job, load));
     } catch (e) {
-      parentPort!.postMessage({ day: /(\d{4}-\d{2}-\d{2})\.parquet$/.exec(file)![1]!, error: e instanceof Error ? e.message : String(e) } satisfies DayError);
+      parentPort!.postMessage({ day: load.slot, error: e instanceof Error ? e.message : String(e) } satisfies DayError);
     }
   }
 }
 
+const list = (v: string | undefined) => (v === undefined ? undefined : v.split(',').map((x) => x.trim()).filter(Boolean));
+
+/** What to build, from the arguments. */
+function jobOf(args: string[]): { job: Job; out: string } {
+  const flags = new Map<string, string[]>();
+  const rest: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a.startsWith('--')) {
+      flags.set(a.slice(2), [...(flags.get(a.slice(2)) ?? []), args[i + 1] ?? '']);
+      i++;
+    } else rest.push(a);
+  }
+  const one = (k: string) => flags.get(k)?.at(-1);
+  if (!flags.has('flow')) {
+    // The taxi example, as build.py has always called it: a directory of daily files.
+    const [dir, out] = rest;
+    if (!dir || !out) throw new Error('usage: node scripts/data/history.mjs --flow DOC --watch SOURCE --files LIST.json OUT.json, or DAYS_DIR OUT.json');
+    const files = readdirSync(dir).filter((x) => /^yellow_tripdata_\d{4}-\d{2}-\d{2}\.parquet$/.test(x)).sort().map((x) => ({ file: join(dir, x), slot: /(\d{4}-\d{2}-\d{2})/.exec(x)![1]! }));
+    return jobOf(['--flow', 'examples/nyc-taxis-weather.smaltfl.json', '--watch', 'trips', '--files', JSON.stringify(files), '--count', TAXI.count.join(','), '--follow', TAXI.follow.join(','), '--pair', TAXI.pair.join(','), '--time', TAXI.time, '--param', 'month={slot:7}', out]);
+  }
+  const flowPath = one('flow')!;
+  const doc = JSON.parse(readFileSync(flowPath, 'utf8')) as FlowDocument;
+  const source = one('watch') ?? Object.keys(doc.publish?.watch ?? {})[0];
+  if (!source || !doc.sources.some((s) => s.id === source)) throw new Error(`${flowPath} has no source ${source ?? '(none named)'} to watch`);
+  const bindPath = one('bind') ?? flowPath.replace(/\.smaltfl\.json$/, '.data.json');
+  if (!existsSync(bindPath)) throw new Error(`no data list ${bindPath} for ${basename(flowPath)}: pass --bind`);
+  const data = JSON.parse(readFileSync(bindPath, 'utf8')) as DataBindings;
+  const binding = data.sources[source];
+  if (!binding) throw new Error(`${bindPath} binds no ${source}`);
+  const filesArg = one('files');
+  if (!filesArg) throw new Error('--files LIST.json: the loads, each { file, slot }');
+  const files = (filesArg.trim().startsWith('[') ? JSON.parse(filesArg) : JSON.parse(readFileSync(filesArg, 'utf8'))) as { file: string; slot: string }[];
+  const watch = doc.publish?.watch?.[source];
+  const w = typeof watch === 'object' ? watch : null;
+  const props = doc.ontology?.properties ?? [];
+  const count = list(one('count')) ?? w?.count ?? props.filter((p) => (p.values !== undefined && Object.keys(p.values).length > 0) || (p.bad?.length ?? 0) > 0).map((p) => p.column);
+  const follow = (list(one('follow')) ?? w?.follow ?? props.filter((p) => p.newValues === 'alert').map((p) => p.column)).filter((c) => !count.includes(c));
+  const pair = list(one('pair')) ?? count.filter((c) => {
+    const p = props.find((x) => x.column === c);
+    return p?.values !== undefined && Object.keys(p.values).length <= 20;
+  });
+  const params = Object.fromEntries((flags.get('param') ?? []).map((p) => {
+    const at = p.indexOf('=');
+    return [p.slice(0, at), p.slice(at + 1)];
+  }));
+  const out = rest[0];
+  if (!out) throw new Error('name the history file to write');
+  return { job: { doc, source, binding, settings: { source, every: 'day', counted: [...new Set(count)], followed: [...new Set(follow)], paired: [...new Set(pair)], time: one('time') ?? w?.time ?? null, zone: one('zone') ?? w?.zone ?? null, sample: SAMPLE }, params, files }, out };
+}
+
 async function main(): Promise<void> {
-  const [dir, out] = process.argv.slice(2);
-  if (!dir || !out) throw new Error('usage: node scripts/data/history.mjs DAYS_DIR OUT.json');
-  const files = readdirSync(dir).filter((x) => /^yellow_tripdata_\d{4}-\d{2}-\d{2}\.parquet$/.test(x)).sort().map((x) => join(dir, x));
-  if (!files.length) throw new Error(`no daily files in ${dir}`);
+  const { job, out } = jobOf(process.argv.slice(2));
+  const files = [...job.files].sort((a, b) => (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0));
+  if (!files.length) throw new Error('no loads to measure');
   const n = Math.max(1, Math.min(availableParallelism(), files.length));
   const started = Date.now();
-  const results: DayNumbers[] = [];
+  const results: Measures[] = [];
   const failures: DayError[] = [];
   await Promise.all(Array.from({ length: n }, (_, w) => new Promise<void>((resolve, reject) => {
-    // Every n-th day to each worker, so each has days from the whole span.
+    // Every n-th load to each worker, so each has loads from the whole span.
     const mine = files.filter((_, k) => k % n === w);
-    const t = new Worker(new URL(import.meta.url), { workerData: mine });
-    t.on('message', (d: DayNumbers | DayError) => {
+    const t = new Worker(new URL(import.meta.url), { workerData: { job, mine } });
+    t.on('message', (d: Measures | DayError) => {
       if ('error' in d) {
         failures.push(d);
         console.log(`${d.day}: not measured: ${d.error}`);
       } else results.push(d);
       const done = results.length + failures.length;
-      if (done % 25 === 0 || done === files.length) console.log(`${done} of ${files.length} days (${((Date.now() - started) / 1000).toFixed(0)} s)`);
+      if (done % 25 === 0 || done === files.length) console.log(`${done} of ${files.length} loads (${((Date.now() - started) / 1000).toFixed(0)} s)`);
     });
     t.on('error', reject);
     t.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`worker ${w} exited with ${code}`))));
   })));
-  results.sort((a, b) => (a.day < b.day ? -1 : 1));
+  results.sort((a, b) => (a.slot < b.slot ? -1 : 1));
   failures.sort((a, b) => (a.day < b.day ? -1 : 1));
-  // A few days that couldn't be measured are gaps a normal range steps over; more than a few is a broken history.
-  if (!results.length || failures.length > files.length / 50) throw new Error(`${failures.length} of ${files.length} days not measured`);
-  const columns = results[0]!.schema;
-  const odd = results.find((r) => JSON.stringify(r.schema) !== JSON.stringify(columns));
-  if (odd) throw new Error(`${odd.day}'s columns differ from ${results[0]!.day}'s: ${JSON.stringify(odd.schema)}`);
-  // The kind a column has on most days.
-  const kinds = columns.map((_, k) => {
+  // A few loads that couldn't be measured are gaps a normal range steps over; more than a few is a broken history.
+  if (!results.length || failures.length > files.length / 50) throw new Error(`${failures.length} of ${files.length} loads not measured`);
+  const first = results[0]!;
+  const odd = results.find((r) => JSON.stringify([r.columns, r.types]) !== JSON.stringify([first.columns, first.types]));
+  if (odd) throw new Error(`${odd.slot}'s columns differ from ${first.slot}'s`);
+  // The kind a column has on most loads.
+  const kinds = first.columns.map((_, k) => {
     const count = new Map<Kind, number>();
     for (const r of results) count.set(r.kinds[k]!, (count.get(r.kinds[k]!) ?? 0) + 1);
     return [...count.entries()].sort((a, b) => b[1] - a[1])[0]![0];
   });
-  const values: Record<string, ValueHistory> = {};
-  for (const c of Object.keys(results[0]!.singles)) values[c] = followed(results.map((r) => r.singles[c] ?? []), !ZONES.includes(c));
-  const pairs: Record<string, ValueHistory> = {};
-  for (const c of Object.keys(results[0]!.pairs)) pairs[c] = followed(results.map((r) => r.pairs[c] ?? []), false);
-  const history: HistoryFile = {
-    format: 'smaltfl-history/2',
-    built: new Date().toISOString().slice(0, 19) + 'Z',
-    flow: doc.id,
-    step: STEP,
-    rules: step.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })),
-    columns: columns.map(([c]) => c),
-    types: columns.map(([, t]) => t),
-    kinds,
-    sample: SAMPLE,
-    days: results.map((r) => r.day),
-    rows: results.map((r) => r.rows),
-    dropped: results.map((r) => r.dropped),
-    failed: results.map((r) => r.failed),
-    present: results.map((r) => r.present),
-    p50: results.map((r) => r.p50.map((x) => (x === null ? null : Number(x.toPrecision(6))))),
-    missing: failures,
-    quantiles: results.map((r) => r.quantiles),
-    hours: results.map((r) => r.hours),
-    warmup: WARMUP,
-    values,
-    pairs,
-  };
-  writeFileSync(out, JSON.stringify(history) + '\n');
-  console.log(`${out}: ${results.length} days, ${history.days[0]} to ${history.days.at(-1)}, in ${((Date.now() - started) / 1000).toFixed(0)} s on ${n} threads`);
-}
-
-/**
- * A column's (or a pair's) values over the days, in order: each value, the day it was first and last seen, the days it
- * was seen and its rows in all, and each day's rows with a value first seen that day, once the first weeks are past.
- * With `daily`, each day's rows with each value too.
- */
-function followed(days: readonly (readonly [string, number][])[], daily: boolean): ValueHistory {
-  const at = new Map<string, number>();
-  const first: number[] = [];
-  const last: number[] = [];
-  const seen: number[] = [];
-  const total: number[] = [];
-  const fresh: [number, number][] = [];
-  days.forEach((entries, d) => {
-    let novel = 0;
-    for (const [key, n] of entries) {
-      let k = at.get(key);
-      if (k === undefined) {
-        at.set(key, (k = first.length));
-        first.push(d);
-        last.push(d);
-        seen.push(0);
-        total.push(0);
-        if (d >= WARMUP) novel += n;
-      }
-      last[k] = d;
-      seen[k]!++;
-      total[k]! += n;
-    }
-    if (novel) fresh.push([d, novel]);
-  });
-  // In order of rows over the history.
-  const order = [...at.keys()].map((key) => [key, at.get(key)!] as const).sort((a, b) => total[b[1]]! - total[a[1]]!);
-  const out: ValueHistory = { values: order.map(([key]) => key), first: order.map(([, k]) => first[k]!), last: order.map(([, k]) => last[k]!), days: order.map(([, k]) => seen[k]!), rows: order.map(([, k]) => total[k]!), fresh };
-  if (daily) {
-    const place = new Map(order.map(([key], i) => [key, i]));
-    out.counts = days.map((entries) => {
-      const row = new Array<number>(order.length).fill(0);
-      for (const [key, n] of entries) row[place.get(key)!] = n;
-      return row;
-    });
-  }
-  return out;
+  const s = job.settings;
+  const start = emptyHistory({ flow: job.doc.id, source: job.source, settings: { ...s, checks: first.checks }, columns: first.columns, types: first.types, kinds, warmup: WARMUP, built: new Date().toISOString().slice(0, 19) + 'Z' });
+  const history: HistoryFile = { ...appendPeriods(start, results), kinds, missing: failures };
+  // The columns asked for that the files don't have: said, not left out quietly.
+  const have = new Set(first.columns);
+  history.skipped = [...s.counted, ...s.followed, ...(s.time ? [s.time] : [])].filter((c) => !have.has(c)).map((c): [string, string] => [c, 'not in the files']);
+  const text = JSON.stringify(history) + '\n';
+  if (text.length > LIMIT) throw new Error(`${out} would be ${(text.length / 1048576).toFixed(1)} MB, past the ${LIMIT / 1048576} MB a page fetches`);
+  writeFileSync(out, text);
+  console.log(`${out}: ${results.length} loads of ${job.source}, ${history.days[0]} to ${history.days.at(-1)}, ${(text.length / 1048576).toFixed(2)} MB, in ${((Date.now() - started) / 1000).toFixed(0)} s on ${n} threads`);
 }
 
 if (isMainThread) await main();

@@ -8,6 +8,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { readDataList } from '../src/app/datalist.js';
 import { Database } from 'smaltdb/engine';
 import io from '@smaltdb/io';
 import external from '@smaltdb/external';
@@ -18,7 +19,7 @@ import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { dayClaim } from '../src/core/hold.js';
 import { pinFile, releaseRun, runFlow, verifyRun } from '../src/index.js';
 import smaltfl from '../src/plugin/index.js';
-import { EXAMPLE_SOURCES, pinnedDdl } from '../examples/sources.js';
+import { EXAMPLE_DATA, EXAMPLE_SOURCES, pinnedDdl } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
 import { exampleDoc } from './helpers/example.js';
 
@@ -39,7 +40,7 @@ describe.skipIf(!has)('the owner’s example, held through the engine on the rea
     expect(doc.publish).toEqual({ hold: ['checks', 'wrong'], watch: { trips: 'history.json' }, period: 'day', together: true, donor: 'weekday' });
     const db = Database.openMemory({ plugins: [io, external, parquet, smaltfl] });
     // The sources and the history pinned in the engine, as the page pins them, each by the hash the data's list gives.
-    const list = read('loads.json') as { files: Record<string, { path: string; sha256: string; bytes: number }>; episodes: { loads: { day: string; file: string; sha256: string; rows: number }[] }[] };
+    const list = readDataList(read('loads.json'), EXAMPLE_DATA) as unknown as { files: Record<string, { path: string; sha256: string; bytes: number }>; episodes: { loads: { day: string; file: string; sha256: string; rows: number }[] }[] };
     for (const src of EXAMPLE_SOURCES.filter((x) => x.file !== 'trips.parquet')) await pinFile(db, src.file, bytes(src.file), list.files[src.file.split('.')[0]!]!.sha256);
     const history = list.files.history!;
     expect(await pinFile(db, 'history.json', bytes(history.path), history.sha256)).toMatchObject({ sha256: history.sha256, bytes: history.bytes });

@@ -1,0 +1,12 @@
+{
+  "smaltflData": 1,
+  "flow": "nyc-taxis-weather",
+  "sources": {
+    "trips": { "table": "trips_file", "format": "parquet", "file": "trips.parquet" },
+    "zones": { "table": "zones_file", "format": "csv", "file": "zones.csv", "header": true, "columns": [["LocationID", "INTEGER"], ["Borough", "TEXT"], ["Zone", "TEXT"], ["service_zone", "TEXT"]] },
+    "weather": {
+      "table": "weather_file", "format": "csv", "file": "weather.csv", "header": true, "context": "weather",
+      "columns": [["borough", "TEXT"], ["time", "TEXT"], ["temperature_2m", "REAL"], ["precipitation", "REAL"], ["rain", "REAL"], ["snowfall", "REAL"], ["snow_depth", "REAL"], ["wind_speed_10m", "REAL"], ["weather_code", "INTEGER"]]
+    }
+  }
+}

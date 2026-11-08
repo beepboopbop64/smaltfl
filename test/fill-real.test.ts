@@ -9,6 +9,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { readDataList } from '../src/app/datalist.js';
 import { Database } from 'smaltdb/engine';
 import io from '@smaltdb/io';
 import external from '@smaltdb/external';
@@ -20,7 +21,7 @@ import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { claimHolds, dayClaim, flowStory, type HistoryRef } from '../src/core/hold.js';
 import { pinFile, releaseRun, runFlow, verifyRun, type FlowDocument } from '../src/index.js';
 import smaltfl from '../src/plugin/index.js';
-import { DONOR_SOURCE, EXAMPLE_SOURCES, pinnedDdl } from '../examples/sources.js';
+import { EXAMPLE_DATA, DONOR_SOURCE, EXAMPLE_SOURCES, pinnedDdl } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
 import { exampleFilled } from './helpers/example.js';
 
@@ -28,7 +29,7 @@ const DATA = new URL('../dist/app/data/', import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, DATA), 'utf8')) as unknown;
 const has = existsSync(new URL('history.json', DATA)) && existsSync(new URL('loads.json', DATA)) && (read('history.json') as HistoryFile).days.length > 400;
 interface Load { day: string; file: string; sha256: string; bytes: number; rows: number }
-const loadsJson = has ? (read('loads.json') as { files: Record<string, { path: string; sha256: string; bytes: number }>; loads: Load[]; episodes: { loads: Load[] }[]; donors?: Load[] }) : null;
+const loadsJson = has ? (readDataList(read('loads.json'), EXAMPLE_DATA) as unknown as { files: Record<string, { path: string; sha256: string; bytes: number }>; loads: Load[]; episodes: { loads: Load[] }[]; donors?: Load[] }) : null;
 const donorDays = loadsJson?.donors ?? [];
 const files = has && donorDays.length > 0 && existsSync(new URL('loads/yellow_tripdata_2023-09-14.parquet.txt', DATA)) && existsSync(new URL('loads/yellow_tripdata_2023-09-21.parquet.txt', DATA));
 
