@@ -60,9 +60,10 @@ where about 35,000 are usual, and everything else held.
    against the rows a day like it drops, so a share past its limit because the kept rows went missing reads
    differently from one past it because bad rows came. On such a day the verb is "Tell the source", not "Add a check".
    New count metrics (`count`, `droppedRows`, `ruleRows`, scale `count`) give those rows their usual ranges; metrics are
-   not hashed, so no encoding changes.
+   not hashed, so no encoding changes. A gate within one point below its limit is drawn too ("near"), and a share is
+   never printed equal to the limit it passed or missed.
 
-5. **Words.** A head is at most six words and carries the number or the time ("Only Flex Fare trips arrived", "Trips
+5. **Words.** A head is at most six words and carries the number or the time ("Only Flex Fare records arrived", "Trips
    fall 95% at 13:00", "Vendor 1 sent almost nothing", "Normal for MLK Day"); a finding's title at most eight, with its
    measured number and value names ("Payment type Credit card: 0.2% (usually 75–80%)"); its detail at most one sentence
    of twenty words, shown only on tap. A share outside its range is printed with the decimals that keep it from reading
@@ -71,15 +72,17 @@ where about 35,000 are usual, and everything else held.
    60 words at a glance, an unusual one 45, a calm one 16.
 
 6. **One cause card.** The head, one chip (the episode's day, "Day 2 · since Thu 13:00", or "Back to normal"'s "after
-   Thu–Sun", or the weather that names its day), one visual chosen by the cause (split rows, 24 hour bars over a ghost
-   of a usual day, a strip of days each with its own range, a bullet track on a calm day), the gate when it held, what
-   it reaches ("3 outputs not published" or "Reaches 3 outputs"), the folded findings as counted rows ("+16 follow from
-   this", "12 more this day") that open in place into compact rows with micro visuals, and one verb with the others
-   behind ⋯. Then a health row of five cells (File, Amount, Hours, Values, Shape: ↳ where the cause explains it; "All 5
-   normal" on a calm day), at most two more stories, and counted rows for the rest and the notes. A tap opens a sheet
-   that is visual too: a waterfall from a usual day to this one, the part's own days, its column's composition usual
-   and today; the episode's hours; the checks rule by rule against their usual rows, and the outputs the held run
-   didn't publish.
+   Thu–Sun", or the weather that names its day), the day's count on a line with its usual range (the amount line, under
+   the head on every day), one visual chosen by the cause (the part and the rest on one bar at one scale, today's ink
+   over a dashed usual, so a part that held and a rest that stopped read at their real sizes; 24 hour bars over a ghost
+   of a usual day; a strip of days each with its own range, four weeks on an amount day and the week on a calm one),
+   the gate when it held, what it reaches ("3 outputs not published" or "Reaches 3 outputs"), the folded findings as
+   counted rows ("+16 follow from this", "12 more this day") that open in place into compact rows with micro visuals,
+   and one verb with the others behind ⋯. Then a health row of five cells (File, Amount, Hours, Values, Shape: ↳ where
+   the cause explains it; "All 5 normal" on a calm day), at most two more stories, and counted rows for the rest and
+   the notes. A tap opens a sheet that is visual too: a waterfall from a usual day to this one, the part's own days,
+   its column's composition usual and today; the episode's hours; the checks rule by rule against their usual rows, and
+   the outputs the held run didn't publish.
 
 7. **Marks** carry severity by shape and fill first and colour third (the tokens' hues are too close in greyscale):
    something wrong is a filled hexagon with "!", unusual an outlined triangle on a wash, a note a small dot, ok no mark,
