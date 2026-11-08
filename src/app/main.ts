@@ -7148,9 +7148,9 @@ async function checkAgainst(file: File | undefined): Promise<void> {
 
 /**
  * The audit bag (E9): the record and its checkpoints, the signer's card, every manifest, plan and flow document the
- * record names, what the engine names and the releases it kept (ADR 0009 §11), the data's list, a proof for each
- * dataset as published, and a readable account. The source files are left out: an auditor gets each from the data
- * branch by its sha256.
+ * record names, what the engine names, the releases it kept and what held its runs (ADR 0009 §11), the data's list, a
+ * proof for each dataset as published, and a readable account. The source files are left out: an auditor gets each
+ * from the data branch by its sha256.
  */
 async function exportAudit(): Promise<void> {
   if (!ledger) return;
@@ -7173,14 +7173,15 @@ async function exportAudit(): Promise<void> {
   ];
   for (const b of await ledger.blobs()) payload.push({ path: `blobs/${b.kind}-${b.hash}.json`, bytes: enc.encode(b.json + '\n') });
   // What the engine holds of this visit's runs, when it is running (a refused start-up leaves it without one): its
-  // plans, flows and runs, the version each dataset name shows and the releases it kept (ADR 0009 §11).
-  const named: { datasets: { name: string; key: string; run: number; manifest: string; release: number | null }[]; releases: unknown[] } = { datasets: [], releases: [] };
+  // plans, flows and runs, the version each dataset name shows, the releases it kept and what held each run (ADR 0009
+  // §11).
+  const named: { datasets: { name: string; key: string; run: number; manifest: string; release: number | null }[]; releases: unknown[]; holds: unknown[] } = { datasets: [], releases: [], holds: [] };
   if (state.engine) {
     for (const [hash, plan] of (await state.engine.query('SELECT hash, plan FROM _smaltfl_plans')).rows) payload.push({ path: `engine/plans/${String(hash)}.json`, bytes: enc.encode(String(plan) + '\n') });
     for (const [hash, doc] of (await state.engine.query('SELECT hash, doc FROM _smaltfl_flows')).rows) payload.push({ path: `engine/flows/${String(hash)}.json`, bytes: enc.encode(String(doc) + '\n') });
     for (const [id, hash, manifest] of (await state.engine.query('SELECT id, hash, manifest FROM _smaltfl_runs')).rows) payload.push({ path: `engine/runs/${String(id)}-${String(hash)}.json`, bytes: enc.encode(String(manifest) + '\n') });
     Object.assign(named, await state.engine.callPlugin('smaltfl', 'names', []));
-    payload.push({ path: 'engine/datasets.json', bytes: json(named.datasets) }, { path: 'engine/releases.json', bytes: json(named.releases) });
+    payload.push({ path: 'engine/datasets.json', bytes: json(named.datasets) }, { path: 'engine/releases.json', bytes: json(named.releases) }, { path: 'engine/holds.json', bytes: json(named.holds) });
   }
   if (integrity.manifestBytes) payload.push({ path: 'data/MANIFEST.json', bytes: integrity.manifestBytes });
   if (integrity.data) payload.push({ path: 'data/commit.txt', bytes: enc.encode(`${integrity.data.commit}\n`) });

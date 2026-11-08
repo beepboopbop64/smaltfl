@@ -93,17 +93,26 @@ export function releasesOf(db: Database, run?: number): StoredRelease[] {
 
 /**
  * What the engine names, for an audit bag (engine/datasets.json, core/audit.ts EngineName): each dataset name, the
- * key it shows, the run that made it current and that run's manifest hash, and the applied release that pointed it,
- * if one did; with every release, applied or refused (engine/releases.json).
+ * key it shows, the run that made it current and that run's manifest hash ('' for a number that is no run), and the
+ * applied release that pointed it, if one did; with every release, applied or refused (engine/releases.json); and what
+ * held each run of a plan with a publish block, as the plugin judged it (engine/holds.json, core/audit.ts EngineHolds),
+ * so the audit reads what held a run from the engine, not only from the page's record.
  */
-export function engineNames(db: Database): { datasets: { name: string; key: string; run: number; manifest: string; release: number | null }[]; releases: StoredRelease[] } {
+export function engineNames(db: Database): {
+  datasets: { name: string; key: string; run: number; manifest: string; release: number | null }[];
+  releases: StoredRelease[];
+  holds: { run: number; manifest: string; holds: Hold[]; judged: Judged[] }[];
+} {
   const releases = releasesOf(db);
   const datasets = db.query('SELECT d.name, d.key, d.run, r.hash FROM _smaltfl_datasets d LEFT JOIN _smaltfl_runs r ON r.id = d.run ORDER BY d.name').rows.map((row) => {
     const [name, key, run] = [String(row[0]), String(row[1]), Number(row[2])];
     const by = releases.filter((x) => x.outcome === 'applied' && x.run === run && x.names[name] === key).at(-1);
     return { name, key, run, manifest: row[3] === null ? '' : String(row[3]), release: by ? by.id : null };
   });
-  return { datasets, releases };
+  const holds = db.query('SELECT h.run, r.hash, h.holds, h.claims FROM _smaltfl_holds h JOIN _smaltfl_runs r ON r.id = h.run ORDER BY h.run').rows.map((row) => ({
+    run: Number(row[0]), manifest: String(row[1]), holds: JSON.parse(String(row[2])) as Hold[], judged: JSON.parse(String(row[3])) as Judged[],
+  }));
+  return { datasets, releases, holds };
 }
 
 /** The version a dataset name shows now, and the run that made it current; null for a name smaltfl doesn't hold. */

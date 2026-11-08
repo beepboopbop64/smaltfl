@@ -11,8 +11,9 @@
  *   pin [name, bytes, sha256]         → { sha256 }    hash a source file in the engine, refuse a mismatch, serve it
  *                                                     as smaltfl:<name> (ADR 0006 §3); null bytes unpin it
  *   manifest [run]                    → RunManifest   a stored run's manifest
- *   names                             → { datasets, releases }  what each dataset name shows, by which run and
- *                                                     release, and every release: an audit bag's engine/ files
+ *   names                             → { datasets, releases, holds }  what each dataset name shows, by which
+ *                                                     run and release, every release, and what held each run: an
+ *                                                     audit bag's engine/ files
  *   act [ActInput]                    → Edit          check an action and record its edit or refusal
  *   edits / verifyEdits               → Edit[] / …    the hash chain of edits, and its check
  *

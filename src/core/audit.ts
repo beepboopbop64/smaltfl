@@ -8,9 +8,11 @@
  * A day held by its flow (ADR 0009) is checked as an `ok` run is, and its holds against its manifest and its claims;
  * each decision against the run it decides and the policies of its flow document (who may decide, a reason for
  * publish as is, a standing decision that stands for its day); each release against the decision it cites (an earlier
- * decide entry, by its leaf) and the run it releases; a proof may cite a release; and the engine's names
- * (engine/datasets.json, engine/releases.json) never show a held run's output without a release citing a decision in
- * the record.
+ * decide entry, by its leaf, still the day's decision when it was released) and the run it releases; a proof may
+ * cite a release, or a held run's entry for an output it didn't hold; and the engine's names (engine/datasets.json,
+ * engine/releases.json) show only versions of runs in the record, never a held output without a release citing a
+ * decision in the record. What held a run is read from the engine (engine/holds.json) as well as from the record: a
+ * run the engine held, recorded as published, fails, and its outputs need a release all the same.
  *
  * A bag carries its own card and its own data list, so on its own it shows only that it is consistent with itself:
  * anyone can make a bag that is. What ties it to someone is what the auditor brings: a checkpoint they kept, the
@@ -20,8 +22,9 @@
 import { checkBag, readBagInfo, type BagFile } from './bag.js';
 import type { FlowDocument } from './document.js';
 import { sha256Hex } from './hash.js';
-import { claimHolds, heldOutputs, holdsOf, inputsKey, judgeClaims, sameKeys, standingFor, type DecideAbout, type HeldAbout, type Hold, type ReleaseAbout, type StoryClaim } from './hold.js';
-import { consistencyProof, entryLeaf, parseCheckpoint, rootOf, verifyCheckpoint, verifyConsistency, verifyInclusion, verifyRecord, type LogEntry, type SignedCheckpoint } from './log.js';
+import { claimHolds, heldOutputs, holdsOf, inputsKey, judgeClaims, sameKeys, standingFor, type DecideAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type StoryClaim } from './hold.js';
+import { canonicalJSON } from './canonical.js';
+import { consistencyProof, entryLeaf, parseCheckpoint, rootOf, verifyCheckpoint, verifyConsistency, verifyInclusion, verifyRecord, type JSONValue, type LogEntry, type SignedCheckpoint } from './log.js';
 import { manifestHash, planHash, policiesHash, type IdentityCard, type RunManifest } from './manifest.js';
 import { flowHash, type FlowPlan } from './plan.js';
 import { checkDecision, DECIDE_OPTIONS } from './policy.js';
@@ -52,6 +55,17 @@ export interface EngineName {
   run: number;
   manifest: string;
   release: number | null;
+}
+
+/**
+ * What held a run, as the plugin kept it (engine/holds.json, its `_smaltfl_holds`): a row for every run of a plan with a
+ * publish block in the engine, `holds` empty when it published, and its watched sources as it judged them.
+ */
+export interface EngineHolds {
+  run: number;
+  manifest: string;
+  holds: Hold[];
+  judged: Judged[];
 }
 
 /** A release as the engine keeps it (engine/releases.json): what was asked, and what came of it. */
@@ -151,6 +165,8 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     const got = await manifestHash(JSON.parse(text(f.bytes)) as RunManifest);
     if (got !== want) say(false, `engine/runs/${f.path.split('/').pop()}: hashes to ${got.slice(0, 16)}…, not the hash in its name`);
   }
+  // What held each of the engine's runs, as the plugin kept it, by the run's manifest hash.
+  const engineHolds = new Map((json<EngineHolds[]>('data/engine/holds.json') ?? []).map((x) => [x.manifest, x]));
   // The runs that made something, published or held, by their manifest's hash: what decisions, releases and proofs cite.
   const runs = new Map<string, { entry: LogEntry; manifest: RunManifest | null; plan: FlowPlan | null; ok: boolean }>();
   for (const e of entries.filter((x) => x.kind === 'run' && ['ok', 'held'].includes(String((x.about as { outcome?: string } | null)?.outcome)))) {
@@ -173,6 +189,9 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     const said = a.outcome === 'held' && typed ? heldProblems(e.about, typed, m, problems) : '';
     // Recorded as published: a plan that holds on its checks must not have counts that hold it.
     if (a.outcome === 'ok' && typed?.publish && checksHolds(typed, m).length) problems.push("it was recorded as published, and its manifest's counts hold it");
+    // What the engine kept of what held it: what its manifest and its judged sources hold, and what the record says.
+    const kept = engineHolds.get(a.manifest);
+    if (kept && typed) problems.push(...engineHoldsProblems(kept, e.about, typed, m, a.outcome));
     const flow = flows.get(m.flow.hash);
     if (flow && (await flowHash(JSON.parse(text(flow.bytes)) as FlowDocument)) !== m.flow.hash) problems.push("its flow document doesn't hash to what the manifest says");
     const read = m.nodes.filter((n) => n.file);
@@ -197,6 +216,26 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     say(problems.length === 0, problems.length ? `run ${a.run} (#${e.seq}): ${problems.join('; ')}` : `run ${a.run} (#${e.seq}): manifest ${a.manifest.slice(0, 16)}… holds${plan ? ', with its plan' : ''}${flow ? ' and flow document' : ''}; read ${where || 'no files'}${unlisted ? ' (a build with no published data list: the files\' hashes are recorded, but nothing outside the build vouches for them)' : ''}${said}`);
     runs.set(a.manifest, { entry: e, manifest: mh === a.manifest ? m : null, plan: typed, ok: problems.length === 0 });
   }
+
+  /**
+   * The outputs a run held, by its manifest's hash: those its record entry's holds keep back and the keys it names,
+   * and those the engine's holds keep back; every output of a held run whose plan isn't in the bag. Null for a run the
+   * record doesn't have.
+   */
+  const heldBy = (manifest: string | undefined): Set<string> | null => {
+    const run = manifest === undefined ? undefined : runs.get(manifest);
+    if (!run) return null;
+    const a = run.entry.about as Partial<HeldAbout> & { outcome?: string };
+    const out = new Set<string>();
+    if (a.outcome === 'held') {
+      if (isKeys(a.keys)) for (const k of Object.keys(a.keys)) out.add(k);
+      if (run.plan) for (const k of heldOutputs(run.plan, Array.isArray(a.holds) ? a.holds : [])) out.add(k);
+      else for (const k of Object.keys(run.manifest?.outputs ?? {})) out.add(k);
+    }
+    const kept = engineHolds.get(manifest!);
+    if (kept && run.plan) for (const k of heldOutputs(run.plan, kept.holds)) out.add(k);
+    return out;
+  };
 
   // Each decision: the held run it decides is in the record before it, with the same inputs and keys; its actor may
   // take its option under the policies of the run's flow document; publish as is has a reason; a decision applied
@@ -263,6 +302,9 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     else {
       if (decision?.option !== 'asis') problems.push(`its decision, #${a.decision}, doesn't publish`);
       if (allowed.get(cited.seq) === false) problems.push(`its decision, #${a.decision}, doesn't hold`);
+      // Still the day's decision when it is released: none amends it, and no other decision of its day follows it.
+      const since = entries.slice(cited.seq + 1, e.seq).find((x) => x.kind === 'decide' && (x.amends === cited.seq || (isRecord(x.about) && isInputs(x.about.inputs) && isInputs(decision?.inputs) && inputsKey(x.about.inputs) === inputsKey(decision.inputs))));
+      if (since) problems.push(`its decision, #${a.decision}, was ${since.amends === cited.seq ? 'amended' : 'decided again'} by #${since.seq} before it`);
       const run = runs.get(a.manifest);
       const runAbout = run?.entry.about as unknown as HeldAbout | undefined;
       if (!run || runAbout?.outcome !== 'held' || run.entry.seq > e.seq) problems.push(`it releases run ${a.run} (${shortHash(a.manifest)}), which the record doesn't hold before it`);
@@ -281,8 +323,9 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     const p = JSON.parse(text(f.bytes)) as { dataset: string; key?: string; content: string; rows?: number; manifest?: string; entry: LogEntry; inclusion: { seq: number; size: number; root: string; leaf: string; proof: string[] } };
     const leaf = entryLeaf(p.entry);
     const proven = leaf === p.inclusion.leaf && verifyInclusion(leaf, p.inclusion.seq, p.inclusion.size, p.inclusion.proof, p.inclusion.root) && p.inclusion.size <= leaves.length && rootOf(leaves, p.inclusion.size) === p.inclusion.root;
-    // A dataset published by its run cites the run's `ok` entry; one a release published cites the `release` entry,
-    // and is proven by the held run it released, found in the record by the release's manifest.
+    // A dataset published by its run cites the run's `ok` entry, or a held run's entry for an output it didn't hold (a
+    // flow that doesn't hold its outputs together); one a release published cites the `release` entry, and is proven by
+    // the held run it released, found in the record by the release's manifest.
     const released = p.entry?.kind === 'release' && proven && entries[p.inclusion.seq] && entryLeaf(entries[p.inclusion.seq]!) === leaf ? releasedBy.get(p.inclusion.seq) : undefined;
     const runEntry = released ? runs.get(released.manifest)?.entry : p.entry;
     const about = (runEntry?.about ?? null) as { outcome?: string; manifest?: string; blob?: string } | null;
@@ -293,7 +336,8 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     const kind = p.entry?.kind === 'release' ? 'release' : 'run';
     if (!proven) problems.push("its proof doesn't hold");
     else if (p.entry.kind === 'release' && !released) problems.push(`entry #${p.inclusion.seq} is not a release that holds, of a decision that publishes`);
-    else if (!released && (p.entry.kind !== 'run' || about?.outcome !== 'ok')) problems.push(`entry #${p.inclusion.seq} is not a run that made anything`);
+    else if (!released && (p.entry.kind !== 'run' || (about?.outcome !== 'ok' && about?.outcome !== 'held'))) problems.push(`entry #${p.inclusion.seq} is not a run that made anything`);
+    else if (!released && about?.outcome === 'held' && heldBy(about.manifest)?.has(p.dataset) !== false) problems.push(`entry #${p.inclusion.seq} is a held run, which held ${p.dataset}: only a release publishes it`);
     else if (released && released.outputs[p.dataset] === undefined) problems.push(`its release doesn't name ${p.dataset}`);
     else if (p.manifest !== undefined && p.manifest !== about?.manifest) problems.push(`it names the manifest ${String(p.manifest).slice(0, 16)}…, and its entry the manifest ${String(about?.manifest).slice(0, 16)}…`);
     else if (!m || (await manifestHash(m)) !== about?.manifest) problems.push("its run's manifest isn't in the bag as the record names it");
@@ -321,15 +365,17 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     for (const n of names) {
       const run = runs.get(n.manifest);
       const problems: string[] = [];
-      if (run?.manifest && run.manifest.outputs[n.name]?.key !== n.key) problems.push(`it shows the key ${shortHash(n.key)}, which its run didn't make for it`);
-      if ((run?.entry.about as { outcome?: string } | undefined)?.outcome === 'held') {
+      // A version shown under a number that is no run, or a run the record doesn't have, is one nobody can account for.
+      if (!run) problems.push(`it shows run ${n.run}'s version, ${n.manifest ? `and the record has no run ${shortHash(n.manifest)}` : 'and the engine has no run by that number'}`);
+      else if (run.manifest && run.manifest.outputs[n.name]?.key !== n.key) problems.push(`it shows the key ${shortHash(n.key)}, which its run didn't make for it`);
+      if (run && heldBy(n.manifest)?.has(n.name)) {
         const rel = engineReleases.find((r) => r.outcome === 'applied' && r.run === n.run && r.manifest === n.manifest && r.names[n.name] === n.key && !!r.decision && decided.has(r.decision));
-        if (!rel) problems.push(`it shows run ${n.run}'s version, which the record holds as held, with no release citing a decision in the record`);
+        if (!rel) problems.push(`it shows run ${n.run}'s version, which ${(run.entry.about as { outcome?: string }).outcome === 'held' ? 'the record holds as held' : 'the engine held'}, with no release citing a decision in the record`);
       }
       if (problems.length) say(false, `${n.name} (engine): ${problems.join('; ')}`);
       else shown++;
     }
-    if (shown === names.length) say(true, `the engine's ${names.length} dataset name${names.length === 1 ? '' : 's'} show versions their runs made, and no held run's output without a release`);
+    if (shown === names.length) say(true, `the engine's ${names.length} dataset name${names.length === 1 ? '' : 's'} show versions their runs in the record made, and no output a run held without a release`);
   }
 
   // A checkpoint the auditor kept.
@@ -356,6 +402,30 @@ function flowOf(flows: Map<string, BagFile>, hash: string): FlowDocument | null 
   } catch {
     return null;
   }
+}
+
+/**
+ * What is wrong with what the engine kept of what held a run: its holds must be what the run's manifest and its judged
+ * sources hold (each claim judged again against the manifest), and what the record says of the run: held by the same
+ * holds, or, recorded as published, held by none.
+ */
+function engineHoldsProblems(kept: EngineHolds, about: unknown, plan: FlowPlan, m: RunManifest, outcome: 'ok' | 'held'): string[] {
+  const problems: string[] = [];
+  const holds = Array.isArray(kept.holds) ? kept.holds : [];
+  const judged = Array.isArray(kept.judged) ? kept.judged.filter(isRecord) as Judged[] : [];
+  if (!Array.isArray(kept.holds) || !Array.isArray(kept.judged)) problems.push("what the engine kept of what held it isn't shaped as holds and judged sources");
+  try {
+    const claims = judged.flatMap((j) => ('claim' in j ? [j.claim] : []));
+    const again = judgeClaims(plan, claims, { rows: (node) => m.nodes.find((n) => n.node === node)?.rows, pinned: (path) => claims.find((c: StoryClaim) => c.history.path === path)?.history });
+    const same = (x: unknown, y: unknown) => x !== undefined && y !== undefined && canonicalJSON(x as JSONValue) === canonicalJSON(y as JSONValue);
+    if (judged.some((j) => 'claim' in j && !same(again.find((k) => k.node === j.node), j))) problems.push("the claims the engine judged it by don't match it");
+    if (!same(holdsOf(plan, m, judged), holds)) problems.push("the engine's holds for it aren't what its manifest and its judged sources hold");
+    if (outcome === 'held' && !same((about as Partial<HeldAbout>).holds ?? [], holds)) problems.push("the holds the record names aren't the ones the engine kept");
+  } catch (e) {
+    problems.push(`what the engine kept of what held it can't be read: ${(e as Error).message}`);
+  }
+  if (outcome === 'ok' && holds.length) problems.push(`it was recorded as published, and the engine held it (${holds.map((x) => (isRecord(x) ? String(x.origin) : '?')).join(', ')})`);
+  return problems;
 }
 
 /** What a run's checks hold, from its manifest's counts alone: none for a plan that doesn't hold on its checks. */
@@ -395,8 +465,10 @@ function heldProblems(about: unknown, plan: FlowPlan, m: RunManifest, problems: 
   const held = new Set(heldOutputs(plan, holds));
   const keys = isKeys(a.keys) ? a.keys : {};
   const bad = Object.entries(keys).filter(([name, key]) => !held.has(name) || m.outputs[name]?.key !== key).map(([name]) => name);
+  const missing = [...held].filter((name) => m.outputs[name] && !Object.hasOwn(keys, name));
   if (!isKeys(a.keys) || Object.keys(keys).length === 0) problems.push('it names no staged keys');
   else if (bad.length) problems.push(`the keys it names for ${bad.join(', ')} aren't the ones it held`);
+  else if (missing.length) problems.push(`it names no staged key for ${missing.join(', ')}, which it held`);
   const waiting = Array.isArray(a.waiting) ? a.waiting : [];
   if (waiting.some((w) => typeof w !== 'string' || !Object.hasOwn(keys, w))) problems.push('it says an output waits that it names no key for');
   return `; held by ${holds.map((h) => `${h.origin} (${h.by === 'checks' ? 'its checks' : h.by === 'story' ? h.said : 'not judged'})`).join(', ')}, ${waiting.length} output${waiting.length === 1 ? '' : 's'} waiting`;

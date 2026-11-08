@@ -211,15 +211,19 @@ published. Cached check counts must still hold. And older builds must refuse wha
 11. **verify and the audit.**
     - verify gains a *held* check. The holds must recompute from the manifest and the stored claims. Every held output
       that a name shows must have a release of this run, with this key and a decision's leaf, so a held output pointed
-      by hand fails. *published* accepts a release.
-    - The audit bag adds what the engine names (each dataset's key, run and release) and its releases. It proves each
-      dataset as published: a released one by its `release` entry.
+      by hand fails, whatever run number is stored beside it: only a run that made the same version (a reused key, the
+      same day run again) may stand there instead. *published* accepts a release.
+    - The audit bag adds what the engine names (each dataset's key, run and release), its releases, and what held each
+      of its runs (the plugin's `_smaltfl_holds`, engine/holds.json). It proves each dataset as published: a released
+      one by its `release` entry, and one a held run didn't hold (`together: false`) by that run's entry.
     - `audit.mjs check` checks held runs as it checks `ok` ones (manifest, plan, files). It fails:
-      - a release whose decision isn't in the record before it;
+      - a release whose decision isn't in the record before it, or was amended or decided again before it;
       - a release whose actor the stored policies don't allow;
       - a release whose keys aren't the held run's, or aren't its decision's;
       - a decision applied under a standing one that doesn't stand for its day;
-      - and a held output that is current with no release.
+      - a held output that is current with no release, the outputs a run held read from the engine's holds as well as
+        the record's, so a run the engine held and the page recorded as published fails too;
+      - and a name that shows a version of a run the record doesn't have.
     - An older `audit.mjs` rejects a proof that cites a `release` entry ("not a run that made anything"), so old tools
       fail closed.
 

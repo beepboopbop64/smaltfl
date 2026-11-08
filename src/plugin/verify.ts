@@ -10,7 +10,8 @@
  *   A run of a plan with a publish block (ADR 0009 §11) is also checked *held*: its stored holds are what its
  *   manifest's counts and its stored claims hold (each claim judged again against the manifest: its day, its
  *   history's file, the snapshot's rows), and every output it held that a name shows was released, by a release of
- *   this run, with this manifest and key and a decision's leaf, so a held output pointed by hand fails.
+ *   this run, with this manifest and key and a decision's leaf, so a held output pointed by hand fails, under this
+ *   run's number or under one that is no run, or a run that didn't make that version.
  * - **rerun:** recomputing every stored node from the run's snapshots, with the same plan, gives the same content
  *   hashes and the same expectation counts. The recomputed rows go to temporary tables, which are dropped after.
  * - **rederive:** the source files the run read are still pinned with the hashes it recorded, each source is still the
@@ -187,8 +188,18 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
     for (const o of plan.outputs) {
       if (!held.has(o.name)) continue;
       const named = currentOf(db, o.name);
-      if (!named || named.run !== runId) continue; // still staged: nothing to check
       const key = manifest.outputs[o.name]!.key;
+      if (!named) continue; // still staged: nothing to check
+      if (named.run !== runId) {
+        if (named.key !== key) continue; // another version: still staged
+        // The name shows this run's staged version under another run's number: only a run that made that same version
+        // (a key the zones reuse, or the same day run again) may stand beside it, and verifying that run checks it. A
+        // number that is no run, or a run that made another version, is a held output pointed by hand.
+        const other = db.query('SELECT manifest FROM _smaltfl_runs WHERE id = ?', [named.run]).rows[0];
+        const made = other ? (JSON.parse(String(other[0])) as RunManifest).outputs[o.name]?.key === key : false;
+        if (!made) check({ node: o.node, origin: o.name, check: 'held', ok: false, expected: key, actual: named.key, note: `run ${runId} held it, and its name shows it under run ${named.run}, ${other ? "which didn't make it" : 'which is no run in this database'}, with no release` });
+        continue;
+      }
       const rel = releases.find((x) => x.names[o.name] === key && x.manifest === String(row[1]) && /^[0-9a-f]{64}$/.test(x.decision ?? ''));
       check({ node: o.node, origin: o.name, check: 'held', ok: !!rel, expected: key, actual: named.key, note: rel ? `released by release ${rel.id}, citing the decision ${rel.decision!.slice(0, 16)}…` : `run ${runId} held it, and its name shows it with no release` });
     }

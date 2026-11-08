@@ -309,6 +309,27 @@ describe("verify's held check (ADR 0009 §11)", () => {
     expect(fails(v)).toEqual([`zone_hour:held (run ${feb.run} held it, and its name shows it with no release)`]);
   });
 
+  it('fails a held output pointed by hand under a number that is no run, or under a run that made another version', async () => {
+    const db = fixture();
+    const jan = await run(db, holding(), { month: '2024-01', day: '2024-01-31' });
+    const feb = await run(db, holding(), { month: '2024-02', day: '2024-02-01' });
+    const key = feb.manifest.outputs.zone_hour!.key;
+    const point = (under: number) => {
+      db.exec('BEGIN');
+      pointDataset(db, 'zone_hour', key, findVersion(db, key)!.table, under);
+      db.exec('COMMIT');
+    };
+    point(999);
+    expect(fails(await verifyRun(db, feb.run, { smaltdb: SMALTDB, level: 'stored' }))).toEqual([`zone_hour:held (run ${feb.run} held it, and its name shows it under run 999, which is no run in this database, with no release)`]);
+    expect(fails(await verifyRun(db, jan.run, { smaltdb: SMALTDB, level: 'stored' }))).toEqual([]);
+    point(jan.run);
+    expect(fails(await verifyRun(db, feb.run, { smaltdb: SMALTDB, level: 'stored' }))).toEqual([`zone_hour:held (run ${feb.run} held it, and its name shows it under run ${jan.run}, which didn't make it, with no release)`]);
+    expect(fails(await verifyRun(db, jan.run, { smaltdb: SMALTDB, level: 'stored' }))).toEqual(["zone_hour:published (the name points at another version; the name's view isn't the one the runtime writes)"]);
+    // The zones' own output reuses its key: Wednesday's version, shown under Wednesday's run, is no held output shown.
+    expect(current(db, 'zone_list')).toEqual([feb.manifest.outputs.zone_list!.key, jan.run]);
+    expect(fails(await verifyRun(db, feb.run, { smaltdb: SMALTDB, level: 'stored' })).filter((f) => f.startsWith('zone_list'))).toEqual([]);
+  });
+
   it('fails a refused release as no release at all', async () => {
     const db = fixture();
     const feb = await run(db, holding(), { month: '2024-02', day: '2024-02-01' });

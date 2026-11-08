@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FlowRecord } from '../src/app/record.js';
-import { auditBag, type EngineName, type EngineRelease } from '../src/core/audit.js';
+import { auditBag, type EngineHolds, type EngineName, type EngineRelease } from '../src/core/audit.js';
 import { buildBag, type BagFile } from '../src/core/bag.js';
 import { canonicalJSON } from '../src/core/canonical.js';
 import { withoutDisplay } from '../src/core/document.js';
@@ -18,9 +18,10 @@ import { heldOutputs, inputsOf, stagedKeys, type DecideAbout, type HeldAbout, ty
 import { entryLeaf, type JSONValue, type LogEntry } from '../src/core/log.js';
 import { policiesHash, type RunManifest } from '../src/core/manifest.js';
 import { flowHash, type FlowPlan } from '../src/core/plan.js';
+import { sha256Hex } from '../src/core/hash.js';
 import { zip } from '../src/core/zip.js';
 import { findVersion, pointDataset } from '../src/plugin/store.js';
-import { releaseRun, runFlow, type FlowDocument, type RunResult } from '../src/index.js';
+import { pinFile, releaseRun, runFlow, type FlowDocument, type PublishDef, type RunResult } from '../src/index.js';
 import { loadFixture, makeTrips, visualFlow } from './fixtures/taxi.js';
 import { openEngine, SMALTDB } from './helpers/engine.js';
 import { installFakeIndexedDB } from './helpers/fake-idb.js';
@@ -238,7 +239,7 @@ describe('an audit bag', () => {
 type Engine = ReturnType<typeof openEngine>;
 
 /** The reference flow with a day parameter, the zones' own output, an owner and a steward, holding on its checks. */
-function holdingFlow(id: string): FlowDocument {
+function holdingFlow(id: string, publish: PublishDef = { hold: ['checks'] }): FlowDocument {
   const doc = visualFlow();
   return {
     ...doc,
@@ -250,16 +251,16 @@ function holdingFlow(id: string): FlowDocument {
       principals: [{ id: 'owner', name: 'Owner', owner: true }, { id: 'ana', name: 'Ana' }],
       rules: [{ id: 'stewards', kind: 'action', name: 'Ana may decide not to publish', action: 'smaltfl:decide', for: ['ana'], may: ['dont'] }],
     },
-    publish: { hold: ['checks'] },
+    publish,
   };
 }
 
 /** A flow, its record, and its document kept by the record as the app keeps it. */
-async function holdingRecord() {
+async function holdingRecord(publish?: PublishDef) {
   const flow = `paused-${Math.random().toString(36).slice(2)}`;
   const db = openEngine();
   loadFixture(db, makeTrips(1500));
-  const doc = holdingFlow(flow);
+  const doc = holdingFlow(flow, publish);
   const rec = await FlowRecord.open(flow);
   await rec.append('flow', 'owner', { before: null, after: await flowHash(doc), doc: await rec.keep('flow', withoutDisplay(doc)) });
   return { db, doc, rec };
@@ -298,7 +299,7 @@ async function release(s: { db: Engine; rec: FlowRecord }, r: RunResult, decisio
 async function pausedBag(s: { db: Engine; rec: FlowRecord }, tweak: (payload: BagFile[]) => void = () => {}): Promise<BagFile[]> {
   const { db, rec } = s;
   const head = rec.head();
-  const names = (await db.callPlugin('smaltfl', 'names', [])) as { datasets: EngineName[]; releases: EngineRelease[] };
+  const names = (await db.callPlugin('smaltfl', 'names', [])) as { datasets: EngineName[]; releases: EngineRelease[]; holds: EngineHolds[] };
   const payload: BagFile[] = [
     { path: 'record/entries.jsonl', bytes: enc.encode(rec.entries.map((e) => canonicalJSON(e as never)).join('\n') + '\n') },
     { path: 'record/checkpoints.jsonl', bytes: enc.encode(rec.checkpoints.map((c) => JSON.stringify(c)).join('\n') + '\n') },
@@ -309,10 +310,14 @@ async function pausedBag(s: { db: Engine; rec: FlowRecord }, tweak: (payload: Ba
     ...db.query('SELECT id, hash, manifest FROM _smaltfl_runs').rows.map(([id, h, m]) => ({ path: `engine/runs/${String(id)}-${String(h)}.json`, bytes: enc.encode(String(m)) })),
     { path: 'engine/datasets.json', bytes: enc.encode(JSON.stringify(names.datasets)) },
     { path: 'engine/releases.json', bytes: enc.encode(JSON.stringify(names.releases)) },
+    { path: 'engine/holds.json', bytes: enc.encode(JSON.stringify(names.holds)) },
   ];
   for (const d of names.datasets) {
-    const runEntry = [...rec.entries].reverse().find((e) => e.kind === 'run' && (e.about as { manifest?: string }).manifest === d.manifest)!;
-    const m = JSON.parse(String(db.query('SELECT manifest FROM _smaltfl_runs WHERE id = ?', [d.run]).rows[0]![0])) as RunManifest;
+    const runEntry = [...rec.entries].reverse().find((e) => e.kind === 'run' && (e.about as { manifest?: string }).manifest === d.manifest);
+    const row = db.query('SELECT manifest FROM _smaltfl_runs WHERE id = ?', [d.run]).rows[0];
+    // A name under a number that is no run, or a run the record doesn't have, has no proof: the app's export skips it.
+    if (!runEntry || !row) continue;
+    const m = JSON.parse(String(row[0])) as RunManifest;
     const releaseEntry = d.release === null ? undefined : [...rec.entries].reverse().find((e) => e.kind === 'release' && (e.about as unknown as ReleaseAbout).manifest === d.manifest && (e.about as unknown as ReleaseAbout).outputs[d.name] === d.key);
     const entry = releaseEntry ?? runEntry;
     payload.push({ path: `proofs/${d.name}.json`, bytes: enc.encode(JSON.stringify({ dataset: d.name, ...m.outputs[d.name], run: d.run, manifest: d.manifest, entry, inclusion: rec.proofOf(entry.seq, head.size) })) });
@@ -344,7 +349,7 @@ describe('an audit bag with a day held, decided and released (ADR 0009 §11)', (
     expect(lines).toContainEqual(`decision #${s.decision.seq}: publish as is for 2024-02-01, by owner, on run ${s.thu.r.run}'s keys`);
     expect(lines).toContainEqual(`release #${s.rel.entry.seq}: 3 outputs of run ${s.thu.r.run} released, citing decision #${s.decision.seq}`);
     expect(lines.filter((l) => l.endsWith(`in release entry #${s.rel.entry.seq} proven in the record, as the held run its release published made it`))).toHaveLength(3);
-    expect(lines).toContainEqual("the engine's 3 dataset names show versions their runs made, and no held run's output without a release");
+    expect(lines).toContainEqual("the engine's 3 dataset names show versions their runs in the record made, and no output a run held without a release");
   });
 
   it('checks the same bag with the auditor’s script, and fails it with the decide entry dropped', async () => {
@@ -447,7 +452,7 @@ describe('an audit bag with a day held, decided and released (ADR 0009 §11)', (
     const r = await runFlow(s.db, s.doc, { smaltdb: SMALTDB, parameters: { month: '2024-02', day: '2024-02-01' }, log: s.rec.head() });
     expect(r.published).toEqual([]);
     const entry = await keepRun(s.rec, s.db, r.manifest, r.hash, r.run, { day: '2024-02-01', inputs: inputsOf(r.manifest) as unknown as JSONValue });
-    expect(failed(await auditBag(await pausedBag(s)))).toEqual([`run ${r.run} (#${entry.seq}): it was recorded as published, and its manifest's counts hold it`]);
+    expect(failed(await auditBag(await pausedBag(s)))).toEqual([`run ${r.run} (#${entry.seq}): it was recorded as published, and its manifest's counts hold it; it was recorded as published, and the engine held it (trips_valid)`]);
   });
 
   it("fails a held run whose manifest isn't in the bag", async () => {
@@ -455,5 +460,65 @@ describe('an audit bag with a day held, decided and released (ADR 0009 §11)', (
     const blob = (s.thu.entry.about as { blob: string }).blob;
     const f = failed(await auditBag(await pausedBag(s, (payload) => payload.splice(payload.findIndex((x) => x.path === `blobs/manifest-${blob}.json`), 1))));
     expect(f).toContain(`run ${s.thu.r.run} (#${s.thu.entry.seq}): its manifest isn't in the bag`);
+  });
+
+  it('fails a held output pointed under a number that is no run, as verify does', async () => {
+    const s = await holdingRecord();
+    await day(s, '2024-01-31', '2024-01');
+    const thu = await day(s, '2024-02-01', '2024-02');
+    const key = thu.r.manifest.outputs.zone_hour!.key;
+    s.db.exec('BEGIN');
+    pointDataset(s.db, 'zone_hour', key, findVersion(s.db, key)!.table, 999);
+    s.db.exec('COMMIT');
+    expect(failed(await auditBag(await pausedBag(s)))).toEqual(["zone_hour (engine): it shows run 999's version, and the engine has no run by that number"]);
+  });
+
+  it("takes a flow that doesn't hold its outputs together: what nothing held is published as it ran, proven by the held run's entry", async () => {
+    const s = await holdingRecord({ hold: ['checks'], together: false });
+    await day(s, '2024-01-31', '2024-01');
+    const thu = await day(s, '2024-02-01', '2024-02');
+    expect(thu.r.published).toEqual(['zone_list']);
+    expect(Object.keys(thu.keys)).toEqual(['borough_hour', 'zone_hour']);
+    const held = await auditBag(await pausedBag(s));
+    expect(failed(held)).toEqual([]);
+    expect(held.lines.map((l) => l.what)).toContainEqual(expect.stringMatching(new RegExp(`^zone_list: content [0-9a-f]{16}…, in run entry #${thu.entry.seq} proven in the record, as its run made it$`)));
+    // Released, it still holds; and a proof of a held output by the held run's entry, with no release, fails.
+    const decision = await decide(s, thu.r, thu.keys);
+    expect((await release(s, thu.r, decision, thu.keys)).out.outcome).toBe('applied');
+    expect(failed(await auditBag(await pausedBag(s)))).toEqual([]);
+    const forged = await pausedBag(s, (payload) => {
+      const f = payload.find((x) => x.path === 'proofs/zone_hour.json')!;
+      f.bytes = enc.encode(JSON.stringify({ ...JSON.parse(new TextDecoder().decode(f.bytes)), entry: thu.entry, inclusion: s.rec.proofOf(thu.entry.seq, s.rec.head().size) }));
+    });
+    expect(failed(await auditBag(forged))).toContainEqual(expect.stringMatching(new RegExp(`^zone_hour: content [0-9a-f]{16}…, in run entry #${thu.entry.seq} : entry #${thu.entry.seq} is a held run, which held zone_hour: only a release publishes it$`)));
+  });
+
+  it('fails a run the engine held, recorded as published, and its output shown with no release', async () => {
+    // Watched with no claim: the plugin holds the source as not judged, which the page's record can leave out.
+    const s = await holdingRecord({ hold: ['checks', 'wrong'], watch: { trips: 'history-audit.json' }, period: 'day' });
+    const bytes = enc.encode('{"days":[]}');
+    await pinFile(s.db, 'history-audit.json', bytes, await sha256Hex(bytes));
+    const r = await runFlow(s.db, s.doc, { smaltdb: SMALTDB, parameters: { month: '2024-01', day: '2024-01-31' }, log: s.rec.head() });
+    expect(r.holds.map((x) => `${x.by}: ${x.said}`)).toEqual(['unjudged: no claim for trips']);
+    const entry = await keepRun(s.rec, s.db, r.manifest, r.hash, r.run, { day: '2024-01-31', inputs: inputsOf(r.manifest) as unknown as JSONValue });
+    const key = r.manifest.outputs.zone_hour!.key;
+    s.db.exec('BEGIN');
+    pointDataset(s.db, 'zone_hour', key, findVersion(s.db, key)!.table, r.run);
+    s.db.exec('COMMIT');
+    expect(failed(await auditBag(await pausedBag(s)))).toEqual([
+      `run ${r.run} (#${entry.seq}): it was recorded as published, and the engine held it (trips)`,
+      `zone_hour (engine): it shows run ${r.run}'s version, which the engine held, with no release citing a decision in the record`,
+    ]);
+  });
+
+  it('fails a release whose decision was amended before it was released', async () => {
+    const s = await holdingRecord();
+    await day(s, '2024-01-31', '2024-01');
+    const thu = await day(s, '2024-02-01', '2024-02');
+    const first = await decide(s, thu.r, thu.keys);
+    // Decided again while the first release was on its way: don't publish, amending it. The release lands after.
+    const amended = await decide(s, thu.r, thu.keys, 'owner', { option: 'dont' }, null, first.seq);
+    const rel = await release(s, thu.r, first, thu.keys);
+    expect(failed(await auditBag(await pausedBag(s)))).toContain(`release #${rel.entry.seq}: 3 outputs of run ${thu.r.run} released, citing decision #${first.seq}: its decision, #${first.seq}, was amended by #${amended.seq} before it`);
   });
 });
