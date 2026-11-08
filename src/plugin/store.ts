@@ -91,6 +91,21 @@ export function releasesOf(db: Database, run?: number): StoredRelease[] {
   return rows.map(releaseOf);
 }
 
+/**
+ * What the engine names, for an audit bag (engine/datasets.json, core/audit.ts EngineName): each dataset name, the
+ * key it shows, the run that made it current and that run's manifest hash, and the applied release that pointed it,
+ * if one did; with every release, applied or refused (engine/releases.json).
+ */
+export function engineNames(db: Database): { datasets: { name: string; key: string; run: number; manifest: string; release: number | null }[]; releases: StoredRelease[] } {
+  const releases = releasesOf(db);
+  const datasets = db.query('SELECT d.name, d.key, d.run, r.hash FROM _smaltfl_datasets d LEFT JOIN _smaltfl_runs r ON r.id = d.run ORDER BY d.name').rows.map((row) => {
+    const [name, key, run] = [String(row[0]), String(row[1]), Number(row[2])];
+    const by = releases.filter((x) => x.outcome === 'applied' && x.run === run && x.names[name] === key).at(-1);
+    return { name, key, run, manifest: row[3] === null ? '' : String(row[3]), release: by ? by.id : null };
+  });
+  return { datasets, releases };
+}
+
 /** The version a dataset name shows now, and the run that made it current; null for a name smaltfl doesn't hold. */
 export function currentOf(db: Database, name: string): { key: string; run: number } | null {
   const row = db.query('SELECT key, run FROM _smaltfl_datasets WHERE name = ?', [name]).rows[0];

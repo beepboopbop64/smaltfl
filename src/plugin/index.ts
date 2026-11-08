@@ -11,6 +11,8 @@
  *   pin [name, bytes, sha256]         → { sha256 }    hash a source file in the engine, refuse a mismatch, serve it
  *                                                     as smaltfl:<name> (ADR 0006 §3); null bytes unpin it
  *   manifest [run]                    → RunManifest   a stored run's manifest
+ *   names                             → { datasets, releases }  what each dataset name shows, by which run and
+ *                                                     release, and every release: an audit bag's engine/ files
  *   act [ActInput]                    → Edit          check an action and record its edit or refusal
  *   edits / verifyEdits               → Edit[] / …    the hash chain of edits, and its check
  *
@@ -23,7 +25,7 @@ import { act, listEdits, verifyEdits, type ActInput } from './actions.js';
 import { pin, pinnedSource } from './pinned.js';
 import { release } from './release.js';
 import { RunError, runPlan } from './runtime.js';
-import { ensureStore } from './store.js';
+import { engineNames, ensureStore } from './store.js';
 import { verifyRun } from './verify.js';
 
 declare const __PLUGIN_VERSION__: string | undefined;
@@ -46,6 +48,10 @@ const smaltfl: SmaltPlugin = {
     host.addMethod('act', (ctx, [input]) => act(ctx.db, input as ActInput));
     host.addMethod('edits', (ctx) => listEdits(ctx.db));
     host.addMethod('verifyEdits', (ctx) => verifyEdits(ctx.db));
+    host.addMethod('names', (ctx) => {
+      ensureStore(ctx.db);
+      return engineNames(ctx.db);
+    });
     host.addMethod('manifest', (ctx, [run]) => {
       ensureStore(ctx.db);
       const row = ctx.db.query('SELECT manifest FROM _smaltfl_runs WHERE id = ?', [Number(run)]).rows[0];
