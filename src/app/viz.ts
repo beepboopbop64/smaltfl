@@ -303,8 +303,10 @@ export interface Part {
  * below the bar) as an outlined box, 6 px at least, never dashed.
  */
 export function partBar({ left, right, w = 334, aria }: { left: Part; right: Part; w?: number; aria: string }): string {
-  const h = 58;
-  const by = 32;
+  // The count labels sit on y 26; the bar starts low enough that a usual notch (5 px past the bar) clears their
+  // descenders ("10,518": the notch never runs through the comma).
+  const h = 62;
+  const by = 36;
   const bh = 20;
   const gap = 4;
   const slot = (p: Part) => Math.max(p.today, p.usual, 1);
@@ -324,7 +326,7 @@ export function partBar({ left, right, w = 334, aria }: { left: Part; right: Par
       if (today - usual > 1) {
         const ow = Math.min(Math.max(6, today - usual - 2), end - (x0 + usual + 2));
         s += `<rect class="over" x="${f1(x0 + usual + 2.75)}" y="${by + 0.75}" width="${f1(Math.max(1, ow - 1.5))}" height="${bh - 1.5}" rx="2"/>`;
-        s += `<line class="usual-end" x1="${f1(x0 + usual + 1)}" x2="${f1(x0 + usual + 1)}" y1="${by - 6}" y2="${by + bh + 6}"/>`;
+        s += `<line class="usual-end" x1="${f1(x0 + usual + 1)}" x2="${f1(x0 + usual + 1)}" y1="${by - 5}" y2="${by + bh + 5}"/>`;
       }
     }
     return sw;

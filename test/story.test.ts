@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
-import { CELL_KINDS, HEALTH_HEAD, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, shortWho, splitOf, splitSentence, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
+import { CELL_KINDS, HEALTH_HEAD, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, shortWho, splitOf, splitSentence, stepLabels, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
 import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
 const DAY = '2023-10-11'; // a Wednesday
@@ -190,6 +190,22 @@ describe('the words at a glance', () => {
     // 70,495 against ~68k beside a +2k step reads as 2.5k: 68.5k doesn't.
     expect([approx(68_486), approx(4_756), approx(110_157), approx(85_000)]).toEqual(['68.5k', '4.8k', '110k', '85k']);
     expect(countLabel({ today: 10_518, usual: 4_508, low: null, high: null })).toBe('10,518 · usual ~4.5k');
+  });
+
+  it('labels a waterfall at one precision, so its labels add up as read', () => {
+    // A usual 115,240 less 110,480 and 143 is 4,617: at thousands, 5k isn't 4,617; at tenths, 115.2 − 110.5 − 0.143 ≈ 4.6.
+    expect(stepLabels(115_240, [-110_480, -143], 4_617)).toEqual({ start: '115.2k', steps: ['−110.5k', '−143'], end: '4.6k' });
+    // 115.3 − 110.5 − 0.143 is 4.66, not 4.6: whole numbers, which add up.
+    expect(stepLabels(115_276, [-110_500, -143], 4_633)).toEqual({ start: '115,276', steps: ['−110,500', '−143'], end: '4,633' });
+    // 119k − 77k − 26 is 42k as read: thousands add up.
+    expect(stepLabels(119_431, [-77_466, -26], 41_939)).toEqual({ start: '119k', steps: ['−77k', '−26'], end: '42k' });
+    // Thousands when they add up and say each step within 5%.
+    expect(stepLabels(120_000, [-60_000, 2_000], 62_000)).toEqual({ start: '120k', steps: ['−60k', '+2k'], end: '62k' });
+    // A tenth that is .0 is said, so every label reads at the same place.
+    expect(stepLabels(103_040, [-45_020, 1_100], 59_120).steps[0]).toBe('−45.0k');
+    // A step under a thousand is said whole beside thousands, and still adds up as read.
+    expect(stepLabels(100_049, [-50_049, 49], 50_049)).toEqual({ start: '100k', steps: ['−50k', '+49'], end: '50k' });
+    expect(stepLabels(100_000, [], 100_000)).toEqual({ start: '100k', steps: [], end: '100k' });
   });
 
   it('labels the gate’s two bars by what they count, and says a margin within two points of the limit', () => {

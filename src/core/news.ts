@@ -48,8 +48,9 @@ export interface Finding {
   lasting?: string;
   /** The finding it likely follows from (a feed that stopped): its key. */
   because?: string;
-  /** Trips by pickup hour today and on a day like it, and the hours short of trips (an hours finding): for its bars. */
-  hours?: { got: number[]; usual: number[]; from: number; to: number };
+  /** Trips by pickup hour today and on a day like it, and the hours short of trips (an hours finding): for its bars;
+   * `fall`, how far short those hours are in percent, as its title says it. */
+  hours?: { got: number[]; usual: number[]; from: number; to: number; fall: number };
   /** The findings told together as one (the same trips seen through several columns): each with its own numbers. */
   members?: { column: string; value: string; label: string; share: number; range: NormalRange; rows: number }[];
 }
@@ -499,7 +500,7 @@ export function hoursShort(h: HistoryRanges, k: number, expected: number): Findi
     title: b === 23 ? `Trips fall ${fall}% from ${clockText(a * 60)}` : a === 0 ? `Trips start late, at ${clockText((b + 1) * 60)}` : `Gap in trips, ${clockText(a * 60)}–${clockText((b + 1) * 60)}`,
     detail: `${fmtInt(had)} trips ${span}, where a day like it has about ${fmtInt(usual)}.`,
     look: 'history', rows: Math.round(usual - had), acts: ['incident', 'notify', 'expected'],
-    hours: { got: [...got], usual: want.map((x) => Math.round(x)), from: a, to: b },
+    hours: { got: [...got], usual: want.map((x) => Math.round(x)), from: a, to: b, fall },
   };
 }
 

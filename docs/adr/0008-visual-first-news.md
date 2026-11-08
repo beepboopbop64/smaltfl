@@ -107,7 +107,9 @@ where about 35,000 are usual, and everything else held.
    the fall as the head does ("Thu from 13:00: 3,679 trips · usual ~80k (−95%)") and its shortfall an estimate with
    its bound ("~375k fewer (≥270k)"), never the bound alone; the checks rule by rule against their usual rows, on one
    count scale over an incident's days so far, and the outputs the held run didn't publish. Numbers that sit beside a
-   difference are rounded finely enough to subtract ("~68.5k" beside "+2k").
+   difference are rounded finely enough to subtract ("~68.5k" beside "+2k"); a waterfall's labels share one place,
+   the coarsest at which they add up as read and each is within 5% of its count ("119k −77k −26 → 42k"), else whole
+   numbers ("114,913 −110,137 −143 → 4,633").
 
 7. **Marks** carry severity by shape and fill first and colour third (the tokens' hues are too close in greyscale):
    something wrong is a filled hexagon with "!", unusual an outlined triangle on a wash, a note a small dot, ok no mark,
@@ -154,13 +156,16 @@ where about 35,000 are usual, and everything else held.
     never a count of wrong days before then ("693 days to Thu Sep 21 · 23 wrong · 36 unusual" after). Days after the
     viewed one are lighter and not counted. A key says what each cell is, and each year's block names its year on its
     first row. The band's "outside last year" is another measure (days outside their range), said as such. A day with
-    something wrong shows its checks whether they held, came near or passed ("Checks passed", Sat Sep 17, 2022), and
-    says what its outputs are: "Outputs not published" when held, else what they were built from, "Outputs built from
-    a short day" or "Outputs built without Vendor 1", published ones ticked in their icon, not drawn in a severity
-    colour; its boxes carry up to three outputs, so their number is said only past three. A tap lists them, each with
-    its rows and a tap to its card. An output (or a step after the load) built from such a day says what its load
-    lacked above its own rows' news ("Built from a load missing 13:00–24:00", "Its load: Trips fall 95% from 13:00"),
-    for the day its rows are: on a held day the last day that passed, itself short at times. Holding such outputs, and
+    something wrong shows its checks whether they held, came near or passed ("Checks passed", Sat Sep 17, 2022), their
+    sheet titled with the share their bars say and marked as the checks are (wrong when held, unusual when near the
+    limit or their own findings are, no mark when they passed as usual), and says what its outputs are: "Outputs not published" when held, else what they were built from, "Outputs built from
+    a short day", "Outputs built without Vendor 1" (under a tenth of its usual count came, as its head's "almost
+    nothing") or "with Vendor 1 short" (Aug 10, 2022: 85% short), published ones ticked in their icon, not drawn in a
+    severity colour; its boxes carry up to three outputs, so their number is said only past three. A tap lists them,
+    each with its rows and a tap to its card. An output (or a step after the load) built from such a day says what its
+    load lacked above its own rows' news, with its head's figures ("Built from a load 95% short from 13:00", "Its load:
+    Trips fall 95% from 13:00"; hours are short, never missing, as trips still came in them), for the day its rows are:
+    on a held day the last day that passed, itself short at times. Holding such outputs, and
     never keeping a day that was itself wrong, change what the flow publishes: an open question (Q-45). One colour
     rule: a canvas card's line and its badge take the card's own severity and nothing else does (a routine count, such
     as Nov 15, 2022's ordinary 4.6% dropped, is neutral ink); the status line after a run takes its day's verdict,

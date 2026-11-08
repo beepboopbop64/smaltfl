@@ -261,6 +261,9 @@ export function gateLabels(g: Gate): { said: string; share: string; limit: strin
   };
 }
 
+/** The gate as a head or a sheet's title, its share said as its bars say it: "Held at trips_valid: 10.45% dropped". */
+export const gateHead = (g: Gate) => `${g.held ? 'Held at ' : ''}${g.step}: ${gateLabels(g).said} dropped`;
+
 /** A company's name said short, legal form and all but its first two words left off: "Creative Mobile". */
 export function shortWho(name: string): string {
   return name.replace(/,?\s+(LLC|L\.L\.C\.|Inc\.?|Ltd\.?|Corp\.?|Co\.?|Company)$/i, '').split(/\s+/).slice(0, 2).join(' ');
@@ -686,7 +689,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
         ? partRatio < 0.1 ? (/^Vendor /.test(split.name) ? `${split.name} sent almost nothing` : `${part} almost gone`) : `${part} ${pctShort(1 - partRatio)} short`
         : partRatio >= 1.95 ? `${part} ${partRatio.toFixed(1).replace(/\.0$/, '')}× usual` : `${part} up ${pctShort(partRatio - 1)}`;
   } else if (hero === 'amount' && volume) head = volume.title;
-  else if (hero === 'gate' && gate) head = `Held at ${gate.step}: ${pastLimit(gate.share, gate.limit)} dropped`;
+  else if (hero === 'gate' && gate) head = gateHead(gate);
   else if (population && popShare) {
     // "More Flex Fare trips: 5.3%": the population, which way, and its share; its usual range is on the visual under it.
     const way = population.kind === 'surged' ? 'More' : 'Fewer';
@@ -814,6 +817,48 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     },
     findings: [...told].sort(byRank),
   };
+}
+
+/**
+ * A waterfall's labels at one precision: a total, its steps and the total they come to, said in thousands to the place
+ * the finest of them needs, so the labels, read back, add up within half their last digit ("119k −77k −26 → 42k",
+ * "115.2k −110.5k −143 → 4.6k"; never "119k" beside a "−77.4k"), and each is within 5% of what it shows (never "5k"
+ * for 4,633). A count under a thousand is said whole; when no place of thousands adds up, every label is whole
+ * ("114,913 −110,137 −143 → 4,633").
+ */
+export function stepLabels(start: number, steps: readonly number[], end: number): { start: string; steps: string[]; end: string } {
+  const signed = (v: number, text: string) => `${v >= 0 ? '+' : '−'}${text}`;
+  for (const dec of [0, 1]) {
+    const unit = 10 ** (3 - dec);
+    const back = (v: number) => (Math.abs(v) < 1000 ? Math.round(v) : Math.sign(v) * Number((Math.abs(v) / 1000).toFixed(dec)) * 1000);
+    const say = (v: number) => (Math.abs(v) < 1000 ? String(Math.round(Math.abs(v))) : `${(Math.abs(v) / 1000).toFixed(dec)}k`);
+    const adds = Math.abs(back(start) + steps.reduce((t, v) => t + back(v), 0) - back(end)) <= unit / 2;
+    const near = [start, ...steps, end].every((v) => Math.abs(back(v) - v) <= 0.05 * Math.abs(v));
+    if (adds && near) return { start: say(start), steps: steps.map((v) => signed(v, say(v))), end: say(end) };
+  }
+  return { start: fmtInt(start), steps: steps.map((v) => signed(v, fmtInt(Math.abs(v)))), end: fmtInt(end) };
+}
+
+/**
+ * The split as steps from a usual day to this one: the usual count, the side that moved, the other side, and today's
+ * count (which the steps come to), each labelled at one precision (stepLabels). Null without a split.
+ */
+export function splitSteps(s: Pick<Story, 'split' | 'amount'>): { name: string; value: number; label: string }[] | null {
+  const sp = s.split;
+  if (!sp || !s.amount) return null;
+  const held = sp.kind === 'held';
+  // Whole trips throughout, so the steps come to today's count exactly.
+  const [part, rest] = [Math.round(sp.part.usual), Math.round(sp.rest.usual)];
+  const moved = held ? sp.rest.today - rest : sp.part.today - part;
+  const other = held ? sp.part.today - part : sp.rest.today - rest;
+  const usual = part + rest;
+  const l = stepLabels(usual, [moved, other], s.amount.value);
+  return [
+    { name: 'Usual', value: usual, label: l.start },
+    { name: held ? 'Everything else' : sp.name, value: moved, label: l.steps[0]! },
+    { name: held ? sp.name : 'Everything else', value: other, label: l.steps[1]! },
+    { name: 'Today', value: s.amount.value, label: l.end },
+  ];
 }
 
 /**

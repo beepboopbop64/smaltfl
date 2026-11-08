@@ -114,8 +114,13 @@ describe('the History calendar’s header', () => {
 describe('what the outputs of a day with something wrong say', () => {
   const base = { severity: 'alert', split: null, hours: null, amount: { value: 40_000, low: 90_000, expected: 120_000 }, gate: { held: false } };
   it('names what the load lacked, never "published" alone', () => {
-    expect(lacked({ ...base, hours: { from: 13, to: 23 } })!.long).toBe('Built from a load missing 13:00–24:00');
-    expect(lacked({ ...base, split: { kind: 'vanished', name: 'Vendor 1' } })).toEqual({ short: 'without Vendor 1', long: 'Built without Vendor 1’s trips' });
+    // Hours fall short, as the head says them, and are never said to be missing: trips still came in them.
+    expect(lacked({ ...base, hours: { from: 13, to: 23, fall: 95 } })).toEqual({ short: 'from a short day', long: 'Built from a load 95% short from 13:00' });
+    expect(lacked({ ...base, hours: { from: 6, to: 15, fall: 97 } })!.long).toBe('Built from a load 97% short 06:00–16:00');
+    expect(lacked({ ...base, hours: { from: 0, to: 6, fall: 90 } })!.long).toBe('Built from a load 90% short until 07:00');
+    // A part is "without" only under a tenth of its usual count, as its head's "almost gone"; else it was short.
+    expect(lacked({ ...base, split: { kind: 'vanished', name: 'Vendor 1', part: { today: 3, usual: 35_000 } } })).toEqual({ short: 'without Vendor 1', long: 'Built without Vendor 1’s trips' });
+    expect(lacked({ ...base, split: { kind: 'vanished', name: 'Vendor 1', part: { today: 5197, usual: 33_607 } } })).toEqual({ short: 'with Vendor 1 short', long: 'Built with Vendor 1’s trips 85% short' });
     expect(lacked(base)).toEqual({ short: 'from a short day', long: 'Built from a short day (−67% trips)' });
     expect(lacked({ ...base, amount: { value: 100_000, low: 90_000, expected: 120_000 } })!.short).toBe('from a day with an alert');
     expect(lacked({ ...base, severity: 'warn' })).toBeNull();

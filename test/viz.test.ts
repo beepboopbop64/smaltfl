@@ -67,6 +67,15 @@ describe('the news’s charts', () => {
     // The rest's 1,014 extra trips are 4 px at this scale: drawn as 6 px (less its outline).
     expect(Math.min(...overs)).toBeGreaterThanOrEqual(4.5 - 1e-9);
     expect(svg.match(/class="usual-end"/g)).toHaveLength(2);
+    // Each usual notch stays clear of the count labels over the bar, their descenders (a comma, ~3 px) included.
+    const labels = [...svg.matchAll(/<text x="[\d.]+" y="([\d.]+)" text-anchor="(?:start|end)" class="lbl-m">/g)].map((m) => Number(m[1]));
+    const notches = [...svg.matchAll(/class="usual-end" x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)" y2="([\d.]+)"/g)].map((m) => [Number(m[1]), Number(m[2])] as const);
+    expect(labels).toHaveLength(2);
+    expect(notches).toHaveLength(2);
+    for (const [y1, y2] of notches) {
+      for (const y of labels) expect(y1, `notch from ${y1}, label on ${y}`).toBeGreaterThanOrEqual(y + 4);
+      expect(y2).toBeLessThanOrEqual(62);
+    }
   });
 
   it('marks earlier days in a strip, and gives axes ends that don’t jump', () => {

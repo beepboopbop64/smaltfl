@@ -19,7 +19,7 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, toldLine, type EpisodeDay } from '../core/days.js';
-import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, ruleOrder, ruleUsual, shortWho, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
+import { CELL_KINDS, CELL_NAMES, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
@@ -2948,19 +2948,19 @@ function causeDetail(story: Story, card: string): void {
   const day = story.day;
   const body: (Node | null)[] = [];
   const sp = story.split;
-  if (sp && story.amount) {
-    const moved = sp.kind === 'held' ? sp.rest.today - sp.rest.usual : sp.part.today - sp.part.usual;
-    const other = sp.kind === 'held' ? sp.part.today - sp.part.usual : sp.rest.today - sp.rest.usual;
-    const [movedName, otherName] = sp.kind === 'held' ? ['Everything else', sp.name] : [sp.name, 'Everything else'];
-    const usual = sp.part.usual + sp.rest.usual;
+  const steps = splitSteps(story);
+  if (sp && story.amount && steps) {
+    // Its labels at one precision, so they add up as read (stepLabels: "119k −77k −26 → 42k").
+    const [usual, moved, other, today] = steps;
+    const way = (v: number) => `${v >= 0 ? '+' : '−'}${fmtInt(Math.abs(v))}`;
     body.push(block('From a usual day to this one', svgNode(waterfall({
       steps: [
-        { name: 'Usual', label: approx(usual), value: usual, total: true, kind: 'total' },
-        { name: movedName, label: `${moved >= 0 ? '+' : '−'}${approx(Math.abs(moved))}`, value: moved, kind: moved >= 0 ? 'up' : 'down', sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined },
-        { name: otherName, label: `${other >= 0 ? '+' : '−'}${approx(Math.abs(other))}`, value: other, kind: other >= 0 ? 'up' : 'down' },
-        { name: 'Today', label: approx(story.amount.value), value: story.amount.value, total: true, kind: 'total' },
+        { ...usual, total: true, kind: 'total' },
+        { ...moved, kind: moved.value >= 0 ? 'up' : 'down', sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined },
+        { ...other, kind: other.value >= 0 ? 'up' : 'down' },
+        { ...today, total: true, kind: 'total' },
       ],
-      aria: `From a usual day's ${fmtInt(usual)} trips to ${fmtInt(story.amount.value)}: ${movedName} ${moved >= 0 ? '+' : '−'}${fmtInt(Math.abs(moved))}, ${otherName} ${other >= 0 ? '+' : '−'}${fmtInt(Math.abs(other))}.`,
+      aria: `From a usual day's ${fmtInt(usual.value)} trips to ${fmtInt(today.value)}: ${moved.name} ${way(moved.value)}, ${other.name} ${way(other.value)}.`,
     }))));
     const part = stripOf({ of: 'count', column: sp.column, value: sp.value }, day, 28, story.severity);
     const at = part.at(-1);
@@ -3128,9 +3128,13 @@ function gateBlocks(g: Gate, day: string, countMax?: number, findings: readonly 
 function gateSheet(story: Story, card: string): void {
   const g = story.gate;
   if (!g) return;
-  const said = pastLimit(g.rows ? g.dropped / g.rows : 0, g.limit);
   const anchor = anchorOf(story);
-  openDetail(g.held ? `Held at ${g.step}: ${said} dropped` : `${g.step}: ${said} dropped`, g.held ? 'alert' : 'warn', gateBlocks(g, story.day, gateScale(story), story.findings), anchor, card, g.held ? 'notify' : story.primary);
+  // Its title says the share as the bars under it do, and takes the checks' own mark (ADR 0008 §7): held is something
+  // wrong; unusual only when their findings are, or the share came within a point of the limit; no mark for a gate
+  // that passed as it usually does (Sat Sep 17, 2022: 4% dropped).
+  const worst = checksWorst(g, story.findings);
+  const sev: Severity = worst === 'alert' || worst === 'warn' ? worst : g.near ? 'warn' : 'ok';
+  openDetail(gateHead(g), sev, gateBlocks(g, story.day, gateScale(story), story.findings), anchor, card, g.held ? 'notify' : story.primary);
 }
 
 /** What a tap on the checks' card opens: what the card above doesn't show. The rows dropped day by day, each day
@@ -3437,12 +3441,20 @@ function storyNews(card: string, story: Story): HTMLElement[] {
   return out;
 }
 
+/** The checks' own findings (their rows dropped, their rules) that say something. */
+const checksFindings = (findings: readonly Finding[]) => findings.filter((f) => (f.kind === 'dropped' || f.kind === 'rule') && f.severity !== 'ok');
+
+/** The checks' own severity: something wrong when held, else the worst of their own findings. */
+function checksWorst(g: Gate, findings: readonly Finding[]): Severity {
+  return g.held ? 'alert' : checksFindings(findings).reduce<Severity>((w, f) => (SEV_RANK[f.severity] < SEV_RANK[w] ? f.severity : w), 'ok');
+}
+
 /** The checks' news: held or passed, the gate, and the rules. */
 function checksNews(card: string, story: Story): HTMLElement[] {
   const g = story.gate;
   if (!g) return [];
-  const findings = story.findings.filter((f) => (f.kind === 'dropped' || f.kind === 'rule') && f.severity !== 'ok');
-  const worst: Severity = g.held ? 'alert' : findings.reduce<Severity>((w, f) => (SEV_RANK[f.severity] < SEV_RANK[w] ? f.severity : w), 'ok');
+  const findings = checksFindings(story.findings);
+  const worst = checksWorst(g, story.findings);
   const m = sevMark(worst);
   // Said as its bar says it (8.6%, not 9% over a bar labelled 8.6%), never equal to the limit it passed or missed.
   const head = `${g.held ? 'Held' : 'Passed'}: ${gateLabels(g).said} dropped`;

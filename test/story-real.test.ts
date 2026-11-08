@@ -8,7 +8,7 @@ import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
 import { lacked, reachLabel, shortfall, type EpisodeDay } from '../src/core/days.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
-import { CELL_KINDS, countRange, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
+import { CELL_KINDS, countRange, gateHead, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, splitSteps, storyOf, wordsIn } from '../src/core/story.js';
 
 const HISTORY = new URL('../dist/app/data/history.json', import.meta.url);
 const has = existsSync(HISTORY) && (JSON.parse(readFileSync(HISTORY, 'utf8')) as HistoryFile).days.length > 400;
@@ -63,21 +63,58 @@ describe.skipIf(!has)('the story on the real history', () => {
     expect(fri.bound).toBeLessThan(fri.estimate);
   });
 
+  it('labels the split’s waterfall at one precision, so the labels add up as read and each is the value it shows', () => {
+    // A label read back: "119.4k", "−77.5k", "−26", "41,939"; its unit, half of which is what rounding may move it.
+    const read = (l: string) => {
+      const m = l.replace(/,/g, '').match(/^([+−]?)(\d+(?:\.(\d+))?)(k?)$/)!;
+      const k = m[4] ? 1000 : 1;
+      return { v: (m[1] === '−' ? -1 : 1) * Number(m[2]) * k, unit: 10 ** -(m[3]?.length ?? 0) * k };
+    };
+    for (const d of ['2023-09-21', '2023-09-22', '2022-11-14', '2022-09-17', '2024-01-01', '2022-08-10', '2022-11-15']) {
+      const steps = splitSteps(story(d))!;
+      const said = steps.map((x) => `${x.name} ${x.label}`).join(' | ');
+      const back = steps.map((x) => read(x.label));
+      const unit = Math.max(...back.map((b) => b.unit));
+      // Today is what the steps come to, and so are its labels, within half the coarsest label's last place.
+      expect(steps[0]!.value + steps[1]!.value + steps[2]!.value, d).toBeCloseTo(steps[3]!.value, 6);
+      expect(Math.abs(back[0]!.v + back[1]!.v + back[2]!.v - back[3]!.v), `${d}: ${said}`).toBeLessThanOrEqual(unit / 2 + 1e-9);
+      steps.forEach((x, i) => expect(Math.abs(back[i]!.v - x.value), `${d}: ${said}`).toBeLessThanOrEqual(back[i]!.unit / 2 + 1e-9));
+    }
+  });
+
+  it('says what a day’s outputs were built from with the figures its head says, never against it (ADR 0008 §10)', () => {
+    for (const d of ['2022-01-29', '2022-08-10', '2022-09-17', '2022-11-08', '2022-11-14', '2022-12-19', '2023-09-21', '2023-11-07']) {
+      const s = story(d);
+      const l = lacked(s)!;
+      // The head's percentages and times are the long form's; hours fall short and are never missing; a part is
+      // "without" only on a day its head says it almost stopped.
+      for (const n of s.head.match(/\d+%|\d\d:\d\d/g) ?? []) expect(l.long, `${d}: ${s.head} | ${l.long}`).toContain(n);
+      expect(l.long, d).not.toMatch(/missing/);
+      expect(/without/.test(l.long + l.short), `${d}: ${s.head} | ${l.short}`).toBe(/almost (gone|nothing)/.test(s.head));
+    }
+  });
+
   it('says what outputs built from a day with something wrong were built from, and shows its checks (ADR 0008 §10)', () => {
     const glance = (d: string) => { const s = story(d); return [...glanceStrings(s), reachLabel(s, 3)].reduce((t, x) => t + wordsIn(x), 0); };
     expect(reachLabel(story('2023-09-21'), 3)).toBe('Outputs built from a short day');
     expect(reachLabel(story('2023-09-21'), 5)).toBe('5 outputs built from a short day');
-    expect(lacked(story('2023-09-21'))!.long).toBe('Built from a load missing 13:00–24:00');
-    expect(lacked(story('2022-09-17'))!.long).toBe('Built from a load missing 15:00–24:00');
+    expect(lacked(story('2023-09-21'))!.long).toBe('Built from a load 95% short from 13:00');
+    expect(lacked(story('2022-09-17'))!.long).toBe('Built from a load 96% short from 15:00');
+    expect(lacked(story('2022-01-29'))!.long).toMatch(/^Built from a load \d+% short 06:00–16:00$/);
     expect(reachLabel(story('2022-11-14'), 3)).toBe('Outputs built without Vendor 1');
     expect(reachLabel(story('2022-11-15'), 3)).toBe('Outputs built without Vendor 1');
+    // A part that only fell partway is short, never "without" (Aug 10, 2022: 5,197 of ~33.6k Vendor 1 trips came).
+    expect(story('2022-08-10').head).toBe('Vendor 1 records 85% short');
+    expect(reachLabel(story('2022-08-10'), 3)).toBe('Outputs built with Vendor 1 short');
+    expect(lacked(story('2022-08-10'))!.long).toBe('Built with Vendor 1’s trips 85% short');
+    expect(reachLabel(story('2023-11-07'), 3)).toBe('Outputs built with Extras 7.5 short');
     expect(reachLabel(story('2023-09-22'), 3)).toBe('Outputs not published');
     expect(lacked(story('2023-09-25'))).toBeNull();
     // The checks show on every day with something wrong: passed on Sat Sep 17, 2022 and Mon Nov 14, 2022.
     expect(story('2022-09-17').labels.hero).toContain('Checks passed');
     expect(story('2022-11-14').labels.hero).toContain('Checks passed');
     expect(story('2023-09-21').labels.hero).toContain('Checks near the limit');
-    for (const d of ['2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24', '2022-09-17', '2022-09-18', '2022-11-14', '2022-11-15']) expect(glance(d), `${d}: ${[...glanceStrings(story(d)), reachLabel(story(d), 3)].join(' | ')}`).toBeLessThanOrEqual(60);
+    for (const d of ['2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24', '2022-09-17', '2022-09-18', '2022-11-14', '2022-11-15', '2022-08-10', '2023-11-07']) expect(glance(d), `${d}: ${[...glanceStrings(story(d)), reachLabel(story(d), 3)].join(' | ')}`).toBeLessThanOrEqual(60);
   });
 
   it('says each split day’s sentence from its own figures', () => {
@@ -177,7 +214,7 @@ describe.skipIf(!has)('the story on the real history', () => {
         expect(Math.abs(shown - v), `${label}: ${shown} for ${v}`).toBeLessThanOrEqual(Math.max(unit / 2, loose ? 0.05 * v : 0) + 1e-9);
       });
     };
-    for (const day of ['2023-09-22', '2022-11-15', '2024-01-01', '2023-09-21', '2022-09-18']) {
+    for (const day of ['2023-09-22', '2022-11-15', '2024-01-01', '2023-09-21', '2022-09-18', '2023-10-29']) {
       const s = story(day);
       const [part, partNum, , restNum] = s.split ? s.labels.hero : [];
       if (s.split && s.hero === 'split') {
@@ -205,6 +242,19 @@ describe.skipIf(!has)('the story on the real history', () => {
         if (g.margin) said(g.margin, Math.abs(s.gate.share - s.gate.limit!) * 100);
         said(g.rows, s.gate.dropped);
         said(g.usual!, s.gate.usual!.low, s.gate.usual!.high);
+      }
+      if (s.gate) {
+        // The gate's sheet title says the share as its bars do, so the margin beside them is the title's share less
+        // the limit at the decimals printed (Sep 21, 2023: 9.55%, 0.45 pt under; never 9.5% over 0.45).
+        const g = gateLabels(s.gate);
+        const title = gateHead(s.gate);
+        said(title.replace(/^[^:]*: /, ''), s.gate.share * 100);
+        expect(title, day).toContain(` ${g.said} dropped`);
+        if (g.margin) {
+          const [share, margin] = [g.said, g.margin].map((x) => x.match(/\d+(?:\.\d+)?/)![0]);
+          const dec = (margin!.split('.')[1] ?? '').length;
+          expect(Math.abs(Number(share) - s.gate.limit! * 100).toFixed(dec), `${title} | ${g.margin}`).toBe(margin);
+        }
       }
     }
   });
@@ -234,6 +284,9 @@ describe.skipIf(!has)('the story on the real history', () => {
     // Far past it, no margin and no zoom: Fri Sep 22, 2023.
     expect(gateLabels(story('2023-09-22').gate!)).toMatchObject({ share: '46% of arrived rows dropped', margin: null, rows: '2,116 rows dropped' });
     expect(glanceStrings(story('2022-09-18')).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(60);
+    // The sheet a tap on the gate opens is titled with the share its bars say.
+    expect(gateHead(story('2022-09-18').gate!)).toBe('Held at trips_valid: 10.45% dropped');
+    expect(gateHead(story('2023-09-21').gate!)).toBe('trips_valid: 9.55% dropped');
   });
 
   it('says each rule of the checks one way on the real days: in_month never fails, no range no "·" (tabs #12)', () => {

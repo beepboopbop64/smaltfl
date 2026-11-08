@@ -112,19 +112,30 @@ export function toldLine(entries: readonly { day: string; act: string }[], since
 }
 
 /** What an output of a day says of its load: the story's parts it needs. */
-type LoadStory = { severity: string; split: { kind: string; name: string } | null; hours?: { from: number; to: number } | null; amount: { value: number; low: number; expected: number } | null; gate: { held: boolean } | null };
+type LoadStory = { severity: string; split: { kind: string; name: string; part: { today: number; usual: number } } | null; hours?: { from: number; to: number; fall: number } | null; amount: { value: number; low: number; expected: number } | null; gate: { held: boolean } | null };
 
 const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
 
 /**
- * What a load with something wrong lacked, as the outputs built from it say it (ADR 0008 §10): short for the outputs
- * row ("from a short day", "without Vendor 1"), long for an output's own news ("Built from a load missing
- * 13:00–24:00"). Null when the day had nothing wrong.
+ * What a load with something wrong lacked, as the outputs built from it say it (ADR 0008 §10), from the figures its
+ * head says: short for the outputs row ("from a short day", "without Vendor 1"), long for an output's own news ("Built
+ * from a load 95% short from 13:00"). A part is said to be missing ("without") only when under a tenth of its usual
+ * count came, as the head's "almost gone"; else it was short ("with Vendor 1 short"). Hours are short, never missing:
+ * the trips fall, they don't end. Null when the day had nothing wrong.
  */
 export function lacked(s: LoadStory): { short: string; long: string } | null {
   if (s.severity !== 'alert') return null;
-  if (s.split?.kind === 'vanished') return { short: `without ${s.split.name}`, long: `Built without ${s.split.name}’s trips` };
-  if (s.hours) return { short: 'from a short day', long: `Built from a load missing ${hh(s.hours.from)}–${hh(s.hours.to + 1)}` };
+  const sp = s.split;
+  if (sp?.kind === 'vanished') {
+    const ratio = sp.part.today / Math.max(1, sp.part.usual);
+    if (ratio < 0.1) return { short: `without ${sp.name}`, long: `Built without ${sp.name}’s trips` };
+    return { short: `with ${sp.name} short`, long: `Built with ${sp.name}’s trips ${Math.round((1 - ratio) * 100)}% short` };
+  }
+  if (s.hours) {
+    const { from, to, fall } = s.hours;
+    const span = to === 23 ? `from ${hh(from)}` : from === 0 ? `until ${hh(to + 1)}` : `${hh(from)}–${hh(to + 1)}`;
+    return { short: 'from a short day', long: `Built from a load ${fall}% short ${span}` };
+  }
   if (s.amount && s.amount.value < s.amount.low) {
     const change = Math.round((1 - s.amount.value / Math.max(1, s.amount.expected)) * 100);
     return { short: 'from a short day', long: `Built from a short day (−${change}% trips)` };
@@ -134,7 +145,8 @@ export function lacked(s: LoadStory): { short: string; long: string } | null {
 
 /**
  * The outputs row on a day with something wrong: never "published" alone, which reads as good news. Held: "Outputs
- * not published"; else what they were built from: "Outputs built from a short day", "Outputs built without Vendor 1".
+ * not published"; else what they were built from: "Outputs built from a short day", "Outputs built without Vendor 1",
+ * "Outputs built with Vendor 1 short".
  * Its icon draws a box for each of up to three outputs, so their number is said only past three ("5 outputs …").
  */
 export function reachLabel(s: LoadStory, n: number): string {
