@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { documentFormat, insertAfter, takeOut, validateDocument, type FlowDocument, type PublishDef } from '../src/core/document.js';
+import { documentFormat, insertAfter, takeOut, validateDocument, type FlowDocument, type PublishDef, type WatchDef } from '../src/core/document.js';
 import { renameIdentifier } from '../src/core/sqltext.js';
 import { nodeKey } from '../src/core/keys.js';
 import { shapeOf } from '../src/core/optimize.js';
@@ -254,15 +254,15 @@ describe('a document that says what holds its publication (ADR 0009 §2)', () =>
     expect(documentFormat(visualFlow())).toBe(1);
     expect(validateDocument({ ...holding(PUBLISH), smaltfl: 1 })).toEqual([{ path: '$.smaltfl', message: 'expected 2: a document with a publish block is format 2' }]);
     expect(validateDocument({ ...visualFlow(), smaltfl: 2 })).toEqual([{ path: '$.smaltfl', message: 'expected 1: format 2 is for a document with a publish block' }]);
-    expect(validateDocument({ ...visualFlow(), smaltfl: 3 as never })).toEqual([{ path: '$.smaltfl', message: 'expected 1 or 2, the formats this version reads' }]);
+    expect(validateDocument({ ...visualFlow(), smaltfl: 4 as never })).toEqual([{ path: '$.smaltfl', message: 'expected 1, 2, 3, the formats this version reads' }]);
   });
 
   it('says each problem with its block', () => {
     const issues = (publish: unknown) => validateDocument(holding(publish));
     expect(issues('all')).toEqual([{ path: '$.publish', message: '{ hold, watch, period, together }' }]);
-    expect(issues({ hold: [] })).toEqual([{ path: '$.publish.hold', message: 'a list of what holds: checks, short, wrong' }]);
+    expect(issues({ hold: [] })).toEqual([{ path: '$.publish.hold', message: 'a list of what holds: checks, short, unlearned, wrong' }]);
     expect(issues({ hold: ['checks', 'late', 'checks'] })).toEqual([
-      { path: '$.publish.hold[1]', message: 'one of checks, short, wrong' },
+      { path: '$.publish.hold[1]', message: 'one of checks, short, unlearned, wrong' },
       { path: '$.publish.hold[2]', message: 'checks is listed twice' },
     ]);
     expect(issues({ ...PUBLISH, hold: ['short', 'wrong'] })).toEqual([{ path: '$.publish.hold', message: 'short or wrong, not both: wrong holds every day short does' }]);
@@ -290,6 +290,103 @@ describe('a document that says what holds its publication (ADR 0009 §2)', () =>
     const a = holding(PUBLISH);
     expect(await flowHash(a)).not.toBe(await flowHash({ ...a, publish: { ...PUBLISH, together: false } }));
     expect(await flowHash({ ...a, layout: { zone_hour: [5, 5] } })).toBe(await flowHash(a));
+  });
+});
+
+/** The reference flow in the general form (format 3): a publish block whose watch is an object, and what else is given. */
+const general = (watch: Partial<WatchDef> | string = {}, extra: Partial<FlowDocument> = {}): FlowDocument => {
+  const doc = holding({ hold: ['checks', 'wrong'], period: 'day', watch: { trips: typeof watch === 'string' ? watch : { history: 'history.json', ...watch } } });
+  return { ...doc, smaltfl: 3, ...extra };
+};
+/** A property that marks a column's bad codes, as a sign-in flow's result would. */
+const BAD_RESULT = { column: 'payment_type', title: 'Payment type', description: 'How the trip was paid: one of these codes.', values: { '1': 'Credit card', '2': 'Cash', '4': 'Dispute' }, bad: ['4'] };
+const withOntology = (doc: FlowDocument, properties: unknown[], nouns?: unknown): FlowDocument => ({ ...doc, ontology: { objectTypes: [], linkTypes: [], actionTypes: [], properties: properties as never, ...(nouns ? { nouns: nouns as never } : {}) } });
+
+describe('a document that says how its days are judged (format 3, ADR 0010 §10)', () => {
+  it('is format 3 with a calendar, a watch given as an object, or a mark that changes verdicts; and only then', () => {
+    expect(documentFormat(general())).toBe(3);
+    expect(validateDocument(general())).toEqual([]);
+    expect(documentFormat({ ...holding(PUBLISH), calendar: { base: 'none' } })).toBe(3);
+    expect(documentFormat({ ...visualFlow(), calendar: { base: 'us' } })).toBe(3);
+    expect(documentFormat(withOntology(visualFlow(), [BAD_RESULT]))).toBe(3);
+    expect(documentFormat(withOntology(visualFlow(), [{ column: 'country', title: 'Country', description: 'Where from', newValues: 'alert' }]))).toBe(3);
+    expect(documentFormat(withOntology(visualFlow(), [{ column: 'tpep_dropoff_datetime', title: 'Drop-off', description: 'When', after: { of: 'tpep_pickup_datetime', minutes: 15 } }]))).toBe(3);
+    // Nouns, a part's name and a sender's role are display: they change no verdict, so the format stays.
+    const display = withOntology(holding(PUBLISH), [{ column: 'VendorID', title: 'Vendor', description: 'Who sent it', values: { '1': 'Creative Mobile' }, name: 'Vendor {code}', role: 'sender' }], { trips: { one: 'trip', many: 'trips' } });
+    expect(documentFormat(display)).toBe(2);
+    expect(validateDocument(display)).toEqual([]);
+    // A legacy watch stays legal in format 3, meaning the settings every flow had before.
+    expect(validateDocument({ ...general('history.json'), calendar: { base: 'us-nyc' } })).toEqual([]);
+    const three = 'a calendar, a watch given as an object, or a mark that changes verdicts (bad, newValues, after)';
+    expect(validateDocument({ ...general(), smaltfl: 2 })).toEqual([{ path: '$.smaltfl', message: `expected 3: a document with ${three} is format 3` }]);
+    expect(validateDocument({ ...holding(PUBLISH), smaltfl: 3 })).toEqual([{ path: '$.smaltfl', message: `expected 2: format 3 is for a document with ${three}` }]);
+    expect(validateDocument({ ...visualFlow(), smaltfl: 3 })).toEqual([{ path: '$.smaltfl', message: `expected 1: format 3 is for a document with ${three}` }]);
+  });
+
+  it('refuses a watch setting it can’t judge yet, and any field it doesn’t know', () => {
+    const issues = (w: Record<string, unknown>) => validateDocument(general(w as Partial<WatchDef>));
+    const later = 'not something this version can judge yet: refused rather than ignored';
+    expect(issues({ every: '6h' })).toEqual([{ path: '$.publish.watch.trips.every', message: `6h: ${later}` }]);
+    expect(issues({ every: 'week' })).toEqual([{ path: '$.publish.watch.trips.every', message: 'day' }]);
+    expect(issues({ pattern: 'none' })).toEqual([{ path: '$.publish.watch.trips.pattern', message: `none: ${later}` }]);
+    expect(issues({ pattern: 'monthly' })).toEqual([{ path: '$.publish.watch.trips.pattern', message: `monthly: ${later}` }]);
+    expect(issues({ breaks: [] })).toEqual([{ path: '$.publish.watch.trips.breaks', message: 'not a field this version reads (history, period, every, pattern, donor, time, zone, calendar, scale, holds, count, follow): refused rather than ignored' }]);
+    expect(issues({ history: '' })).toEqual([{ path: '$.publish.watch.trips.history', message: "the history's file, a file in the data's list" }]);
+    expect(issues({ donor: 'previous', zone: 'Nowhere/Else', calendar: 'yes', scale: 'log', holds: 1, count: ['a', 'a'], follow: 'user' })).toEqual([
+      { path: '$.publish.watch.trips.donor', message: 'weekday or nearest' },
+      { path: '$.publish.watch.trips.zone', message: 'a time zone, such as UTC or America/New_York' },
+      { path: '$.publish.watch.trips.calendar', message: 'true or false' },
+      { path: '$.publish.watch.trips.holds', message: 'true or false' },
+      { path: '$.publish.watch.trips.scale', message: 'fixed or volume' },
+      { path: '$.publish.watch.trips.count', message: 'a list of columns, each once' },
+      { path: '$.publish.watch.trips.follow', message: 'a list of columns, each once' },
+    ]);
+    expect(issues({ every: 'day', pattern: 'weekly', donor: 'nearest', time: 'tpep_pickup_datetime', zone: 'America/New_York', calendar: false, scale: 'fixed', holds: true, count: ['VendorID'], follow: ['PULocationID'] })).toEqual([]);
+    expect(issues({ period: 'month' })).toEqual([]);
+    expect(issues({ period: 'week' })).toEqual([{ path: '$.publish.watch.trips.period', message: 'no parameter week' }]);
+  });
+
+  it('lets each watch name its period, and a watch that never holds be told without a judging hold kind', () => {
+    const own = general({ period: 'day' });
+    const { period: _p, ...pub } = own.publish!;
+    expect(validateDocument({ ...own, publish: pub })).toEqual([]);
+    expect(validateDocument({ ...general(), publish: { ...general().publish!, period: undefined } })).toEqual([{ path: '$.publish.period', message: 'a watch needs a period: the parameter whose value is the day a claim names' }]);
+    const told = general({ holds: false });
+    expect(validateDocument({ ...told, publish: { ...told.publish!, hold: ['checks'] } })).toEqual([]);
+    expect(validateDocument(told)).toEqual([{ path: '$.publish.watch', message: 'wrong judges a source against its history: watch names it, and every watch says holds: false' }]);
+  });
+
+  it('may hold a day not judged yet, beside short or wrong (ADR 0010 §1)', () => {
+    expect(validateDocument(holding({ ...PUBLISH, hold: ['checks', 'wrong', 'unlearned'] }))).toEqual([]);
+    expect(validateDocument(holding({ hold: ['checks', 'unlearned'], watch: { trips: 'history.json' }, period: 'day' }))).toEqual([
+      { path: '$.publish.hold', message: 'unlearned holds beside short or wrong: a day not judged is only a reason to hold for a flow that holds on its story' },
+      { path: '$.publish.watch', message: 'a watch is judged only for short or wrong, and hold has neither' },
+    ]);
+  });
+
+  it('checks its calendar, refusing the days this build can’t judge yet', () => {
+    expect(validateDocument(general({}, { calendar: { base: 'us', zone: 'Europe/London' } }))).toEqual([]);
+    expect(validateDocument(general({}, { calendar: { base: 'uk' as never, days: [{ name: 'Patch Tuesday', weekday: 'tue', between: [8, 14] }] } }))).toEqual([
+      { path: '$.calendar.base', message: 'one of none, us, us-nyc' },
+      { path: '$.calendar.days', message: "a flow's own recurring days are not something this version can judge yet: refused rather than ignored" },
+    ]);
+  });
+
+  it('checks the ontology’s new marks and nouns', () => {
+    const doc = (props: unknown[], nouns?: unknown) => validateDocument({ ...withOntology(general(), props, nouns), smaltfl: 3 });
+    expect(doc([BAD_RESULT], { trips: { one: 'trip', many: 'trips' }, trips_valid: { one: 'valid trip', many: 'valid trips' } })).toEqual([]);
+    expect(doc([{ ...BAD_RESULT, bad: ['4', '9'] }])).toEqual([{ path: '$.ontology.properties[0].bad[1]', message: "9 is not one of the column's values (1, 2, 4)" }]);
+    expect(doc([{ ...BAD_RESULT, bad: [] }])).toEqual([{ path: '$.ontology.properties[0].bad', message: 'a list of codes, each once' }]);
+    expect(doc([{ column: 'c', title: 'C', description: 'D', newValues: 'warn', name: 'Vendor', role: 'source', after: { of: 'x' } }])).toEqual([
+      { path: '$.ontology.properties[0].newValues', message: 'alert: a value never seen before is something wrong' },
+      { path: '$.ontology.properties[0].name', message: 'how a part is named, with {code} for its code: "Vendor {code}"' },
+      { path: '$.ontology.properties[0].role', message: 'sender: the column names who sent the rows' },
+      { path: '$.ontology.properties[0].after', message: '{ of: a time column, minutes }' },
+    ]);
+    expect(doc([BAD_RESULT], { nowhere: { one: 'x', many: 'xs' }, trips: { one: 'trip', many: 'the many trips' } })).toEqual([
+      { path: '$.ontology.nouns.nowhere', message: 'no source or step nowhere' },
+      { path: '$.ontology.nouns.trips', message: '{ one, many }: one or two words each, "sign-in" and "sign-ins"' },
+    ]);
   });
 });
 
@@ -352,7 +449,7 @@ describe('the plan of a flow that holds (plan/1, ADR 0009 E10)', () => {
     const bad = (publish: unknown) => () => validatePlan({ ...plan, publish } as FlowPlan);
     expect(bad({ ...plan.publish, hold: ['wrong', 'checks'] })).toThrow('publish.hold is sorted');
     expect(bad({ ...plan.publish, hold: ['short', 'wrong'] })).toThrow('one or the other');
-    expect(bad({ ...plan.publish, hold: ['later'] })).toThrow('publish.hold is a list of checks, short, wrong');
+    expect(bad({ ...plan.publish, hold: ['later'] })).toThrow('publish.hold is a list of checks, short, unlearned, wrong');
     const step = plan.nodes.findIndex((n) => n.op !== 'table');
     expect(bad({ ...plan.publish, watch: [[step, 'history.json']] })).toThrow(`publish.watch[0] watches node ${step}, which isn't a source`);
     expect(bad({ ...plan.publish, watch: [[0, 'history.json'], [0, 'again.json']] })).toThrow('publish.watch is sorted by node');

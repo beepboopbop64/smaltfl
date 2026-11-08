@@ -5,28 +5,77 @@
  * Expressions are SQL expression text (smaltdb's SQL), so a visual step reads the way its SQL would. Steps refer to
  * their inputs, and SQL steps to their inputs' data, by the inputs' ids.
  */
-import type { Ontology } from './ontology.js';
+import { calendarProblems, type CalendarDef } from './calendar.js';
+import { marksVerdicts, type Ontology } from './ontology.js';
 import { DECIDE, DECIDE_OPTIONS, type Policies } from './policy.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { renameIdentifier, SqlTextError, tokens } from './sqltext.js';
 
-/** The formats this version reads: 1, and 2 for a document that says what holds its publication (ADR 0009 §2). */
-export const DOCUMENT_FORMATS = [1, 2] as const;
+/**
+ * The formats this version reads: 1; 2 for a document that says what holds its publication (ADR 0009 §2); 3 for one
+ * that says how its days are judged (ADR 0010 §10).
+ */
+export const DOCUMENT_FORMATS = [1, 2, 3] as const;
 export type DocumentFormat = (typeof DOCUMENT_FORMATS)[number];
 
+/** Whether a watch is given in the general form, as an object of its settings, not as a history's file name. */
+export const isGeneralWatch = (w: unknown): w is WatchDef => typeof w === 'object' && w !== null && !Array.isArray(w);
+
 /**
- * The format a document must say it is: 2 when it has a publish block, else 1, so an older build, which reads only 1,
- * refuses a flow that holds rather than publish what that flow would hold. Q-47 is decided here and in `planKind`.
+ * The format a document must say it is, so an older build refuses a flow it would judge differently rather than judge
+ * it (Q-47, ADR 0010 §10): 3 with a calendar block, a watch given as an object, or an ontology mark that changes verdicts
+ * (`bad`, `newValues`, `after`); else 2 with a publish block; else 1. Decided here and in `planKind`.
  */
-export const documentFormat = (doc: { publish?: unknown }): DocumentFormat => (doc.publish === undefined ? 1 : 2);
+export const documentFormat = (doc: { publish?: unknown; calendar?: unknown; ontology?: unknown }): DocumentFormat => {
+  const watch = typeof doc.publish === 'object' && doc.publish !== null ? (doc.publish as { watch?: unknown }).watch : undefined;
+  const general = typeof watch === 'object' && watch !== null && Object.values(watch).some(isGeneralWatch);
+  if (doc.calendar !== undefined || general || marksVerdicts(doc.ontology as Ontology | undefined)) return 3;
+  return doc.publish === undefined ? 1 : 2;
+};
 
 /**
  * What pauses publication (ADR 0009 §2). `checks`: a `fail` rule failed, or more rows were dropped than `maxDropped`
  * allows. `wrong`: the watched source's story says something wrong on the day. `short`: it says so and the day's rows
- * are below their range, which narrows `wrong`; a flow holds on one or the other.
+ * are below their range, which narrows `wrong`; a flow holds on one or the other. `unlearned`, beside one of them: a
+ * day with nothing to compare against, which is published marked unless a flow lists it (ADR 0010 §1, Q-53).
  */
-export const HOLD_KINDS = ['checks', 'short', 'wrong'] as const;
+export const HOLD_KINDS = ['checks', 'short', 'unlearned', 'wrong'] as const;
 export type HoldKind = (typeof HOLD_KINDS)[number];
+
+/**
+ * A watch in the general form (ADR 0010 §10): its history, and how its source is judged, every setting but the history
+ * optional. This build judges a day a load (`every: day`) and the weekly pattern; any other is refused, never ignored.
+ */
+export interface WatchDef {
+  /** The history's file, a file in the data's list. */
+  history: string;
+  /** The text parameter whose value is the load's period (default `publish.period`). */
+  period?: string;
+  /** What one load covers (default `day`). */
+  every?: 'day';
+  /** What a load is compared with: the same weekday over the weeks before (default `weekly`). */
+  pattern?: 'weekly';
+  /** Which good day fills a paused one: the same weekday, or the nearest (default from the pattern: weekly, `weekday`). */
+  donor?: 'weekday' | 'nearest';
+  /** The time column the hours are counted from, and the zone they are counted in (default the calendar's). */
+  time?: string;
+  zone?: string;
+  /** Whether the flow's calendar applies to the source (default true). */
+  calendar?: boolean;
+  /** Floors fixed, or scaled with the period's expected rows (default `volume`). */
+  scale?: 'fixed' | 'volume';
+  /** Whether its story holds (default true; false: told and recorded, never holding). */
+  holds?: boolean;
+  /** Columns counted value by value, and columns followed for new values only (default from the ontology). */
+  count?: string[];
+  follow?: string[];
+}
+
+/** A watch's history file, whichever form it is given in. */
+export const watchHistory = (w: string | WatchDef): string => (typeof w === 'string' ? w : w.history);
+
+/** A watch's fields this version knows: any other is refused, never ignored. */
+const WATCH_FIELDS = ['history', 'period', 'every', 'pattern', 'donor', 'time', 'zone', 'calendar', 'scale', 'holds', 'count', 'follow'];
 
 /**
  * What holds a flow's publication, and what waits while it holds (ADR 0009 §2, §4). A run that holds is built, checked,
@@ -35,9 +84,13 @@ export type HoldKind = (typeof HOLD_KINDS)[number];
  */
 export interface PublishDef {
   hold: HoldKind[];
-  /** Each source judged against its history, by its id, with the history's file (a file in the data's list). */
-  watch?: Record<string, string>;
-  /** The text parameter whose value is the run's day: the day a claim must name, and the order days are decided in. */
+  /**
+   * Each source judged against its history, by its id: the history's file (a file in the data's list), which means the
+   * settings every flow had before ADR 0010, or a watch in the general form (format 3).
+   */
+  watch?: Record<string, string | WatchDef>;
+  /** The text parameter whose value is the run's day: the day a claim must name, and the order days are decided in.
+   * Optional when every watch names its own. */
   period?: string;
   /** Nothing goes out while any output waits (the default); with false, a hold reaches only the outputs that read
    * what the holding step reads, and the rest publish. */
@@ -61,6 +114,9 @@ export interface FlowDocument {
   policies?: Policies;
   /** What pauses publication, and what waits (ADR 0009): a document with it is format 2. */
   publish?: PublishDef;
+  /** The flow's calendar (ADR 0010 §2): a document with it is format 3. Without it, a flow whose watches are all legacy
+   * keeps `us-nyc/1`, and any other has none (Q-58). */
+  calendar?: CalendarDef;
   /** Display only: sections of the canvas, each holding sources and steps. Not part of any hash. */
   groups?: GroupDef[];
   /**
@@ -207,8 +263,14 @@ export function validateDocument(doc: unknown): Issue[] {
   const issues: Issue[] = [];
   const add = (path: string, message: string) => issues.push({ path, message });
   if (!isRecord(doc)) return [{ path: '$', message: 'a flow document is a JSON object' }];
-  if (!(DOCUMENT_FORMATS as readonly unknown[]).includes(doc.smaltfl)) add('$.smaltfl', `expected ${DOCUMENT_FORMATS.join(' or ')}, the formats this version reads`);
-  else if (doc.smaltfl !== documentFormat(doc)) add('$.smaltfl', doc.publish === undefined ? 'expected 1: format 2 is for a document with a publish block' : 'expected 2: a document with a publish block is format 2');
+  if (!(DOCUMENT_FORMATS as readonly unknown[]).includes(doc.smaltfl)) add('$.smaltfl', `expected ${DOCUMENT_FORMATS.join(', ')}, the formats this version reads`);
+  else if (doc.smaltfl !== documentFormat(doc)) {
+    const want = documentFormat(doc);
+    const three = 'a calendar, a watch given as an object, or a mark that changes verdicts (bad, newValues, after)';
+    add('$.smaltfl', want === 3 ? `expected 3: a document with ${three} is format 3`
+      : doc.smaltfl === 3 ? `expected ${want}: format 3 is for a document with ${three}`
+      : doc.publish === undefined ? 'expected 1: format 2 is for a document with a publish block' : 'expected 2: a document with a publish block is format 2');
+  }
   if (typeof doc.id !== 'string' || doc.id === '') add('$.id', 'a non-empty string');
   if (typeof doc.name !== 'string' || doc.name === '') add('$.name', 'a non-empty string');
 
@@ -290,6 +352,7 @@ export function validateDocument(doc: unknown): Issue[] {
   }
   validateExtras(doc, ids, add);
   validatePublish(doc, params, add);
+  if (doc.calendar !== undefined) for (const [path, message] of calendarProblems(doc.calendar)) add(`$.calendar${path}`, message);
   return issues;
 }
 
@@ -309,26 +372,57 @@ function validatePublish(doc: Record<string, unknown>, params: Map<string, Param
     });
   if (hold.has('short') && hold.has('wrong')) add('$.publish.hold', 'short or wrong, not both: wrong holds every day short does');
   const judged = hold.has('short') || hold.has('wrong');
+  if (hold.has('unlearned') && !judged) add('$.publish.hold', 'unlearned holds beside short or wrong: a day not judged is only a reason to hold for a flow that holds on its story');
   const sources = new Map((Array.isArray(doc.sources) ? doc.sources : []).filter((s: unknown) => isRecord(s) && typeof s.id === 'string').map((s: Record<string, unknown>) => [String(s.id).toLowerCase(), String(s.id)]));
+  const textParam = (name: unknown, path: string, what: string) => {
+    const d = typeof name === 'string' ? params.get(name) : undefined;
+    if (!d) add(path, `no parameter ${String(name)}`);
+    else if (d.type !== 'text') add(path, `${d.name} is ${d.type === 'integer' ? 'an' : 'a'} ${d.type}: ${what}`);
+  };
   let watched = 0;
+  let holding = 0;
+  let unperiod = 0;
   if (p.watch !== undefined) {
     if (!isRecord(p.watch)) add('$.publish.watch', "each source judged against its history, with the history's file");
     else
-      for (const [id, file] of Object.entries(p.watch)) {
+      for (const [id, w] of Object.entries(p.watch)) {
         watched++;
-        if (!sources.has(id.toLowerCase())) add(`$.publish.watch.${id}`, `no source ${id}: a watch judges a source`);
-        else if (Object.keys(p.watch).findIndex((k) => k.toLowerCase() === id.toLowerCase()) < watched - 1) add(`$.publish.watch.${id}`, `${sources.get(id.toLowerCase())} is watched twice (ids are compared without case)`);
-        if (typeof file !== 'string' || file === '') add(`$.publish.watch.${id}`, "the history's file, a file in the data's list");
+        const at = `$.publish.watch.${id}`;
+        if (!sources.has(id.toLowerCase())) add(at, `no source ${id}: a watch judges a source`);
+        else if (Object.keys(p.watch).findIndex((k) => k.toLowerCase() === id.toLowerCase()) < watched - 1) add(at, `${sources.get(id.toLowerCase())} is watched twice (ids are compared without case)`);
+        if (!isGeneralWatch(w)) {
+          if (typeof w !== 'string' || w === '') add(at, "the history's file, a file in the data's list");
+          holding++;
+          unperiod++;
+          continue;
+        }
+        validateWatch(w as unknown as Record<string, unknown>, at, add, textParam);
+        if (w.holds !== false) holding++;
+        if (w.period === undefined) unperiod++;
       }
   }
-  if (judged && watched === 0) add('$.publish.watch', `${hold.has('short') ? 'short' : 'wrong'} judges a source against its history: watch names it`);
-  if (!judged && watched > 0) add('$.publish.watch', 'a watch is judged only for short or wrong, and hold has neither');
-  if (p.period !== undefined) {
-    const d = typeof p.period === 'string' ? params.get(p.period) : undefined;
-    if (!d) add('$.publish.period', `no parameter ${String(p.period)}`);
-    else if (d.type !== 'text') add('$.publish.period', `${d.name} is ${d.type === 'integer' ? 'an' : 'a'} ${d.type}: the period is a text parameter, such as a day`);
-  } else if (watched > 0) add('$.publish.period', 'a watch needs a period: the parameter whose value is the day a claim names');
+  if (judged && holding === 0) add('$.publish.watch', `${hold.has('short') ? 'short' : 'wrong'} judges a source against its history: watch names it${watched ? ', and every watch says holds: false' : ''}`);
+  if (!judged && holding > 0) add('$.publish.watch', 'a watch is judged only for short or wrong, and hold has neither');
+  if (p.period !== undefined) textParam(p.period, '$.publish.period', 'the period is a text parameter, such as a day');
+  else if (unperiod > 0) add('$.publish.period', 'a watch needs a period: the parameter whose value is the day a claim names');
   if (p.together !== undefined && typeof p.together !== 'boolean') add('$.publish.together', 'true or false');
+}
+
+/** A watch in the general form (ADR 0010 §10): its fields, each one this build can judge, else refused. */
+function validateWatch(w: Record<string, unknown>, at: string, add: (path: string, message: string) => void, textParam: (name: unknown, path: string, what: string) => void): void {
+  const later = 'not something this version can judge yet: refused rather than ignored';
+  for (const k of Object.keys(w)) if (!WATCH_FIELDS.includes(k)) add(`${at}.${k}`, `not a field this version reads (${WATCH_FIELDS.join(', ')}): refused rather than ignored`);
+  if (typeof w.history !== 'string' || w.history === '') add(`${at}.history`, "the history's file, a file in the data's list");
+  if (w.period !== undefined) textParam(w.period, `${at}.period`, 'the period is a text parameter, such as a day');
+  if (w.every !== undefined && w.every !== 'day') add(`${at}.every`, typeof w.every === 'string' && /^(12|8|6|4|3|2|1)h$/.test(w.every) ? `${w.every}: ${later}` : 'day');
+  if (w.pattern !== undefined && w.pattern !== 'weekly') add(`${at}.pattern`, w.pattern === 'none' || w.pattern === 'monthly' ? `${w.pattern}: ${later}` : 'weekly');
+  if (w.donor !== undefined && w.donor !== 'weekday' && w.donor !== 'nearest') add(`${at}.donor`, 'weekday or nearest');
+  if (w.time !== undefined && (typeof w.time !== 'string' || w.time === '')) add(`${at}.time`, 'a time column');
+  if (w.zone !== undefined && (typeof w.zone !== 'string' || calendarProblems({ zone: w.zone }).length > 0)) add(`${at}.zone`, 'a time zone, such as UTC or America/New_York');
+  for (const k of ['calendar', 'holds'] as const) if (w[k] !== undefined && typeof w[k] !== 'boolean') add(`${at}.${k}`, 'true or false');
+  if (w.scale !== undefined && w.scale !== 'fixed' && w.scale !== 'volume') add(`${at}.scale`, 'fixed or volume');
+  for (const k of ['count', 'follow'] as const)
+    if (w[k] !== undefined && (!Array.isArray(w[k]) || (w[k] as unknown[]).some((c) => typeof c !== 'string' || c === '') || new Set(w[k] as string[]).size !== (w[k] as unknown[]).length)) add(`${at}.${k}`, 'a list of columns, each once');
 }
 
 /** Groups, the ontology and the policies: their references, checked against the flow's ids. */
@@ -392,6 +486,16 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
             refs.add(r.id);
           });
       }
+      if (o.nouns !== undefined) {
+        if (!isRecord(o.nouns)) add('$.ontology.nouns', 'what a row of each source or step is called: { id: { one, many } }');
+        else
+          for (const [id, n] of Object.entries(o.nouns)) {
+            const at = `$.ontology.nouns.${id}`;
+            if (!known(id)) add(at, `no source or step ${id}`);
+            const word = (x: unknown) => typeof x === 'string' && x.trim() !== '' && x.trim().split(/\s+/).length <= 2;
+            if (!isRecord(n) || !word(n.one) || !word(n.many)) add(at, '{ one, many }: one or two words each, "sign-in" and "sign-ins"');
+          }
+      }
       if (o.properties !== undefined) {
         if (!Array.isArray(o.properties)) add('$.ontology.properties', 'a list of { column, title, description }');
         else {
@@ -407,6 +511,16 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
               else p.sources.forEach((r: unknown, j: number) => !refs.has(String(r)) && add(`${at}.sources[${j}]`, `no reference ${String(r)}`));
             }
             if (p.datasets !== undefined && (!Array.isArray(p.datasets) || p.datasets.length === 0)) add(`${at}.datasets`, 'a list of sources or steps');
+            // The marks of ADR 0010 §4 and §8: what changes verdicts, and how a part is named.
+            if (p.bad !== undefined) {
+              const codes = isRecord(p.values) ? Object.keys(p.values) : null;
+              if (!Array.isArray(p.bad) || p.bad.length === 0 || p.bad.some((v) => typeof v !== 'string') || new Set(p.bad).size !== p.bad.length) add(`${at}.bad`, 'a list of codes, each once');
+              else if (codes) p.bad.forEach((v: string, j: number) => !codes.includes(v) && add(`${at}.bad[${j}]`, `${v} is not one of the column's values (${codes.join(', ')})`));
+            }
+            if (p.newValues !== undefined && p.newValues !== 'alert') add(`${at}.newValues`, 'alert: a value never seen before is something wrong');
+            if (p.name !== undefined && (typeof p.name !== 'string' || !p.name.includes('{code}'))) add(`${at}.name`, 'how a part is named, with {code} for its code: "Vendor {code}"');
+            if (p.role !== undefined && p.role !== 'sender') add(`${at}.role`, 'sender: the column names who sent the rows');
+            if (p.after !== undefined && (!isRecord(p.after) || typeof p.after.of !== 'string' || p.after.of === '' || typeof p.after.minutes !== 'number' || !Number.isFinite(p.after.minutes))) add(`${at}.after`, '{ of: a time column, minutes }');
             const column = p.column;
             const scopes = Array.isArray(p.datasets) ? p.datasets : ['*'];
             scopes.forEach((d: unknown, j: number) => {

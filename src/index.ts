@@ -11,7 +11,7 @@ import type { ParamValue } from './core/sqltext.js';
 
 export { canonicalJSON } from './core/canonical.js';
 export { hashOf, hex, sha256, sha256Hex, unhex, utf8 } from './core/hash.js';
-export { DOCUMENT_FORMATS, HOLD_KINDS, documentFormat, sourceOf, validateDocument, withoutDisplay } from './core/document.js';
+export { DOCUMENT_FORMATS, HOLD_KINDS, documentFormat, isGeneralWatch, sourceOf, validateDocument, watchHistory, withoutDisplay } from './core/document.js';
 export type {
   AggregateStep,
   DatasetDef,
@@ -34,6 +34,7 @@ export type {
   SqlStep,
   StepDef,
   StepKind,
+  WatchDef,
 } from './core/document.js';
 export { PLAN_FORMATS, PlanError, flowHash, translate, validatePlan } from './core/plan.js';
 export type { Column, ColumnType, FlowPlan, PlanFormat, PlanNode, PlanOutput, PlanPublish } from './core/plan.js';
@@ -56,8 +57,8 @@ export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, p
 export type { DatasetRecord, ExpectationResult, Identity, IdentityCard, ManifestNode, RunManifest, SignatureCheck, SignedManifest } from './core/manifest.js';
 export { DECIDE, DECIDE_OPTIONS, checkAction, checkDecision, covers, readView, wrapRead } from './core/policy.js';
 export type { ActionCheck, ActionRule, ColumnRule, DecideOption, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
-export type { ActRequest, ActionType, Edit, LinkType, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
-export { glossOf, meaningOf, propertyOf } from './core/ontology.js';
+export type { ActRequest, ActionType, Edit, LinkType, Noun, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
+export { counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, VERDICT_MARKS } from './core/ontology.js';
 // What holds a run, what waits, and what the record decided (ADR 0009): one group a line, so that changes to one part
 // don't touch the others' lines.
 export { claimHolds, dayClaim, flowStory } from './core/hold.js';

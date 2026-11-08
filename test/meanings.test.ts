@@ -10,7 +10,7 @@ import io from '@smaltdb/io';
 import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../src/plugin/index.js';
-import { glossOf, meaningOf, propertyOf, runFlow, translate, validateDocument, type FlowDocument, type FlowPlan, type RunResult } from '../src/index.js';
+import { counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, runFlow, translate, validateDocument, type FlowDocument, type FlowPlan, type RunResult } from '../src/index.js';
 import { emitDayHours, emitDistinct, emitRead, emitSample, stampShift, type EmitContext } from '../src/core/emit.js';
 import { insertAfter } from '../src/core/document.js';
 import { nodeKey } from '../src/core/keys.js';
@@ -102,6 +102,27 @@ describe('what the columns mean', () => {
     expect(s!.why).toBe('Its source documents 3 codes, and 9 isn’t one.');
     const [g] = suggestChecks([profileColumn('RatecodeID', 'int', { ...facts, max: 2 }, [1, 2, 1, 1])], { values: new Map([['RatecodeID', ['1', '2']]]), documented });
     expect(g).toMatchObject({ name: 'RatecodeID_documented', guard: true });
+  });
+});
+
+describe('what a row is called, and the marks that change verdicts (ADR 0010 §4, §8)', () => {
+  it('names a row by the noun the ontology gives, else the object type over it or what reads it, else rows', () => {
+    const o = ontology({ nouns: { Trips: { one: 'trip', many: 'trips' } }, objectTypes: [{ id: 'Zone', name: 'Zone', dataset: 'zone_list', key: ['LocationID'], title: 'Zone' }] });
+    expect(nounOf(o, 'trips')).toEqual({ one: 'trip', many: 'trips' });
+    expect(nounOf(o, 'zone_list')).toEqual({ one: 'zone', many: 'zones' });
+    expect(nounOf(o, 'zones', ['zone_list', 'trips_zoned'])).toEqual({ one: 'zone', many: 'zones' });
+    expect(nounOf(o, 'weather')).toBe(ROWS);
+    expect(nounOf(undefined, 'trips')).toEqual({ one: 'row', many: 'rows' });
+    expect([counted(1, { one: 'sign-in', many: 'sign-ins' }), counted(41939, { one: 'trip', many: 'trips' }), counted(0, ROWS)]).toEqual(['1 sign-in', '41,939 trips', '0 rows']);
+  });
+
+  it('names a part by its property’s template, and tells which marks change verdicts', () => {
+    const vendor = { column: 'VendorID', title: 'Vendor', description: 'Who sent it.', name: 'Vendor {code}', role: 'sender' as const };
+    expect([partNamed(vendor, 1), partNamed({ ...vendor, name: undefined }, 1), partNamed(undefined, 1)]).toEqual(['Vendor 1', undefined, undefined]);
+    expect(marksVerdicts(ontology({ properties: [vendor] }))).toBe(false);
+    expect(marksVerdicts(ontology({ properties: [vendor, { column: 'result', title: 'Result', description: 'How.', bad: ['fail'] }] }))).toBe(true);
+    expect(marksVerdicts(ontology({ properties: [{ column: 'country', title: 'Country', description: 'Where.', newValues: 'alert' }] }))).toBe(true);
+    expect(marksVerdicts(undefined)).toBe(false);
   });
 });
 

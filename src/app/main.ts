@@ -11,7 +11,7 @@ import { EXAMPLE_SOURCES, pinnedDdl } from '../../examples/sources.js';
 import { holidayOf, seasonOf } from '../core/calendar.js';
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
-import { GROUP_COLORS, insertAfter, takeOut, validateDocument, withoutDisplay } from '../core/document.js';
+import { GROUP_COLORS, insertAfter, takeOut, validateDocument, watchHistory, withoutDisplay } from '../core/document.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDayHours, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, stampShift, type EmitContext } from '../core/emit.js';
 import { effectOf, type Effect } from '../core/effect.js';
 import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, QUANTILES, type HistoryFile, type Metric } from '../core/history.js';
@@ -7046,8 +7046,8 @@ function claimsFor(day: string | undefined): StoryClaim[] | undefined {
   const watch = state.doc.publish?.watch;
   if (!watch) return undefined;
   const out: StoryClaim[] = [];
-  for (const [source, file] of Object.entries(watch)) {
-    if (!day || !flowHistory || !historyPin || historyPin.path !== file) continue;
+  for (const [source, w] of Object.entries(watch)) {
+    if (!day || !flowHistory || !historyPin || historyPin.path !== watchHistory(w)) continue;
     const key = `${day}|${source}|${countedChecks(state.doc, flowHistory, source)}`;
     if (!claims.has(key)) claims.set(key, dayClaim(flowHistory, state.doc, historyPin, day, source, BUILD_COMMIT));
     const c = claims.get(key);
@@ -8378,7 +8378,7 @@ async function start(): Promise<void> {
     }
     // The history pinned in the engine as the flow's watch names it (ADR 0009 §3): a claim told from it is checked against
     // the bytes the engine hashed, and a run whose claim was told from other bytes holds its day as not judged.
-    if (pastBytes && flowHistory && hf && Object.values(state.doc.publish?.watch ?? {}).includes(hf.path)) {
+    if (pastBytes && flowHistory && hf && Object.values(state.doc.publish?.watch ?? {}).map(watchHistory).includes(hf.path)) {
       const pin = await pinFile(engine, hf.path, pastBytes, hf.sha256);
       historyPin = { path: pin.name, sha256: pin.sha256, bytes: pin.bytes };
     }

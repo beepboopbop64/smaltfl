@@ -176,7 +176,7 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   // Without a publish block the plan is what it always was, so every plan/0 hash holds (ADR 0009, E10).
   if (!doc.publish) return plan;
   const p = doc.publish;
-  const watch = Object.entries(p.watch ?? {}).map(([id, file]): [number, string] => [index.get(id.toLowerCase())!, file]).sort((a, b) => a[0] - b[0]);
+  const watch = Object.entries(p.watch ?? {}).map(([id, w]): [number, string] => [index.get(id.toLowerCase())!, typeof w === 'string' ? w : w.history]).sort((a, b) => a[0] - b[0]);
   return { ...plan, smaltflPlan: 1, publish: { hold: [...new Set(p.hold)].sort(), watch, period: p.period ?? null, together: p.together ?? true } };
 }
 

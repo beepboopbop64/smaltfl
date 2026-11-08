@@ -63,6 +63,29 @@ export interface PropertyType {
   sources?: string[];
   /** Only on these sources or steps, when the same name means something else elsewhere. */
   datasets?: string[];
+  /**
+   * The codes that mean something went wrong ("fail", "locked"): one of them above its range, at twice its usual rows
+   * and past its floor is something wrong, never marked as expected (ADR 0010 §4). It changes verdicts: a document with
+   * it is format 3.
+   */
+  bad?: string[];
+  /** A value never seen before in this column is something wrong: a new country, a new tool (ADR 0010 §4, Q-56). It
+   * changes verdicts: format 3. */
+  newValues?: 'alert';
+  /** How a part with one of its codes is named in a head, `{code}` standing for the code: "Vendor {code}". Display. */
+  name?: string;
+  /** The column names who sent the rows: a part that stopped "sent almost nothing" rather than being "almost gone".
+   * Display. */
+  role?: 'sender';
+  /** This time column runs behind another by about so many minutes (a drop-off after its pickup): what its quantiles are
+   * told against. It changes verdicts: format 3. */
+  after?: { of: string; minutes: number };
+}
+
+/** What a row of a source or step is called, one and many: "trip" and "trips", "sign-in" and "sign-ins". Display. */
+export interface Noun {
+  one: string;
+  many: string;
 }
 
 /** A document the ontology's meanings come from. */
@@ -84,7 +107,37 @@ export interface Ontology {
   properties?: PropertyType[];
   /** Where those meanings come from. */
   references?: Reference[];
+  /** What a row of each source or step is called, by its id (ADR 0010 §8). Display: kept out of the plan and every
+   * verdict. */
+  nouns?: Record<string, Noun>;
 }
+
+/** The marks on a property that change how a day is judged (ADR 0010 §4): a document with any of them is format 3. */
+export const VERDICT_MARKS = ['bad', 'newValues', 'after'] as const;
+
+/** Whether an ontology carries a mark that changes verdicts. */
+export const marksVerdicts = (ontology: Ontology | undefined): boolean => (ontology?.properties ?? []).some((p) => VERDICT_MARKS.some((m) => p[m] !== undefined));
+
+/** The plain word for rows: what a row is called when nothing names it. */
+export const ROWS: Noun = Object.freeze({ one: 'row', many: 'rows' });
+
+/**
+ * What a row of a source or step is called (ADR 0010 §8): the noun the ontology names for it; else the object type over
+ * it, or over a step that reads it (`readers`, for a source a lookup is made from: "zones"); else "rows".
+ */
+export function nounOf(ontology: Ontology | undefined, id: string, readers: readonly string[] = []): Noun {
+  const named = Object.entries(ontology?.nouns ?? {}).find(([k]) => k.toLowerCase() === id.toLowerCase())?.[1];
+  if (named) return named;
+  const types = ontology?.objectTypes ?? [];
+  const t = types.find((x) => x.dataset === id) ?? types.find((x) => readers.includes(x.dataset));
+  return t ? { one: t.name.toLowerCase(), many: `${t.name.toLowerCase()}s` } : ROWS;
+}
+
+/** A count said with its noun: "1 trip", "41,939 trips". */
+export const counted = (n: number, noun: Noun): string => `${Math.round(n).toLocaleString('en-US')} ${Math.round(n) === 1 ? noun.one : noun.many}`;
+
+/** A part named by its property's template ("Vendor {code}" → "Vendor 1"), when it has one. */
+export const partNamed = (property: PropertyType | undefined, code: unknown): string | undefined => (property?.name ? property.name.split('{code}').join(String(code)) : undefined);
 
 /** A dataset's column's property type: the one named for that dataset, else the one its name has everywhere. */
 export function propertyOf(ontology: Ontology | undefined, dataset: string, column: string): PropertyType | undefined {
