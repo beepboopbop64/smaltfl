@@ -57,7 +57,7 @@ export { DECIDE, DECIDE_OPTIONS, checkAction, checkDecision, covers, readView, w
 export type { ActionCheck, ActionRule, ColumnRule, DecideOption, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
 export type { ActRequest, ActionType, Edit, LinkType, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
 export { meaningOf, propertyOf } from './core/ontology.js';
-export { claimHolds, countedChecks, dayClaim, decisionFor, flowStory, heldOutputs, holdsOf, inputsKey, inputsOf, judgeClaims, pausesOf, reachOf, sameKeys, stagedKeys, standingFor, tripped, waitingOf } from './core/hold.js';
+export { claimHolds, countedChecks, dayClaim, decisionFor, flowStory, heldOutputs, holdsOf, inputsKey, inputsOf, judgeClaims, pausesOf, pauseState, reachOf, sameKeys, stagedKeys, standingFor, tripped, waitingOf } from './core/hold.js';
 export type { ClaimFacts, DecideAbout, Decided, HeldAbout, HistoryRef, Hold, Inputs, Judged, Pause, ReleaseAbout, StoryClaim } from './core/hold.js';
 export { PLUGIN_NAME } from './core/protocol.js';
 export type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunOptions, RunResult, VerifyCheck, VerifyLevel, VerifyOptions, VerifyResult } from './core/protocol.js';

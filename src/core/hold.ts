@@ -14,6 +14,7 @@
  *   decision or by a passing run of the same inputs, and a decision is applied again only to the keys it named.
  */
 import { canonicalJSON } from './canonical.js';
+import type { PauseState } from './days.js';
 import type { FlowDocument, HoldKind } from './document.js';
 import type { HistoryRanges } from './history.js';
 import type { JSONValue, LogEntry } from './log.js';
@@ -485,4 +486,24 @@ export function decisionFor(entries: readonly EntryLike[], inputs: Inputs, keys:
   let found: Decided | null = null;
   for (const e of entries) if (e.kind === 'decide' && isDecide(e.about) && inputsKey(e.about.inputs) === key) found = decided(e, e.about);
   return found ? { kind: sameKeys(found.about.outputs, keys) ? 'same' : 'otherBuild', decision: found } : null;
+}
+
+/**
+ * What became of a held day (ADR 0009 §6, §12): `waiting` for a decision, `asis` published as is, `dont` not published.
+ * From a held run in this engine (how many holds and waiting outputs it has, and whether a release of it applied here)
+ * and the record's pause of its inputs; or, with no run here (a day held in an earlier visit), from the pause alone.
+ * Published as is needs the release applied (here, or in the record before the engine was lost) or nothing left
+ * waiting; until then the day still waits. Null for a run that published, a pause a passing run closed, and a held run
+ * with nothing waiting and nothing decided (each name already shows its versions: there is nothing to decide).
+ */
+export function pauseState(run: { holds: number; waiting: number; released: boolean } | null, pause: Pick<Pause, 'state' | 'decision' | 'released'> | null): PauseState | null {
+  if (!run) {
+    if (!pause || pause.state === 'passed') return null;
+    return pause.state === 'open' ? 'waiting' : pause.decision?.about.option === 'asis' ? 'asis' : 'dont';
+  }
+  if (run.holds === 0) return null;
+  const d = pause?.state === 'decided' ? pause.decision : null;
+  if (d?.about.option === 'dont') return 'dont';
+  if (d?.about.option === 'asis' && (run.released || run.waiting === 0 || pause?.released === true)) return 'asis';
+  return run.waiting === 0 ? null : 'waiting';
 }

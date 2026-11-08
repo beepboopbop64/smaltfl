@@ -18,6 +18,7 @@ import {
   inputsOf,
   judgeClaims,
   pausesOf,
+  pauseState,
   reachOf,
   sameKeys,
   stagedKeys,
@@ -315,6 +316,41 @@ describe('pauses, read from the record (ADR 0009 §10)', () => {
     const plan = await planOf();
     const m = manifestOf(plan);
     expect(inputsOf(m)).toEqual({ flow: plan.flow.hash, parameters: { month: '2023-09', day: '2023-09-21' }, files: { trips: SHA('1'), zones: SHA('2'), weather: SHA('3') } });
+  });
+});
+
+describe('what became of a held day (ADR 0009 §6, §12)', () => {
+  const pause = (log: LogEntry[]) => pausesOf(log)[0]!;
+  const run = (holds: number, waiting: number, released = false) => ({ holds, waiting, released });
+
+  it('waits until a person decides, and a run that published has no pause', () => {
+    expect(pauseState(run(0, 0), null)).toBeNull();
+    expect(pauseState(run(1, 3), null)).toBe('waiting');
+    expect(pauseState(run(1, 3), pause([held('2023-09-21', 41)]))).toBe('waiting');
+  });
+
+  it('is not published once decided so; published as is once released, or once nothing is left waiting', () => {
+    const asis = decide('2023-09-21', 41, 'asis');
+    expect(pauseState(run(1, 3), pause([held('2023-09-21', 41), decide('2023-09-21', 41, 'dont')]))).toBe('dont');
+    // Decided, not yet released (a crash between the two, or a release refused): the day still waits.
+    expect(pauseState(run(1, 3), pause([held('2023-09-21', 41), asis]))).toBe('waiting');
+    expect(pauseState(run(1, 3, true), pause([held('2023-09-21', 41), asis]))).toBe('asis');
+    expect(pauseState(run(1, 3), pause([held('2023-09-21', 41), asis, release(asis.seq)]))).toBe('asis');
+    expect(pauseState(run(1, 0), pause([held('2023-09-21', 41), asis]))).toBe('asis');
+  });
+
+  it('has nothing to decide when every held output shows its versions already, and waits again under another build', () => {
+    expect(pauseState(run(1, 0), null)).toBeNull();
+    const log = [held('2023-09-21', 41), decide('2023-09-21', 41, 'dont'), held('2023-09-21', 1, { ...KEYS, zone_hour: 'other' })];
+    expect(pauseState(run(1, 3), pause(log))).toBe('waiting');
+  });
+
+  it('is read from the record alone for a day held in an earlier visit', () => {
+    expect(pauseState(null, null)).toBeNull();
+    expect(pauseState(null, pause([held('2023-09-21', 41)]))).toBe('waiting');
+    expect(pauseState(null, pause([held('2023-09-21', 41), decide('2023-09-21', 41, 'asis')]))).toBe('asis');
+    expect(pauseState(null, pause([held('2023-09-21', 41), decide('2023-09-21', 41, 'dont', 'untilPass')]))).toBe('dont');
+    expect(pauseState(null, pause([held('2023-09-21', 41), ok('2023-09-21', 42)]))).toBeNull();
   });
 });
 
