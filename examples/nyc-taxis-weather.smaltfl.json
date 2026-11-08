@@ -36,10 +36,23 @@
   ],
   "steps": [
     {
+      "id": "trips_filled",
+      "kind": "fill",
+      "inputs": [
+        "trips"
+      ],
+      "description": "The trips as they arrived, each marked with the day it came from when a paused day is filled from another day",
+      "time": "tpep_pickup_datetime",
+      "shift": [
+        "tpep_pickup_datetime",
+        "tpep_dropoff_datetime"
+      ]
+    },
+    {
       "id": "trips_valid",
       "kind": "expectations",
       "inputs": [
-        "trips"
+        "trips_filled"
       ],
       "description": "Trips that pass the checks",
       "rules": [
@@ -169,6 +182,14 @@
         {
           "name": "card_tip_rate",
           "expr": "avg(card_tip_rate)"
+        },
+        {
+          "name": "filled_from",
+          "expr": "max(filled_from)"
+        },
+        {
+          "name": "filled",
+          "expr": "count(filled_from)"
         }
       ],
       "dataset": {
@@ -190,6 +211,14 @@
         {
           "name": "trips",
           "expr": "sum(trips)"
+        },
+        {
+          "name": "filled_from",
+          "expr": "max(filled_from)"
+        },
+        {
+          "name": "filled",
+          "expr": "sum(filled)"
         }
       ],
       "dataset": {}
@@ -285,7 +314,7 @@
         "borough_hour_weather"
       ],
       "description": "Trips per hour in each condition, against dry hours at the same hour of day",
-      "sql": "WITH h AS (\n  SELECT pu_borough, condition, CAST(strftime('%H', pu_hour) AS INTEGER) AS hour_of_day, trips\n  FROM borough_hour_weather WHERE condition IS NOT NULL\n), dry AS (\n  SELECT pu_borough, hour_of_day, avg(trips) AS dry_trips FROM h WHERE condition = 'dry' GROUP BY 1, 2\n)\nSELECT h.pu_borough AS borough, h.condition, count(*) AS hours, avg(h.trips) AS trips_per_hour,\n  avg(h.trips / d.dry_trips) AS vs_dry\nFROM h JOIN dry d ON d.pu_borough = h.pu_borough AND d.hour_of_day = h.hour_of_day\nGROUP BY 1, 2",
+      "sql": "WITH h AS (\n  SELECT pu_borough, condition, CAST(strftime('%H', pu_hour) AS INTEGER) AS hour_of_day, trips, filled, filled_from\n  FROM borough_hour_weather WHERE condition IS NOT NULL\n), dry AS (\n  SELECT pu_borough, hour_of_day, avg(trips) AS dry_trips FROM h WHERE condition = 'dry' GROUP BY 1, 2\n)\nSELECT h.pu_borough AS borough, h.condition, count(*) AS hours, avg(h.trips) AS trips_per_hour,\n  avg(h.trips / d.dry_trips) AS vs_dry, sum(h.filled) AS filled, max(h.filled_from) AS filled_from\nFROM h JOIN dry d ON d.pu_borough = h.pu_borough AND d.hour_of_day = h.hour_of_day\nGROUP BY 1, 2",
       "dataset": {
         "description": "Weather's effect on demand, per borough"
       }
@@ -903,6 +932,16 @@
         "column": "vs_dry",
         "title": "Against dry hours",
         "description": "Trips in an hour of that condition against a dry hour at the same time of day, on average: 1.2 is 20% more."
+      },
+      {
+        "column": "filled_from",
+        "title": "Filled from",
+        "description": "The day a row came from, when its own day was filled from another day (ADR 0009 amendment 1): empty for a row that arrived. In a row that sums others up, the latest such day among them."
+      },
+      {
+        "column": "filled",
+        "title": "Filled",
+        "description": "How many of the trips it counts came from another day: 0 when nothing was filled."
       }
     ],
     "references": [
@@ -1085,6 +1124,7 @@
       "color": "amber",
       "steps": [
         "trips",
+        "trips_filled",
         "trips_valid",
         "trips_dedup"
       ]
@@ -1155,7 +1195,8 @@
       "trips": "history.json"
     },
     "period": "day",
-    "together": true
+    "together": true,
+    "donor": "weekday"
   },
   "layout": {}
 }

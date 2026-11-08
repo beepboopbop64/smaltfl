@@ -752,7 +752,13 @@ export function standingEnds(entries: readonly EntryLike[], index: number, perio
   const before = entries.slice(0, index);
   const mine = publishedDays(entries.slice(0, index + 1), period).find((p) => p.seq === e.seq);
   if (!mine || publishedDays(before, period).some((p) => p.day === mine.day)) return null;
-  return standingFor(before, mine.day, period)?.seq ?? null;
+  const stood = standingFor(before, mine.day, period);
+  if (!stood) return null;
+  // A release that applies the standing decision itself (a fill that stands until a day passes, Q-64, released for the
+  // day under it) is the decision at work: it ends nothing.
+  const d = mine.decision !== undefined ? entries.find((x) => x.seq === mine.decision)?.about : undefined;
+  if (mine.decision === stood.seq || (isDecide(d) && d.under === stood.seq)) return null;
+  return stood.seq;
 }
 
 /**

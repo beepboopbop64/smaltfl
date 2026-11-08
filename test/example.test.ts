@@ -101,8 +101,10 @@ describe('the example flow on real data (tier XS)', () => {
     // Nothing was published before it: every output waits.
     expect(held.waiting).toEqual(Object.keys(held.manifest.outputs).sort());
     expect(db.query('SELECT count(*) FROM _smaltfl_datasets').rows[0]![0]).toBe(0);
-    // Holding changes no node: the example run as it was before reuses every node the held run built, and publishes.
-    const published = await runFlow(db, doc, { smaltdb: SMALTDB });
+    // Holding changes no node: the example run without its publish block, on the same day, reuses every node the held
+    // run built, and publishes.
+    const { publish: _p, ...shipped } = exampleDoc();
+    const published = await runFlow(db, { ...shipped, smaltfl: 1 }, { smaltdb: SMALTDB, parameters: { day: '2024-01-15' } });
     expect(published.manifest.nodes.filter((x) => x.status === 'built').map((x) => x.origin)).toEqual([]);
     expect(Object.fromEntries(Object.entries(published.manifest.outputs).map(([k, o]) => [k, o.key]))).toEqual(Object.fromEntries(Object.entries(held.manifest.outputs).map(([k, o]) => [k, o.key])));
     expect(published.published).toEqual(Object.keys(published.manifest.outputs).sort());

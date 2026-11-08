@@ -1013,6 +1013,9 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-versions-list li { padding: 8px 10px; border-radius: 8px; background: var(--sunk); font-size: 13.5px; color: var(--ink-2); }
 .vf-versions-list li.now { color: var(--ink); font-weight: 600; box-shadow: inset 0 0 0 1.5px var(--smalt); }
 .vf-reasons { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Rows from another day (a fill): the gutter stippled, the head saying how many (ADR 0009 amendment 1 S12). */
+.data th.rownum.filled { background: radial-gradient(circle, var(--ink-2) 0.9px, transparent 1.1px) 0 0 / 4px 4px, var(--surface); box-shadow: inset 2px 0 0 var(--ink); }
+.rows-filled { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--ink); }
 .vf-reason { min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1.5px solid var(--edge); background: var(--surface); color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
 /* Chosen by colour and an inset ring, never by weight: a bolder chip is wider, and the row would wrap under the finger. */
 .vf-reason[aria-checked="true"] { border-color: var(--smalt); background: var(--smalt-wash); color: var(--ink); box-shadow: inset 0 0 0 1px var(--smalt); }

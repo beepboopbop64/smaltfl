@@ -47,8 +47,10 @@ import type { LogEntry } from '../src/core/log.js';
 import type { ExpectationResult, RunManifest } from '../src/core/manifest.js';
 import { translate, type FlowPlan } from '../src/core/plan.js';
 import { historyWith } from './helpers/history.js';
+import { exampleUnfilled } from './helpers/example.js';
 
-const example = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
+// The example as it was before its fill step: these plans index its nodes, and add a fill step of their own.
+const example = exampleUnfilled();
 const PUBLISH: PublishDef = { hold: ['checks', 'wrong'], watch: { trips: 'history.json' }, period: 'day', together: true };
 const DAY_PARAM = { name: 'day', type: 'text' as const, default: null };
 
@@ -720,6 +722,11 @@ describe('a fill that stands until a day passes (amendment 1 S5, Q-64)', () => {
     // Another decision's release in between (a day published as is) ends it, as for a decision not to publish.
     const wed = decide('2022-11-16', 44, 'asis');
     expect(standingFor([...log, wed, release(wed.seq)], '2022-11-17')).toBeNull();
+    // Its own release for a day under it is the decision at work: the record's line ends nothing ("· ends #…" only on the
+    // day that passes).
+    const end = [...log, ok('2022-11-21', 50)];
+    expect(log.map((_, i) => standingEnds(log, i))).toEqual(log.map(() => null));
+    expect(standingEnds(end, end.length - 1)).toBe(mon.seq);
   });
 
   it('is ended by a withdrawal of a fill it covered, or of its own (Q-61): later days wait for a person', () => {

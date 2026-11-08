@@ -9,7 +9,7 @@ import { missingSql, nodeSelect, shiftSql } from '../src/core/emit.js';
 import { planHash, planKind } from '../src/core/manifest.js';
 import { canonicalJSON } from '../src/core/canonical.js';
 import { visualFlow } from './fixtures/taxi.js';
-import { exampleDoc, exampleFilled } from './helpers/example.js';
+import { exampleDoc, exampleFilled, exampleUnfilled } from './helpers/example.js';
 
 const env = { smaltdb: '0.9.0', smaltfl: '0.0.0' };
 
@@ -236,7 +236,7 @@ describe('keys', () => {
  * (its nouns, a part's name and role), whatever it gains later.
  */
 function exampleBefore(): FlowDocument {
-  const doc = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
+  const doc = exampleUnfilled();
   const { publish: _publish, ...rest } = doc;
   const { nouns: _nouns, ...ontology } = doc.ontology!;
   const properties = ontology.properties?.map(({ name: _name, role: _role, ...p }) => p);
@@ -434,10 +434,7 @@ describe('the plan of a flow that holds (plan/1, ADR 0009 E10)', () => {
     expect(await planHash(await translate({ ...without, smaltfl: 1 }, { day: '2023-09-21' }))).toBe('32609b0f1de25bc72ea09219c0c38cd2cff347619e2db5c8506a7da144720f8e');
     // The example with the block of ADR 0009 §2, and its ontology's nouns and the vendor's name and role (ADR 0010 §8,
     // display: they move the flow hash and the plan hash, and no node key).
-    const withMarks = (doc: FlowDocument): FlowDocument => {
-      const now = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
-      return { ...doc, ontology: now.ontology };
-    };
+    const withMarks = (doc: FlowDocument): FlowDocument => ({ ...doc, ontology: exampleUnfilled().ontology });
     expect(await planHash(await translate(exampleHolding(), { month: '2023-09', day: '2023-09-21' }))).toBe('ccbc4d7bee92ae2e153ab8a345e6a3d807e201193ab9dade82a48362dc3cd8c8');
     expect(await planHash(await translate(withMarks(exampleHolding()), { month: '2023-09', day: '2023-09-21' }))).toBe('7d7236ead520908b210b879a16815f4d3a727b6320f620d2821d3f87195fd252');
   });
@@ -706,9 +703,10 @@ describe('the fills’ content vectors (ADR 0009 amendment 1, Encodings)', () =>
     expect(plan.publish).toEqual({ hold: ['checks', 'wrong'], watch: [[0, 'history.json']], period: 'day', together: true, donor: 'weekday' });
     // On the example with its ontology's nouns and the vendor's name and role (ADR 0010 §8); d145cfde… without them.
     expect(await planHash(plan)).toBe('0749ab06d7d6e78fff14b5ff23d4f8641ac315b70764b16881b367ed13074170');
-    // The example as it ships, with its publish block: the same plan/1 vector as before the fills (7d7236ea…, which is
-    // ccbc4d7b… with those marks).
-    const before = await translate(exampleDoc(), values);
+    // The example as it ships has its fill step (step A10): this vector. Taken out again (exampleUnfilled), the plan/1
+    // vector it had before the fills (7d7236ea…, which is ccbc4d7b… with those marks).
+    expect(await planHash(await translate(exampleDoc(), values))).toBe('0749ab06d7d6e78fff14b5ff23d4f8641ac315b70764b16881b367ed13074170');
+    const before = await translate(exampleUnfilled(), values);
     expect(await planHash(before)).toBe('7d7236ead520908b210b879a16815f4d3a727b6320f620d2821d3f87195fd252');
     const keyed = async (p: FlowPlan) => Object.fromEntries((await keysOf(p)).map((k, i) => [p.nodes[i]!.origin, k]));
     const [now, then] = [await keyed(plan), await keyed(before)];

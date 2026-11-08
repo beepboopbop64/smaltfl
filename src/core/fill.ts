@@ -14,6 +14,7 @@
  *   the one it names, else its pattern's (ADR 0010 §3, C1).
  */
 import { isSpecial, plusDays } from './calendar.js';
+import { canonicalJSON } from './canonical.js';
 import { dayShort } from './days.js';
 import { fillStepOf, isGeneralWatch, type DonorRule, type FillStep, type FlowDocument, type Missing } from './document.js';
 import type { HistoryRanges } from './history.js';
@@ -392,6 +393,15 @@ export function dayVersions(entries: readonly EntryLike[], day: string, period?:
         const kind: Version['kind'] = a.outcome === 'derived' ? (repair?.kind === 'complete' ? 'complete' : 'filled') : out.some((x) => x.kind === 'arrived' || x.kind === 'rerun') ? 'rerun' : 'arrived';
         const donor = repair && isRecord(repair.donor) && typeof repair.donor.day === 'string' ? repair.donor.day : undefined;
         v = { seq: e.seq, run: a.run as number, manifest: a.manifest, kind, ...(donor ? { donor } : {}), ...(Number.isInteger(a.rows) ? { rows: a.rows as number } : {}), shown: null };
+        // The same fill made again in a new engine (a decision applied again after a reload) isn't another version: the
+        // same inputs (its document, its parameters, the donor's file) as a derived version before it.
+        if ((kind === 'filled' || kind === 'complete') && isRecord(a.inputs)) {
+          const same = out.find((x) => x.kind === kind && sameInputs(entries, x.seq, a.inputs as Record<string, unknown>));
+          if (same) {
+            byManifest.set(a.manifest, same);
+            continue;
+          }
+        }
         // A re-run of the same file isn't another version: the same inputs as a version before it.
         if (kind === 'rerun' && isRecord(a.inputs)) {
           const same = out.find((x) => x.kind !== 'filled' && x.kind !== 'complete' && sameFiles(entries, x.seq, a.inputs as Record<string, unknown>));
@@ -428,6 +438,13 @@ export function dayVersions(entries: readonly EntryLike[], day: string, period?:
   const now = showing as Version | null;
   for (const v of out) v.shown = v === now ? 'now' : shownEver.has(v) ? 'before' : null;
   return out;
+}
+
+/** Whether the run entry at `seq` has the same inputs as these: its flow hash, parameters and files. */
+function sameInputs(entries: readonly EntryLike[], seq: number, inputs: Record<string, unknown>): boolean {
+  const e = entries.find((x) => x.seq === seq);
+  const a = e && isRecord(e.about) ? e.about : null;
+  return !!a && isRecord(a.inputs) && canonicalJSON(a.inputs as JSONValue) === canonicalJSON(inputs as JSONValue);
 }
 
 /** Whether the run entry at `seq` has the same files as these inputs. */

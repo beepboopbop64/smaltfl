@@ -36,7 +36,7 @@ describe.skipIf(!has)('the owner’s example, held through the engine on the rea
   };
 
   it('publishes Wed 20, holds Thu 21 and Fri 22 with their manifests, and releases Thu 21 as is', async () => {
-    expect(doc.publish).toEqual({ hold: ['checks', 'wrong'], watch: { trips: 'history.json' }, period: 'day', together: true });
+    expect(doc.publish).toEqual({ hold: ['checks', 'wrong'], watch: { trips: 'history.json' }, period: 'day', together: true, donor: 'weekday' });
     const db = Database.openMemory({ plugins: [io, external, parquet, smaltfl] });
     // The sources and the history pinned in the engine, as the page pins them, each by the hash the data's list gives.
     const list = read('loads.json') as { files: Record<string, { path: string; sha256: string; bytes: number }>; episodes: { loads: { day: string; file: string; sha256: string; rows: number }[] }[] };

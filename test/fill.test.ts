@@ -301,7 +301,12 @@ describe('a day’s versions (S7)', () => {
   const inputs = (day: string, file = 'f1') => ({ flow: 'flow-a', parameters: { day }, files: { trips: file } });
   let seq = 0;
   const entry = (kind: LogEntry['kind'], about: Record<string, unknown>): Pick<LogEntry, 'seq' | 'kind' | 'about'> => ({ seq: seq++, kind, about: about as LogEntry['about'] });
-  const run = (outcome: string, run: number, manifest: string, day: string, extra: Record<string, unknown> = {}) => entry('run', { run, manifest, outcome, day, inputs: inputs(day, (extra.file as string) ?? 'f1'), ...extra });
+  // A derived run's inputs are its own: the derived document's flow hash and the donor's file among its files.
+  const derivedInputs = (day: string, donor: string) => ({ flow: `flow-filled-${donor}`, parameters: { day }, files: { trips: 'f1', trips_donor: `d-${donor}` } });
+  const run = (outcome: string, run: number, manifest: string, day: string, extra: Record<string, unknown> = {}) => {
+    const donor = ((extra.repair as { donor?: { day?: string } } | undefined)?.donor?.day) ?? 'none';
+    return entry('run', { run, manifest, outcome, day, inputs: outcome === 'derived' ? derivedInputs(day, donor) : inputs(day, (extra.file as string) ?? 'f1'), ...extra });
+  };
 
   it('lists what arrived, its fills and re-runs, and ticks the one readers have', () => {
     seq = 0;
@@ -333,6 +338,10 @@ describe('a day’s versions (S7)', () => {
     // A later day published: readers have no version of this day now.
     const later = [...more, run('ok', 6, 'm-fri', '2023-09-22')];
     expect(dayVersions(later, '2023-09-21').map((x) => x.shown)).toEqual([null, 'before', 'before']);
+    // The fill made again in a new engine (its decision applied again after a reload): the same inputs, so the same
+    // version, shown now once its release applies again.
+    const reload = [...more, run('held', 7, 'm-thu-3', '2023-09-21'), run('derived', 8, 'm-refill-2', '2023-09-21', { repair: { kind: 'fill', donor: { day: '2023-09-20' } } }), entry('release', { run: 8, manifest: 'm-refill-2', decision: 7, outcome: 'applied' })];
+    expect(dayVersions(reload, '2023-09-21').map((x) => [x.kind, x.run, x.shown])).toEqual([['arrived', 2, null], ['filled', 3, 'before'], ['filled', 5, 'now']]);
   });
 
   it('counts another file of the day as a re-run, and a passing re-run shown as it publishes', () => {
