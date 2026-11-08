@@ -458,6 +458,76 @@ export function drift(kind: Kind, before: readonly unknown[], after: readonly un
   return { psi: value, level: value < 0.1 ? 'steady' : value < 0.25 ? 'moved' : 'shifted', note };
 }
 
+// ------------------------------------------------------------------ what a step's columns became
+
+/**
+ * A step's new and dropped columns, with the renames among them told as such: a dropped column and a new one whose
+ * names are the same but for case and underscores (LocationID → location_id). The rest stay new or dropped.
+ */
+export function renamesOf(added: readonly string[], removed: readonly string[]): { renamed: [string, string][]; added: string[]; removed: string[] } {
+  const key = (c: string) => c.toLowerCase().replace(/_/g, '');
+  const renamed: [string, string][] = [];
+  const left = [...added];
+  const gone: string[] = [];
+  for (const r of removed) {
+    const k = left.findIndex((a) => key(a) === key(r));
+    if (k >= 0) renamed.push([r, left.splice(k, 1)[0]!]);
+    else gone.push(r);
+  }
+  return { renamed, added: left, removed: gone };
+}
+
+/**
+ * What a simple rule asks of a row, read from its check, for a dropped row's why in plain words: a time between two
+ * columns within a span ("unixepoch(b) - unixepoch(a) BETWEEN 60 AND 10800"), a column's bounds ("x > 0 AND x <= 100",
+ * "x >= 0"), a value present, or values it must not be ("x NOT IN (264, 265) AND y NOT IN (264, 265)"). Null for
+ * anything else, which is then said as its rule.
+ */
+export type Need =
+  | { kind: 'span'; from: string; to: string; lo: number; hi: number }
+  | { kind: 'bounds'; column: string; lo: number | null; loOpen: boolean; hi: number | null; hiOpen: boolean }
+  | { kind: 'present'; column: string }
+  | { kind: 'notIn'; columns: string[]; values: string[] };
+
+export function needOf(check: string): Need | null {
+  const t = check.trim().replace(/\s+/g, ' ');
+  const id = '([A-Za-z_][A-Za-z0-9_]*)';
+  const num = '(-?\\d+(?:\\.\\d+)?)';
+  let m = new RegExp(`^unixepoch\\(${id}\\) - unixepoch\\(${id}\\) BETWEEN ${num} AND ${num}$`, 'i').exec(t);
+  if (m) return { kind: 'span', to: m[1]!, from: m[2]!, lo: Number(m[3]), hi: Number(m[4]) };
+  m = new RegExp(`^${id} (>=|>) ${num} AND ${id} (<=|<) ${num}$`, 'i').exec(t);
+  if (m && m[1]!.toLowerCase() === m[4]!.toLowerCase()) return { kind: 'bounds', column: m[1]!, lo: Number(m[3]), loOpen: m[2] === '>', hi: Number(m[6]), hiOpen: m[5] === '<' };
+  m = new RegExp(`^${id} (>=|>|<=|<) ${num}$`, 'i').exec(t);
+  if (m) return m[2]!.startsWith('>') ? { kind: 'bounds', column: m[1]!, lo: Number(m[3]), loOpen: m[2] === '>', hi: null, hiOpen: false } : { kind: 'bounds', column: m[1]!, lo: null, loOpen: false, hi: Number(m[3]), hiOpen: m[2] === '<' };
+  m = new RegExp(`^${id} IS NOT NULL$`, 'i').exec(t);
+  if (m) return { kind: 'present', column: m[1]! };
+  const parts = t.split(/ AND /i).map((x) => new RegExp(`^${id} NOT IN \\(([^)]*)\\)$`, 'i').exec(x));
+  if (parts.every((x) => x) && parts.every((x) => x![2] === parts[0]![2])) return { kind: 'notIn', columns: parts.map((x) => x![1]!), values: parts[0]![2]!.split(',').map((v) => v.trim()) };
+  return null;
+}
+
+/** A span of seconds as people say it: 19 s, 1 min, 2.5 min, 3 h. */
+export function secondsText(x: number): string {
+  const a = Math.abs(x);
+  if (a < 60) return `${Math.round(x)} s`;
+  if (a < 3600) return `${Number((x / 60).toPrecision(2))} min`;
+  return `${Number((x / 3600).toPrecision(2))} h`;
+}
+
+/** What a need asks, said: "1 min–3 h", "over 0, at most 100", "0 or more", "a value", "not 264 or 265". */
+export function needWords(n: Need, fmt: (column: string, v: number) => string = (_c, v) => String(v)): string {
+  switch (n.kind) {
+    case 'span': return `${secondsText(n.lo)}–${secondsText(n.hi)}`;
+    case 'bounds': {
+      const lo = n.lo === null ? '' : n.loOpen ? `over ${fmt(n.column, n.lo)}` : `${fmt(n.column, n.lo)} or more`;
+      const hi = n.hi === null ? '' : n.hiOpen ? `under ${fmt(n.column, n.hi)}` : `at most ${fmt(n.column, n.hi)}`;
+      return [lo, hi].filter(Boolean).join(', ');
+    }
+    case 'present': return 'a value';
+    case 'notIn': return `not ${n.values.length > 1 ? `${n.values.slice(0, -1).join(', ')} or ${n.values.at(-1)}` : n.values[0]}`;
+  }
+}
+
 // ------------------------------------------------------------------ checks worth adding
 
 export interface Suggestion {

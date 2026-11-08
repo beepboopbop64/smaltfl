@@ -14,7 +14,7 @@ import { emitCheckCounts, emitColumnFacts, emitDistinct, emitDropped, emitRead, 
 import { insertAfter } from '../src/core/document.js';
 import { shapeOf } from '../src/core/optimize.js';
 import { identifiers } from '../src/core/sqltext.js';
-import { columnSql, drift, fillGaps, isolationForest, madsOf, niceCeil, profileColumn, psi, quantile, random, suggestChecks, unusual, type ColumnFacts } from '../src/core/quality.js';
+import { columnSql, drift, fillGaps, isolationForest, madsOf, needOf, needWords, niceCeil, profileColumn, psi, quantile, random, renamesOf, secondsText, suggestChecks, unusual, type ColumnFacts } from '../src/core/quality.js';
 import { EXAMPLE_SOURCES } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
 
@@ -148,6 +148,30 @@ describe('suggested checks', () => {
   it('reads bounds and names as people would', () => {
     expect([niceCeil(47.3), niceCeil(312), niceCeil(1), niceCeil(0.023), niceCeil(21), niceCeil(29.8)]).toEqual([50, 400, 1, 0.025, 25, 30]);
     expect([columnSql('speed_mph'), columnSql('time'), columnSql('Airport_fee'), columnSql('trip distance')]).toEqual(['speed_mph', '"time"', 'Airport_fee', '"trip distance"']);
+  });
+});
+
+describe('a step’s columns and rules in plain words (tabs #31)', () => {
+  it('tells a rename as one, not a new column and a dropped one', () => {
+    // zone_list: LocationID AS location_id (Zone AS zone and Borough AS borough differ only in case, so they stay).
+    expect(renamesOf(['location_id'], ['LocationID'])).toEqual({ renamed: [['LocationID', 'location_id']], added: [], removed: [] });
+    expect(renamesOf(['borough', 'hours', 'vs_dry'], ['pu_borough', 'trips'])).toEqual({ renamed: [], added: ['borough', 'hours', 'vs_dry'], removed: ['pu_borough', 'trips'] });
+  });
+
+  it('reads what a simple rule needs, and says it', () => {
+    const duration = needOf('unixepoch(tpep_dropoff_datetime) - unixepoch(tpep_pickup_datetime) BETWEEN 60 AND 10800')!;
+    expect(duration).toEqual({ kind: 'span', from: 'tpep_pickup_datetime', to: 'tpep_dropoff_datetime', lo: 60, hi: 10800 });
+    expect(needWords(duration)).toBe('1 min–3 h');
+    expect(secondsText(19)).toBe('19 s');
+    const distance = needOf('trip_distance > 0 AND trip_distance <= 100')!;
+    expect(needWords(distance, (_c, v) => `${v} miles`)).toBe('over 0 miles, at most 100 miles');
+    expect(needWords(needOf('fare_amount >= 0')!)).toBe('0 or more');
+    expect(needWords(needOf('passenger_count IS NOT NULL')!)).toBe('a value');
+    const zones = needOf('PULocationID NOT IN (264, 265) AND DOLocationID NOT IN (264, 265)')!;
+    expect(zones).toEqual({ kind: 'notIn', columns: ['PULocationID', 'DOLocationID'], values: ['264', '265'] });
+    expect(needWords(zones)).toBe('not 264 or 265');
+    // Anything else is said by its rule.
+    expect(needOf('substr(tpep_pickup_datetime, 1, 7) = :month')).toBeNull();
   });
 });
 

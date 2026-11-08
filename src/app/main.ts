@@ -14,12 +14,12 @@ import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/docume
 import { GROUP_COLORS, insertAfter, takeOut, validateDocument, withoutDisplay } from '../core/document.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
 import { effectOf, type Effect } from '../core/effect.js';
-import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, type Metric } from '../core/history.js';
+import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, QUANTILES, type HistoryFile, type Metric } from '../core/history.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, toldLine, type EpisodeDay } from '../core/days.js';
-import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, ruleOrder, ruleUsual, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
+import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, ruleOrder, ruleUsual, shortWho, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
@@ -27,7 +27,7 @@ import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
 import { flowHash, type Column, type FlowPlan, type PlanNode } from '../core/plan.js';
-import { checksOver, clockText, columnSql, fillGaps, growForest, isolationPath, madsOf, minuteOfDay, pathLength, principalComponents, profileColumn, quantile, scoreOf, suggestChecks, unusual, type Cut, type Drift, type Forest, type Judge, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
+import { checksOver, clockText, columnSql, fillGaps, growForest, isolationPath, madsOf, minuteOfDay, needOf, needWords, pathLength, principalComponents, profileColumn, quantile, renamesOf, scoreOf, secondsText, suggestChecks, unusual, type Cut, type Drift, type Forest, type Judge, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
 import type { RunResult, VerifyLevel, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
 import { pinFile, runFlow, verifyRun } from '../index.js';
@@ -2284,14 +2284,18 @@ function miniDist(p: Profile, meaning?: PropertyType): SVGSVGElement | HTMLEleme
       svg.append(s('rect', { class: `v${k}`, x: x.toFixed(1), y: 0, width: (w - 0.6).toFixed(1), height: 8 }));
       x += w;
     });
-    // The top value only, said short: its meaning when that is a word or two, else its code (the rest is a tap away).
+    // The top value only, said short: its meaning when that is a word or two (a company's without its legal form,
+    // "Curb Mobility"), a money value in dollars, else its code (the rest is a tap away); its share after a "·".
     const name = (t: { value: unknown }) => {
       const m = meaningFor(meaning, t.value);
-      return m && m.split(/\s+/).length <= 2 ? m : String(t.value);
+      const who = m && /,?\s+(LLC|L\.L\.C\.|Inc\.?|Ltd\.?|Corp\.?)$/i.test(m) ? shortWho(m) : m;
+      if (who && who.split(/\s+/).length <= 2) return who;
+      const n = Number(t.value);
+      return meaning?.unit === 'USD' && t.value !== '' && Number.isFinite(n) ? `$${n.toFixed(2)}` : String(t.value);
     };
     // A tie is said as one, never as one value's lead: "all equal", or "3 tie · 17%".
     const tie = tieOf(p);
-    const said = tie === 'all' ? 'all equal' : tie > 1 ? `${tie === p.top.length && p.facts.distinct > tie ? `${tie}+` : tie} tie · ${Math.round(p.top[0]!.share * 100)}%` : `${name(top[0]!)} ${Math.round(top[0]!.share * 100)}%`;
+    const said = tie === 'all' ? 'all equal' : tie > 1 ? `${tie === p.top.length && p.facts.distinct > tie ? `${tie}+` : tie} tie · ${Math.round(p.top[0]!.share * 100)}%` : `${name(top[0]!)} · ${Math.round(top[0]!.share * 100)}%`;
     return h('span', { class: 'mini-tops' }, svg, h('span', { class: 'mini-label' }, said));
   }
   return null;
@@ -2454,9 +2458,22 @@ async function columnsTab(card: string, id: string, who: string): Promise<HTMLEl
     }
   }
   const gappy = q.profiles.filter((p) => p.facts.present < p.facts.rows).length;
-  const lead = h('p', { class: 'foot' }, `${plural(q.profiles.length, 'column')}${gappy ? ` · ${gappy} with blanks` : ''} · shapes from ${fmtInt(q.sample.length)} rows`);
+  // Counts are over every row; the shapes and common values from an even sample, said as such.
+  const lead = h('p', { class: 'foot' }, `${plural(q.profiles.length, 'column')}${gappy ? ` · ${gappy} with blanks` : ''} · ${q.sample.length < q.rows ? `shapes from ${fmtInt(q.sample.length)} of ${plural(q.rows, 'row')}, sampled` : `shapes from all ${plural(q.rows, 'row')}`}`);
   if (opened) requestAnimationFrame(() => opened!.scrollIntoView({ block: 'start' }));
-  return h('div', { class: 'columns-tab' }, lead, list);
+  return h('div', { class: 'columns-tab' }, lead, colKey(list), list);
+}
+
+/** A key for the marks the column rows carry, only those shown: ↳ the day's cause explains it, ▲/▼ its share today
+ * above or below its usual, ○ outside its range without being news. */
+function colKey(list: HTMLElement): HTMLElement | null {
+  const has = (sel: string) => !!list.querySelector(sel);
+  const text = list.textContent ?? '';
+  const items: Child[] = [];
+  if (has('.cr-mark.explained')) items.push(h('span', { class: 'ck-i' }, glyphEl('explained', 13), 'the day’s cause'));
+  if (/[▲▼]/.test(text)) items.push(h('span', { class: 'ck-i' }, '▲▼ today vs usual'));
+  if (has('.cr-mark.ring')) items.push(h('span', { class: 'ck-i' }, h('span', { class: 'cr-mark ring', 'aria-hidden': 'true' }, h('i', {})), 'outside its range'));
+  return items.length ? h('p', { class: 'col-key', 'aria-label': 'Key' }, ...items) : null;
 }
 
 /** A column's story, in order: what it is, how full, its shape or values, what is normal for it, what is new, and what to do. */
@@ -3669,8 +3686,8 @@ async function oddTab(card: string, id: string, who: string): Promise<HTMLElemen
     h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head' }, glyphEl('warn', 18), far.length === 1 ? 'A value far beyond the rest' : `${far.length} values far beyond the rest`)),
     ...far.flatMap((x) => [h('p', { class: 'vf-sec-h' }, x.title), x.svg])));
   box.append(h('div', { class: 'verdict note' },
-    h('h3', { class: 'v-head' }, q.odd.length ? `${plural(q.odd.length, 'row')} stand${q.odd.length === 1 ? 's' : ''} out of ${fmtInt(q.sample.length)} sampled` : 'No row stands out'),
-    h('p', { class: 'v-line' }, `Scored on ${listed(q.measures.map((c) => meanings(c)?.title ?? c))} together.`)));
+    h('h3', { class: 'v-head' }, q.odd.length ? `${plural(q.odd.length, 'row')} stand${q.odd.length === 1 ? 's' : ''} out` : 'No row stands out'),
+    h('p', { class: 'v-line' }, `${q.sample.length < q.rows ? `Sampled ${fmtInt(q.sample.length)} of ${plural(q.rows, 'row')}` : `All ${plural(q.rows, 'row')}`}, scored on ${listed(q.measures.map((c) => meanings(c)?.title ?? c))} together.`)));
   const odd = oddRows(q, meanings);
   const openOdd = (k: number) => {
     const d = odd.querySelector('details.fold') as HTMLDetailsElement | null;
@@ -3719,7 +3736,12 @@ async function historyTab(card: string, id: string, who: string): Promise<HTMLEl
       sel.addEventListener('change', () => sel.value && set(sel.value));
     }
     box.append(h('div', { class: 'vf-pick', role: 'group', 'aria-label': 'The number to see' },
-      ...top.map((c) => h('button', { type: 'button', class: 'vf-pick-chip', 'aria-pressed': String(c.key === choice.key), onclick: () => set(c.key) }, c.label.replace(/^In the news: /, '').replace(/:.*$/, ''))),
+      // Named by the number each draws ("Extras $2.50 share"), a finding's chip carrying its mark and its title.
+      ...top.map((c) => {
+        const f = c.label.startsWith('In the news: ') ? dayNews(day).find((x) => x.metric && metricKey(x.metric) === c.key) : undefined;
+        const mk = f ? sevMark(f.severity) : null;
+        return h('button', { type: 'button', class: 'vf-pick-chip', 'aria-pressed': String(c.key === choice.key), ...(f ? { title: f.title, 'aria-label': `${metricName(c.m)}: ${f.title}` } : {}), onclick: () => set(c.key) }, mk ? glyphEl(mk, 12) : null, metricName(c.m));
+      }),
       sel));
   }
   if (ranges) {
@@ -3751,6 +3773,22 @@ const historyFocus = new Map<string, string>();
 
 /** The trips' numbers the history follows, to pick from: the trips, each column's share missing and middle value,
  * and each coded column's common values' shares. The day's news comes first: a finding's number a tap away. */
+/** A metric's name as a chip says it: the number it draws, not a finding about it. */
+function metricName(m: Metric): string {
+  const col = (c: string) => NEWS_NAMES.column(c);
+  switch (m.of) {
+    case 'trips': return 'Trips';
+    case 'dropped': return 'Dropped';
+    case 'droppedRows': return 'Rows dropped';
+    case 'rule': case 'ruleRows': return RULE_TITLE(m.name);
+    case 'missing': return `${col(m.column)} blank`;
+    case 'median': return `${col(m.column)} median`;
+    case 'quantile': return `${col(m.column)} p${Math.round((QUANTILES[m.q] ?? 0) * 100)}`;
+    case 'value': return `${col(m.column)} ${NEWS_NAMES.label(m.column, JSON.parse(m.value) as unknown)} share`;
+    case 'count': return `${col(m.column)} ${NEWS_NAMES.label(m.column, JSON.parse(m.value) as unknown)} trips`;
+  }
+}
+
 function tripChoices(): { key: string; label: string; m: Metric }[] {
   const file = history!.file;
   const col = (c: string) => NEWS_NAMES.column(c);
@@ -4471,7 +4509,7 @@ function ruleReasons(id: string): Map<string, string | undefined> {
  * Up to 50 rows a step dropped, each leading with why: the rules it failed and their reasons. `rules` are the ones the
  * person may read (none on a column their policy removes), each with a flag column the statement computed.
  */
-async function showDropped(into: HTMLElement, title: string, sql: string, rules: readonly { k: number; name: string; description?: string; reads: ReadonlySet<string> }[], meanings: Meanings = noMeanings): Promise<void> {
+async function showDropped(into: HTMLElement, title: string, sql: string, rules: readonly { k: number; name: string; check?: string; description?: string; reads: ReadonlySet<string> }[], meanings: Meanings = noMeanings): Promise<void> {
   into.hidden = false;
   into.replaceChildren(h('p', { class: 'eyebrow' }, title), h('p', { class: 'foot' }, 'Loading…'));
   try {
@@ -4479,18 +4517,36 @@ async function showDropped(into: HTMLElement, title: string, sql: string, rules:
     const flagAt = new Map(rules.map((x) => [x, r.columns.indexOf(`_smaltfl_fail_${x.k}`)]));
     const keep = [...r.columns.keys()].filter((k) => !r.columns[k]!.startsWith('_smaltfl_fail_'));
     const failed = r.rows.map((row) => rules.filter((x) => Number(row[flagAt.get(x)!]) === 1));
-    // Why, in the row's own values first: "speed_mph 46.1 fails speed_mph_range: …" and the reason the rule has.
-    const valueOf = (row: unknown[], c: string) => {
-      const k = keep.find((j) => r.columns[j]!.toLowerCase() === c);
-      return k === undefined ? null : `${r.columns[k]} ${typeof row[k] === 'number' ? fmtNum(row[k] as number) : cellOf(row[k]).text}`;
+    // Why, in plain words from the row's own values: what the rule measures and what it needs ("Duration 19 s (needs
+    // 1 min–3 h) · Distance 0 miles (needs over 0, at most 100)"); a rule read no simpler is said by its values.
+    const at = (c: string) => keep.find((j) => r.columns[j]!.toLowerCase() === c.toLowerCase());
+    const said = (c: string, v: unknown) => {
+      const m = meanings(c);
+      return typeof v === 'number' ? (m?.unit === 'USD' ? `$${v.toFixed(2)}` : `${fmtNum(v)}${m?.unit ? ` ${m.unit}` : ''}`) : cellOf(v).text;
     };
-    const why = failed.map((fs, n) =>
-      fs.length
-        ? fs.map((x) => {
-            const values = [...x.reads].map((c) => valueOf(r.rows[n]!, c)).filter((v): v is string => v !== null);
-            return `${values.length ? `${values.join(', ')} ${values.length === 1 ? 'fails' : 'fail'} ` : ''}${x.name}${x.description ? `: ${x.description}` : ''}`;
-          }).join(' · ')
-        : 'a rule on a column hidden from you');
+    const titled = (c: string) => meanings(c)?.title ?? c;
+    const plainWhy = (x: (typeof rules)[number], row: unknown[]): string => {
+      const need = x.check ? needOf(x.check) : null;
+      // A bound in dollars as money; any other unit once, after the bounds ("over 0, at most 100 miles").
+      const fmt = (c: string, v: number) => (meanings(c)?.unit === 'USD' ? `$${v.toFixed(2)}` : fmtNum(v));
+      const unitOf = (c: string) => (meanings(c)?.unit && meanings(c)!.unit !== 'USD' ? ` ${meanings(c)!.unit}` : '');
+      if (need?.kind === 'span') {
+        const [a, b] = [at(need.from), at(need.to)];
+        const secs = a !== undefined && b !== undefined ? (Date.parse(`${String(row[b]).replace(' ', 'T')}Z`) - Date.parse(`${String(row[a]).replace(' ', 'T')}Z`)) / 1000 : Number.NaN;
+        if (Number.isFinite(secs)) return `${RULE_TITLE(x.name)} ${secondsText(secs)} (needs ${needWords(need)})`;
+      }
+      if (need?.kind === 'bounds' || need?.kind === 'present') {
+        const k = at(need.column);
+        if (k !== undefined) return `${titled(r.columns[k]!)} ${row[k] === null || row[k] === undefined ? 'blank' : said(r.columns[k]!, row[k])} (needs ${needWords(need, fmt)}${need.kind === 'bounds' ? unitOf(r.columns[k]!) : ''})`;
+      }
+      if (need?.kind === 'notIn') {
+        const bad = need.columns.map((c) => at(c)).filter((k): k is number => k !== undefined && need.values.includes(String(row[k])));
+        if (bad.length) return `${bad.map((k) => `${titled(r.columns[k]!)} ${cellOf(row[k]).text}`).join(', ')} (needs ${needWords(need)})`;
+      }
+      const values = [...x.reads].map((c) => at(c)).filter((k): k is number => k !== undefined).map((k) => `${titled(r.columns[k]!)} ${said(r.columns[k]!, row[k])}`);
+      return `${RULE_TITLE(x.name)}${values.length ? `: ${values.join(', ')}` : ''}${x.description ? ` (${x.description})` : ''}`;
+    };
+    const why = failed.map((fs, n) => (fs.length ? fs.map((x) => plainWhy(x, r.rows[n]!)).join(' · ') : 'a rule on a column hidden from you'));
     const columns = ['why', ...keep.map((k) => r.columns[k]!)];
     const rows = r.rows.map((row, n) => [why[n], ...keep.map((k) => row[k])]);
     into.replaceChildren(
@@ -4561,7 +4617,7 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
         const reasons = ruleReasons(id);
         const flagged = n.rules.flatMap(([rule, check], k) => {
           const reads = [...identifiers(check)];
-          return reads.some((x) => hidden.has(x)) ? [] : [{ k, name: rule, description: reasons.get(rule), reads: new Set(reads.filter((x) => visibleCols.has(x))) }];
+          return reads.some((x) => hidden.has(x)) ? [] : [{ k, name: rule, check, description: reasons.get(rule), reads: new Set(reads.filter((x) => visibleCols.has(x))) }];
         });
         const sql = wrapRead(view, emitDropped(insp.plan, i, flagged.map((f) => f.k), insp.ctx), flagged.map((f) => `_smaltfl_fail_${f.k}`));
         if (sql) box.append(h('div', { class: 'row' }, h('button', { class: 'btn show', type: 'button', onclick: () => void showDropped(rows, `Dropped by ${id}, and why`, sql, flagged, meaningsOf(id)) }, `Show the ${plural(lost, 'row')} it dropped, and why`)));
@@ -4576,10 +4632,13 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
     case 'filter':
     case 'sql': {
       if (!c.same) {
-        headline(`${plural(inn, 'row')} in, ${fmtInt(out)} out`, removedRows(c) ? 'drop' : 'same');
-        if (c.added.length) say(`New columns: ${list(c.added)}.`);
-        if (c.removed.length) say(`Columns it doesn’t keep: ${list(c.removed)}.`);
-        say(`Its columns aren’t the ones it reads, so the rows it returns can’t be matched one to one with the rows it read.`);
+        // In plain words: what it left out (in neutral ink: a step that keeps some rows does so by design), what it
+        // renamed, what it adds and what it doesn't keep.
+        const r = renamesOf(c.added, c.removed);
+        headline(out < inn ? `Left out ${fmtInt(inn - out)} of ${plural(inn, nounOf(id) === 'rows' ? 'row' : nounOf(id).replace(/s$/, ''))}` : `${plural(inn, 'row')} in, ${fmtInt(out)} out`);
+        if (r.renamed.length) say(`Renamed ${r.renamed.map(([a, b]) => `${a} → ${b}`).join(', ')}.`);
+        if (r.added.length) say(`New columns: ${list(r.added)}.`);
+        if (r.removed.length) say(`Columns it doesn’t keep: ${list(r.removed)}.`);
         break;
       }
       const lost = Math.max(0, inn - out);
