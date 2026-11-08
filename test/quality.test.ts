@@ -112,6 +112,39 @@ describe('suggested checks', () => {
     expect(got.findIndex((s) => s.guard)).toBeGreaterThan(lastCatch);
   });
 
+  it('never bounds a documented code or a tail more than 1% of rows reach, and says what the rows cover (tabs #14)', () => {
+    // A weather file's codes: clear to overcast most hours, drizzle, rain and snow (51–75) a fifth of them. As a number
+    // its tail lies past 12, but the codes are documented: no bound, the documented codes instead, said by meaning.
+    const codes = Array.from({ length: 1000 }, (_, i) => (i % 5 === 0 ? [51, 53, 55, 61, 63, 65, 71, 73, 75][(i / 5) % 9]! : [0, 1, 2, 3][i % 4]!));
+    const wmo: Record<string, string> = { 0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle', 61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain', 71: 'Slight snowfall', 73: 'Moderate snowfall', 75: 'Heavy snowfall', 95: 'Thunderstorm' };
+    const p = profileColumn('weather_code', 'int', facts(codes), codes);
+    const held = [...new Set(codes.map(String))];
+    const got = suggestChecks([p], { values: new Map([['weather_code', held]]), documented: new Map([['weather_code', Object.keys(wmo)]]), meaning: (_c, v) => wmo[v], span: 'in this file' });
+    expect(got.some((x) => x.kind === 'range')).toBe(false);
+    const doc = got.find((x) => x.kind === 'documented')!;
+    expect(p.kind).toBe('measure');
+    expect(doc.check).toBe('weather_code IS NULL OR weather_code IN (0, 1, 2, 3, 45, 51, 53, 55, 61, 63, 65, 71, 73, 75, 95)');
+    expect(doc.guard).toBe(true);
+    expect(doc.why).toBe('It holds 13 of the 15 codes its source documents; 51–75 are Light drizzle to Heavy snowfall, not outliers. This flags any other.');
+    // A coded column that isn't a number with a tail says no more than how many codes it holds.
+    const vendors = Array.from({ length: 300 }, (_, i) => [1, 2][i % 2]!);
+    const v = suggestChecks([profileColumn('VendorID', 'int', facts(vendors), vendors)], { values: new Map([['VendorID', ['1', '2']]]), documented: new Map([['VendorID', ['1', '2', '6', '7']]]), meaning: (_c, x) => ({ 1: 'Creative Mobile', 2: 'Curb Mobility' })[x as '1' | '2'] });
+    expect(v.find((x) => x.kind === 'documented')!.why).toBe('It holds 2 of the 4 codes its source documents. This flags any other.');
+    // A tail a twentieth of the rows reach (surcharges, airport fares) is no far tail: no bound. A few far rows are.
+    const rnd = random(9);
+    const extras = Array.from({ length: 1000 }, (_, i) => (i % 20 === 0 ? 7.75 : Math.round(Math.abs(normal(rnd)) * 2) / 2));
+    expect(suggestChecks([profileColumn('extra', 'real', facts(extras), extras)]).some((x) => x.kind === 'range')).toBe(false);
+    const far = [...Array.from({ length: 997 }, () => 12 + 3 * normal(rnd)), 150, 220, 312];
+    const range = suggestChecks([profileColumn('speed_mph', 'real', facts(far), far)]).find((x) => x.kind === 'range')!;
+    expect(range.bound).toBe(Number(/<= ([\d.]+)$/.exec(range.check)![1]));
+    // The rows' span in the reasons: a day's load says "today", a file of many days "in this file".
+    const boroughs = Array.from({ length: 300 }, (_, i) => ['Manhattan', 'Queens', 'Bronx'][i % 3]!);
+    const b = profileColumn('borough', 'text', facts(boroughs), boroughs);
+    const known = new Map([['borough', ['Bronx', 'Manhattan', 'Queens']]]);
+    expect(suggestChecks([b], { values: known, span: 'in this file' }).map((x) => x.why)).toEqual(['It takes 3 values in this file; this flags a new one.', 'Every row has a borough in this file; this flags one that doesn\'t.']);
+    expect(suggestChecks([b], { values: known })[0]!.why).toBe('It takes 3 values today; this flags a new one.');
+  });
+
   it('reads bounds and names as people would', () => {
     expect([niceCeil(47.3), niceCeil(312), niceCeil(1), niceCeil(0.023), niceCeil(21), niceCeil(29.8)]).toEqual([50, 400, 1, 0.025, 25, 30]);
     expect([columnSql('speed_mph'), columnSql('time'), columnSql('Airport_fee'), columnSql('trip distance')]).toEqual(['speed_mph', '"time"', 'Airport_fee', '"trip distance"']);
@@ -160,7 +193,9 @@ describe('data quality on real data', () => {
     expect(all.find((s) => s.check === 'RatecodeID IS NOT NULL')!.why).toMatch(/RatecodeID, store_and_fwd_flag, congestion_surcharge or Airport_fee: they go missing together\.$/);
     expect(suggestions.length).toBeGreaterThan(2);
     expect(suggestions.every((s) => added.has(s.column.toLowerCase()))).toBe(true);
-    expect(suggestions.some((s) => s.name === 'speed_mph_range' && !s.guard)).toBe(true);
+    // Duration's far tail gets a bound; speed's doesn't: more than 1% of the sampled trips go past 30 mph (tabs #14).
+    expect(suggestions.some((s) => s.name === 'duration_min_range' && !s.guard)).toBe(true);
+    expect(suggestions.some((s) => s.name === 'speed_mph_range')).toBe(false);
     const counts = db.query(emitCheckCounts(read, suggestions.map((s) => s.check))).rows[0]!.map(Number);
     // Odd rows, on the sample's measures.
     const measures = profiles.filter((p) => p.kind === 'measure');

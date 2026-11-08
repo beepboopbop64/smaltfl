@@ -1461,17 +1461,22 @@ async function lookInto(insp: Inspection, i: number, read: string, columns: stri
     const codes = meanings(p.name)?.values;
     if (codes) documented.set(p.name, Object.keys(codes));
   }
-  // A small category's values, exactly, for the ones a check could be suggested on.
+  // A small category's values, exactly, for the ones a check could be suggested on; a documented column's whatever
+  // its kind (a weather code is a number).
   const values = new Map<string, string[]>();
   for (const p of profiles) {
     const mine = !covered.has(p.name.toLowerCase()) && (!only || only.has(p.name.toLowerCase()));
     const most = documented.has(p.name) ? 40 : 12;
-    if (mine && (p.kind === 'category' || p.kind === 'code') && p.facts.distinct <= most) {
+    if (mine && (p.kind === 'category' || p.kind === 'code' || (documented.has(p.name) && p.kind === 'measure')) && p.facts.distinct <= most) {
       values.set(p.name, (await engine.query(emitDistinct(read, p.name, most + 1))).rows.map((r) => r[0]).filter((v) => v !== null && v !== undefined).map(String));
     }
   }
-  const suggestions = suggestChecks(profiles, { covered, only, values, documented });
-  const counts = suggestions.length ? (await engine.query(emitCheckCounts(read, suggestions.map((x) => x.check)))).rows[0]! : [];
+  const id = insp.plan.nodes[i]!.origin;
+  const raw = suggestChecks(profiles, { covered, only, values, documented, span: spanOf(id), meaning: (c, v) => meanings(c)?.values?.[v] });
+  const counted = raw.length ? (await engine.query(emitCheckCounts(read, raw.map((x) => x.check)))).rows[0]!.map(Number) : [];
+  // Counted over every row: a bound that would flag more than 1% of them (the sample guessed its tail short) cuts
+  // ordinary rows, and is not suggested.
+  const kept = raw.map((x, k) => ({ ...x, failing: counted[k] ?? 0 })).filter((x) => x.kind !== 'range' || x.failing <= rows * 0.01);
   const measures = profiles.filter((p) => p.kind === 'measure').map((p) => p.name);
   let odd: Quality['odd'] = [];
   let matrix: number[][] = [];
@@ -1492,7 +1497,7 @@ async function lookInto(insp: Inspection, i: number, read: string, columns: stri
       .slice(0, 8)
       .map((x) => ({ ...x, why: unusual(profiles, records[x.at]!, mads) }));
   }
-  return { rows, columns, sample, profiles, measures, odd, suggestions: suggestions.map((x, k) => ({ ...x, failing: Number(counts[k] ?? 0) })), judges, verdicts, matrix, forest, scores };
+  return { rows, columns, sample, profiles, measures, odd, suggestions: kept, judges, verdicts, matrix, forest, scores };
 }
 
 /** A measure's value for people: about three significant digits. */
@@ -1676,6 +1681,19 @@ function alreadyChecked(q: Quality, meanings: Meanings): HTMLElement | null {
         h('code', {}, jd.check)))));
 }
 
+/** What a suggested check flags, in plain words before its SQL: "Flags rows with Wind speed over 50 km/h." */
+function plainCheck(x: Suggestion, m: PropertyType | undefined): string {
+  const what = m?.title ?? x.column;
+  const unit = m?.unit ? ` ${m.unit}` : '';
+  switch (x.kind) {
+    case 'range': return `Flags rows with ${what} over ${fmtNum(x.bound ?? 0)}${unit}.`;
+    case 'negative': return `Flags rows with ${what} below 0.`;
+    case 'present': return `Flags rows with no ${what}.`;
+    case 'known': return `Flags a ${what} value it hasn’t had before.`;
+    case 'documented': return x.guard ? 'Flags a code its source doesn’t list.' : 'Flags the codes its source doesn’t list.';
+  }
+}
+
 function suggestedChecks(id: string, q: Quality, meanings: Meanings): HTMLElement {
   const box = h('div', { class: 'quality-part' }, h('p', { class: 'eyebrow' }, `Suggested checks · ${q.suggestions.length}`));
   if (!q.suggestions.length) {
@@ -1683,6 +1701,7 @@ function suggestedChecks(id: string, q: Quality, meanings: Meanings): HTMLElemen
     return box;
   }
   const after = readersOf(id).filter(visible);
+  const span = spanOf(id);
   box.append(h('p', { class: 'foot' }, `Each counted over every row; picked ones become a filter box after ${id}.`));
   void after;
   const picks: { s: Suggestion; input: HTMLInputElement }[] = [];
@@ -1694,12 +1713,16 @@ function suggestedChecks(id: string, q: Quality, meanings: Meanings): HTMLElemen
     input.checked = false;
     void catches;
     picks.push({ s: x, input });
-    list.append(h('label', { class: 'suggestion', for: input.id }, input,
-      h('span', { class: 'sg-body' },
-        meanings(x.column) ? h('span', { class: 'sg-col' }, `${meanings(x.column)!.title} · `, h('code', {}, x.column)) : null,
-        h('code', {}, x.check),
-        h('span', { class: 'sg-why' }, x.why),
-        h('span', { class: `pill ${x.failing ? 'warn' : 'ok'}` }, x.failing ? `flags ${plural(x.failing, 'row')} today (${pct(x.failing / Math.max(1, q.rows))})` : 'passes today'))));
+    // A plain sentence of what it flags first, how many rows it flags, why; its SQL folded under it.
+    const m = meanings(x.column);
+    list.append(h('div', { class: 'suggestion' }, input,
+      h('div', { class: 'sg-body' },
+        h('label', { for: input.id, class: 'sg-label' },
+          h('span', { class: 'sg-col' }, m?.title ?? x.column, m ? h('code', {}, ` · ${x.column}`) : null),
+          h('span', { class: 'sg-plain' }, plainCheck(x, m)),
+          h('span', { class: `pill ${x.failing ? 'warn' : 'ok'}` }, x.failing ? `flags ${plural(x.failing, 'row')} ${span} (${pct(x.failing / Math.max(1, q.rows))})` : `passes ${span}`),
+          h('span', { class: 'sg-why' }, x.why)),
+        h('details', { class: 'sg-sql' }, h('summary', {}, 'SQL'), h('code', {}, x.check)))));
   }
   box.append(list);
   if (isOwner()) {
@@ -5419,6 +5442,12 @@ const checked = (path: string, expected: Expected | undefined) => fetchChecked(p
 /** The sha256 this browser last read for a file, from the record (none yet: every file is new). */
 let seenOf = (_path: string): string | undefined => undefined;
 
+/** What a step's rows cover, as its words say it: a day's load ("today") when the day's file feeds it, else the
+ * whole file it reads, many days of it ("in this file"; the weather covers the loads' weeks). */
+const spanOf = (id: string): string => {
+  const src = loadSource();
+  return loads.list.length && src && (id === src || downstreamOf(src).includes(id)) ? 'today' : 'in this file';
+};
 /** The source the loads feed: the one the example reads trips.parquet into. */
 const loadSource = (): string | undefined => {
   const table = EXAMPLE_SOURCES.find((x) => x.file === 'trips.parquet')?.table;

@@ -470,6 +470,10 @@ export interface Suggestion {
   why: string;
   /** Whether every row passes it today: a guard for later runs, rather than a catch now. */
   guard: boolean;
+  /** What it tests, for a plain sentence before its SQL: a measure's upper bound (`bound`), not below 0, present, one
+   * of the values it takes, or one of the codes its source documents. */
+  kind: 'range' | 'negative' | 'present' | 'known' | 'documented';
+  bound?: number;
 }
 
 const RESERVED = new Set(['all', 'and', 'as', 'between', 'by', 'case', 'cast', 'check', 'date', 'default', 'distinct', 'else', 'end', 'exists', 'from', 'group', 'in', 'index', 'is', 'join', 'key', 'like', 'limit', 'not', 'null', 'on', 'or', 'order', 'select', 'table', 'then', 'time', 'timestamp', 'unique', 'values', 'when', 'where']);
@@ -492,20 +496,25 @@ export function niceCeil(x: number): number {
 /**
  * Checks worth adding for these columns, the ones that catch rows today first:
  *
- * - a measure with a far tail (beyond the third quartile plus three times the middle half) gets an upper bound;
+ * - a measure with a far tail (beyond the third quartile plus three times the middle half, reached by under 1% of the
+ *   sampled rows: a bound past which more go would drop ordinary rows, an airport fare or a rainy hour) gets an upper
+ *   bound;
  * - a measure with negative values where most are not gets `>= 0`; one that never goes below zero, a guard that it doesn't;
  * - a column with a few values missing (up to 5% of rows) gets `IS NOT NULL`, which flags them;
  * - a category of a dozen values or fewer gets `IN (…)` its values today, which flags a new one, and if it is never
  *   missing, a guard that it isn't;
- * - a column whose codes the ontology documents (`documented`) gets `IN (…)` those codes instead: a catch if it holds
- *   a code they don't list, else a guard against one.
+ * - a column whose codes the ontology documents (`documented`) gets `IN (…)` those codes instead, whatever its kind (a
+ *   weather code is a number, but 51–75 are rain and snow, not a tail): a catch if it holds a code they don't list,
+ *   else a guard against one, saying what the codes it holds mean (`meaning`); never a bound.
  *
  * A column an expectation already checks (in `covered`) is left alone, as is one outside `only` when it is given
  * (the columns a step makes itself, so a check sits where its column is made). Columns missing in the same rows get
  * one check between them. Range checks let a missing value pass: missing values are a check of their own. `values`
- * holds each small category's values, exactly.
+ * holds each small category's values, exactly. `span` is what the rows cover, said in the reasons: "today" for a day's
+ * load, "in this file" for a file of many days.
  */
-export function suggestChecks(profiles: readonly Profile[], options: { covered?: ReadonlySet<string>; only?: ReadonlySet<string>; values?: ReadonlyMap<string, readonly string[]>; documented?: ReadonlyMap<string, readonly string[]>; limit?: number } = {}): Suggestion[] {
+export function suggestChecks(profiles: readonly Profile[], options: { covered?: ReadonlySet<string>; only?: ReadonlySet<string>; values?: ReadonlyMap<string, readonly string[]>; documented?: ReadonlyMap<string, readonly string[]>; meaning?: (column: string, code: string) => string | undefined; span?: string; limit?: number } = {}): Suggestion[] {
+  const span = options.span ?? 'today';
   const catches: Suggestion[] = [];
   // A column's documented codes guard it better than the codes it holds today: they come first among the guards.
   const documentedGuards: Suggestion[] = [];
@@ -530,6 +539,7 @@ export function suggestChecks(profiles: readonly Profile[], options: { covered?:
       column: p!.name,
       check: `${columnSql(p!.name)} IS NOT NULL`,
       guard: false,
+      kind: 'present',
       why: names.length === 1 ? `${pctText(gaps / p!.facts.rows)} of rows have no ${p!.name}.` : `${pctText(gaps / p!.facts.rows)} of rows have no ${names.slice(0, -1).join(', ')} or ${names.at(-1)}: they go missing together.`,
     });
   }
@@ -538,33 +548,48 @@ export function suggestChecks(profiles: readonly Profile[], options: { covered?:
     const c = columnSql(p.name);
     const { rows, present, min, max } = p.facts;
     const gaps = rows - present;
+    const known = options.values?.get(p.name);
+    const codes = options.documented?.get(p.name);
+    // Documented codes first, whatever the column's kind: they say what its values are, and a bound would cut codes
+    // the source lists (weather codes over 12 are drizzle, rain and snow).
+    if (codes?.length) {
+      if (!known?.length || known.length !== p.facts.distinct) continue;
+      const numeric = codes.every((v) => /^-?\d+$/.test(v)) && p.kind !== 'category';
+      const order = (a: string, b: string) => (numeric ? Number(a) - Number(b) : a < b ? -1 : 1);
+      const list = [...codes].sort(order).map((v) => (numeric ? v : textSql(v)));
+      const other = known.filter((v) => !codes.includes(v));
+      const rule = { name: `${p.name}_documented`, column: p.name, check: `${c} IS NULL OR ${c} IN (${list.join(', ')})`, kind: 'documented' as const };
+      const held = [...known].filter((v) => codes.includes(v)).sort(order);
+      // A coded number whose high codes would read as a far tail says what they mean instead: weather codes 51–75 are
+      // drizzle, rain and snow, not outliers.
+      const said = (v: string) => options.meaning?.(p.name, v);
+      const q = p.kind === 'measure' ? p.quantiles : undefined;
+      const fence = q ? q.p75 + 3 * (q.p75 - q.p25) : Infinity;
+      const past = numeric && q && q.p75 > q.p25 ? held.filter((v) => Number(v) > fence) : [];
+      const tail = past.length && said(past[0]!) && said(past.at(-1)!)
+        ? past.length === 1 ? `; ${past[0]} is ${said(past[0]!)}, not an outlier` : `; ${past[0]}–${past.at(-1)} are ${said(past[0]!)} to ${said(past.at(-1)!)}, not outliers`
+        : '';
+      if (other.length) catches.push({ ...rule, guard: false, why: `Its source documents ${codes.length} codes, and ${other.join(', ')} ${other.length === 1 ? 'isn’t one' : 'aren’t among them'}.` });
+      else documentedGuards.push({ ...rule, guard: true, why: `It holds ${held.length} of the ${codes.length} codes its source documents${tail}. This flags any other.` });
+      continue;
+    }
     if (p.kind === 'measure' && p.quantiles && isNumber(min) && isNumber(max)) {
       const q = p.quantiles;
       const iqr = q.p75 - q.p25;
       const fence = q.p75 + 3 * iqr;
-      if (iqr > 0 && max > fence) {
-        const bound = niceCeil(fence);
-        catches.push({ name: `${p.name}_range`, column: p.name, check: `${c} IS NULL OR ${c} <= ${numberText(bound)}`, guard: false, why: `The middle half lies between ${roughText(q.p25)} and ${roughText(q.p75)}, but some rows go up to ${roughText(max)}.` });
+      const bound = niceCeil(fence);
+      // A far tail only: past the bound go under 1% of the sampled rows.
+      if (iqr > 0 && max > fence && q.p99 <= bound) {
+        catches.push({ name: `${p.name}_range`, column: p.name, check: `${c} IS NULL OR ${c} <= ${numberText(bound)}`, guard: false, kind: 'range', bound, why: `The middle half lies between ${roughText(q.p25)} and ${roughText(q.p75)}, but some rows go up to ${roughText(max)}.` });
       }
-      if (min < 0 && q.p01 >= 0) catches.push({ name: `${p.name}_not_negative`, column: p.name, check: `${c} IS NULL OR ${c} >= 0`, guard: false, why: `Nearly all values are 0 or more, but the smallest is ${roughText(min)}.` });
-      else if (min >= 0) guards.push({ name: `${p.name}_not_negative`, column: p.name, check: `${c} IS NULL OR ${c} >= 0`, guard: true, why: `It has never been below 0; this flags a run where it is.` });
-    }
-    const known = options.values?.get(p.name);
-    const codes = options.documented?.get(p.name);
-    if ((p.kind === 'category' || p.kind === 'code') && codes?.length && known?.length && known.length === p.facts.distinct) {
-      const numeric = codes.every((v) => /^-?\d+$/.test(v)) && p.kind === 'code';
-      const list = [...codes].sort((a, b) => (numeric ? Number(a) - Number(b) : a < b ? -1 : 1)).map((v) => (numeric ? v : textSql(v)));
-      const other = known.filter((v) => !codes.includes(v));
-      const rule = { name: `${p.name}_documented`, column: p.name, check: `${c} IS NULL OR ${c} IN (${list.join(', ')})` };
-      if (other.length) catches.push({ ...rule, guard: false, why: `Its source documents ${codes.length} codes, and ${other.join(', ')} ${other.length === 1 ? 'isn’t one' : 'aren’t among them'}.` });
-      else documentedGuards.push({ ...rule, guard: true, why: `Its source documents ${codes.length} codes and it holds ${known.length} of them; this flags any other.` });
-      continue;
+      if (min < 0 && q.p01 >= 0) catches.push({ name: `${p.name}_not_negative`, column: p.name, check: `${c} IS NULL OR ${c} >= 0`, guard: false, kind: 'negative', why: `Nearly all values are 0 or more, but the smallest is ${roughText(min)}.` });
+      else if (min >= 0) guards.push({ name: `${p.name}_not_negative`, column: p.name, check: `${c} IS NULL OR ${c} >= 0`, guard: true, kind: 'negative', why: `It has never been below 0; this flags a run where it is.` });
     }
     if ((p.kind === 'category' || p.kind === 'code') && known && known.length > 0 && known.length <= 12 && p.facts.distinct <= 12) {
       const numeric = known.every((v) => /^-?\d+(\.\d+)?$/.test(v)) && p.kind === 'code';
       const list = [...known].sort((a, b) => (numeric ? Number(a) - Number(b) : a < b ? -1 : 1)).map((v) => (numeric ? v : textSql(v)));
-      guards.push({ name: `${p.name}_known`, column: p.name, check: `${c} IS NULL OR ${c} IN (${list.join(', ')})`, guard: true, why: `It takes ${known.length} ${known.length === 1 ? 'value' : 'values'} today; this flags a new one.` });
-      if (gaps === 0) guards.push({ name: `${p.name}_present`, column: p.name, check: `${c} IS NOT NULL`, guard: true, why: `Every row has a ${p.name} today; this flags one that doesn't.` });
+      guards.push({ name: `${p.name}_known`, column: p.name, check: `${c} IS NULL OR ${c} IN (${list.join(', ')})`, guard: true, kind: 'known', why: `It takes ${known.length} ${known.length === 1 ? 'value' : 'values'} ${span}; this flags a new one.` });
+      if (gaps === 0) guards.push({ name: `${p.name}_present`, column: p.name, check: `${c} IS NOT NULL`, guard: true, kind: 'present', why: `Every row has a ${p.name} ${span}; this flags one that doesn't.` });
     }
   }
   const names = new Set<string>();
