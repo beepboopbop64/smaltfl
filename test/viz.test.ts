@@ -163,6 +163,25 @@ describe('the news’s charts', () => {
     expect(dayStrip({ days: [{ day: '2024-01-01', v: 10_518, low: 2280, high: 8610, sev: 'warn' }], aria: 'Flex Fare by day' })).toContain('sev-warn-fill');
   });
 
+  it('draws a day this visit didn’t run as absent: its band, no tick, no mark, a dashed frame, and keys it', () => {
+    // Mon Sep 25, 2023, after a visit that ran Thu–Sat and skipped Sun 24: Sun is not run, never “published with
+    // something wrong”.
+    const days = [
+      { day: '2023-09-23', v: 4_100, low: 80_000, high: 140_000, sev: 'alert' as const, mark: 'held' as const },
+      { day: '2023-09-24', v: 3_900, low: 70_000, high: 130_000, sev: 'alert' as const, mark: 'alert' as const, notRun: true },
+      { day: '2023-09-25', v: 91_341, low: 71_515, high: 130_105 },
+    ];
+    const svg = dayStrip({ days, key: ['usual', 'actual'], zero: true, aria: 'Trips by day' });
+    expect(svg.match(/class="notrun"/g)).toHaveLength(2);
+    expect(svg).toContain('>not run</text>');
+    expect(svg).not.toContain('g-alert');
+    expect(svg).toContain('g-held');
+    // Two ticks only, Sat's and Mon's, and the key's tick swatch.
+    expect(svg.match(/class="(ink|sev-alert-fill)" x="[\d.]+" y="[\d.]+" width="[\d.]+" height="3"/g)).toHaveLength(3);
+    // Without a day not run, no such key.
+    expect(dayStrip({ days: [days[0]!, days[2]!], key: ['usual', 'actual'], aria: 'Trips by day' })).not.toContain('not run');
+  });
+
   it('keys a strip where it is first shown, and prints its axis with a unit and 0', () => {
     const svg = dayStrip({ days: [{ day: '2024-01-01', v: 10_518, low: 2280, high: 8610 }, { day: '2023-12-31', v: 13_296, low: 3615, high: 7771 }], key: ['usual', 'actual'], unit: '/day', aria: 'Flex Fare by day' });
     expect(svg).toContain('>usual</text>');

@@ -397,7 +397,8 @@ describe.skipIf(!has)('the story on the real history', () => {
     const after = afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'dont' }, { day: '2023-09-23', state: 'dont' }, { day: '2023-09-24', state: 'dont' }])!;
     const mon = story('2023-09-25');
     expect(mon.labels.after).toBe('Nothing to do · Thu published short, Fri–Sun held');
-    expect(glanceStrings(mon).filter((x) => x !== mon.labels.after).reduce((t, x) => t + wordsIn(x), 0) + wordsIn(after)).toBeLessThanOrEqual(24);
+    // Its strip keys a day of the episode this visit didn't run, where one is ("not run"): counted too.
+    expect(glanceStrings(mon).filter((x) => x !== mon.labels.after).reduce((t, x) => t + wordsIn(x), 0) + wordsIn(after) + wordsIn('not run')).toBeLessThanOrEqual(24);
   }, 60_000);
 
   it('accounts for every finding in one tier: the grouped rows add up to what the old view counted', () => {

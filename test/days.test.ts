@@ -3,7 +3,8 @@
  * passed, said as such; never a day after it, whatever order the days were run in.
  */
 import { describe, expect, it } from 'vitest';
-import { calendarHead, dayMid, lacked, reachLabel, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine, toldLine, type EpisodeDay } from '../src/core/days.js';
+import { wordsIn } from '../src/core/story.js';
+import { calendarHead, dayMid, heldLoadLine, lacked, readersSee, reachLabel, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine, toldLine, type EpisodeDay } from '../src/core/days.js';
 
 describe('the run a day shows', () => {
   it('is the day’s own newest run when it passed', () => {
@@ -126,6 +127,23 @@ describe('what the outputs of a day with something wrong say', () => {
     expect(lacked({ ...base, severity: 'warn' })).toBeNull();
   });
 
+  it('says a held load to someone who can’t read its story from the flow’s verdict, naming no source, value or figure', () => {
+    const claim = (below: boolean) => ({ by: 'story' as const, claim: { state: 'wrong', below } });
+    // Thu Sep 21, 2023 as Ana sees zone_hour: the trips closed to her, held by the story, the day short.
+    expect(heldLoadLine([claim(true)])).toBe('Built from a short load');
+    // Fri Sep 22: held by its checks too, still said by what the story found.
+    expect(heldLoadLine([{ by: 'checks' }, claim(true)])).toBe('Built from a short load');
+    // Tue Nov 8, 2022 as Dev sees it: held for Extras, a column closed to him; the trips in their range.
+    expect(heldLoadLine([claim(false)])).toBe('Built from a load with something wrong');
+    expect(heldLoadLine([{ by: 'checks' }])).toBe('Built from a load its checks held');
+    expect(heldLoadLine([{ by: 'unjudged' }])).toBe('Built from a load not yet judged');
+    expect(heldLoadLine([])).toBeNull();
+    for (const s of [heldLoadLine([claim(true)]), heldLoadLine([claim(false)]), heldLoadLine([{ by: 'checks' }]), heldLoadLine([{ by: 'unjudged' }])]) {
+      expect(s).not.toMatch(/trips|\d/);
+      expect(wordsIn(s!)).toBeLessThanOrEqual(8);
+    }
+  });
+
   it('lets the icon’s boxes carry up to three outputs, and says a held day’s are not published', () => {
     expect(reachLabel(base, 3)).toBe('Outputs built from a short day');
     expect(reachLabel(base, 1)).toBe('Output built from a short day');
@@ -152,6 +170,17 @@ describe('a held day’s own rows, staged (ADR 0009 §12)', () => {
     expect(stagedBar('2023-09-21', null)).toBe('Staged Thu 21 · nothing published yet');
     // Published as is: its rows are what readers see, and no bar.
     expect(stagedBar('2023-09-21', '2023-09-21')).toBeNull();
+  });
+
+  it('say how old the day readers see is once it is two days or more before the day held', () => {
+    // Tue 19 and Wed 20 not run in this visit: readers still see Mon 18, and the bar says it is stale.
+    expect(stagedBar('2023-09-21', '2023-09-18')).toBe('Staged Thu 21 · readers see Mon 18 · 3 days old');
+    expect(readersSee('2023-09-20', '2023-09-21')).toBe('readers see Wed 20');
+    expect(readersSee('2022-11-12', '2022-11-15')).toBe('readers see Sat 12 · 3 days old');
+    // Across a month's end, by the calendar.
+    expect(readersSee('2023-08-30', '2023-09-01')).toBe('readers see Wed 30 · 2 days old');
+    expect(readersSee(null, '2023-09-21')).toBe('nothing published yet');
+    expect(readersSee('2023-09-18', null)).toBe('readers see Mon 18');
   });
 });
 

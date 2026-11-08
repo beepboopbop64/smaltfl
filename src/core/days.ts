@@ -59,12 +59,23 @@ export function rowsFrom(shown: string | null | undefined, viewed: string | null
 }
 
 /**
+ * The day readers see while a day waits (ADR 0009 §12), with its age once it is two days or more before the day held,
+ * so a stale one reads stale: "readers see Wed 20", "readers see Mon 18 · 3 days old"; "nothing published yet".
+ */
+export function readersSee(published: string | null | undefined, day: string | null | undefined): string {
+  if (!published) return 'nothing published yet';
+  const age = day ? Math.round((at(day).getTime() - at(published).getTime()) / 864e5) : 0;
+  return `readers see ${dayShort(published)}${age >= 2 ? ` · ${age} days old` : ''}`;
+}
+
+/**
  * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Staged Thu 21 ·
- * readers see Wed 20", or "… · nothing published yet". Null when the day is the one published.
+ * readers see Wed 20", "… · readers see Mon 18 · 3 days old", or "… · nothing published yet". Null when the day is the
+ * one published.
  */
 export function stagedBar(day: string, published: string | null | undefined): string | null {
   if (published === day) return null;
-  return `Staged ${dayShort(day)} · ${published ? `readers see ${dayShort(published)}` : 'nothing published yet'}`;
+  return `Staged ${dayShort(day)} · ${readersSee(published, day)}`;
 }
 
 /** A panel with no rows to show for the viewed day: no day before it passed in this visit. */
@@ -155,6 +166,21 @@ export function lacked(s: LoadStory): { short: string; long: string } | null {
     return { short: 'from a short day', long: `Built from a short day (−${change}% trips)` };
   }
   return { short: 'from a day with an alert', long: 'Built from a day with something wrong' };
+}
+
+/**
+ * What a held load lacked, said above an output's own rows to someone who can't read the day's story (its source closed
+ * to them, or the column it is about): from the flow's own verdict, the claim the run was held on or its checks, and
+ * never a source's name, a value or a figure (ADR 0009 §12). "Built from a short load", "Built from a load with
+ * something wrong", "Built from a load its checks held", "Built from a load not yet judged". Null for a run nothing held.
+ */
+export function heldLoadLine(holds: readonly { by: 'checks' | 'story' | 'unjudged'; claim?: { state: string; below: boolean } | undefined }[]): string | null {
+  const story = holds.find((x) => x.by === 'story')?.claim;
+  if (story?.below) return 'Built from a short load';
+  if (story) return 'Built from a load with something wrong';
+  if (holds.some((x) => x.by === 'checks')) return 'Built from a load its checks held';
+  if (holds.some((x) => x.by === 'unjudged')) return 'Built from a load not yet judged';
+  return null;
 }
 
 /** What became of a paused day's outputs (ADR 0009): waiting for a decision, published as is, or not published. */

@@ -4,7 +4,7 @@
  * within their budgets.
  */
 import { describe, expect, it } from 'vitest';
-import { afterLabel, afterLine, dayPausedLine, decidedLines, decisionDrawing, goLabel, heldLine, outputPausedLine, pauseLines, ribbonOf, sheetText, sheetWords, waitedLabel, type SheetIn } from '../src/core/decision.js';
+import { afterLabel, afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, goLabel, heldLine, outputPausedLine, pauseLines, ribbonOf, runFigures, sheetText, sheetWords, waitedLabel, type SheetIn, type Sight } from '../src/core/decision.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
 import { storyOf, wordsIn } from '../src/core/story.js';
@@ -139,12 +139,15 @@ describe('the cause card’s pause row, the day after an episode, and the record
     expect(dayPausedLine({ state: 'waiting', readers: null, may: false, standing: false })).toEqual({ text: 'Paused · nothing published yet', verb: null });
     expect(dayPausedLine({ state: 'asis', readers: '2023-09-21', may: true, standing: false })).toEqual({ text: 'Published as is', verb: null });
     expect(dayPausedLine({ state: 'dont', readers: '2022-11-13', may: true, standing: true }).text).toBe('Unpublished until a day publishes · readers see Sun 13');
+    // The day readers see, with its age once it is stale: Tue 19 and Wed 20 not run in this visit.
+    expect(dayPausedLine({ state: 'waiting', readers: '2023-09-18', may: true, standing: false, day: '2023-09-21' })).toEqual({ text: 'Paused · readers see Mon 18 · 3 days old', verb: 'Decide' });
+    expect(dayPausedLine({ state: 'waiting', readers: '2023-09-20', may: true, standing: false, day: '2023-09-21' }).text).toBe('Paused · readers see Wed 20');
     expect(outputPausedLine({ state: 'waiting', may: true, deciders: 'Owner', standing: false })).toEqual({ text: 'Waits for a decision', verb: 'Decide' });
     expect(outputPausedLine({ state: 'waiting', may: false, deciders: 'Owner', standing: false })).toEqual({ text: 'Waits on Owner', verb: null });
     expect(outputPausedLine({ state: 'dont', may: true, deciders: 'Owner', standing: false }).text).toBe('Not published');
     // A line, not a paragraph: at most 8 words with its verb, in every state.
     for (const state of ['waiting', 'asis', 'dont'] as const) for (const standing of [false, true]) {
-      const l = dayPausedLine({ state, readers: '2023-09-18', may: true, standing });
+      const l = dayPausedLine({ state, readers: '2023-09-18', may: true, standing, day: '2023-09-21' });
       expect(wordsIn(l.text) + (l.verb ? wordsIn(l.verb) : 0)).toBeLessThanOrEqual(10);
     }
   });
@@ -174,5 +177,40 @@ describe('the cause card’s pause row, the day after an episode, and the record
     expect(decidedLines({ day: '2023-09-21', state: 'asis', who: 'Owner', minutes: 26, reason: 'Real change', run: 41, seq: 212, under: null })).toEqual({ head: 'Thu Sep 21 · published as is', who: 'Owner · 26 min after · Real change', where: 'Run 41 · record #212 ✓' });
     expect(decidedLines({ day: '2023-09-23', state: 'dont', who: 'Owner', minutes: 1, reason: null, run: null, seq: 230, under: 'Fri' })).toEqual({ head: 'Sat Sep 23 · not published', who: 'Under Fri’s decision', where: 'record #230 ✓' });
     expect(decidedLines({ day: '2022-11-14', state: 'waiting', who: null, minutes: 125, reason: null, run: 7, seq: null, under: null })).toEqual({ head: 'Mon Nov 14 · waiting', who: 'Waiting 2 h', where: 'Run 7' });
+  });
+
+  it('says a run on the status line in one day sentence for every viewer, of what they may see', () => {
+    const waiting = { state: 'waiting' as const, readers: '2023-09-20', standing: false, may: false, deciders: 'Owner' };
+    // Someone who reads the day's story gets its head; the pause is its mark.
+    expect(daySentence({ day: '2023-09-21', head: 'Trips fall 95% from 13:00', wrong: true, pause: { ...waiting, may: true } })).toBe('Thu Sep 21: Trips fall 95% from 13:00');
+    expect(daySentence({ day: '2023-09-18', head: 'A normal Monday', wrong: false, pause: null })).toBe('Mon Sep 18: A normal Monday');
+    // Someone the source is closed to gets what became of the day, naming no source and telling no story.
+    expect(daySentence({ day: '2023-09-21', head: null, wrong: false, pause: waiting })).toBe('Thu Sep 21: paused · readers see Wed 20 · waits on Owner');
+    expect(daySentence({ day: '2023-09-21', head: null, wrong: false, pause: { ...waiting, may: true } })).toBe('Thu Sep 21: paused · readers see Wed 20');
+    expect(daySentence({ day: '2023-09-21', head: null, wrong: false, pause: { ...waiting, state: 'asis' } })).toBe('Thu Sep 21: published as is');
+    expect(daySentence({ day: '2023-09-22', head: null, wrong: false, pause: { ...waiting, state: 'dont', standing: true } })).toBe('Fri Sep 22: unpublished until a day publishes · readers see Wed 20');
+    expect(daySentence({ day: '2023-09-18', head: null, wrong: false, pause: null })).toBe('Mon Sep 18: published');
+    // Dev on Tue Nov 8, 2022: held for Extras, a column closed to him, his own story calm: the pause, not a calm head.
+    expect(daySentence({ day: '2022-11-08', head: 'A normal Tuesday', wrong: false, pause: waiting })).toBe('Tue Nov 8: paused · readers see Wed 20 · waits on Owner');
+  });
+
+  it('puts a run’s figures in the line’s title, a node closed to the viewer neither counted nor named, a hold’s words only to who reads all of it', () => {
+    const nodes = [
+      { origin: 'trips', status: 'built' }, { origin: 'trips_valid', status: 'built' }, { origin: 'zones', status: 'reused' },
+      { origin: 'zone_hour', status: 'built' }, { origin: 'weather', status: 'folded' },
+    ];
+    const holds = [{ origin: 'trips', said: 'Trips fall 95% from 13:00' }, { origin: 'trips_valid', said: '10.45% of arrived rows dropped' }];
+    const figures = (sight: (id: string) => Sight, h = holds) => runFigures({ day: '2023-09-21', run: 15, ms: '820 ms', nodes, holds: h, sight, page: false });
+    expect(figures(() => 'all')).toBe('Thu Sep 21: Run 15 took 820 ms: 3 built, 1 reused, 1 folded; held: trips, Trips fall 95% from 13:00; trips_valid, 10.45% of arrived rows dropped.');
+    // Ana: the trips and their checks are closed to her; zone_hour she reads some rows of.
+    const ana = (id: string): Sight => (id === 'trips' || id === 'trips_valid' ? 'closed' : id === 'zone_hour' ? 'some' : 'all');
+    const said = figures(ana);
+    expect(said).toBe('Thu Sep 21: Run 15 took 820 ms: 1 built, 1 reused, 1 folded; held.');
+    expect(said).not.toMatch(/trips|13:00|95%/);
+    // Dev reads the trips without their fares: the source named, never the flow's story told over every column.
+    const dev = (id: string): Sight => (id === 'trips' || id === 'trips_valid' ? 'some' : 'all');
+    expect(figures(dev)).toBe('Thu Sep 21: Run 15 took 820 ms: 3 built, 1 reused, 1 folded; held: trips; trips_valid.');
+    // A run that published says nothing held; the engine in the page says so.
+    expect(runFigures({ day: null, run: 2, ms: '1.2 s', nodes, holds: [], sight: () => 'all', page: true })).toBe('Run 2 took 1.2 s: 3 built, 1 reused, 1 folded (the engine runs in the page here).');
   });
 });

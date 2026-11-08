@@ -477,6 +477,9 @@ export interface StripDay {
   sev?: 'alert' | 'warn' | null;
   /** A mark over the day's column: an earlier day told as something wrong, or held at the checks. */
   mark?: Mark;
+  /** A day of the loads this visit didn't run, its fate unknown here: its band, no tick and no mark, its column dashed
+   * (absent), and the key says "not run". */
+  notRun?: boolean;
 }
 
 /**
@@ -484,7 +487,8 @@ export interface StripDay {
  * least the tick's height and 4 px more so a narrow one shows past it, with the day's value as an ink tick, the last
  * day outlined; a tick takes a severity fill only when that day was told as alert or warn and sits outside its own
  * band (a part that held, inside its band, is drawn plain on the day its rest fell). The axis starts at 0. `key` puts
- * a one-line key over it (band, tick); `unit` prints the axis's top (a round number) with its unit and 0.
+ * a one-line key over it (band, tick, and "not run" when a day wasn't); `unit` prints the axis's top (a round number)
+ * with its unit and 0. A day not run keeps its band, with no tick or mark, inside a dashed frame: absent.
  */
 export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number; labels?: [number, string, string?][]; aria: string; bandLabel?: string; zero?: boolean; key?: readonly [string, string]; unit?: string }): string {
   const w = o.w ?? 334;
@@ -506,14 +510,18 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
   const TICK = 3;
   let s = open(w, h, o.aria, 'data-y0="0"');
   if (o.key) {
-    // The key, right-aligned: a band swatch and its word, a tick swatch and its word.
+    // The key, right-aligned: a band swatch and its word, a tick swatch and its word, and a dashed one for a day not run.
     const [kb, kt] = o.key;
+    const kn = o.days.some((d) => d.notRun) ? 'not run' : '';
+    const nw = kn ? kn.length * 6.2 : 0;
     const tw = kt.length * 6.2;
     const bwid = kb.length * 6.2;
-    const x2 = w - tw;
+    const x3 = w - nw;
+    const x2 = (kn ? x3 - 16 - 14 : w) - tw;
     const x1 = x2 - 22 - bwid - 18;
     s += `<rect class="ghost" x="${f1(x1)}" y="3" width="12" height="8" rx="2"/><text x="${f1(x1 + 16)}" y="11" class="lbl-m key">${esc(kb)}</text>`;
     s += `<rect class="ink" x="${f1(x2 - 18)}" y="5.5" width="14" height="3" rx="1"/><text x="${f1(x2)}" y="11" class="lbl-m key">${esc(kt)}</text>`;
+    if (kn) s += `<rect class="notrun" x="${f1(x3 - 16)}" y="2.5" width="11" height="9" rx="2"/><text x="${f1(x3)}" y="11" class="lbl-m key">${esc(kn)}</text>`;
   }
   s += `<line class="base" x1="${gx}" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
   o.days.forEach((d, i) => {
@@ -521,9 +529,13 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
     const same = new Date(`${d.day}T00:00:00Z`).getUTCDay() === wd;
     const vy = d.v !== null ? Math.min(y(d.v), base - TICK) : null;
     if (d.low !== null && d.high !== null) {
-      const outside = d.v !== null && (d.v > d.high || d.v < d.low);
+      const outside = !d.notRun && d.v !== null && (d.v > d.high || d.v < d.low);
       const [t, b] = bandSpan(y(d.high), y(d.low), outside ? vy : null, TICK + 4, top - 4, base);
       s += `<rect class="${same ? 'ghost-2' : 'ghost'}" x="${f1(cx - bw / 2)}" y="${f1(t)}" width="${f1(bw)}" height="${f1(b - t)}" rx="2"/>`;
+    }
+    if (d.notRun) {
+      s += `<rect class="notrun" x="${f1(cx - bw / 2 - 2.5)}" y="${top - 6}" width="${f1(bw + 5)}" height="${base - top + 8}" rx="3"/>`;
+      return;
     }
     const inside = d.v !== null && d.low !== null && d.high !== null && d.v >= d.low && d.v <= d.high;
     const sev = inside ? null : d.sev;

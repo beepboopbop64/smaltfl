@@ -12,9 +12,11 @@
  *   held card's line (`heldLine`), what held a day with no story to tell it.
  * - The day line under the loads strip (`dayPausedLine`) and the head of a waiting output's News (`outputPausedLine`):
  *   the pause, readers' day, and the verb that opens the sheet, on the first screen.
+ * - The status line after a run (`daySentence`), one sentence for every viewer of what they may see, and its title's
+ *   figures (`runFigures`), a node closed to the viewer neither counted nor named.
  * - An episode's days once it is over (`afterLine`), and the paused days by month (`ribbonOf`, `decidedLines`).
  */
-import { dayMid, dayShort, type PauseState } from './days.js';
+import { dayMid, dayShort, readersSee, type PauseState } from './days.js';
 import type { HistoryRanges } from './history.js';
 import type { Hold } from './hold.js';
 import type { DecideOption } from './policy.js';
@@ -248,13 +250,50 @@ export function pauseLines(o: { state: PauseState; outputs: number; who: string 
 
 /**
  * The day line under the loads strip on a held day (ADR 0009 §12), on the canvas's first screen: the pause and the day
- * readers see meanwhile, with Decide for someone who may decide; once decided, what became of the day.
+ * readers see meanwhile, its age when it is stale ("readers see Mon 18 · 3 days old", `day` being the day held), with
+ * Decide for someone who may decide; once decided, what became of the day.
  */
-export function dayPausedLine(o: { state: PauseState; readers: string | null; may: boolean; standing: boolean }): { text: string; verb: string | null } {
-  const see = o.readers ? `readers see ${dayShort(o.readers)}` : 'nothing published yet';
+export function dayPausedLine(o: { state: PauseState; readers: string | null; may: boolean; standing: boolean; day?: string | null }): { text: string; verb: string | null } {
+  // Its age while it waits, when what readers see is stale (two days or more before it); once decided, the line keeps
+  // to its ten words.
+  const see = readersSee(o.readers, o.state === 'waiting' ? o.day : null);
   if (o.state === 'waiting') return { text: `Paused · ${see}`, verb: o.may ? 'Decide' : null };
   if (o.state === 'asis') return { text: 'Published as is', verb: null };
   return { text: `${o.standing ? 'Unpublished until a day publishes' : 'Not published'} · ${see}`, verb: null };
+}
+
+/**
+ * The status line after a run on a day (ADR 0008 §10, ADR 0009 §12): one sentence for every viewer, of what their policy
+ * lets them see. The day's head where its story is theirs to read ("Thu Sep 21: Trips fall 95% from 13:00"); else what
+ * became of the day, which names no source and tells no story: "Thu Sep 21: paused · readers see Wed 20 · waits on
+ * Owner", "Mon Sep 18: published". A day held for what the viewer's own story doesn't tell (`wrong` false: a column
+ * closed to them) is said by its pause too, never by a calm head beside its mark. The run's own figures go to the
+ * line's title (`runFigures`).
+ */
+export function daySentence(o: { day: string; head: string | null; wrong: boolean; pause: { state: PauseState; readers: string | null; standing: boolean; may: boolean; deciders: string } | null }): string {
+  const d = dayMid(o.day);
+  const held = !!o.pause && o.pause.state !== 'asis';
+  if (o.head && (!held || o.wrong)) return `${d}: ${o.head}`;
+  if (!o.pause) return `${d}: published`;
+  const l = dayPausedLine({ ...o.pause, day: o.day });
+  const waits = o.pause.state === 'waiting' && !o.pause.may ? ` · waits on ${o.pause.deciders}` : '';
+  return `${d}: ${l.text.replace(/^./, (c) => c.toLowerCase())}${waits}`;
+}
+
+/** What a viewer may read of a node: all of it, some of it (rows or columns closed to them), or nothing. */
+export type Sight = 'all' | 'some' | 'closed';
+
+/**
+ * A run's figures, for the status line's title (ADR 0008: the header says the day, not build statistics): its number and
+ * time, the steps built, reused and folded, and what held it, of what the viewer may see. A node closed to them is
+ * neither counted nor named; what a hold says (the flow's story or its checks' counts, told over every row and column)
+ * only to someone who reads all of its node. "Thu Sep 21: Run 15 took 820 ms: 0 built, 8 reused, 3 folded; held".
+ */
+export function runFigures(o: { day: string | null; run: number; ms: string; nodes: readonly { origin: string; status: string }[]; holds: readonly Pick<Hold, 'origin' | 'said'>[]; sight: (origin: string) => Sight; page: boolean }): string {
+  const count = (status: string) => o.nodes.filter((n) => n.status === status && o.sight(n.origin) !== 'closed').length;
+  const named = o.holds.filter((x) => o.sight(x.origin) !== 'closed').map((x) => (o.sight(x.origin) === 'all' ? `${x.origin}, ${x.said}` : x.origin));
+  const held = o.holds.length ? `; held${named.length ? `: ${named.join('; ')}` : ''}` : '';
+  return `${o.day ? `${dayMid(o.day)}: ` : ''}Run ${o.run} took ${o.ms}: ${count('built')} built, ${count('reused')} reused, ${count('folded')} folded${held}${o.page ? ' (the engine runs in the page here)' : ''}.`;
 }
 
 /**

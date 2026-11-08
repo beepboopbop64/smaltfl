@@ -314,6 +314,8 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .verdict.warn { background: var(--warn-wash); }
 .verdict.alert { background: var(--bad-wash); }
 .verdict.note { background: var(--sunk); }
+/* Rows built from a held or short load: neutral, never vouched for in green (ADR 0009 §12). */
+.verdict.staged { background: var(--sunk); }
 .v-day { margin: 0; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .v-head { margin: 0; font-size: 20px; }
 .verdict.warn .v-head { color: var(--warn); } .verdict.alert .v-head { color: var(--bad); } .verdict.ok .v-head { color: var(--teal); }
@@ -632,6 +634,10 @@ th.hit, td.hit { background: var(--warn-wash); }
 .load.holiday.season::after { opacity: 0.3; }
 .loads-key { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; font-size: 11.5px; color: var(--ink-2); }
 .loads-key .lk-hol { display: inline-block; width: 16px; height: 3px; border-radius: 2px; background: var(--violet, var(--smalt)); opacity: 0.7; }
+.loads-key .lk { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
+/* A day this visit didn't run (ADR 0008 §7: dashes mean absent): its outline dashed, its band and no count. */
+.load.notrun { background: transparent; border-style: dashed; border-color: var(--muted); }
+.loads-key .lk-notrun { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px dashed var(--muted); }
 .range-why { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
 .range-why p { margin: 0; }
 .range-why .off { color: var(--warn); }
@@ -842,6 +848,8 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz text.lbl-bad { fill: var(--bad); font-weight: 600; }
 .viz .slot { fill: none; stroke: var(--edge); stroke-width: 1; }
 .viz .absent { fill: var(--bad-wash); stroke: var(--bad); stroke-width: 1.5; stroke-dasharray: 4 2.5; }
+/* A day not run in this visit: absent, neutral (no severity), dashed. */
+.viz .notrun { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 2.5; }
 .viz .over { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
 .viz .ring-bad { fill: none; stroke: var(--bad); stroke-width: 1.5; }
 .viz .port { fill: var(--smalt); }

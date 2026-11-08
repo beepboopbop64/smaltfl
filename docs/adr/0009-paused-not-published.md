@@ -236,6 +236,18 @@ published. Cached check counts must still hold. And older builds must refuse wha
       see Wed 20", with **Decide ›**, which opens the decision sheet; once decided, "⚑ Published as is" or "✕ Not
       published · readers see Wed 20". A waiting output's News leads with the staged bar and "‖ Waits for a decision ·
       Decide ›", and what it says of its rows is "From its staged rows", never the day's own verdict.
+    - **What each viewer may see.** The status line after a run is one day sentence for every viewer, of what their
+      policy lets them see: the day's head where its story is theirs to read, else what became of the day ("Thu Sep
+      21: paused · readers see Wed 20 · waits on Owner"); the run's figures sit in its title, a node closed to the
+      viewer neither counted nor named, and what a hold says only to someone who reads all of its node. An output of a
+      held day never vouches for its staged rows in green: above them it says what its load lacked, from the story
+      where the viewer may read it, else from the flow's verdict naming no source, value or figure ("Built from a
+      short load"), and someone who may not decide gets "What readers get ›", read only (nothing of the trips when
+      they are closed to them). The loads strip draws and says a day's trips only to someone the trips are open to.
+    - **Days not run.** A day before the one on screen that this visit didn't run, its fate not in the record, is drawn
+      not run: a dashed outline, its band and no count, no mark, and a key ("not run"); in the day after an episode's
+      strip too, never as published with something wrong. The day readers see carries its age once it is two days or
+      more before the day held ("readers see Mon 18 · 3 days old").
     - **The cause card** keeps its head and its visual. Its reach row reads "‖ Paused · 3 outputs waiting", and its one
       verb is **Decide**, both under the visual, before the health row and the checks, so they are on the first screen;
       "Tell the source" moves behind ⋯. Someone who may not decide sees "Paused · waiting on Owner"
