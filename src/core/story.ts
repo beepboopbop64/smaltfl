@@ -18,7 +18,7 @@
 import { holidayOf, plusDays, seasonOf, shortName } from './calendar.js';
 import { QUANTILES, type HistoryRanges } from './history.js';
 import { shortfall, type EpisodeDay } from './days.js';
-import { MATERIAL, hoursShort, shareWords, type Act, type Finding, type Names, type Severity } from './news.js';
+import { coverageOf, LEGACY_JUDGE, MATERIAL, hoursShort, materialFor, notJudgedChip, nounFor, partTemplate, shareWords, type Act, type Coverage, type Finding, type JudgeSettings, type Names, type Severity } from './news.js';
 
 /** Rows today against the rows a day like it has: `usual` is the guess; `low` and `high` its range, when it has one. */
 export interface Count {
@@ -39,6 +39,10 @@ export interface Split {
   who?: string;
   /** What the named part did: kept to its usual count while the rest moved, or fell away, or surged, while the rest held. */
   kind: 'held' | 'vanished' | 'surged';
+  /** Its column names who sent the rows (the ontology's `role: "sender"`): a part that stopped "sent almost nothing". */
+  sender?: boolean;
+  /** Its value is one the ontology marks bad (ADR 0010 §4): a surge in it is something wrong, told by its name. */
+  bad?: boolean;
   part: Count;
   rest: Count;
   /** Columns blank on the part's rows (its count of blanks is the part's count): the same trips, said once. */
@@ -80,7 +84,8 @@ export type Cell = 'file' | 'amount' | 'hours' | 'values' | 'shape';
 
 export interface Story {
   day: string;
-  state: 'calm' | 'notes' | 'unusual' | 'wrong' | 'refused' | 'recovery';
+  /** `unlearned`: the day's rows have no range to be judged by, so nothing about them is told (ADR 0010 §1). */
+  state: 'calm' | 'notes' | 'unusual' | 'wrong' | 'refused' | 'recovery' | 'unlearned';
   severity: Severity;
   head: string;
   chip: string | null;
@@ -114,7 +119,10 @@ export interface Story {
   /** The episode a calm day comes after: its days, the hour its first day fell from (null for a whole day), those the
    * checks held (never published) and the rest (published short), and what it was. */
   recovery: { from: string; to: string; hour: number | null; held: string[]; published: string[]; name: string | null } | null;
-  health: { cell: Cell; severity: Severity | null; explained: boolean; follows: number; sameDay: number }[];
+  /** Each cell, and how many of its numbers had no range that day (`unjudged`: ◌ with a count, ADR 0010 §1). */
+  health: { cell: Cell; severity: Severity | null; explained: boolean; follows: number; sameDay: number; unjudged: number }[];
+  /** What the day's news could judge (news.ts `coverageOf`). */
+  coverage: Coverage;
   primary: Act | null;
   /** Labels the screen shows at a glance, so their words can be counted: rows, chips, the hero's marks. */
   labels: {
@@ -144,6 +152,8 @@ export interface StoryOptions {
   hidden?: ReadonlySet<string>;
   /** Whether to look at the days before for an episode or a recovery (default true; a calendar of every day skips it). */
   episode?: boolean;
+  /** How the source is judged (ADR 0010 §4, §8): the legacy form by default. */
+  judge?: JudgeSettings;
 }
 
 export const ACT_VERB: Record<Act, string> = {
@@ -169,7 +179,7 @@ export const SETTLE_LINE = 'Total in range · nothing to do';
 
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const VALUE_KINDS = new Set<Finding['kind']>(['gone', 'share', 'missing']);
-const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'schema', 'integrity', 'weather', 'calm']);
+const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const worst = (xs: readonly Severity[]): Severity => xs.reduce<Severity>((a, b) => (RANK[b] < RANK[a] ? b : a), 'ok');
 const weekdayOf = (day: string) => WEEKDAYS[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
@@ -318,9 +328,11 @@ export function wordsIn(text: string): number {
 
 /**
  * What a coded value's part is called in a head, and whether it reads as a kind of trip: a code's short meaning is one
- * ("Flex Fare" trips, "Cash" trips); anything else is said with its column ("Extras $0.50", "Vendor 1").
+ * ("Flex Fare" trips, "Cash" trips); anything else is said with its column ("Extras $0.50", "Vendor 1"). A column whose
+ * property names its parts ("Vendor {code}", ADR 0010 §8) is said by its code and named beside it; and its `role`
+ * says whether a part that stopped sent almost nothing. The legacy form names a vendor so when the ontology doesn't.
  */
-function partName(column: string, value: string, names: Names): { name: string; trips: boolean; who?: string } {
+function partName(column: string, value: string, names: Names, judge: JudgeSettings): { name: string; trips: boolean; who?: string; sender: boolean } {
   const parsed = (() => {
     try {
       return JSON.parse(value) as unknown;
@@ -328,14 +340,17 @@ function partName(column: string, value: string, names: Names): { name: string; 
       return value;
     }
   })();
-  if (/vendor/i.test(column)) {
-    // A vendor is said by its code, as the files and the TLC say it, and named beside it: "Vendor 1 · Creative Mobile".
+  const part = names.part?.(column);
+  const named = partTemplate(names, column, parsed) ?? (judge.legacy && !part && /vendor/i.test(column) ? `Vendor ${String(parsed)}` : undefined);
+  const sender = part ? part.role === 'sender' : judge.legacy && /vendor/i.test(column);
+  if (named) {
+    // A part said by its code, as the files say it, and named beside it: "Vendor 1 · Creative Mobile".
     const meant = names.label?.(column, parsed);
-    return { name: `Vendor ${String(parsed)}`, trips: true, ...(meant && meant !== String(parsed) ? { who: shortWho(meant) } : {}) };
+    return { name: named, trips: true, sender, ...(meant && meant !== String(parsed) ? { who: shortWho(meant) } : {}) };
   }
   const label = (names.label ?? names.value)(column, parsed).replace(/\s+trips?$/i, '');
   const meaning = label !== String(parsed) && !/^\$?-?[\d.,]+$/.test(label);
-  return meaning && wordsIn(label) <= 3 ? { name: label, trips: true } : { name: `${names.column(column)} ${label.length <= 8 ? label : String(parsed)}`, trips: false };
+  return meaning && wordsIn(label) <= 3 ? { name: label, trips: true, sender } : { name: `${names.column(column)} ${label.length <= 8 ? label : String(parsed)}`, trips: false, sender };
 }
 
 /**
@@ -344,13 +359,14 @@ function partName(column: string, value: string, names: Names): { name: string; 
  * carrying at least 40% of the day's change and 200 trips. The named side is the smaller one, and never a blank, so a
  * head names a population ("Flex Fare") and not its symptom ("Stored and forwarded N"). Null when nothing stands out.
  */
-export function splitOf(h: HistoryRanges, day: string, names: Names, hidden: ReadonlySet<string> = new Set()): Split | null {
+export function splitOf(h: HistoryRanges, day: string, names: Names, hidden: ReadonlySet<string> = new Set(), judge: JudgeSettings = LEGACY_JUDGE): Split | null {
   const file = h.file;
   const k = file.days.indexOf(day);
   const range = h.of({ of: 'trips' })?.at(day);
   if (k < 0 || !range) return null;
   const n = file.rows[k]!;
   const E = range.expected;
+  const floor = materialFor(E, judge.scale).split;
   const change = n - E;
   const steady = (r: number) => r >= 2 / 3 && r <= 1.5;
   let best: { column: string; value: string; kind: Split['kind']; nv: number; Ev: number; score: number } | null = null;
@@ -361,7 +377,7 @@ export function splitOf(h: HistoryRanges, day: string, names: Names, hidden: Rea
       const share = h.of({ of: 'value', column, value })?.at(day)?.expected;
       if (share === undefined) return;
       const Ev = share * E;
-      if (Ev < 200 || Ev > E - Ev) return;
+      if (Ev < floor || Ev > E - Ev) return;
       const nv = vh.counts![k]![i] ?? 0;
       const rs = nv / Ev;
       const rr = (n - nv) / Math.max(1, E - Ev);
@@ -370,19 +386,19 @@ export function splitOf(h: HistoryRanges, day: string, names: Names, hidden: Rea
       const dv = nv - Ev;
       const dr = n - nv - (E - Ev);
       let kind: Split['kind'] | null = null;
-      if (steady(rr) && Math.abs(dv) >= 0.4 * Math.abs(change) && Math.abs(dv) >= 200) kind = rs < rr ? 'vanished' : 'surged';
-      else if (steady(rs) && Math.abs(dr) >= 0.4 * Math.abs(change) && Math.abs(dr) >= 200) kind = 'held';
+      if (steady(rr) && Math.abs(dv) >= 0.4 * Math.abs(change) && Math.abs(dv) >= floor) kind = rs < rr ? 'vanished' : 'surged';
+      else if (steady(rs) && Math.abs(dr) >= 0.4 * Math.abs(change) && Math.abs(dr) >= floor) kind = 'held';
       if (!kind) return;
       const score = Math.abs(Math.log((rs + 1e-4) / (rr + 1e-4)));
       if (!best || score > best.score) best = { column, value, kind, nv, Ev, score };
     });
   }
   const b = best as { column: string; value: string; kind: Split['kind']; nv: number; Ev: number } | null;
-  return b ? splitWith(h, day, names, hidden, b) : null;
+  return b ? splitWith(h, day, names, hidden, b, judge) : null;
 }
 
 /** The split for one coded value, its kind and counts decided. */
-function splitWith(h: HistoryRanges, day: string, names: Names, hidden: ReadonlySet<string>, b: { column: string; value: string; kind: Split['kind']; nv: number; Ev: number }): Split {
+function splitWith(h: HistoryRanges, day: string, names: Names, hidden: ReadonlySet<string>, b: { column: string; value: string; kind: Split['kind']; nv: number; Ev: number }, judge: JudgeSettings): Split {
   const file = h.file;
   const k = file.days.indexOf(day);
   const n = file.rows[k]!;
@@ -401,7 +417,14 @@ function splitWith(h: HistoryRanges, day: string, names: Names, hidden: Readonly
       if (Math.abs((vh.counts[k]![at] ?? 0) - b.nv) <= 0.02 * n) blank.push(names.column(column));
     }
   }
-  const named = partName(b.column, b.value, names);
+  const named = partName(b.column, b.value, names, judge);
+  const isBad = (() => {
+    try {
+      return judge.bad.get(b.column.toLowerCase())?.has(String(JSON.parse(b.value))) ?? false;
+    } catch {
+      return false;
+    }
+  })();
   return {
     column: b.column,
     value: b.value,
@@ -409,6 +432,8 @@ function splitWith(h: HistoryRanges, day: string, names: Names, hidden: Readonly
     trips: named.trips,
     ...(named.who ? { who: named.who } : {}),
     kind: b.kind,
+    ...(named.sender ? { sender: true } : {}),
+    ...(isBad ? { bad: true } : {}),
     part: { today: b.nv, usual, low: near ? counted!.low : null, high: near ? counted!.high : null },
     rest: { today: n - b.nv, usual: Math.max(0, E - usual), low: null, high: null },
     blank,
@@ -435,7 +460,7 @@ export function countRange(h: HistoryRanges, column: string, value: string, day:
  * That finding has already judged the part out of the ordinary, so the split's own test of twice apart isn't asked
  * again. Null when it doesn't hold.
  */
-export function populationOf(h: HistoryRanges, day: string, names: Names, f: Finding, hidden: ReadonlySet<string> = new Set()): Split | null {
+export function populationOf(h: HistoryRanges, day: string, names: Names, f: Finding, hidden: ReadonlySet<string> = new Set(), judge: JudgeSettings = LEGACY_JUDGE): Split | null {
   const ms = f.members ?? [];
   const coded = ms.filter((m) => m.value !== 'null');
   if (ms.length < 2 || coded.length !== 1) return null;
@@ -453,8 +478,8 @@ export function populationOf(h: HistoryRanges, day: string, names: Names, f: Fin
   const Ev = share * E;
   const nv = vh.counts[k]![at] ?? 0;
   const rr = (n - nv) / Math.max(1, E - Ev);
-  if (Ev < 1 || Ev > E - Ev || rr < 2 / 3 || rr > 1.5 || Math.abs(nv - Ev) < 200) return null;
-  return { ...splitWith(h, day, names, hidden, { column, value, kind: nv > Ev ? 'surged' : 'vanished', nv, Ev }), via: 'blanks' };
+  if (Ev < 1 || Ev > E - Ev || rr < 2 / 3 || rr > 1.5 || Math.abs(nv - Ev) < materialFor(E, judge.scale).split) return null;
+  return { ...splitWith(h, day, names, hidden, { column, value, kind: nv > Ev ? 'surged' : 'vanished', nv, Ev }, judge), via: 'blanks' };
 }
 
 /** The checks on the day, from the history: the share and the rows they drop, by rule, against a day like it. */
@@ -518,19 +543,20 @@ function minuteAt(hours: readonly number[], q: number): number {
  * Whether a day had a cause of something wrong (almost no trips, trips that stop, or a part that vanished or held),
  * and what it was, in at most three words: "trips fell", "only Flex Fare", "Vendor 1 missing".
  */
-function badDay(h: HistoryRanges, day: string, names: Names, hidden: ReadonlySet<string>): { hour: number | null; name: string | null } | null {
+function badDay(h: HistoryRanges, day: string, names: Names, hidden: ReadonlySet<string>, judge: JudgeSettings): { hour: number | null; name: string | null } | null {
   const file = h.file;
   const k = file.days.indexOf(day);
   const r = h.of({ of: 'trips' })?.at(day);
   if (k < 0 || !r) return null;
   const n = file.rows[k]!;
   const hours = hoursShort(h, k, r.expected);
-  if (hours && n >= MATERIAL.blank * r.expected) return { hour: hours.hours && hours.hours.to === 23 ? hours.hours.from : null, name: hours.hours && hours.hours.from === 0 ? 'late start' : 'trips fell' };
-  const s = n >= r.low && n <= r.high ? null : splitOf(h, day, names, hidden);
+  const noun = nounFor(names);
+  if (hours && n >= MATERIAL.blank * r.expected) return { hour: hours.hours && hours.hours.to === 23 ? hours.hours.from : null, name: hours.hours && hours.hours.from === 0 ? 'late start' : `${noun} fell` };
+  const s = n >= r.low && n <= r.high ? null : splitOf(h, day, names, hidden, judge);
   const said = (x: string) => (wordsIn(x) <= 3 ? x : null);
-  if (s && s.kind === 'held') return { hour: null, name: s.rest.today < 0.1 * s.rest.usual ? said(`only ${s.name}`) : 'trips short' };
+  if (s && s.kind === 'held') return { hour: null, name: s.rest.today < 0.1 * s.rest.usual ? said(`only ${s.name}`) : said(`${noun} short`) };
   if (s && s.kind === 'vanished') return { hour: null, name: said(`${s.name} ${s.part.today < 0.1 * s.part.usual ? 'missing' : 'short'}`) };
-  if (n < MATERIAL.blank * r.expected) return { hour: null, name: 'almost no trips' };
+  if (n < MATERIAL.blank * r.expected) return { hour: null, name: said(`almost no ${noun}`) };
   return null;
 }
 
@@ -539,26 +565,29 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const file = h.file;
   const k = file.days.indexOf(day);
   const names = o.names;
+  const judge = o.judge ?? LEGACY_JUDGE;
+  const noun = (n?: number) => nounFor(names, n);
+  const Noun = (n?: number) => noun(n).charAt(0).toUpperCase() + noun(n).slice(1);
   const ack = o.acknowledged ?? new Set<string>();
   const hidden = new Set([...(o.hidden ?? [])].map((c) => c.toLowerCase()));
   const shown = (f: Finding) => !(f.columns ?? []).some((c) => hidden.has(c.toLowerCase())) && !(f.members ?? []).some((m) => hidden.has(m.column.toLowerCase()));
   const tripsRange = k >= 0 ? h.of({ of: 'trips' })?.at(day) : null;
   const amount = tripsRange && k >= 0 ? { value: file.rows[k]!, low: tripsRange.low, high: tripsRange.high, expected: tripsRange.expected, change: file.rows[k]! < tripsRange.low || file.rows[k]! > tripsRange.high ? file.rows[k]! / tripsRange.expected - 1 : null } : null;
-  const live = findings.filter((f) => f.kind !== 'calm' && shown(f));
+  const live = findings.filter((f) => f.kind !== 'calm' && f.kind !== 'unlearned' && shown(f));
   const volume = live.find((f) => f.kind === 'volume') ?? null;
   const hoursF = live.find((f) => f.kind === 'hours') ?? null;
   const loud = (f: Finding) => (f.severity === 'alert' || f.severity === 'warn') && !ack.has(f.key);
   const valueStories = live.filter((f) => VALUE_KINDS.has(f.kind) && loud(f)).length;
-  const split = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden) : null;
+  const split = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden, judge) : null;
   const gate = k >= 0 && o.step ? gateOf(h, day, o.step, o.limit ?? null) : null;
   if (gate && o.held !== undefined) (gate.held = o.held), gate.held && (gate.near = false);
   const blankDay = !!volume && volume.value !== undefined && !!volume.range && volume.value < MATERIAL.blank * volume.range.expected;
   // A population seen through its blanks (a value and the fields blank on its rows, told together): the day's cause
   // when nothing else is, named by the value and not by a blank or a symptom (Mon Sep 18, 2023's Flex Fare trips).
   const popFinding = k >= 0 && !o.refused && !split && !hoursF && !(volume && loud(volume)) && !gate?.held
-    ? (live.filter((f) => f.members && loud(f)).sort((a, b) => b.score - a.score).find((f) => populationOf(h, day, names, f, hidden)) ?? null)
+    ? (live.filter((f) => f.members && loud(f)).sort((a, b) => b.score - a.score).find((f) => populationOf(h, day, names, f, hidden, judge)) ?? null)
     : null;
-  const population = popFinding ? populationOf(h, day, names, popFinding, hidden) : null;
+  const population = popFinding ? populationOf(h, day, names, popFinding, hidden, judge) : null;
   // What the findings are tested against: the split, or the population.
   const basis = split ?? population;
 
@@ -605,7 +634,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     if (f === popFinding && population) return { tier: 'cause' };
     if (f === hoursF && hero === 'hours') return { tier: 'cause' };
     if (f === volume) return hero === 'amount' ? { tier: 'cause' } : caused ? { tier: 'absorbed' } : { tier: loud(f) ? 'standalone' : 'note' };
-    if (NEVER_FOLD.has(f.kind) || f.severity === 'ok') return { tier: loud(f) ? 'standalone' : 'note' };
+    // A value marked bad is told at its own severity, never as part of a cause (ADR 0010 §4).
+    if (NEVER_FOLD.has(f.kind) || f.bad || f.severity === 'ok') return { tier: loud(f) ? 'standalone' : 'note' };
     if (f.kind === 'dropped' && gate?.held && hero === 'gate') return { tier: 'absorbed' };
     if (!caused) return { tier: loud(f) ? 'standalone' : 'note' };
     const within = (f.rows ?? 0) <= size;
@@ -622,7 +652,9 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       const c = f.columns?.[0];
       const time = c !== undefined && file.kinds[file.columns.indexOf(c)] === 'time';
       if (time && f.metric?.of === 'quantile' && f.value !== undefined && file.hours?.[k]) {
-        const off = /drop/i.test(c!) ? 15 : 0;
+        // A time that runs behind the hours' own (a drop-off after its pickup): by the ontology's `after` mark, or in the
+        // legacy form by a column named like a drop-off, 15 minutes (ADR 0010 §8).
+        const off = judge.after.get(c!.toLowerCase())?.minutes ?? (judge.legacy && /drop/i.test(c!) ? 15 : 0);
         if (Math.abs(f.value - minuteAt(file.hours[k]!, QUANTILES[f.metric.q]!) - off) <= 75) return { tier: 'follows' };
       }
       return { tier: 'sameDay' };
@@ -656,6 +688,10 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   if (split && RANK[causeSeverity] > RANK.warn) causeSeverity = 'warn';
   if (gate?.held) causeSeverity = 'alert';
   const severity: Severity = o.refused ? 'alert' : worst([causeSeverity, ...standalone.map((f) => f.severity), notes.length ? 'note' : 'ok']);
+  // What could be judged (ADR 0010 §1): with no range for the day's rows, it isn't judged, unless something wrong or
+  // unusual was found anyway (a value marked bad, a serious column's new value, the floor).
+  const coverage = coverageOf(h, day, { checks: !!o.step });
+  const unlearned = k >= 0 && !o.refused && !tripsRange && severity !== 'alert' && severity !== 'warn';
 
   // The episode: the days before with a cause of something wrong, back to its first.
   let episode: Story['episode'] = null;
@@ -666,7 +702,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     let days = 0;
     for (let i = 1; i <= 14; i++) {
       const d = plusDays(from, -i);
-      const b = badDay(h, d, names, hidden);
+      const b = badDay(h, d, names, hidden, judge);
       if (!b) break;
       first = d;
       hour = b.hour;
@@ -703,7 +739,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     }
   } else if (k >= 0 && !o.refused && severity !== 'alert' && severity !== 'warn' && o.episode !== false) {
     const yesterday = plusDays(day, -1);
-    const last = badDay(h, yesterday, names, hidden);
+    const last = badDay(h, yesterday, names, hidden, judge);
     if (last) {
       const b = before(yesterday);
       const from = b.days ? b.first : yesterday;
@@ -720,8 +756,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const popShare = popMember ? shareWords(popMember.share, popMember.range.low, popMember.range.high) : null;
 
   // The head: the cause as a population or a time, in at most six words.
-  const holiday = holidayOf(day);
-  const season = seasonOf(day);
+  const holiday = holidayOf(day, h.calendar);
+  const season = seasonOf(day, h.calendar);
   const calmHead = holiday ? `Normal for ${shortName(holiday)}` : season ? `Normal for ${shortName(season).replace(/^Holiday season$/, 'the holidays')}` : `A normal ${weekdayOf(day)}`;
   const pctShort = (x: number) => `${Math.round(x * 100)}%`;
   // The trips an hour after a fall that runs to the day's end: they fall to a trickle and don't stop (Thu Sep 21, 2023
@@ -745,22 +781,24 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const none = !!hoursF?.hours && hoursF.hours.got.slice(hoursF.hours.from, hoursF.hours.to + 1).every((n) => n === 0);
   let head: string;
   if (o.refused) head = 'File refused: bytes don’t match';
-  else if (hero === 'hours' && hoursF) head = hoursF.hours && hoursF.hours.to === 23 && perHour !== null && !none ? (trickle ? `Trips fall to trickle from ${clock(hoursF.hours.from)}` : `Trips fall to ~${fmtInt(perHour)}/h from ${clock(hoursF.hours.from)}`) : hoursF.title;
+  else if (hero === 'hours' && hoursF) head = hoursF.hours && hoursF.hours.to === 23 && perHour !== null && !none ? (trickle ? `${Noun()} fall to trickle from ${clock(hoursF.hours.from)}` : `${Noun()} fall to ~${fmtInt(perHour)}/h from ${clock(hoursF.hours.from)}`) : hoursF.title;
   else if (hero === 'split' && split) {
     const restRatio = split.rest.today / Math.max(1, split.rest.usual);
     const partRatio = split.part.today / Math.max(1, split.part.usual);
     const part = split.trips ? `${split.name} records` : split.name;
+    // A bad value that surged takes its own name as the head: "Failed 4.5× usual" (ADR 0010 §4).
+    const surged = split.bad ? split.name : part;
     head = split.kind === 'held'
-      ? restRatio < 0.1 ? `Only ${part} arrived` : `Trips ${pctShort(1 - restRatio)} short; ${split.name} held`
+      ? restRatio < 0.1 ? `Only ${part} arrived` : `${Noun()} ${pctShort(1 - restRatio)} short; ${split.name} held`
       : split.kind === 'vanished'
-        ? partRatio < 0.1 ? (/^Vendor /.test(split.name) ? `${split.name} sent almost nothing` : `${part} almost gone`) : `${part} ${pctShort(1 - partRatio)} short`
-        : partRatio >= 1.95 ? `${part} ${partRatio.toFixed(1).replace(/\.0$/, '')}× usual` : `${part} up ${pctShort(partRatio - 1)}`;
+        ? partRatio < 0.1 ? (split.sender ? `${split.name} sent almost nothing` : `${part} almost gone`) : `${part} ${pctShort(1 - partRatio)} short`
+        : partRatio >= 1.95 ? `${surged} ${partRatio.toFixed(1).replace(/\.0$/, '')}× usual` : `${surged} up ${pctShort(partRatio - 1)}`;
   } else if (hero === 'amount' && volume) head = volume.title;
   else if (hero === 'gate' && gate) head = gateHead(gate);
   else if (population && popShare) {
     // "More Flex Fare trips: 5.3%": the population, which way, and its share; its usual range is on the visual under it.
     const way = population.kind === 'surged' ? 'More' : 'Fewer';
-    const full = `${way} ${population.name}${population.trips ? ' trips' : ''}: ${popShare.value}`;
+    const full = `${way} ${population.name}${population.trips ? ` ${noun()}` : ''}: ${popShare.value}`;
     head = wordsIn(full) <= 6 ? full : `${way} ${population.name}: ${popShare.value}`;
   } else if (standalone[0]) {
     // A finding's title as a head, in six words: its usual range left to the visual under it when it doesn't fit.
@@ -810,21 +848,29 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       ? `Day ${episode.days} · ~${compact(episode.short.estimate)} short`
       : `Day ${episode.days} · since ${ddd(episode.since)}${episode.hour !== null ? ` ${clock(episode.hour)}` : ''}`
     : afterChip;
+  const whyChip = coverage.why ? notJudgedChip(coverage.why, shortName, h.to) : null;
   // And whether anything is left to do: a held load is never published, and nothing waits on a person to release it.
   const after = recovery && o.step ? `Nothing to do · ${[recovery.published.length ? `${spans(recovery.published)} published short` : '', recovery.held.length ? `${spans(recovery.held)} held` : ''].filter(Boolean).join(', ')}` : null;
 
-  const state: Story['state'] = o.refused ? 'refused' : severity === 'alert' ? 'wrong' : severity === 'warn' ? 'unusual' : recovery ? 'recovery' : notes.length ? 'notes' : 'calm';
-  const shownHero: Hero = state === 'calm' || state === 'notes' || state === 'recovery' ? 'calm' : hero;
+  // Nothing to judge the day's rows by (ADR 0010 §1): not judged yet, whatever the notes say; something wrong or unusual
+  // found anyway (a value marked bad, a serious column's new value, the floor) is told as it is.
+  const state: Story['state'] = o.refused ? 'refused' : severity === 'alert' ? 'wrong' : severity === 'warn' ? 'unusual' : unlearned ? 'unlearned' : recovery ? 'recovery' : notes.length ? 'notes' : 'calm';
+  if (state === 'unlearned') {
+    head = 'Not judged yet';
+    recovery = null;
+  }
+  const shownHero: Hero = state === 'calm' || state === 'notes' || state === 'recovery' || state === 'unlearned' ? 'calm' : hero;
 
   // One verb: what can be done about the cause.
   const primary: Act | null = o.refused ? 'refetch'
-    : state === 'calm' || state === 'notes' || state === 'recovery' ? null
+    : state === 'calm' || state === 'notes' || state === 'recovery' || state === 'unlearned' ? null
     : hero === 'hours' ? 'incident'
-    : hero === 'split' && split ? (split.kind === 'surged' ? 'expected' : 'notify')
+    : hero === 'split' && split ? (split.kind === 'surged' ? (split.bad ? 'incident' : 'expected') : 'notify')
     : hero === 'gate' ? 'notify'
     : cause?.acts[0] ?? standalone[0]?.acts[0] ?? null;
 
   // The health row: each cell the worst of its kinds as told, and whether the cause explains it.
+  const unjudgedIn: Record<Cell, number> = { file: 0, amount: coverage.rows || k < 0 ? 0 : 1, hours: 0, values: coverage.values[1] - coverage.values[0], shape: coverage.quantiles[1] - coverage.quantiles[0] };
   const health = (Object.entries(CELL_KINDS) as [Cell, readonly Finding['kind'][]][]).map(([cell, kinds]) => {
     const mine = told.filter((f) => kinds.includes(f.kind) && f.severity !== 'ok');
     const loudOnes = mine.filter((f) => f.tier === 'cause' || f.tier === 'standalone');
@@ -832,10 +878,11 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     // The cell holding the cause's own measure carries the cause's mark: the amount on a split day with a volume
     // finding, the hours on a day they fall, the values on a surge with no volume finding.
     const causeCell = hero === 'hours' ? 'hours' : hero === 'split' ? (volume ? 'amount' : 'values') : hero === 'amount' ? 'amount' : null;
-    if (cell === causeCell && (causeSeverity === 'alert' || causeSeverity === 'warn')) return { cell, severity: causeSeverity, explained: false, follows: mine.filter((f) => f.tier === 'follows' || f.tier === 'absorbed').length, sameDay: mine.filter((f) => f.tier === 'sameDay').length };
+    if (cell === causeCell && (causeSeverity === 'alert' || causeSeverity === 'warn')) return { cell, severity: causeSeverity, explained: false, follows: mine.filter((f) => f.tier === 'follows' || f.tier === 'absorbed').length, sameDay: mine.filter((f) => f.tier === 'sameDay').length, unjudged: unjudgedIn[cell] };
     const explained = (folded.length > 0 && loudOnes.length === 0) || (cell === 'hours' && blankDay);
-    return { cell, severity: loudOnes.length ? worst(loudOnes.map((f) => f.severity)) : mine.length && !explained ? 'note' as Severity : null, explained, follows: mine.filter((f) => f.tier === 'follows' || f.tier === 'absorbed').length, sameDay: mine.filter((f) => f.tier === 'sameDay').length };
+    return { cell, severity: loudOnes.length ? worst(loudOnes.map((f) => f.severity)) : mine.length && !explained ? 'note' as Severity : null, explained, follows: mine.filter((f) => f.tier === 'follows' || f.tier === 'absorbed').length, sameDay: mine.filter((f) => f.tier === 'sameDay').length, unjudged: unjudgedIn[cell] };
   });
+  const notJudged = health.reduce((t, c) => t + c.unjudged, 0);
 
   // The labels at a glance.
   const heroLabels: string[] = [];
@@ -883,13 +930,15 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const more = standalone.filter((f) => f !== cause && !stories.includes(f));
 
   return {
-    day, state, severity, head, chip, hero: shownHero, amount, split: shownHero === 'calm' ? null : basis, hours: hoursF?.hours ?? null, hoursLabels, gate,
+    day, state, severity, head, chip: state === 'unlearned' ? whyChip : chip, hero: shownHero, amount, split: shownHero === 'calm' ? null : basis, hours: hoursF?.hours ?? null, hoursLabels, gate, coverage,
     cause, stories, more, follows, sameDay, absorbed, notes, context: weather,
     episode, recovery, health, primary,
     labels: {
       // The day's own change sits on the amount line when its count is outside its range and the head doesn't say it;
       // beside a head about the hours from a fall, it says its window ("whole day −65%"), so it can't fight the head.
-      amount: amount ? [`${fmtInt(amount.value)} trips`, ...(amount.change !== null && hero !== 'amount' && cause?.kind !== 'volume' ? [`${hero === 'hours' ? 'whole day ' : ''}${changeLabel(amount.change)}`] : []), `usual ${compact(amount.low)}–${compact(amount.high)}`] : [],
+      amount: amount ? [`${fmtInt(amount.value)} ${noun(amount.value)}`, ...(amount.change !== null && hero !== 'amount' && cause?.kind !== 'volume' ? [`${hero === 'hours' ? 'whole day ' : ''}${changeLabel(amount.change)}`] : []), `usual ${compact(amount.low)}–${compact(amount.high)}`]
+        // A count with no range to judge it by: its count alone; the head and its chip say why (ADR 0010 §1, 16 words).
+        : state === 'unlearned' ? [`${fmtInt(file.rows[k]!)} ${noun(file.rows[k]!)}`] : [],
       hero: heroLabels,
       gate: gateWords,
       // At a glance one row for both: its first change named, the rest counted ("Passengers 1 share + 27 more").
@@ -911,7 +960,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       key: shownHero === 'calm' ? [...STRIP_KEY, ...(state === 'recovery' ? ['wrong'] : [])] : (shownHero === 'amount' || shownHero === 'finding') && cause?.kind === 'volume' ? [...STRIP_KEY, `${weekdayOf(day)}s`] : [],
       context: state === 'recovery' ? null : contextLabel,
       // A calm day's cells, none marked, say so: a blank cell can't be told from one not checked.
-      health: state === 'calm' && health.every((c) => !c.severity && !c.explained) ? `${HEALTH_HEAD} · all normal` : HEALTH_HEAD,
+      // Some of its numbers had no range: never "all normal" (ADR 0010 §1).
+      health: notJudged > 0 ? `${HEALTH_HEAD} · ${notJudged} not judged` : state === 'calm' && health.every((c) => !c.severity && !c.explained) ? `${HEALTH_HEAD} · all normal` : HEALTH_HEAD,
     },
     findings: [...told].sort(byRank),
   };

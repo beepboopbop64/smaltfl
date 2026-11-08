@@ -189,18 +189,21 @@ export function materialFor(expected: number, scale: 'fixed' | 'volume'): typeof
 export function notJudgedChip(why: NoRange, calendarShort = (name: string) => shortName(name), end?: string): string {
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   if (why.why === 'no last year' && why.special) {
-    const name = calendarShort(why.special).replace(/^Holiday season$/, 'holiday season');
+    const name = calendarShort(why.special.replace(/ \(observed\)$/, '')).replace(/^Holiday season$/, 'holiday season');
     const words = (t: string) => t.split(/\s+/).length;
     return words(`First ${name} here`) <= 4 ? `First ${name} here` : words(`First ${name}`) <= 4 ? `First ${name}` : 'None last year';
   }
   if (why.why === 'last year moved') return 'Changed since last year';
   if (why.why === 'history ends' && end) return `History ends ${MON[Number(end.slice(5, 7)) - 1]} ${Number(end.slice(8, 10))}`;
+  // A special day whose last year the history holds too little of to compare this year's days with.
+  if (why.special) return 'Last year too short';
   return `${why.days.toLocaleString('en-US')} ${why.days === 1 ? 'day' : 'days'} of history`;
 }
 
 /**
- * What a day's news could judge (ADR 0010 §1): its rows; of the values seen in the six weeks to it, how many have a range
- * (`values`: judged, of); of the measures and times with quantiles that day, how many medians have one; whether the
+ * What a day's news could judge (ADR 0010 §1): its rows; of the values that could be news (seen in the six weeks to it,
+ * on half a percent of the rows or more that day or on average over those weeks), how many have a range (`values`:
+ * judged, of); of the measures and times with quantiles that day, how many medians have one; whether the
  * checks' share does (false when the history doesn't count the flow's checks); and, when the rows have none, why.
  */
 export interface Coverage {
@@ -217,10 +220,15 @@ export function coverageOf(h: HistoryRanges, day: string, options: { checks?: bo
   const trips = h.of({ of: 'trips' });
   const out: Coverage = { rows: !!trips?.at(day), values: [0, 0], quantiles: [0, 0], checks: options.checks !== false && !!h.of({ of: 'dropped' })?.at(day), why: trips && !trips.at(day) ? trips.explain(day) : null };
   if (k < 0) return out;
+  // The values that could be news: on half a percent of the rows or more, today or on average over the six weeks before.
+  const share = (vh: ValueHistory, i: number, j: number) => (file.rows[j] ? (vh.counts![j]?.[i] ?? 0) / file.rows[j]! : 0);
   for (const [column, vh] of Object.entries(file.values ?? {})) {
     if (!vh.counts) continue;
     vh.values.forEach((value, i) => {
       if (vh.first[i]! > k || vh.last[i]! < k - 42) return;
+      let sum = 0;
+      for (let j = Math.max(0, k - 42); j < k; j++) sum += share(vh, i, j);
+      if (Math.max(share(vh, i, k), sum / Math.max(1, Math.min(42, k))) < MATERIAL.share) return;
       out.values[1]++;
       if (h.of({ of: 'value', column, value })?.at(day)) out.values[0]++;
     });

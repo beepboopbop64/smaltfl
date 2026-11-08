@@ -232,7 +232,8 @@ describe('what waits (ADR 0009 §4)', () => {
 
 describe('the flow’s verdict on a day (ADR 0009 §3)', () => {
   const DAY = '2023-10-11'; // a Wednesday
-  const doc = { steps: [{ id: 'trips_valid', kind: 'expectations' as const, inputs: ['trips'], rules: [{ name: 'fare', check: 'fare_amount >= 0', onFail: 'drop' as const }] }] };
+  // The flow's noun for its source (ADR 0010 §8): the claim's head says it, as the example's does.
+  const doc = { steps: [{ id: 'trips_valid', kind: 'expectations' as const, inputs: ['trips'], rules: [{ name: 'fare', check: 'fare_amount >= 0', onFail: 'drop' as const }] }], ontology: { objectTypes: [], linkTypes: [], actionTypes: [], nouns: { trips: { one: 'trip', many: 'trips' } } } };
   const claimOn = (trouble: Parameters<typeof historyWith>[0]) => dayClaim(new HistoryRanges(historyWith(trouble)), doc, HISTORY, DAY, 'trips', 'abc123');
 
   it('tells a day that falls at an hour, and one a vendor left, as wrong and short', () => {

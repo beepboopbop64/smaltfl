@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
-import { newsOf } from '../src/core/news.js';
+import { LEGACY_JUDGE, newsOf, type JudgeSettings, type Names } from '../src/core/news.js';
 import { ACT_VERB, CELL_KINDS, CONTEXT_TAG, HEALTH_HEAD, SETTLE_LINE, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, rowName, shortWho, splitOf, splitSentence, stepLabels, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
 import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
@@ -409,5 +409,62 @@ describe('the context, the health row and the tiers (ADR 0008 §6)', () => {
     expect(s.episode).toMatchObject({ days: 2, since: DAY });
     expect(s.episode!.trend.map((d) => d.day)).toEqual([DAY, next]);
     for (const d of s.episode!.trend) expect(d.trips / d.expected).toBeLessThan(0.5);
+  });
+});
+
+describe('a story on any dataset (ADR 0010 §1, §4, §8)', () => {
+  const FIRST_THANKSGIVING = '2021-11-25';
+  const general = (over: Partial<JudgeSettings> = {}): JudgeSettings => ({ ...LEGACY_JUDGE, legacy: false, ...over });
+  const told = (trouble: Record<string, Trouble>, day: string, names: Names, judge?: JudgeSettings) => {
+    const h = new HistoryRanges(historyWith(trouble));
+    return storyOf(h, day, newsOf(h, day, names, { judge }), { names, step: 'trips_valid', limit: 0.1, judge });
+  };
+
+  it('says a day with nothing to compare against is not judged yet, why, its count with no range, and never all normal', () => {
+    const s = told({}, FIRST_THANKSGIVING, vendorNames);
+    expect(s).toMatchObject({ state: 'unlearned', head: 'Not judged yet', chip: 'First Thanksgiving here', hero: 'calm', amount: null, primary: null, severity: 'ok' });
+    expect(s.labels.amount).toEqual([`${historyWith().rows[historyWith().days.indexOf(FIRST_THANKSGIVING)]!.toLocaleString('en-US')} trips`]);
+    expect(s.labels.health).toMatch(/^Health · \d+ not judged$/);
+    expect(s.health.find((c) => c.cell === 'amount')!.unjudged).toBe(1);
+    expect(words(s)).toBeLessThanOrEqual(16);
+    // The floor is something wrong, judged or not: the day pauses (Q-53).
+    const cut = told({ [FIRST_THANKSGIVING]: { blank: true } }, FIRST_THANKSGIVING, vendorNames);
+    expect(cut).toMatchObject({ state: 'wrong', hero: 'amount', primary: 'incident' });
+    expect(cut.head).toMatch(/^Almost no trips: /);
+    // A judged day says normal for its holiday a year on, from the history's own calendar.
+    expect(told({}, '2022-11-24', vendorNames)).toMatchObject({ state: 'calm', head: 'Normal for Thanksgiving', chip: null });
+  });
+
+  it('heads a bad value that surged by its own name, with an incident as its verb, never marking it as expected', () => {
+    const failed: Names = { ...vendorNames, label: (_c, v) => (String(v) === '1' ? 'Failed' : String(v)), noun: (n) => (n === 1 ? 'sign-in' : 'sign-ins') };
+    const judge = general({ bad: new Map([['vendorid', new Set(['1'])]]) });
+    const s = told({ [DAY]: { vendorSurge: 2.5 } }, DAY, failed, judge);
+    expect(s.head).toBe('Failed 2.5× usual');
+    expect(s.primary).toBe('incident');
+    expect(s.state).toBe('wrong');
+    expect(s.findings.filter((f) => f.bad).flatMap((f) => f.acts)).not.toContain('expected');
+    expect(s.findings.find((f) => f.bad)!.tier).not.toMatch(/absorbed|follows|sameDay/);
+    // Unmarked, the same surge is unusual, and marking it as expected is its verb.
+    expect(told({ [DAY]: { vendorSurge: 2.5 } }, DAY, failed, general())).toMatchObject({ head: 'Failed records 2.5× usual', primary: 'expected' });
+  });
+
+  it('names a part by the ontology: a sender sent almost nothing, any other part is almost gone', () => {
+    const sender: Names = { ...vendorNames, part: () => ({ name: 'Vendor {code}', role: 'sender' }) };
+    expect(told({ [DAY]: { vendorGone: true } }, DAY, sender, general()).head).toBe('Vendor 1 sent almost nothing');
+    const named: Names = { ...vendorNames, part: () => ({ name: 'Source {code}' }) };
+    expect(told({ [DAY]: { vendorGone: true } }, DAY, named, general()).head).toBe('Source 1 records almost gone');
+    // The general form drops the vendor shortcut: with no name in the ontology the part is said by its column.
+    expect(told({ [DAY]: { vendorGone: true } }, DAY, vendorNames, general()).head).toBe('vendor 1 almost gone');
+    // The legacy form keeps it, so the taxi's heads don't move.
+    expect(told({ [DAY]: { vendorGone: true } }, DAY, vendorNames).head).toBe('Vendor 1 sent almost nothing');
+  });
+
+  it('says the source’s noun everywhere at a glance: no sign-in story says trips', () => {
+    const signIns: Names = { ...vendorNames, noun: (n) => (n === 1 ? 'sign-in' : 'sign-ins') };
+    for (const [trouble, day] of [[{}, DAY], [{ [DAY]: { stopAt: 13 } }, DAY], [{ [DAY]: { vendorGone: true } }, DAY], [{ [DAY]: { blank: true } }, DAY], [{}, FIRST_THANKSGIVING], [{ [DAY]: { onlyVendor1: true } }, DAY]] as const) {
+      const s = told(trouble as Record<string, Trouble>, day, signIns, general());
+      expect(glanceStrings(s).filter((x) => /trip/i.test(x)), `${day} ${s.head}`).toEqual([]);
+    }
+    expect(told({ [DAY]: { stopAt: 13 } }, DAY, signIns, general()).head).toMatch(/^Sign-ins fall /);
   });
 });

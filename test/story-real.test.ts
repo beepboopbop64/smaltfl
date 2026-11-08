@@ -517,8 +517,10 @@ describe.skipIf(!has)('the story on the real history', () => {
   it('tells calm days and the day after an episode calmly', () => {
     expect(story('2024-01-15')).toMatchObject({ state: 'calm', head: 'Normal for MLK Day' });
     expect(story('2023-09-25')).toMatchObject({ state: 'recovery', head: 'Back to normal', chip: 'after Thu 13:00–Sun' });
-    // A calm day says its cells are all normal: a blank cell can't be told from one not checked.
-    expect(story('2024-01-15').labels.health).toBe('Health · all normal');
+    // A calm day says its cells are all normal: a blank cell can't be told from one not checked; one with numbers that had
+    // no range that day says how many, never all normal (ADR 0010 §1): MLK Day's shares moved too far since last year.
+    expect(story('2024-01-17').labels.health).toBe('Health · all normal');
+    expect(story('2024-01-15').labels.health).toBe('Health · 14 not judged');
     expect(story('2024-01-06').labels.health).toBe('Health');
   });
 });
