@@ -460,6 +460,13 @@ Builder and drawn in the family's look. The first concepts are on the design can
   input's columns or in the ones a step adds. Each finding is something wrong (alert), unusual (warn), worth knowing
   (note) or normal, says the published datasets built from its rows when it matters, and where its band comes from.
   A day with nothing to tell says so.
+- **A day shows that day** (ADR 0008 §10). `src/core/days.ts` picks the run every view reads: the viewed day's own,
+  else the latest day before it that passed (the flow publishes only a run that passes, so a held day's outputs keep
+  that day), never a later day's, whatever order the visit ran the days in. A panel of another day's rows carries
+  that day as a full-width bar, the held line says what the outputs keep, and nothing after the viewed day is drawn
+  as known: the episode's hours and shortfall, History charts and the loads strip stop at it. The outputs of a day
+  with something wrong say what they were built from ("Outputs built from a short day"), and the History calendar
+  counts only days it has checked.
 - **What can be done about a finding.** Each finding offers what fits it, as Datadog's annotations, Anomalo's alerts
   and Monte Carlo's incidents do: mark it expected, with why (kept, but quiet, and the next person sees the note);
   open an incident, and resolve it with what it was, which leaves the day out of what the normal ranges learn from;
