@@ -2,8 +2,9 @@
  * The news's visuals (ADR 0008): every chart says its finding to a screen reader, starts counts at zero, carries no
  * broken numbers, and escapes what it is given.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { amountLine, bandSpan, notJudgedMark, degrees, weatherHours, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
+import { DEFS, amountLine, bandSpan, notJudgedMark, degrees, weatherHours, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -682,5 +683,78 @@ describe('a day not judged yet (ADR 0010 §12)', () => {
 
   it('says the source’s noun beside the day’s count', () => {
     expect(amountLine({ value: 981, low: 900, high: 1200, valueLabel: '981', unit: 'sign-ins', bandLabel: 'usual 900–1.2k', aria: '981 sign-ins' })).toContain('<tspan class="count-unit" dx="6">sign-ins</tspan>');
+  });
+});
+
+describe('a filled day, drawn (ADR 0009 amendment 1 S12)', () => {
+  // Thu Sep 21, 2023: the hours before 13:00 arrived; Thu 14's hours from 13:00 fill the rest.
+  const thu = Array.from({ length: 24 }, (_, h) => (h < 13 ? 4000 + h * 100 : 30));
+  const donor = Array.from({ length: 24 }, (_, h) => 3800 + h * 90);
+  const usualThu = Array.from({ length: 24 }, () => 5200);
+  const filled = thu.map((v, h) => (h >= 13 ? donor[h]! : v));
+  const part = thu.map((v, h) => (h >= 13 ? 0 : v));
+  const scale = Math.max(...usualThu, ...filled);
+  const fill = decisionRow({ mark: 'fill', label: 'Fill from Thu 14', number: '121,931 trips', cause: 'hours', rows: { cause: 'hours', hours: filled }, filled: [13, 23], cut: [13, '13h'], scale, aria: 'Fill from Thu 14: readers get 121,931 trips, 83,671 of them from Thu Sep 14' });
+  const only = decisionRow({ mark: 'part', label: 'Before 13:00 only', number: '38,260 trips', cause: 'hours', rows: { cause: 'hours', hours: part }, usual: { cause: 'hours', hours: usualThu }, short: [13, 23], cut: [13, '13h'], scale, aria: 'Before 13:00 only: readers get 38,260 trips, 3,679 set aside' });
+
+  it('stipples the donor’s hours under a solid top edge, the day’s own hours solid, and says so to a screen reader', () => {
+    expect(fill).toContain('aria-label="Fill from Thu 14: readers get 121,931 trips, 83,671 of them from Thu Sep 14"');
+    expect(fill).toContain('data-filled="true"');
+    expect(fill.match(/class="stipple-col"[^>]*data-filled="1"/g)).toHaveLength(11);
+    expect(fill.match(/class="stipple-top"/g)).toHaveLength(11);
+    expect(fill.match(/class="ink-strong"[^>]*data-k="(\d+)"/g)).toHaveLength(13);
+    // The donor's rows are present, not absent, and not another day shown instead: no dashes, no hatch.
+    expect(fill).not.toMatch(/absent|hatch/);
+    expect(fill).toContain('g-fill');
+    expect(fill).toMatch(/class="tick at" data-cut="13">13h<\/text>/);
+  });
+
+  it('draws the part that arrived alone with the hours it leaves out absent at their usual, dashed, and nothing stippled', () => {
+    expect(only).not.toContain('stipple');
+    expect(only.match(/class="absent-fill"/g)).toHaveLength(1);
+    expect(only.match(/class="absent-edge"/g)).toHaveLength(1);
+    expect(only.match(/class="ink-strong"[^>]*data-k/g)).toHaveLength(13);
+    expect(only).not.toContain('miss-l');
+    expect(only).toContain('g-part');
+  });
+
+  it('stipples a split’s donated part, or its donated rest, on one count bar; another day’s rows are never stippled', () => {
+    const sc = 33_842 + 82_544;
+    const vendor = decisionRow({ mark: 'fill', label: 'Fill from Mon 7', number: '114,863 trips', cause: 'split', rows: { cause: 'split', part: 32_587, rest: 82_276 }, filled: 'part', part: 'Vendor 1 · 2', scale: sc, aria: 'Fill from Mon 7' });
+    expect(vendor).toMatch(/<rect class="stipple-col" x="0" [^>]*data-part="part" data-filled="1"\/>/);
+    expect(vendor).toMatch(/<rect class="ink" [^>]*data-part="rest"\/>/);
+    expect(vendor.match(/class="stipple-top"/g)).toHaveLength(1);
+    const rest = decisionRow({ mark: 'fill', label: 'Fill from Fri 15', number: '1', cause: 'split', rows: { cause: 'split', part: 4613, rest: 110_000 }, filled: 'rest', part: 'Flex Fare · 4,613', scale: 120_000, aria: 'Fill from Fri 15' });
+    expect(rest).toMatch(/<rect class="stipple-col" [^>]*data-part="rest" data-filled="1"\/>/);
+    expect(rest).toMatch(/<rect class="ink-strong" x="0" [^>]*data-part="part"\/>/);
+    const kept = decisionRow({ mark: 'keep', label: 'Keep Sun 13', number: '1', cause: 'split', rows: { cause: 'split', part: 30_000, rest: 70_000 }, other: true, filled: 'part', scale: sc, aria: 'Keep Sun 13' });
+    expect(kept).not.toContain('stipple');
+  });
+
+  it('marks ◧ and ◐ at the marks’ 14 px, by shape: half a box, half a disc', () => {
+    for (const g of ['fill', 'part'] as const) {
+      expect(glyph(g, 14)).toMatch(/^<svg width="14" height="14" viewBox="0 0 16 16" class="g g-/);
+      expect(glyph(g)).toContain('class="g-half"');
+    }
+    expect(glyph('fill')).toContain('<rect class="g-fillbox"');
+    expect(glyph('part')).toContain('<circle class="g-fillbox"');
+  });
+
+  it('defines the stipple once, beside the hatch, its dots at 3:1 against the card in both themes', () => {
+    expect(DEFS).toContain('<pattern id="viz-stipple" width="4" height="4" patternUnits="userSpaceOnUse">');
+    expect(DEFS).toContain('class="stipple-dot"');
+    expect(DEFS).toContain('<pattern id="viz-hatch"');
+    const page = readFileSync(new URL('../src/app/page.html', import.meta.url), 'utf8');
+    const dot = /\.stipple-dot \{ fill: var\(--([a-z0-9-]+)\); \}/.exec(page)![1]!;
+    expect(/\.stipple-bg \{ fill: var\(--surface\); \}/.test(page)).toBe(true);
+    const token = (block: string, name: string) => new RegExp(`--${name}: (#[0-9a-f]{6})`).exec(block)![1]!;
+    const light = /:root \{([^}]*)\}/.exec(page)![1]!;
+    const dark = /:root\[data-theme="dark"\] \{([^}]*)\}/.exec(page)![1]!;
+    const lum = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+    };
+    const contrast = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+    for (const block of [light, dark]) expect(contrast(token(block, dot), token(block, 'surface'))).toBeGreaterThanOrEqual(3);
   });
 });

@@ -6,13 +6,15 @@
  * Marks (one meaning each): alert, a filled hexagon with '!'; warn, an outlined triangle on a wash; held, the wall
  * cap ‖; explained, ↳; note, a small dot; usual, a light ghost behind today's ink, its edge at 3:1 against the card;
  * missing, a wash with a dashed edge (dashes mean absent and nothing else: a limit is a solid tick, a link a solid
- * hairline); not today's run, a hatch. A mark for a non-zero number is never under 3 px. Colours are the app's tokens,
+ * hairline); not today's run, a hatch (another day's rows shown instead of the day); another day's rows inside the day
+ * (a fill, ADR 0009 amendment 1 S12), a stipple of the ink's dots under a solid top edge, so they read as present. A
+ * mark for a non-zero number is never under 3 px. Colours are the app's tokens,
  * set by class in page.html under `.viz`, so light and dark both work.
  */
 
 import type { DrawCause, ReaderRows } from '../core/decision.js';
 
-export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack' | 'publish' | 'keep' | 'unlearned';
+export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack' | 'publish' | 'keep' | 'unlearned' | 'fill' | 'part';
 
 export const esc = (s: unknown): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
@@ -42,6 +44,12 @@ export function glyph(kind: Mark, size = 16): string {
       return `<svg ${a}><path class="g-pub" d="M2.5 10v3.5h11V10M8 11V2.6M4.8 5.8L8 2.6l3.2 3.2"/></svg>`;
     case 'keep':
       return `<svg ${a}><rect class="g-keep" x="2.2" y="2.2" width="11.6" height="11.6" rx="2"/></svg>`;
+    // A day filled from another day (◧), and a day published with the part that arrived alone (◐) (ADR 0009 amendment 1
+    // S12): half a box, half a disc, the half that arrived solid; the rest of a filled day stippled, as its rows are.
+    case 'fill':
+      return `<svg ${a}><rect class="g-fillbox" x="2.2" y="2.2" width="11.6" height="11.6" rx="2"/><rect class="g-stip" x="8" y="2.9" width="5.1" height="10.2" rx="1"/><path class="g-half" d="M4.2 2.2H8v11.6H4.2a2 2 0 0 1-2-2V4.2a2 2 0 0 1 2-2z"/></svg>`;
+    case 'part':
+      return `<svg ${a}><circle class="g-fillbox" cx="8" cy="8" r="5.9"/><path class="g-half" d="M8 2.1a5.9 5.9 0 0 0 0 11.8z"/></svg>`;
     case 'explained':
       return `<svg ${a}><path class="g-arrow" d="M4 2.5v6.5h8M9.2 6.2L12 9l-2.8 2.8"/></svg>`;
     case 'note':
@@ -1378,8 +1386,13 @@ export function stripBar({ v, low, high, ymax, sev }: { v: number; low: number |
  * nothing else is dashed; no rows at all (nothing published) is one dashed frame. A count that isn't zero is never under
  * 3 px. `ticks` draws the shared axis under the rows, on the sheet's last row only; `off` greys a row that can't be
  * chosen. Without a mark (a card whose head carries it), the words start at the left edge.
+ *
+ * A fill (ADR 0009 amendment 1 S12) draws the day's own rows with another day's inside it, `filled`: the hours it took
+ * from the donor, or the part (or the rest) of a split, stippled under a solid top edge, so they read as present and
+ * not as the day's own. The part that arrived alone is the day's own rows with what it leaves out absent at its usual
+ * (`usual` and `short`, as for Publish as is): dashed, since those rows aren't there.
  */
-export function decisionRow(o: { mark: Mark | null; label: string; number: string; cause: DrawCause; rows: ReaderRows | null; usual?: ReaderRows | null; short?: readonly [number, number] | null; other?: boolean; scale: number; part?: string | null; ticks?: readonly (readonly [number, string])[]; missing?: string | null; cut?: readonly [number, string] | null; off?: boolean; aria: string; w?: number }): string {
+export function decisionRow(o: { mark: Mark | null; label: string; number: string; cause: DrawCause; rows: ReaderRows | null; usual?: ReaderRows | null; short?: readonly [number, number] | null; other?: boolean; scale: number; part?: string | null; ticks?: readonly (readonly [number, string])[]; missing?: string | null; cut?: readonly [number, string] | null; off?: boolean; filled?: readonly [number, number] | 'part' | 'rest' | null; aria: string; w?: number }): string {
   const w = o.w ?? 300;
   const partH = o.cause === 'split' && o.part && !o.other ? 14 : 0;
   const top = 28 + partH;
@@ -1390,7 +1403,12 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
   const h = base + (ticks.length || cut ? 17 : 3);
   const scale = Math.max(1, o.scale);
   const fill = o.other ? 'hatch-col' : 'ink-strong';
-  let s = open(w, h, o.aria, `data-y0="0" data-cause="${o.cause}"${o.off ? ' data-off="true"' : ''}`).replace('class="viz"', `class="viz decide-row${o.off ? ' off' : ''}"`);
+  // Another day's rows inside the day (a fill): stippled, with a solid edge along the top of each column, or along the
+  // top of the part on a count bar.
+  const filled = o.other ? null : (o.filled ?? null);
+  const stip = 'stipple-col';
+  const topEdge = (x: number, y: number, len: number) => `<rect class="stipple-top" x="${f1(x)}" y="${f1(y)}" width="${f1(len)}" height="1.6" rx="0.8"/>`;
+  let s = open(w, h, o.aria, `data-y0="0" data-cause="${o.cause}"${o.off ? ' data-off="true"' : ''}${filled ? ' data-filled="true"' : ''}`).replace('class="viz"', `class="viz decide-row${o.off ? ' off' : ''}"`);
   if (o.mark) s += `<g transform="translate(0 2)">${glyph(o.mark, 16)}</g>`;
   s += `<text x="${o.mark ? 24 : 0}" y="15" class="opt-l">${esc(o.label)}</text>`;
   if (o.number) s += `<text x="${w}" y="15" text-anchor="end" class="opt-n">${esc(o.number)}</text>`;
@@ -1419,8 +1437,14 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
       s += `<path class="absent-fill" d="${up}${down}Z"/>`;
       s += `<path class="absent-edge" d="M${x0(sh[0])} ${f1(base - tall(sh[0]) - 3)}L${up.slice(1)}L${x1(sh[1])} ${f1(base - tall(sh[1]) - 3)}"/>`;
     }
+    const donor = Array.isArray(filled) ? (filled as readonly [number, number]) : null;
     for (let i = 0; i < 24; i++) {
-      if (tall(i) > 0) s += `<path class="${fill}" d="${inShort(i) ? colPath(i * cw + (i === sh![0] ? 0.75 : 0), base, cw - (i === sh![0] || i === sh![1] ? 0.75 : 0), tall(i), 0.5) : colPath(i * cw + 1.25, base, bw, tall(i), 1.5)}" data-k="${i}"/>`;
+      if (!(tall(i) > 0)) continue;
+      if (donor && i >= donor[0] && i <= donor[1]) {
+        s += `<path class="${stip}" d="${colPath(i * cw + 1.25, base, bw, tall(i), 1.5)}" data-k="${i}" data-filled="1"/>${topEdge(i * cw + 1.25, base - tall(i), bw)}`;
+        continue;
+      }
+      s += `<path class="${fill}" d="${inShort(i) ? colPath(i * cw + (i === sh![0] ? 0.75 : 0), base, cw - (i === sh![0] || i === sh![1] ? 0.75 : 0), tall(i), 0.5) : colPath(i * cw + 1.25, base, bw, tall(i), 1.5)}" data-k="${i}"/>`;
     }
     // What the short hours lack, said in the wash that draws it ("~77k fewer"), so it can't read as part of what
     // goes out; it sits over the wash's middle, clear of the trickle under it.
@@ -1435,11 +1459,11 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
     const u = !o.other && o.usual?.cause === 'split' ? o.usual : null;
     const pw = o.rows.part > 0 ? Math.max(MIN_MARK, x(o.rows.part)) : 0;
     const slot = Math.max(pw, u ? x(u.part) : 0);
-    if (pw) s += `<rect class="${fill}" x="0" y="${by}" width="${f1(pw)}" height="${drawH}" rx="2" data-part="part"/>`;
+    if (pw) s += filled === 'part' ? `<rect class="${stip}" x="0" y="${by}" width="${f1(pw)}" height="${drawH}" rx="2" data-part="part" data-filled="1"/>${topEdge(0, by, pw)}` : `<rect class="${fill}" x="0" y="${by}" width="${f1(pw)}" height="${drawH}" rx="2" data-part="part"/>`;
     if (u && x(u.part) - pw > 3) s += `<rect class="absent" x="${f1(pw + 1)}" y="${by + 1}" width="${f1(x(u.part) - pw - 2)}" height="${drawH - 2}" rx="2"/>`;
     const r0 = slot + gap;
     const rw = o.rows.rest > 0 ? Math.max(MIN_MARK, x(o.rows.rest)) : 0;
-    if (rw) s += `<rect class="${o.other ? fill : 'ink'}" x="${f1(r0)}" y="${by}" width="${f1(rw)}" height="${drawH}" rx="2" data-part="rest"/>`;
+    if (rw) s += filled === 'rest' ? `<rect class="${stip}" x="${f1(r0)}" y="${by}" width="${f1(rw)}" height="${drawH}" rx="2" data-part="rest" data-filled="1"/>${topEdge(r0, by, rw)}` : `<rect class="${o.other ? fill : 'ink'}" x="${f1(r0)}" y="${by}" width="${f1(rw)}" height="${drawH}" rx="2" data-part="rest"/>`;
     if (u && x(u.rest) - rw > 3) s += `<rect class="absent" x="${f1(r0 + rw + 1)}" y="${by + 1}" width="${f1(x(u.rest) - rw - 2)}" height="${drawH - 2}" rx="2"/>`;
     if (partH) s += `<text x="0" y="${top - 4}" class="lbl-b part-l">${esc(o.part!)}</text>`;
   } else {
@@ -1473,5 +1497,6 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
   return `${s}</svg>`;
 }
 
-/** The hatch pattern the 'not today's run' marks use: once per page. */
-export const DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><pattern id="viz-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" class="hatch-bg"/><line x1="0" y1="0" x2="0" y2="4" class="hatch-line"/></pattern></defs></svg>`;
+/** The patterns, once per page: the hatch the 'not today's run' marks use (another day's rows instead of the day), and
+ * the stipple of another day's rows inside it (a fill: the ink's dots on a 4 px grid, ADR 0009 amendment 1 S12). */
+export const DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><pattern id="viz-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" class="hatch-bg"/><line x1="0" y1="0" x2="0" y2="4" class="hatch-line"/></pattern><pattern id="viz-stipple" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" class="stipple-bg"/><circle cx="2" cy="2" r="1.05" class="stipple-dot"/></pattern></defs></svg>`;

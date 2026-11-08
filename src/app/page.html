@@ -906,6 +906,13 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .edge-t { fill: none; stroke: var(--bad); stroke-width: 1.6; } .viz .edge-t.dash { stroke-dasharray: 3 3; }
 .viz .hatch-box { fill: url(#viz-hatch); stroke: var(--muted); stroke-width: 1.2; }
 .hatch-bg { fill: var(--surface); } .hatch-line { stroke: var(--muted); stroke-width: 1.4; }
+/* Another day's rows inside the day (a fill, ADR 0009 amendment 1 S12): the ink's dots on a 4 px grid, 3:1 against the
+   card in both themes as bands are, under a solid top edge in the ink, so the rows read as present. Hatch stays another
+   day's rows instead of the day, and dashes rows that are absent. */
+.stipple-bg { fill: var(--surface); } .stipple-dot { fill: var(--ink-2); }
+.viz .stipple-col { fill: url(#viz-stipple); stroke: var(--ink-2); stroke-width: 0.75; }
+.viz .stipple-top { fill: var(--ink); }
+.viz.off .stipple-top { fill: var(--muted); } .viz.off .stipple-col { stroke: var(--muted); }
 /* A held day's options (ADR 0009 §12): each drawn as what readers get; another day's rows hatched, absent ones dashed. */
 .viz .hatch-col { fill: url(#viz-hatch); stroke: var(--ink-2); stroke-width: 1; }
 .viz text.opt-l { font-size: 15px; font-weight: 600; fill: var(--ink); }
@@ -1125,6 +1132,9 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
    is under its number on the row picked, the reasons under "Why?", and the receipt it collapses to once decided. */
 .g-pub { fill: none; stroke: var(--ink); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .g-keep { fill: url(#viz-hatch); stroke: var(--ink-2); stroke-width: 1.2; }
+/* ◧ filled and ◐ the part alone (ADR 0009 amendment 1 S12): half a box, half a disc, the half that arrived solid. */
+.g-fillbox { fill: none; stroke: var(--ink-2); stroke-width: 1.4; } .g-half { fill: var(--ink-2); } .g-stip { fill: url(#viz-stipple); }
+.vf-option:disabled .g-half, .viz.off .g-half { fill: var(--muted); } .vf-option:disabled .g-fillbox, .viz.off .g-fillbox { stroke: var(--muted); }
 .vf-option:disabled .g-pub, .viz.off .g-pub { stroke: var(--muted); }
 .viz .cut-t { stroke: var(--ink-2); stroke-width: 1.2; }
 .vf-opt-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px; margin-top: 4px; font-size: 12.5px; }
