@@ -192,7 +192,11 @@ const fmtCompact = (n: number) => (Math.abs(n) < 10000 ? fmtInt(n) : Math.abs(n)
 function setStatus(text: string, bad = false, run?: { n: number; state: 'done' | 'failed' | 'refused' }): void {
   const el = $('status');
   el.textContent = text;
-  el.classList.toggle('bad', bad);
+  // A line about a run on a day takes that day's severity, held or published alike: one rule for every alert day.
+  const day = run && loads.list.length > 1 ? loads.list[loads.at]?.day : undefined;
+  const sev = day ? verdictOf(day)?.severity : undefined;
+  el.classList.toggle('bad', bad || sev === 'alert');
+  el.classList.toggle('warn', !bad && sev === 'warn');
   // For tests and tools: which run the line is about, and how it ended, whatever its words.
   if (run) {
     el.dataset.run = String(run.n);
@@ -1192,6 +1196,9 @@ function renderCanvas(): void {
   const card = (key: string, kind: string, name: string, line: CardLine, classes: string[], extra: { port?: 'in' | 'out'; end?: boolean; shield?: ReturnType<typeof shieldOf>; health?: Severity; seal?: 'ok' | 'bad' | 'amber' | null } = {}) => {
     const { x, y } = drawn.at.get(key)!;
     if (line.tone !== 'same') classes.push(`tone-${line.tone}`);
+    // One colour rule (ADR 0008 §10): a card's line and its badge take the card's own severity, and nothing else does;
+    // a routine count is in neutral ink, whatever it counts.
+    if (extra.health === 'alert' || extra.health === 'warn') classes.push(`sev-${extra.health}`);
     const guard = extra.shield ? ` ${extra.shield === 'muted' ? 'Rules limit who sees it' : `${personName(state.viewer)} sees part of it`}.` : '';
     const told = (extra.health === 'alert' || extra.health === 'warn' ? ` News: ${SEV_LABEL[extra.health].toLowerCase()}.` : '') + (extra.seal === 'ok' ? ' Sealed: checked back to the bytes.' : extra.seal === 'bad' ? ' Integrity: broken.' : '');
     const g = s('g', { class: ['card', ...classes].join(' '), 'data-card': key, tabindex: 0, role: 'button', 'aria-label': `${name}: ${kind}. ${line.text}.${guard}${told}` });
@@ -5960,6 +5967,9 @@ function levelOf(r: RunRecord | undefined): number {
  */
 function sealOf(card: string): 'ok' | 'bad' | 'amber' | null {
   const id = dataOf(card);
+  // No tick from another day's run: on a held or refused day, what the load reaches has no run of its own to seal.
+  const src = loadSource();
+  if (rowsFrom(shownDay(), viewedDay()) && src && (id === src || downstreamOf(src).includes(id))) return null;
   const r = latest();
   const v = r?.verified;
   if (v && !v.ok && v.checks.some((c) => !c.ok && c.node === -1)) return 'bad';

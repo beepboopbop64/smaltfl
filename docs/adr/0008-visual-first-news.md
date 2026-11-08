@@ -161,7 +161,10 @@ where about 35,000 are usual, and everything else held.
     its rows and a tap to its card. An output (or a step after the load) built from such a day says what its load
     lacked above its own rows' news ("Built from a load missing 13:00–24:00", "Its load: Trips fall 95% from 13:00"),
     for the day its rows are: on a held day the last day that passed, itself short at times. Holding such outputs, and
-    never keeping a day that was itself wrong, change what the flow publishes: an open question (Q-45).
+    never keeping a day that was itself wrong, change what the flow publishes: an open question (Q-45). One colour
+    rule: a canvas card's line and its badge take the card's own severity and nothing else does (a routine count, such
+    as Nov 15, 2022's ordinary 4.6% dropped, is neutral ink); the status line after a run takes its day's verdict,
+    held or published alike; and no tick (seal) shows on what the load reaches when the day has no run of its own.
 
 ## Consequences
 

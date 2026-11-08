@@ -3,7 +3,7 @@
  * broken numbers, and escapes what it is given.
  */
 import { describe, expect, it } from 'vitest';
-import { amountLine, bandSpan, bulletTrack, composition, dayStrip, dumbbellRows, episodeBars, episodeLine, gateBars, glyph, hourBars, lineage, niceMax, partBar, quantileStrip, ruleRows, splitRows, stripBar, waterfall, wrapName } from '../src/app/viz.js';
+import { amountLine, bandSpan, bulletTrack, composition, dayStrip, dumbbellRows, episodeBars, episodeLine, gateBars, glyph, hourBars, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, waterfall, wrapName } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -89,6 +89,16 @@ describe('the news’s charts', () => {
     const later = stripBar({ v: 0, low: 84912, high: 155515, ymax: 160000 });
     expect(later).toContain('class="ghost"');
     expect(later).not.toMatch(/class="(ink|sev-[a-z]+-fill)"/);
+  });
+
+  it('ticks published outputs in plain boxes, never a severity ring, and hatches held ones (ADR 0008 §10)', () => {
+    const pub = reachIcon({ n: 3, state: 'published' });
+    expect(pub.match(/class="tick-pub"/g)).toHaveLength(3);
+    expect(pub).not.toContain('ring-bad');
+    const held = reachIcon({ n: 5, state: 'held' });
+    expect(held.match(/class="hatch-box"/g)).toHaveLength(3);
+    expect(held).not.toContain('tick-pub');
+    expect(held).toContain('class="wall"');
   });
 
   it('keeps an episode’s shortfall, an estimate with its bound, clear of the hour it began', () => {
