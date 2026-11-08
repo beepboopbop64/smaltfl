@@ -1,7 +1,8 @@
 /**
  * The flow's verdict on the real history (ADR 0009 §3): the days `wrong` and `short` hold are a test vector, so a change
  * to the story that moves one fails here until it is accepted on purpose (Q-52). Runs when the app has been built from
- * the data branch (npm run build:app writes dist/app/data/history.json and loads.json); skipped otherwise.
+ * the data branch (npm run build:app writes dist/app/data/history.json and loads.json); skipped otherwise. The same
+ * days held through the engine, on the real files: test/pause-real.test.ts.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';

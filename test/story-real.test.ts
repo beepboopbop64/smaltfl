@@ -115,6 +115,12 @@ describe.skipIf(!has)('the story on the real history', () => {
     expect(story('2022-11-14').labels.hero).toContain('Checks passed');
     expect(story('2023-09-21').labels.hero).toContain('Checks near the limit');
     for (const d of ['2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24', '2022-09-17', '2022-09-18', '2022-11-14', '2022-11-15', '2022-08-10', '2023-11-07']) expect(glance(d), `${d}: ${[...glanceStrings(story(d)), reachLabel(story(d), 3)].join(' | ')}`).toBeLessThanOrEqual(60);
+    // Held, the card is the paused one ADR 0009 §12 draws: its reach row says the day is paused, and its one verb is
+    // Decide, the story's verb behind ⋯. The budget still holds on the episodes' days (Sat Sep 18, 2022 is 59 words;
+    // with the story's verb, "Tell the source", it would be 61).
+    const paused = (d: string) => { const s = story(d); return [...glanceStrings(s).filter((x) => x !== s.labels.primary), 'Decide', reachLabel(s, 3, 'waiting')].reduce((t, x) => t + wordsIn(x), 0); };
+    expect(reachLabel(story('2023-09-21'), 3, 'waiting')).toBe('Paused · 3 outputs waiting');
+    for (const d of ['2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24', '2022-09-17', '2022-09-18', '2022-11-14', '2022-11-15']) expect(paused(d), d).toBeLessThanOrEqual(60);
   });
 
   it('says each split day’s sentence from its own figures', () => {
