@@ -282,6 +282,13 @@ describe('pauses, read from the record (ADR 0009 §10)', () => {
     expect(decisionFor(log, inputs('2023-09-22'), KEYS)).toBeNull();
   });
 
+  it('stays decided when a day published as is runs again with nothing left waiting, and opens nothing for such a run', () => {
+    const asis = decide('2023-09-21', 41, 'asis');
+    const log = [held('2023-09-21', 41), asis, release(asis.seq), held('2023-09-21', 42, {})];
+    expect(pausesOf(log)[0]).toMatchObject({ run: 41, state: 'decided', otherBuild: false, released: true });
+    expect(pausesOf([held('2023-09-23', 5, {})])).toEqual([]);
+  });
+
   it('compares inputs and keys exactly', () => {
     expect(inputsKey(inputs('2023-09-21'))).toBe(inputsKey(inputs('2023-09-21')));
     expect(inputsKey(inputs('2023-09-21'))).not.toBe(inputsKey(inputs('2023-09-22')));

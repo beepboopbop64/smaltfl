@@ -407,6 +407,9 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
     if (!isRecord(a)) continue;
     if (e.kind === 'run' && isHeld(a)) {
       const key = inputsKey(a.inputs);
+      // Nothing waits (every held output's staged key is already current, as after a day published as is is run
+      // again): there is nothing to decide, and nothing to open or change.
+      if (Object.keys(a.keys).length === 0) continue;
       const p = pauses.get(key) ?? { key, inputs: a.inputs, day: null, run: a.run, manifest: a.manifest, keys: {}, waiting: [], holds: [], opened: e.seq, seq: e.seq, state: 'open' as const, decision: null, otherBuild: false, released: null };
       Object.assign(p, { day: dayOf(a, period), run: a.run, manifest: a.manifest, keys: { ...a.keys }, waiting: Array.isArray(a.waiting) ? [...a.waiting] : Object.keys(a.keys), holds: Array.isArray(a.holds) ? a.holds : [], seq: e.seq });
       p.otherBuild = !!p.decision && !sameKeys(p.decision.about.outputs, p.keys);
@@ -467,7 +470,8 @@ export function standingFor(entries: readonly EntryLike[], day: string, period?:
 /**
  * A decision to apply again to a day held once more (ADR 0009 §10): the latest decision for the same inputs, `same`
  * when it names these keys (applied again, recorded as citing it) or `otherBuild` when it names others (shown, and
- * applied only by a person, as an amendment). Null when the day was never decided.
+ * applied only by a person, as an amendment). Null when the day was never decided. `keys` are the run's waiting
+ * outputs with their staged keys: with none waiting there is nothing to apply.
  */
 export function decisionFor(entries: readonly EntryLike[], inputs: Inputs, keys: Readonly<Record<string, string>>): { kind: 'same' | 'otherBuild'; decision: Decided } | null {
   const key = inputsKey(inputs);
