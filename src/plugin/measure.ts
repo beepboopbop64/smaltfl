@@ -14,7 +14,8 @@ import type { Database } from 'smaltdb/engine';
 import { canonicalJSON } from '../core/canonical.js';
 import { createTable, emitColumnFacts, emitRuleCounts, emitSample } from '../core/emit.js';
 import { hex } from '../core/hash.js';
-import { measuresOf, scanColumns, type MeasureSettings, type Measures } from '../core/measures.js';
+import { isHistory, type HistoryFile } from '../core/history.js';
+import { measuresOf, measuresProblem, scanColumns, tailRef, type HistoryHeader, type MeasureSettings, type Measures, type TailRef } from '../core/measures.js';
 import type { Column } from '../core/plan.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 import { hashTable, sourceColumns } from './dataset-hash.js';
@@ -107,4 +108,55 @@ export async function measure(db: Database, input: unknown): Promise<Measures> {
   } finally {
     db.exec(`DROP TABLE IF EXISTS ${q(stage)}`);
   }
+}
+
+/** Pinned histories' headers and tails, by sha256: parsed once. */
+const parsed = new Map<string, HistoryHeader | TailRef | { problem: string } | null>();
+
+/**
+ * The header of the base history pinned under a watch's name (what a load is measured by: settingsFor), or null when
+ * none is pinned or it isn't a history.
+ */
+export function pinnedHeader(path: string): HistoryHeader | null {
+  const p = pinned(path);
+  if (!p) return null;
+  const key = `h:${p.sha256}`;
+  if (!parsed.has(key)) {
+    let header: HistoryHeader | null = null;
+    try {
+      const f = JSON.parse(new TextDecoder().decode(p.bytes)) as HistoryFile;
+      if (isHistory(f)) header = { format: f.format, columns: f.columns, values: f.values, pairs: f.pairs, sample: f.sample, ...(f.time !== undefined ? { time: f.time } : {}), ...(f.zone !== undefined ? { zone: f.zone } : {}) };
+    } catch {
+      header = null;
+    }
+    parsed.set(key, header);
+  }
+  return parsed.get(key) as HistoryHeader | null;
+}
+
+/**
+ * The tail pinned for a source (ADR 0010 §6, E12), its size and root computed here from its records; or why it isn't
+ * one: not JSON, not a list of measures records of that source, or not in slot order, one a slot. Undefined when none
+ * is pinned.
+ */
+export function pinnedTail(path: string, source: string): TailRef | { problem: string } | undefined {
+  const p = pinned(path);
+  if (!p) return undefined;
+  const key = `t:${source}:${p.sha256}`;
+  if (!parsed.has(key)) {
+    let out: TailRef | { problem: string };
+    try {
+      const ms = JSON.parse(new TextDecoder().decode(p.bytes)) as unknown;
+      if (!Array.isArray(ms) || ms.length === 0) out = { problem: "isn't a list of loads' measures" };
+      else {
+        const bad = ms.findIndex((m) => measuresProblem(m) !== null || (m as Measures).source !== source);
+        const order = ms.findIndex((m, i) => i > 0 && !((m as Measures).slot > (ms[i - 1] as Measures).slot));
+        out = bad >= 0 ? { problem: `has a record ${bad} that ${measuresProblem(ms[bad]) ?? `is of ${(ms[bad] as Measures).source}`}` } : order >= 0 ? { problem: 'isn\'t in slot order, one record a slot' } : tailRef(ms as Measures[])!;
+      }
+    } catch {
+      out = { problem: "isn't JSON" };
+    }
+    parsed.set(key, out);
+  }
+  return parsed.get(key) as TailRef | { problem: string };
 }

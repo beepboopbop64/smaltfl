@@ -32,7 +32,7 @@ import type { FlowDocument } from './document.js';
 import { sha256Hex } from './hash.js';
 import { daysBetween } from './calendar.js';
 import { DONOR_WINDOW, repairDocument, type Repair } from './fill.js';
-import { claimHolds, donorGood, heldOutputs, holdsOf, inputsKey, judgeClaims, lastPublished, sameKeys, standingFor, type DecideAbout, type DerivedAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type RunHold, type StoryClaim } from './hold.js';
+import { claimBase, claimHolds, donorGood, factsFromClaims, heldOutputs, holdsOf, inputsKey, isClaim2, judgeClaims, lastPublished, sameKeys, standingFor, type Claim, type DecideAbout, type DerivedAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type RunHold } from './hold.js';
 import { canonicalJSON } from './canonical.js';
 import { consistencyProof, entryLeaf, parseCheckpoint, rootOf, verifyCheckpoint, verifyConsistency, verifyInclusion, verifyRecord, type JSONValue, type LogEntry, type SignedCheckpoint } from './log.js';
 import { manifestHash, planHash, policiesHash, type IdentityCard, type RunManifest } from './manifest.js';
@@ -167,7 +167,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
   if (yours) say(yours === listHash, yours === listHash ? 'the data\'s list is the one you gave: the data branch\'s' : `the data's list in the bag is ${listHash ?? 'missing'}, not the one you gave (${yours})`);
 
   // The held run's own claim for its day, from its entry's story hold or what the engine judged it by.
-  const heldClaim = (entry: LogEntry, manifest: string): StoryClaim | null => {
+  const heldClaim = (entry: LogEntry, manifest: string): Claim | null => {
     const story = ((entry.about as Partial<HeldAbout>).holds ?? []).find((h) => h.by === 'story' && h.claim)?.claim;
     const judged = engineHolds.get(manifest)?.judged.find((j) => 'claim' in j);
     return story ?? (judged && 'claim' in judged ? judged.claim : null);
@@ -221,7 +221,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       if (judged && 'unjudged' in judged) problems.push(`its donor wasn't judged: ${judged.unjudged}`);
       else if (!isRecord(claim) || !donorGood(claim)) problems.push(`its donor's claim says something wrong${isRecord(claim) ? `: ${claim.head}` : ''}`);
       const told = heldClaim(held.entry, a.from.manifest);
-      if (told && isRecord(claim) && claim.history?.sha256 !== told.history.sha256) problems.push(`its donor's claim was told from another history than run ${a.from.run}'s`);
+      if (told && isRecord(claim) && claimBase(claim as Claim)?.sha256 !== claimBase(told)?.sha256) problems.push(`its donor's claim was told from another history than run ${a.from.run}'s`);
     }
     return `${said}; ${repair.donor ? `fills ${repair.source} from ${repair.donor.day}` : `the part of ${repair.source} that arrived`}, repairing run ${a.from.run}`;
   };
@@ -600,7 +600,7 @@ function engineHoldsProblems(kept: EngineHolds, about: unknown, plan: FlowPlan, 
   if (!Array.isArray(kept.holds) || !Array.isArray(kept.judged)) problems.push("what the engine kept of what held it isn't shaped as holds and judged sources");
   try {
     const claims = judged.flatMap((j) => ('claim' in j ? [j.claim] : []));
-    const again = judgeClaims(plan, claims, { rows: (node) => m.nodes.find((n) => n.node === node)?.rows, pinned: (path) => claims.find((c: StoryClaim) => c.history.path === path)?.history });
+    const again = judgeClaims(plan, claims, factsFromClaims(claims, { rows: (node) => m.nodes.find((n) => n.node === node)?.rows, flow: claimsFlow(claims, m) }));
     const same = (x: unknown, y: unknown) => x !== undefined && y !== undefined && canonicalJSON(x as JSONValue) === canonicalJSON(y as JSONValue);
     if (judged.some((j) => 'claim' in j && !same(again.find((k) => k.node === j.node), j))) problems.push("the claims the engine judged it by don't match it");
     if (!same(holdsOf(plan, m, judged), holds)) problems.push("the engine's holds for it aren't what its manifest and its judged sources hold");
@@ -616,6 +616,15 @@ function engineHoldsProblems(kept: EngineHolds, about: unknown, plan: FlowPlan, 
   }
   if (outcome === 'ok' && holds.length) problems.push(`it was recorded as published, and the engine held it (${holds.map((x) => (isRecord(x) ? String(x.origin) : '?')).join(', ')})`);
   return problems;
+}
+
+/**
+ * The flow hash a run's claim/2 must be told under: its own, or for a derived run its held run's (C4), which the audit
+ * checks apart (derivedProblems: the same snapshot, its document the held run's repaired).
+ */
+function claimsFlow(claims: readonly Claim[], m: RunManifest): string {
+  const told = claims.find(isClaim2)?.flow;
+  return told !== undefined && told !== m.flow.hash ? told : m.flow.hash;
 }
 
 /** What a run's checks hold, from its manifest's counts alone: none for a plan that doesn't hold on its checks. */
@@ -643,7 +652,7 @@ function heldProblems(about: unknown, plan: FlowPlan, m: RunManifest, problems: 
   const stated = holds.filter((h) => h.by === 'checks');
   if (JSON.stringify(checks.map((h) => [h.node, h.said])) !== JSON.stringify(stated.map((h) => [h.node, h.said]))) problems.push("the checks it says held it aren't what its manifest's counts hold");
   const claims = holds.flatMap((h) => (h.by === 'story' && h.claim ? [h.claim] : []));
-  const judged = judgeClaims(plan, claims, { rows: (node) => m.nodes.find((n) => n.node === node)?.rows, pinned: (path) => claims.find((c: StoryClaim) => c.history.path === path)?.history });
+  const judged = judgeClaims(plan, claims, factsFromClaims(claims, { rows: (node) => m.nodes.find((n) => n.node === node)?.rows, flow: claimsFlow(claims, m) }));
   for (const h of holds.filter((x) => x.by === 'story' || x.by === 'unjudged')) {
     if (!watchesOf(pub).some((w) => w.node === h.node)) problems.push(`it says ${h.origin} held it, which the plan doesn't watch`);
     else if (h.by === 'story') {

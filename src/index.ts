@@ -53,8 +53,8 @@ export { calendarProblems, dayLastYear, holidayOf, holidaysOf, isSpecial, NONE, 
 export type { Calendar, CalendarBase, CalendarDate, CalendarDay, CalendarDef, CalendarWindow } from './core/calendar.js';
 export { NormalRanges } from './core/normal.js';
 export type { Backtest, DailySeries, Guess, NoRange, NormalOptions, NormalRange, Place, Scale } from './core/normal.js';
-export { HISTORY_FORMAT, HISTORY_FORMATS, HistoryRanges, isHistory, metricKey, seriesOf } from './core/history.js';
-export type { DayError, HistoryFile, Metric, ValueHistory } from './core/history.js';
+export { checksStart, HISTORY_FORMAT, HISTORY_FORMATS, HistoryRanges, isHistory, metricKey, seriesOf, timeOf } from './core/history.js';
+export type { DayError, HistoryFile, Metric, RangeOptions, ValueHistory } from './core/history.js';
 export { isPlaceholder, MATERIAL, newsOf, PLACEHOLDERS, schemaChanges, tableNewsOf } from './core/news.js';
 export { coverageOf, flowNames, judgeOf, LEGACY_JUDGE, materialFor, notJudgedChip, nounFor } from './core/news.js';
 export type { Act, Coverage, Finding, JudgeSettings, Look, Names, Severity, TableFacts } from './core/news.js';
@@ -68,11 +68,12 @@ export type { ActRequest, ActionType, Edit, LinkType, Noun, ObjectType, Ontology
 export { counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, VERDICT_MARKS } from './core/ontology.js';
 // What holds a run, what waits, and what the record decided (ADR 0009): one group a line, so that changes to one part
 // don't touch the others' lines.
-export { calendarFor, claimHolds, dayClaim, donorDefault, flowStory } from './core/hold.js';
+export { calendarFor, claimHolds, dayClaim, donorDefault, flowStory, loadClaim } from './core/hold.js';
+export { claimBase, claimDay, factsFromClaims, isClaim2, levelsOf, skipOf, tailPath } from './core/hold.js';
 export { countedChecks, donorGood, holdsOf, judgeClaim, judgeClaims, judgeDonors, tripped } from './core/hold.js';
 export { heldOutputs, reachOf, stagedKeys, waitingOf } from './core/hold.js';
 export { dayState, decisionFor, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, standingFor } from './core/hold.js';
-export type { ClaimAt, ClaimFacts, Derived, FillHold, FlowFor, HistoryRef, Hold, Judged, RunHold, StoryClaim } from './core/hold.js';
+export type { Claim, ClaimAt, ClaimFacts, Derived, FillHold, FlowFor, HistoryRef, Hold, Judged, LoadClaimInput, RunHold, StoryClaim, StoryClaim2 } from './core/hold.js';
 export type { DecideAbout, Decided, DerivedAbout, HeldAbout, Inputs, Pause, ReleaseAbout, RunRef } from './core/hold.js';
 // Filling a paused day (ADR 0009 amendment 1).
 export { DONOR_WINDOW, dayVersions, donorChoices, donorFor, donorIdOf, donorRuleOf, donorSourceOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument } from './core/fill.js';

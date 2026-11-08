@@ -26,15 +26,17 @@ import { MANIFEST_FORMAT, manifestHash, ontologyHash, planHash, policiesHash } f
 import { flowHash } from '../core/plan.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, ColumnType, ExpectNode, FillNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
-import { validatePlan } from '../core/plan.js';
-import { heldOutputs, holdsOf, judgeClaims, judgeDonors, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef } from '../core/hold.js';
+import { isPublish2, validatePlan, watchesOf } from '../core/plan.js';
+import { heldOutputs, holdsOf, judgeClaims, judgeDonors, tailPath, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef } from '../core/hold.js';
+import { measuresHash, settingsFor, type MeasureSettings, type Measures } from '../core/measures.js';
+import { measureSnapshot, pinnedHeader, pinnedTail } from './measure.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 import type { TableHash } from './dataset-hash.js';
 import { hashTable, sourceColumns } from './dataset-hash.js';
 import { pinned, pinnedLocation, takeOpened } from './pinned.js';
 
-import { currentOf, ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, nameInUse, pointDataset, recordCheck, recordDerived, recordHolds, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
+import { currentOf, ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, measuresOfRun, nameInUse, pointDataset, recordCheck, recordDerived, recordHolds, recordMeasures, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
 
 export class RunError extends Error {
   override name = 'RunError';
@@ -70,9 +72,11 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   // The flow document, when given, must be the one the plan was translated from: it is kept with the run.
   const context = options.context ?? {};
   let doc: string | null = null;
+  let steps: FlowDocument['steps'] | undefined;
   let flow: RunManifest['flow'] = plan.flow;
   if (context.doc !== undefined) {
     const d = context.doc as FlowDocument;
+    steps = d.steps;
     if ((await flowHash(d)) !== plan.flow.hash) throw new RunError("the flow document doesn't hash to the plan's flow hash: it isn't the document the plan was made from");
     doc = canonicalJSON(withoutDisplay(d) as Parameters<typeof canonicalJSON>[0]);
     flow = { ...plan.flow, policies: await policiesHash(d.policies), ontology: await ontologyHash(d.ontology) };
@@ -197,6 +201,25 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   let held: string[] = [];
   let waiting: string[] = [];
   let derived: { from: RunRef; holds: FillHold[]; donors: Judged[]; filled: number | null } | null = null;
+  // plan/2 (ADR 0010 §6): each watched load measured from its snapshot (the record the page asked for before the run,
+  // when it is of this snapshot), its claim told from those measures; a derived run's claims are judged against the
+  // held run it repairs (C4): its flow hash, and its stored measures when the snapshot is the same.
+  const measured = new Map<number, { hash: string; measures: Measures; settings: MeasureSettings }>();
+  let told: { flow: string; measured: (node: number) => string | undefined } | null = null;
+  if (plan.publish && isPublish2(plan.publish)) {
+    if (stage) told = heldMeasures(db, stage, plan, records);
+    else {
+      for (const w of watchesOf(plan.publish)) {
+        const table = tables.get(w.node);
+        const rec = records.get(w.node);
+        const settings = settingsFor(plan, w.node, pinnedHeader(w.history), steps);
+        if (!table || !rec?.content || !settings) continue;
+        aborted(signal);
+        const m = await measureSnapshot(db, table, settings, rec.file?.sha256 ?? null, rec.content);
+        measured.set(w.node, { hash: await measuresHash(m), measures: m, settings });
+      }
+    }
+  }
   if (plan.publish) {
     const facts: ClaimFacts = {
       rows: (node) => records.get(node)?.rows,
@@ -204,6 +227,9 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
         const p = pinned(path);
         return p && { sha256: p.sha256, bytes: p.bytes.byteLength };
       },
+      measured: (node) => (told ? told.measured(node) : measured.get(node)?.hash),
+      tail: (source) => pinnedTail(tailPath(source), source),
+      flow: told ? told.flow : plan.flow.hash,
     };
     judged = judgeClaims(plan, context.claims, facts);
     holds = holdsOf(plan, manifest, judged);
@@ -229,9 +255,34 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     for (const o of plan.outputs) if (!holding.has(o.name)) pointDataset(db, o.name, keys.get(o.node)!, tables.get(o.node)!, id);
     if (plan.publish) recordHolds(db, id, holds, judged);
     if (derived) recordDerived(db, { run: id, ...derived });
+    for (const [node, m] of measured) recordMeasures(db, { run: id, node, slot: m.measures.slot, hash: m.hash, measures: m.measures, settings: m.settings });
     return id;
   });
-  return { run, hash, manifest, holds, published: plan.outputs.map((o) => o.name).filter((name) => !holding.has(name)), waiting, ...(derived ? { derived: { holds: derived.holds, filled: derived.filled } } : {}) };
+  return {
+    run, hash, manifest, holds, published: plan.outputs.map((o) => o.name).filter((name) => !holding.has(name)), waiting,
+    ...(derived ? { derived: { holds: derived.holds, filled: derived.filled } } : {}),
+    ...(measured.size ? { measures: [...measured.values()].map((m) => m.measures) } : {}),
+  };
+}
+
+/**
+ * What a derived run's watched sources are judged by (ADR 0010 §6, C4): the flow hash of the held run it repairs, and
+ * for each watched source, that run's stored measures when the derived run read the same snapshot (its content hash);
+ * none otherwise, which leaves the source not judged.
+ */
+function heldMeasures(db: Database, from: RunRef, plan: FlowPlan, records: ReadonlyMap<number, ManifestNode>): { flow: string; measured: (node: number) => string | undefined } {
+  const row = db.query('SELECT manifest, hash FROM _smaltfl_runs WHERE id = ?', [from.run]).rows[0];
+  const held = row && String(row[1]) === from.manifest ? (JSON.parse(String(row[0])) as RunManifest) : null;
+  const stored = held ? measuresOfRun(db, from.run) : [];
+  return {
+    flow: held?.flow.hash ?? '',
+    measured: (node) => {
+      const origin = plan.nodes[node]?.origin;
+      const heldNode = held?.nodes.find((n) => n.op === 'table' && n.origin === origin)?.node;
+      const m = stored.find((x) => x.node === heldNode);
+      return m && m.measures.snapshot === records.get(node)?.content ? m.hash : undefined;
+    },
+  };
 }
 
 /**

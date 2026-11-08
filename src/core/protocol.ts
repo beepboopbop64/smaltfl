@@ -3,8 +3,9 @@
  * only, so it crosses the worker protocol by structured clone.
  */
 import type { Repair } from './fill.js';
-import type { FillHold, Hold, RunRef, StoryClaim } from './hold.js';
+import type { Claim, FillHold, Hold, RunRef } from './hold.js';
 import type { RunManifest } from './manifest.js';
+import type { Measures } from './measures.js';
 import type { DecisionOption } from './policy.js';
 
 /** The plugin's name, as `callPlugin` addresses it. */
@@ -38,7 +39,7 @@ export interface RunContext {
    * is missing or doesn't match leaves its source not judged, which holds. A claim can only add a hold. A derived run's
    * claims add each donor's (amendment 1 S3): the donor source's id, its day, the same pinned history.
    */
-  claims?: StoryClaim[];
+  claims?: Claim[];
 }
 
 /** How far verify goes (ADR 0006 §1): the stored hashes; then a recomputation; then decoding the source files again. */
@@ -73,6 +74,9 @@ export interface RunResult {
   /** A derived run (amendment 1 S4): what holds it besides its day's holds (`derived`, and `donor` for a donor not
    * judged good), and the rows its fill took from another day (null for the part that arrived alone). */
   derived?: { holds: FillHold[]; filled: number | null };
+  /** plan/2 (ADR 0010 §6): each watched load's measures, as the run measured its snapshot, which the page appends to
+   * the source's tail (one a slot, C5) and keeps in the run's record entry. */
+  measures?: Measures[];
 }
 
 /**

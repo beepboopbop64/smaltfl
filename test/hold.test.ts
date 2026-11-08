@@ -41,6 +41,7 @@ import {
   type Judged,
   type ReleaseAbout,
   type StoryClaim,
+  type StoryClaim2,
 } from '../src/core/hold.js';
 import type { Repair } from '../src/core/fill.js';
 import type { LogEntry } from '../src/core/log.js';
@@ -152,12 +153,18 @@ describe('what a story claim holds (ADR 0009 §2, §3)', () => {
     const plan2 = (watch: Record<string, unknown>, hold: PublishDef['hold']) => translate({ ...doc, smaltfl: 3, parameters, publish: { hold, watch: { trips: { history: 'history.json', period: 'day', ...watch } as never } } }, { month: '2023-09', day: '2023-09-21' });
     const told = await plan2({ holds: false }, ['checks']);
     expect(told.smaltflPlan).toBe(2);
-    expect(judgeClaims(told, [claim()], facts())).toEqual([{ node: 0, claim: claim() }]);
-    expect(holdsOf(told, manifestOf(told), judgeClaims(told, [claim()], facts()))).toEqual([]);
+    // plan/2 reads claim/2 (ADR 0010 §6): told under the flow hash, from the measures the run made.
+    const MEASURED = SHA('c');
+    const c2 = (over: Partial<StoryClaim2> = {}): StoryClaim2 => ({ by: 'story', v: 2, source: 'trips', slot: '2023-09-21', every: 'day', state: 'wrong', below: true, head: 'Trips fall 95% from 13:00', build: 'dev', flow: told.flow.hash, history: { base: HISTORY, tail: null }, measured: MEASURED, rows: 41_939, skip: [], levels: [], ...over });
+    const facts2 = facts({ measured: () => MEASURED, flow: told.flow.hash });
+    expect(judgeClaims(told, [c2()], facts2)).toEqual([{ node: 0, claim: c2() }]);
+    expect(judgeClaims(told, [claim()], facts2)).toEqual([{ node: 0, unjudged: "the claim for trips isn't claim/2, which plan/2 needs" }]);
+    expect(holdsOf(told, manifestOf(told), judgeClaims(told, [c2()], facts2))).toEqual([]);
     expect(holdsOf(told, manifestOf(told), [])).toEqual([]);
     const holding = await plan2({}, ['checks', 'wrong']);
-    expect(holdsOf(holding, manifestOf(holding), judgeClaims(holding, [claim()], facts()))).toMatchObject([{ by: 'story', origin: 'trips', said: 'Trips fall 95% from 13:00' }]);
-    expect(judgeClaims(holding, [claim({ day: '2023-09-20' })], facts())).toEqual([{ node: 0, unjudged: 'the claim is of 2023-09-20, the run of 2023-09-21' }]);
+    const facts2h = facts({ measured: () => MEASURED, flow: holding.flow.hash });
+    expect(holdsOf(holding, manifestOf(holding), judgeClaims(holding, [c2({ flow: holding.flow.hash })], facts2h))).toMatchObject([{ by: 'story', origin: 'trips', said: 'Trips fall 95% from 13:00' }]);
+    expect(judgeClaims(holding, [c2({ flow: holding.flow.hash, slot: '2023-09-20' })], facts2h)).toEqual([{ node: 0, unjudged: 'the claim is of 2023-09-20, the run of 2023-09-21' }]);
   });
 });
 

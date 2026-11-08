@@ -28,7 +28,9 @@ import type { EmitContext } from '../core/emit.js';
 import { createTable, emitSelect } from '../core/emit.js';
 import { hex } from '../core/hash.js';
 import { repairDocument } from '../core/fill.js';
-import { heldOutputs, holdsOf, judgeClaims, judgeDonors, type FillHold, type StoryClaim } from '../core/hold.js';
+import { factsFromClaims, heldOutputs, holdsOf, isClaim2, judgeClaims, judgeDonors, type FillHold, type RunRef } from '../core/hold.js';
+import { measuresHash } from '../core/measures.js';
+import { measureTable } from './measure.js';
 import { nodeKey } from '../core/keys.js';
 import type { ManifestNode, RunManifest } from '../core/manifest.js';
 import { manifestHash, ontologyHash, planHash, policiesHash } from '../core/manifest.js';
@@ -42,7 +44,7 @@ import { hashTable } from './dataset-hash.js';
 import { PINNED_PREFIX, pinned, pinnedLocation, takeOpened } from './pinned.js';
 import { donorRead } from './release.js';
 import { aborted, countExpectations, engineVersion, RunError } from './runtime.js';
-import { currentOf, datasetView, derivedOf, ensureStore, findVersion, holdsOfRun, releasesOf, repairsOf } from './store.js';
+import { currentOf, datasetView, derivedOf, ensureStore, findVersion, holdsOfRun, measuresOfRun, releasesOf, repairsOf } from './store.js';
 
 type Json = Parameters<typeof canonicalJSON>[0];
 const same = (a: unknown, b: unknown) => canonicalJSON(a as Json) === canonicalJSON(b as Json);
@@ -176,9 +178,10 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
     else {
       if (!same(kept.judged.map((j) => j.node), plan.publish.watch.map(([n]) => n))) notes.push("the sources it judged aren't the plan's watched sources");
       // Each claim again, against the manifest: the run checked the pinned history's hash as it ran.
+      // A claim/2 against the measures the run stored, under the flow hash it was judged by (a derived run's held run's).
       const claims = kept.judged.flatMap((j) => ('claim' in j ? [j.claim] : []));
-      const historyOf = (path: string) => claims.find((c: StoryClaim) => c.history.path === path)?.history;
-      const again = judgeClaims(plan, claims, { rows: (node) => byNode.get(node)?.rows, pinned: (path) => historyOf(path) });
+      const measuredBy = storedMeasuredOf(db, runId, derived?.from ?? null, plan, byNode);
+      const again = judgeClaims(plan, claims, factsFromClaims(claims, { rows: (node) => byNode.get(node)?.rows, flow: measuredBy.flow ?? plan.flow.hash, measured: measuredBy.measured }));
       for (const j of kept.judged) {
         if (!('claim' in j)) continue;
         const k = again.find((x) => x.node === j.node);
@@ -189,8 +192,7 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
       // A derived run: its donors judged again, and what holds it besides, computed again (amendment 1 S4, S11).
       if (derived) {
         const donorClaims = derived.donors.flatMap((j) => ('claim' in j ? [j.claim] : []));
-        const historyOfDonor = (path: string) => donorClaims.find((c) => c.history.path === path)?.history;
-        const againDonors = judgeDonors(plan, donorClaims, { rows: (node) => byNode.get(node)?.rows, pinned: historyOfDonor });
+        const againDonors = judgeDonors(plan, donorClaims, factsFromClaims(donorClaims, { rows: (node) => byNode.get(node)?.rows }));
         for (const j of derived.donors) {
           if (!('claim' in j)) continue;
           const k = againDonors.find((x) => x.node === j.node);
@@ -350,10 +352,54 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
       const h = await hashTable(db, t);
       check({ node: m.node, origin: m.origin, check: 'rerun', ok: h.content === m.content, expected: m.content, actual: h.content });
     }
+    // Held, at the Recomputed level (ADR 0010 §6): each watched load measured again from its snapshot, with the settings
+    // the run measured it by, gives the measures stored and the measures its claim was told from.
+    for (const sm of measuresOfRun(db, runId)) {
+      aborted(signal);
+      const m = byNode.get(sm.node);
+      const v = m ? findVersion(db, m.key) : null;
+      const claim = kept?.judged.find((j) => j.node === sm.node);
+      const told = claim && 'claim' in claim && isClaim2(claim.claim) ? claim.claim.measured : null;
+      const notes: string[] = [];
+      let again: string | null = null;
+      if (!m || !v) notes.push('its snapshot is no longer stored');
+      else {
+        try {
+          again = await measuresHash(await measureTable(db, v.table, sm.settings, m.file?.sha256 ?? null, m.content!));
+        } catch (e) {
+          notes.push(`it couldn't be measured again: ${(e as Error).message}`);
+        }
+      }
+      if (again !== null && again !== sm.hash) notes.push('measured again, its snapshot gives other measures than the run stored');
+      if (told !== null && told !== sm.hash) notes.push('its claim was told from other measures than the run stored');
+      check({ node: sm.node, origin: plan.nodes[sm.node]?.origin ?? String(sm.node), check: 'held', ok: notes.length === 0, expected: sm.hash, actual: again, note: notes.length ? notes.join('; ') : `measured again: ${sm.slot}, ${sm.measures.rows.toLocaleString('en-US')} rows` });
+    }
   } finally {
     for (const t of temps) db.exec(`DROP TABLE IF EXISTS ${q(t)}`);
   }
   return result();
+}
+
+/**
+ * The measures a run's claim/2 were judged by (ADR 0010 §6), as stored: its own; or, for a derived run, those of the held
+ * run it repairs, where it read the same snapshot, under that run's flow hash (C4).
+ */
+function storedMeasuredOf(db: Database, runId: number, from: RunRef | null, plan: FlowPlan, byNode: ReadonlyMap<number, ManifestNode>): { flow: string | null; measured: (node: number) => string | undefined } {
+  if (!from) {
+    const own = measuresOfRun(db, runId);
+    return { flow: null, measured: (node) => own.find((m) => m.node === node)?.hash };
+  }
+  const row = db.query('SELECT manifest, hash FROM _smaltfl_runs WHERE id = ?', [from.run]).rows[0];
+  const held = row && String(row[1]) === from.manifest ? (JSON.parse(String(row[0])) as RunManifest) : null;
+  const stored = held ? measuresOfRun(db, from.run) : [];
+  return {
+    flow: held?.flow.hash ?? null,
+    measured: (node) => {
+      const heldNode = held?.nodes.find((n) => n.op === 'table' && n.origin === plan.nodes[node]?.origin)?.node;
+      const m = stored.find((x) => x.node === heldNode);
+      return m && m.measures.snapshot === byNode.get(node)?.content ? m.hash : undefined;
+    },
+  };
 }
 
 /** The plan's parameter values as the document types them: an integer is recorded as text, to keep its digits. */
