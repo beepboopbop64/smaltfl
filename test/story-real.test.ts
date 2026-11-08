@@ -7,7 +7,10 @@ import { describe, expect, it } from 'vitest';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
 import { lacked, reachLabel, shortfall, type EpisodeDay } from '../src/core/days.js';
-import { afterLine, decisionDrawing, pausedGlance, pauseLines, sheetText, sheetWords } from '../src/core/decision.js';
+import { afterLine, decisionDrawing, pausedGlance, pauseLines, receiptLines, sheetText, sheetWords, versionLines } from '../src/core/decision.js';
+import { donorChoices, fillCounts, missingOf, offersOf } from '../src/core/fill.js';
+import { dayClaim, type HistoryRef } from '../src/core/hold.js';
+import { exampleFilled } from './helpers/example.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
 import { CELL_KINDS, countRange, fallParts, fallSteps, gateHead, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, splitSteps, storyOf, wordsIn } from '../src/core/story.js';
 
@@ -496,6 +499,46 @@ describe.skipIf(!has)('the story on the real history', () => {
     }
     expect(story('2023-09-25').labels.after).toBe('Nothing to do · Thu published short, Fri–Sun held');
   }, 60_000);
+
+  it('keeps the sheet within 45 words with its remedies on every day the flow holds: every pick, every donor, staged or not (amendment 1 S12)', () => {
+    const WRONG = ['2022-01-04', '2022-01-05', '2022-01-06', '2022-01-07', '2022-01-08', '2022-01-09', '2022-01-29', '2022-08-10', '2022-09-17', '2022-09-18',
+      '2022-11-08', '2022-11-14', '2022-11-15', '2022-11-16', '2022-11-17', '2022-11-18', '2022-11-19', '2022-11-20', '2022-12-19', '2022-12-20', '2022-12-21', '2022-12-22',
+      '2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24', '2023-11-07', '2023-11-14'];
+    const filled = exampleFilled();
+    const ref: HistoryRef = { path: 'history.json', sha256: '0'.repeat(64), bytes: 0 };
+    const rows = (d: string) => file!.rows[file!.days.indexOf(d)]!;
+    const plus = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+    // Every day the history has may be a donor here: the words must hold whichever the data's list gives.
+    const listed = (d: string) => ({ path: d, sha256: '0'.repeat(64), bytes: 0 });
+    let offered = 0;
+    for (const d of WRONG) {
+      const s = story(d);
+      const claim = dayClaim(h!, filled, ref, d, 'trips', 'dev');
+      const { picks } = donorChoices({ h: h!, doc: filled, day: d, source: 'trips', listed, history: ref, build: 'dev' }, 'weekday');
+      const offers = offersOf({ story: s, claim, fill: { time: 'tpep_pickup_datetime' }, donors: picks });
+      const missing = missingOf(s, 'tpep_pickup_datetime');
+      if (offers.length) offered++;
+      const draw = decisionDrawing(h, s, d, plus(d, -1), { day: rows(d), readers: rows(plus(d, -1)) }, missing && offers.length ? { missing, donors: picks.map((p) => p.day) } : null);
+      const donors = missing && offers.length ? picks.flatMap((p) => { const c = fillCounts(h!, d, missing, p.day); return c ? [{ day: p.day, counts: c }] : []; }) : [];
+      const partOnly = missing && offers.length ? fillCounts(h!, d, missing, null) : null;
+      expect(draw.fills.length, d).toBe(offers.length ? picks.length : 0);
+      for (const [noun, readersAt, may, fails, withdraws] of [[{ one: 'trip', many: 'trips' }, -1, true, false, null], [{ one: 'trip', many: 'trips' }, -3, true, true, null], [{ one: 'trip', many: 'trips' }, -1, false, false, null], [{ one: 'trip', many: 'trips' }, -1, true, false, 'fill'], [{ one: 'endpoint event', many: 'endpoint events' }, -3, true, false, null]] as const) {
+        const t = sheetText({
+          day: d, waited: 3000, otherBuild: true, outputs: 3, rows: rows(d), reach: rows(d) - file!.dropped[file!.days.indexOf(d)]!, readers: { day: plus(d, readersAt), rows: rows(plus(d, readersAt)) }, later: null, checks: s.gate?.held ? s.gate : null,
+          part: draw.part, missing: draw.cause === 'hours' ? s.hoursLabels?.missing ?? null : null, cut: draw.cut?.[1] ?? null, ticks: draw.ticks.map(([, x]) => x), unjudged: false, hash: 'a'.repeat(64), may, deciders: 'Owner', head: s.head, noun,
+          offers: fails ? offers.map((o) => (o.option === 'complete' ? { ...o, note: 'fails its checks' } : o)) : offers, donors, partOnly, staged: fails && picks[0] ? { option: 'fill', donor: picks[0].day, fails: true } : null, withdraws,
+        });
+        expect(sheetWords(t), `${d} ${JSON.stringify([noun.many, readersAt, may, fails, withdraws])}: ${JSON.stringify(t)}`).toBeLessThanOrEqual(45);
+      }
+    }
+    // The 17 days with a missing part on a short day (fill-real.test.ts).
+    expect(offered).toBe(17);
+    // The receipt and the versions within 45.
+    const l = receiptLines({ state: 'fill', day: '2023-09-21', readers: '2023-09-21', released: 3, who: 'Owner', at: '09:40', seq: 222, under: null, standing: true, remedy: { option: 'fill', donor: '2023-09-14', part: null, filled: 83_671, setAside: 3679 } });
+    expect([l.head, l.sub, 'Versions ›', `${l.change} ›`].reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(45);
+    const v = versionLines([{ seq: 13, run: 1, manifest: 'a', kind: 'arrived', shown: null }, { seq: 15, run: 2, manifest: 'b', kind: 'filled', donor: '2023-09-14', shown: 'before' }, { seq: 18, run: 3, manifest: 'c', kind: 'filled', donor: '2023-09-20', shown: 'now' }, { seq: 31, run: 4, manifest: 'd', kind: 'complete', shown: null }], { day: '2023-09-21', noun: { one: 'endpoint event', many: 'endpoint events' }, name: (x) => `#${x.seq}`, rows: () => 121_931, part: 'Before 13:00 only' });
+    expect([v.title, ...v.lines.map((x) => x.text)].reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(45);
+  }, 120_000);
 
   it('accounts for every finding in one tier: the grouped rows add up to what the old view counted', () => {
     // The old view counted every finding; the story groups them. Thu Sep 21: 1 cause + 2 absorbed + 6 + 8 = 17.

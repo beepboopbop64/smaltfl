@@ -18,14 +18,14 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, QUANTILES, type His
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { calendarHead, heldLoadLine, dayMid, dayShort, judgedWords, lacked, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
-import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, receiptLines, ribbonOf, runFigures, sheetText, type AfterPart, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
+import { calendarHead, heldLoadLine, dayMid, dayShort, judgedWords, lacked, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type PauseState } from '../core/days.js';
+import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, receiptLines, ribbonOf, runFigures, sheetText, type AfterPart, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
-import { DECIDE, checkDecision, covers, readView, wrapRead, type DecideOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
+import { DECIDE, DECIDE_OPTIONS, checkDecision, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
 import { flowHash, type Column, type FlowPlan, type PlanNode } from '../core/plan.js';
@@ -227,12 +227,13 @@ const pct = (x: number) => (x > 0 && x < 0.0005 ? '<0.1%' : x < 1 && x >= 0.9995
 /** Short counts for cards: 9,555 · 12.3k · 456k · 1.2M. */
 const fmtCompact = (n: number) => (Math.abs(n) < 10000 ? fmtInt(n) : Math.abs(n) < 1e6 ? `${(n / 1000).toFixed(Math.abs(n) < 1e5 ? 1 : 0)}k` : `${(n / 1e6).toFixed(1)}M`);
 
-/** A held day's mark (ADR 0009 §12): ‖ paused, ⚑ published as is, ✕ not published. */
-const PAUSE_MARK: Record<PauseState, VizMark> = { waiting: 'held', asis: 'flag', dont: 'closed' };
+/** A held day's mark (ADR 0009 §12, amendment 1 S12): ‖ paused, ⚑ published as is, ✕ not published, ◧ filled, ◐ the
+ * part that arrived alone. */
+const PAUSE_MARK: Record<DayState, VizMark> = { waiting: 'held', asis: 'flag', dont: 'closed', fill: 'fill', complete: 'part' };
 /** What a held day's mark says, for its accessible name. */
-const PAUSE_WORD: Record<PauseState, string> = { waiting: 'paused', asis: 'published as is', dont: 'not published' };
+const PAUSE_WORD: Record<DayState, string> = { waiting: 'paused', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only' };
 /** What a card's mark says to a screen reader, before its line. */
-const CARD_SAID: Record<PauseState, string> = { waiting: 'Paused, ', asis: 'Published as is, ', dont: 'Not published, ' };
+const CARD_SAID: Record<DayState, string> = { waiting: 'Paused, ', asis: 'Published as is, ', dont: 'Not published, ', fill: 'Filled, ', complete: 'Part only, ' };
 
 function setStatus(text: string, bad = false, run?: { n: number; state: 'done' | 'held' | 'failed' | 'refused'; mark?: PauseState | null }): void {
   const el = $('status');
@@ -4153,7 +4154,7 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
   const day = dayOfRun(r) ?? null;
   const shown = readersDay(r);
   const later = shown && day && shown > day ? shown : null;
-  const can = { asis: checkDecision(policies(), state.viewer, 'asis'), dont: checkDecision(policies(), state.viewer, 'dont') };
+  const can = Object.fromEntries(DECIDE_OPTIONS.map((o) => [o, checkDecision(policies(), state.viewer, o)])) as Record<DecisionOption, ReturnType<typeof checkDecision>>;
   const anyone = can.asis.allowed || can.dont.allowed;
   const n = r.result.waiting.length;
   const pick: SheetPick = { option: null, scope: 'day', reason: null };
@@ -4182,12 +4183,12 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
     return h('button', { type: 'button', role: 'radio', class: 'vf-option drawn', 'data-option': o.option, 'aria-checked': 'false', 'aria-label': o.aria, disabled: off, onclick: () => choose(o.option) }, svg, more);
   };
   const rowsEl = h('div', { class: `vf-options${anyone ? '' : ' ro'}`, role: 'radiogroup', 'aria-label': 'What readers get', ...(anyone ? {} : { 'aria-readonly': 'true' }) }, ...t.options.map((o, i) => rowOf(o, i === t.options.length - 1)));
-  const seg = (sc: 'day' | 'untilPass', label: string) => h('button', { type: 'button', role: 'radio', class: 'vf-seg-b', 'data-scope': sc, 'aria-checked': 'false', onclick: () => ((pick.scope = sc), sync()) }, label);
-  const scopes = t.scopes ? h('div', { class: 'vf-seg', role: 'radiogroup', 'aria-label': 'For', hidden: true }, seg('day', t.scopes[0]), seg('untilPass', t.scopes[1])) : null;
+  // One switch for a decision that may stand for the days after it, until one passes (amendment 1 S12).
+  const scopes = t.switch ? h('button', { type: 'button', role: 'switch', class: 'vf-switch', 'aria-checked': 'false', hidden: true, onclick: () => ((pick.scope = pick.scope === 'untilPass' ? 'day' : 'untilPass'), sync()) }, h('span', { class: 'vf-switch-k', 'aria-hidden': 'true' }), t.switch) : null;
   const why = h('div', { class: 'vf-why', hidden: true });
   const go = h('button', { type: 'button', class: 'vf-primary vf-go', disabled: true, title: `What goes out: manifest ${t.hash}`, onclick: () => void submit() }, t.go.rest);
   const foot = anyone ? h('div', { class: 'vf-go-row' }, go) : null;
-  const choose = (option: DecideOption) => {
+  const choose = (option: DecisionOption) => {
     pick.option = option;
     if (option === 'asis') pick.scope = 'day';
     if (pick.reason && !t.chips[option].includes(pick.reason)) pick.reason = null;
@@ -4204,11 +4205,11 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
     }
     why.hidden = !pick.option;
     if (scopes) {
-      scopes.hidden = pick.option !== 'dont';
-      for (const b of Array.from(scopes.querySelectorAll<HTMLButtonElement>('.vf-seg-b'))) b.setAttribute('aria-checked', String(b.dataset.scope === pick.scope));
+      scopes.hidden = !pick.option || pick.option === 'asis';
+      scopes.setAttribute('aria-checked', String(pick.scope === 'untilPass'));
     }
     go.disabled = !pick.option || (pick.option === 'asis' && !pick.reason);
-    go.textContent = !pick.option ? t.go.rest : pick.option === 'asis' ? (pick.reason ? t.go.asis : t.go.reason) : pick.scope === 'untilPass' && t.scopes ? t.go.until : t.go.dont;
+    go.textContent = goShown(t, pick);
   };
   const status = anyone ? oneLine(t.status) : null;
   const ask = !anyone ? h('div', { class: 'vf-waits-on' }, h('p', {}, glyphEl('held', 14), h('b', {}, t.waitsOn ?? '')), h('button', { type: 'button', class: 'linkish vf-ask', 'aria-label': `Ask ${deciders()} to decide: a note to send or copy`, onclick: () => askPanel(r, ask!) }, t.ask ?? '')) : null;
@@ -4218,6 +4219,7 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
     if (!pick.option) return;
     go.disabled = true;
     const option = pick.option;
+    if (option !== 'asis' && option !== 'dont') return sync();
     const entry = await decide(r, option, pick.scope, pick.reason);
     if (!entry) return sync();
     const now = pauseOf(r);
@@ -7453,7 +7455,7 @@ function renderRuns(): void {
 }
 
 /** A held run in the run list (ADR 0009 §12): waiting for a decision (built, not published), then what became of it. */
-const PAUSE_PILL: Record<PauseState, string> = { waiting: 'waiting', asis: 'published as is', dont: 'not published' };
+const PAUSE_PILL: Record<DayState, string> = { waiting: 'waiting', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only' };
 
 /** The record's run entries by manifest, read again as the record grows. */
 const runSeqCache = { size: -1, byManifest: new Map<string, number>() };
