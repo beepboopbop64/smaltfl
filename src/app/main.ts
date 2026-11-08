@@ -17,7 +17,7 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, t
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, type EpisodeDay } from '../core/days.js';
+import { calendarHead, noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, type EpisodeDay } from '../core/days.js';
 import { STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, dayStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
@@ -3536,12 +3536,33 @@ function incidentsList(): HTMLElement | null {
  * unusual outlined, the rest a light ghost. Worked out a few days at a time while the page is idle, then kept.
  */
 const calendar = { sev: new Map<string, Severity>(), key: '', busy: false, picked: '' };
+/**
+ * A day's verdict for the calendar: the one its News tells (the same story, its findings marked as expected left as
+ * such, a refused file first), so the calendar, its header and the News tab never disagree. The day on screen is its
+ * News verdict as it stands, held run and all.
+ */
+function calendarSeverity(day: string): Severity {
+  if (day === newsDay()) return verdictOf(day)?.severity ?? 'ok';
+  const l = loads.list.find((x) => x.day === day);
+  const c = l ? integrity.checks.get(l.file) : undefined;
+  if (c && fileSeverity(c.class) !== 'ok') return fileSeverity(c.class);
+  const found = newsOf(history!, day, NEWS_NAMES, { checks: checksAsCounted() });
+  const acknowledged = new Set(found.filter((f) => logOf(day, f.key).some((e) => e.act === 'expected')).map((f) => f.key));
+  const g = gateStep();
+  return storyOf(history!, day, found, { names: NEWS_NAMES, step: g?.step, limit: g?.limit ?? null, hidden: hiddenTripColumns(), acknowledged, episode: false }).severity;
+}
 function calendarView(): HTMLElement {
   const file = history!.file;
   const key = `${checksAsCounted()}|${dataLog.version}|${[...hiddenTripColumns()].sort().join(',')}`;
-  if (calendar.key !== key) (calendar.sev.clear(), (calendar.key = key));
+  if (calendar.key !== key) (calendar.sev.clear(), (calendar.key = key), (calendar.busy = false));
   const days = file.days.slice(file.warmup);
   const months = [...new Set(days.map((d) => d.slice(0, 7)))].reverse();
+  // The day on screen carries its News verdict at once, whatever is still being checked; the days after it haven't
+  // arrived (ADR 0008 §10): drawn lighter, with no verdict, and not counted.
+  const today = newsDay();
+  if (today && days.includes(today)) calendar.sev.set(today, calendarSeverity(today));
+  const upTo = today ? days.filter((d) => d <= today) : days;
+  const counted = () => new Map(upTo.flatMap((d) => (calendar.sev.has(d) ? [[d, calendar.sev.get(d)!] as const] : [])));
   const box = h('div', { class: 'vf-cal part' });
   const draw = () => {
     const cell = 9;
@@ -3549,23 +3570,30 @@ function calendarView(): HTMLElement {
     const left = 44;
     const W = left + 31 * (cell + gap);
     const H = months.length * (cell + gap) + 4;
-    let svg = `<svg class="viz cal" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Every day of the history: ${[...calendar.sev.values()].filter((x) => x === 'alert').length} something wrong, ${[...calendar.sev.values()].filter((x) => x === 'warn').length} unusual.">`;
+    const seen = counted();
+    const v = [...seen.values()];
+    let svg = `<svg class="viz cal" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Every day of the history to ${today ? dayLabel(today) : 'its end'}, ${fmtInt(seen.size)} of ${fmtInt(upTo.length)} checked: ${v.filter((x) => x === 'alert').length} something wrong, ${v.filter((x) => x === 'warn').length} unusual.">`;
+    let ring = '';
     months.forEach((m, r) => {
       const y = r * (cell + gap) + 2;
-      svg += `<text x="0" y="${y + cell - 1}" class="tick">${m.slice(5, 7) === '01' || r === 0 ? m : m.slice(5, 7)}</text>`;
+      // Newest first: each year's block starts at its December (or the top row), and says its year there.
+      svg += `<text x="0" y="${y + cell - 1}" class="tick">${m.slice(5, 7) === '12' || r === 0 ? m : m.slice(5, 7)}</text>`;
       for (let d = 1; d <= 31; d++) {
         const day = `${m}-${String(d).padStart(2, '0')}`;
         if (!file.days.includes(day) || day < days[0]!) continue;
-        const sv = calendar.sev.get(day);
+        const later = !!today && day > today;
+        const sv = later ? undefined : calendar.sev.get(day);
         const x = left + (d - 1) * (cell + gap);
-        const cls = sv === 'alert' ? 'cal-alert' : sv === 'warn' ? 'cal-warn' : sv ? 'cal-ok' : 'cal-wait';
-        svg += `<rect class="${cls}${day === newsDay() ? ' cal-now' : ''}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" data-day="${day}"/>`;
+        const cls = later ? 'cal-after' : sv === 'alert' ? 'cal-alert' : sv === 'warn' ? 'cal-warn' : sv ? 'cal-ok' : 'cal-wait';
+        svg += `<rect class="${cls}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" data-day="${day}"/>`;
+        // The day on screen: a ring around its cell, apart from the cell's own verdict.
+        if (day === today) ring = `<rect class="cal-now" x="${x - 1.5}" y="${y - 1.5}" width="${cell + 3}" height="${cell + 3}" rx="3"/>`;
       }
     });
-    const el = svgNode(`${svg}</svg>`);
+    const el = svgNode(`${svg}${ring}</svg>`);
     el.addEventListener('click', (e) => {
       const day = (e.target as Element).getAttribute?.('data-day');
-      if (!day) return;
+      if (!day || (today && day > today)) return;
       calendar.picked = day;
       const k = loads.list.findIndex((l) => l.day === day);
       const top = verdictOf(day);
@@ -3574,39 +3602,59 @@ function calendarView(): HTMLElement {
     return el;
   };
   const said = h('p', { class: 'vf-cal-said', 'aria-live': 'polite' });
-  const counts = () => {
-    const v = [...calendar.sev.values()];
-    return `${v.filter((x) => x === 'alert').length} wrong · ${v.filter((x) => x === 'warn').length} unusual · ${calendar.sev.size} of ${days.length} days`;
+  const bar = h('i', {});
+  const progress = h('span', { class: 'cal-progress', 'aria-hidden': 'true' }, bar);
+  const head = h('p', { class: 'eyebrow' });
+  const sayHead = () => {
+    const seen = counted();
+    head.replaceChildren(calendarHead(seen, upTo.length, upTo.length < days.length ? today : undefined), seen.size < upTo.length ? progress : '');
+    bar.style.width = `${((seen.size / Math.max(1, upTo.length)) * 100).toFixed(1)}%`;
   };
-  const head = h('p', { class: 'eyebrow' }, `Every day · ${counts()}`);
+  sayHead();
   let chart = draw();
-  box.append(head, chart, said);
-  // Fill it in a few days at a time, newest first, redrawing as it goes.
-  const todo = [...days].reverse().filter((d) => !calendar.sev.has(d));
-  if (todo.length && !calendar.busy) {
+  // A key: what each cell is, as the cells draw it.
+  const key2 = h('div', { class: 'vf-key cal-key', 'aria-hidden': 'true' },
+    h('span', {}, h('i', { class: 'k-cal ok' }), 'normal'), h('span', {}, h('i', { class: 'k-cal warn' }), 'unusual'), h('span', {}, h('i', { class: 'k-cal alert' }), 'wrong'),
+    h('span', {}, h('i', { class: 'k-cal wait' }), 'not checked yet'), today ? h('span', {}, h('i', { class: 'k-cal now' }), 'this day') : null,
+    upTo.length < days.length ? h('span', {}, h('i', { class: 'k-cal after' }), 'after it') : null);
+  box.append(head, chart, key2, said);
+  // Every day is checked, a few at a time when the page is idle, newest first, and the checking goes on when the tab
+  // closes, so the header only ever counts days that were checked.
+  const todo = [...upTo].reverse();
+  const redraw = () => {
+    if (!box.isConnected) return;
+    const next = draw();
+    chart.replaceWith(next);
+    chart = next;
+    sayHead();
+  };
+  // The latest calendar drawn says what is left to check and where to draw it, so the checking that goes on after
+  // its tab was redrawn (or another day was picked) carries on for it.
+  calendarRedraw = redraw;
+  calendarNext = () => todo.find((d) => !calendar.sev.has(d));
+  if (calendarNext() && !calendar.busy) {
     calendar.busy = true;
+    const mine = calendar.key;
     const step = () => {
+      if (calendar.key !== mine) return;
       const t0 = performance.now();
-      while (todo.length && performance.now() - t0 < 30) {
-        const day = todo.shift()!;
-        const found = newsOf(history!, day, NEWS_NAMES, { checks: checksAsCounted() });
-        const g = gateStep();
-        const sv = storyOf(history!, day, found, { names: NEWS_NAMES, step: g?.step, limit: g?.limit ?? null, hidden: hiddenTripColumns(), episode: false }).severity;
-        calendar.sev.set(day, sv);
-      }
-      if (box.isConnected) {
-        const next = draw();
-        chart.replaceWith(next);
-        chart = next;
-        head.textContent = `Every day · ${counts()}`;
-      }
-      if (todo.length && box.isConnected) setTimeout(step, 0);
+      for (let day = calendarNext(); day && performance.now() - t0 < 24; day = calendarNext()) calendar.sev.set(day, calendarSeverity(day));
+      calendarRedraw();
+      if (calendarNext()) idle(step);
       else calendar.busy = false;
     };
-    setTimeout(step, 50);
+    idle(step);
   }
   return box;
 }
+let calendarRedraw: () => void = () => undefined;
+let calendarNext: () => string | undefined = () => undefined;
+/** When the page is idle, or soon. */
+const idle = (f: () => void): void => {
+  const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+  if (ric) ric(f, { timeout: 400 });
+  else setTimeout(f, 16);
+};
 
 let alerts: { day: string; title: string }[] | null = null;
 /** Every day of the history with an alert, newest first, worked out once (a few seconds), then kept. */

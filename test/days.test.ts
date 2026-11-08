@@ -3,7 +3,7 @@
  * passed, said as such; never a day after it, whatever order the days were run in.
  */
 import { describe, expect, it } from 'vitest';
-import { dayMid, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine, type EpisodeDay } from '../src/core/days.js';
+import { calendarHead, dayMid, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine, type EpisodeDay } from '../src/core/days.js';
 
 describe('the run a day shows', () => {
   it('is the day’s own newest run when it passed', () => {
@@ -96,5 +96,17 @@ describe('an episode’s shortfall', () => {
     const calm: EpisodeDay = { day: '2023-09-22', got: usual, low: 85_000, expected: 120_000, alert: false };
     const before: EpisodeDay = { day: '2023-09-20', got: got.map(() => 0), low: 85_000, expected: 120_000, alert: true };
     expect(shortfall([before, days[0]!, calm], fall, '2023-09-22').estimate).toBe(51_700);
+  });
+});
+
+describe('the History calendar’s header', () => {
+  it('counts no wrong days until every day is checked, then says them', () => {
+    const v = new Map<string, string>([['2023-09-21', 'alert'], ['2023-09-20', 'ok']]);
+    expect(calendarHead(v, 825)).toBe('Checking every day · 2 of 825');
+    expect(calendarHead(v, 825)).not.toMatch(/wrong/);
+    const all = new Map<string, string>(Array.from({ length: 825 }, (_, k) => [String(k), k < 9 ? 'alert' : k < 50 ? 'warn' : k % 3 ? 'ok' : 'note']));
+    expect(calendarHead(all, 825)).toBe('825 days · 9 wrong · 41 unusual');
+    // Stopped at the day on screen: the days after it aren't counted, and it says to when.
+    expect(calendarHead(all, 825, '2023-09-21')).toBe('825 days to Thu Sep 21 · 9 wrong · 41 unusual');
   });
 });

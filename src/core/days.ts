@@ -90,3 +90,14 @@ export function shortfall(days: readonly EpisodeDay[], fall: { day: string; from
   }
   return { estimate, bound };
 }
+
+/**
+ * The History calendar's header (ADR 0008 §10): the days checked so far until every one is, never a count of wrong
+ * days while some are unchecked; then how many were wrong and unusual. One map feeds it and the cells.
+ */
+export function calendarHead(verdicts: ReadonlyMap<string, string>, total: number, to?: string): string {
+  const n = (x: number) => x.toLocaleString('en-US');
+  if (verdicts.size < total) return `Checking every day · ${n(verdicts.size)} of ${n(total)}`;
+  const v = [...verdicts.values()];
+  return `${n(total)} days${to ? ` to ${dayMid(to)}` : ''} · ${v.filter((x) => x === 'alert').length} wrong · ${v.filter((x) => x === 'warn').length} unusual`;
+}

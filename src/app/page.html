@@ -559,7 +559,17 @@ th.hit, td.hit { background: var(--warn-wash); }
 .vf-cal { display: grid; gap: 6px; }
 .viz.cal .cal-ok { fill: var(--ghost); } .viz.cal .cal-wait { fill: none; stroke: var(--line); stroke-width: 0.6; }
 .viz.cal .cal-alert { fill: var(--bad); } .viz.cal .cal-warn { fill: var(--warn-wash); stroke: var(--warn); stroke-width: 1.4; }
-.viz.cal .cal-now { stroke: var(--ink); stroke-width: 1.6; }
+.viz.cal .cal-now { fill: none; stroke: var(--smalt); stroke-width: 1.8; }
+/* The calendar's key and its progress while days are still being checked (ADR 0008 §10). */
+.vf-key .k-cal { width: 9px; height: 9px; box-sizing: border-box; }
+.vf-key .k-cal.ok { background: var(--ghost); border: 1px solid var(--edge); }
+.vf-key .k-cal.warn { background: var(--warn-wash); border: 1.4px solid var(--warn); }
+.vf-key .k-cal.alert { background: var(--bad); }
+.vf-key .k-cal.wait { background: none; border: 1px solid var(--line); }
+.vf-key .k-cal.after, .viz.cal .cal-after { background: var(--sunk); fill: var(--sunk); opacity: 0.6; }
+.vf-key .k-cal.now { background: none; width: 12px; height: 12px; border: 1.8px solid var(--smalt); border-radius: 3px; }
+.cal-progress { display: inline-block; width: 64px; height: 4px; margin-left: 8px; vertical-align: 1px; border-radius: 2px; background: var(--sunk); border: 1px solid var(--edge); overflow: hidden; }
+.cal-progress i { display: block; height: 100%; background: var(--smalt); }
 .viz.cal rect { cursor: pointer; }
 .vf-cal-said { margin: 0; font-size: 13px; color: var(--ink-2); min-height: 20px; }
 .about-flow > summary { cursor: pointer; font-size: 13px; color: var(--ink-2); min-height: 32px; display: flex; align-items: center; gap: 6px; }

@@ -147,7 +147,13 @@ where about 35,000 are usual, and everything else held.
     its shortfall counts those days only, the day it began as its head counts it (Sep 21: "~77k fewer", as its hour
     chart's "~77k missing"); a History chart draws the days after it lighter, their bands (made from days before) but no
     value, and a tap picks no later day; the loads strip leaves them unmarked, a band and no count, whatever the visit
-    ran. The episode chips keep their ⚠: they are how to get to the incidents.
+    ran. The episode chips keep their ⚠: they are how to get to the incidents. The History calendar gives each day the
+    verdict its News tells (the same story, findings marked as expected left so, a refused file first), the viewed
+    day's at once, ringed apart from its own colour; it checks the days to the viewed one a few at a time while the page
+    is idle, on after its tab closes, and says "Checking every day · 276 of 693" with a bar until every one is checked,
+    never a count of wrong days before then ("693 days to Thu Sep 21 · 23 wrong · 36 unusual" after). Days after the
+    viewed one are lighter and not counted. A key says what each cell is, and each year's block names its year on its
+    first row. The band's "outside last year" is another measure (days outside their range), said as such.
 
 ## Consequences
 
