@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
+import { shortfall, type EpisodeDay } from '../src/core/days.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
 import { countRange, gateLabels, glanceStrings, partLabel, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
 
@@ -36,6 +37,30 @@ describe.skipIf(!has)('the story on the real history', () => {
     expect(s.hoursLabels).toEqual({ cut: '13:00', floor: 'still ~330/h', missing: '~77k missing', ghost: 'usual Thursday' });
     expect(s.labels.amount).toEqual(['41,939 trips', '−65%', 'usual 89k–160k']);
     expect(splitSentence(s)).toBe('Flex Fare as usual (4,657; usual 2.8k–5.4k); everything else fell from 13:00 (37,282; usual ~115k).');
+  });
+
+  it('counts an episode’s shortfall only to the day on screen, the day it began as its head does (ADR 0008 §10)', () => {
+    const trips = h!.of({ of: 'trips' })!;
+    const ep = (first: string, viewed: string) => {
+      const fall = story(first).hours!;
+      const days: EpisodeDay[] = file!.days.filter((d) => d >= first && d <= '2023-09-30').map((d) => {
+        const r = trips.at(d)!;
+        const k = file!.days.indexOf(d);
+        return { day: d, got: file!.hours![k]!, low: r.low, expected: r.expected, alert: story(d).severity === 'alert' };
+      });
+      return shortfall(days, { day: first, ...fall }, viewed);
+    };
+    // Thu Sep 21 alone: the same ~77k its hour chart says is missing, not Thu to Mon's ~375k.
+    const thu = ep('2023-09-21', '2023-09-21');
+    expect(Math.round(thu.estimate / 1000)).toBe(77);
+    expect(story('2023-09-21').hoursLabels!.missing).toBe(`~${Math.round(thu.estimate / 1000)}k missing`);
+    // Fri adds Fri, Sat adds Sat; Sun and Mon never reach Fri's figure.
+    const fri = ep('2023-09-21', '2023-09-22');
+    const sat = ep('2023-09-21', '2023-09-23');
+    expect(fri.estimate).toBeGreaterThan(thu.estimate + 100_000);
+    expect(fri.estimate).toBeLessThan(thu.estimate + 120_000);
+    expect(sat.estimate).toBeGreaterThan(fri.estimate + 90_000);
+    expect(fri.bound).toBeLessThan(fri.estimate);
   });
 
   it('says each split day’s sentence from its own figures', () => {

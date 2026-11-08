@@ -17,8 +17,8 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, t
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { noRowsBefore, rowsFrom, shownRun, stoppedLine as stoppedWords } from '../core/days.js';
-import { STRIP_KEY, approx, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Gate, type Story, type Told } from '../core/story.js';
+import { noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, type EpisodeDay } from '../core/days.js';
+import { STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, dayStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
@@ -2839,15 +2839,13 @@ function hoursDetail(story: Story): HTMLElement | null {
   const cutDay = story.hours ? story.day : first;
   const hrs = story.hours ?? storyFor(first)?.hours ?? null;
   if (!hrs) return null;
-  let last = story.day;
-  for (let i = 1; i <= 5 && bad(dayPlus(last, 1)); i++) last = dayPlus(last, 1);
-  const end = file.days.includes(dayPlus(last, 1)) ? dayPlus(last, 1) : last;
-  const span = daysFrom(first, end).slice(0, 7);
+  // The episode's days so far, and no further (ADR 0008 §10): the viewed day is the last a feed has brought.
+  const last = story.day;
+  const span = daysFrom(first, last).slice(-7);
   const ddd = (d: string) => WEEKDAY_NAMES[dateOf(d).getUTCDay()]!.slice(0, 3);
   // The shortfall: an estimate against a usual day, and a bound against the low end of usual (ADR 0008: a bound is
-  // never printed as if it were the estimate).
-  let short = 0;
-  let est = 0;
+  // never printed as if it were the estimate), over those days only.
+  const ep: EpisodeDay[] = [];
   let floor = 0;
   const blank: string[] = [];
   const days = span.map((d) => {
@@ -2859,13 +2857,12 @@ function hoursDetail(story: Story): HTMLElement | null {
     const usual = raw.map((x) => (x / sum) * r.expected);
     const got = file.hours[k]!;
     const st = storyFor(d);
-    // The shortfall, conservatively: the hours after the cut, at the band's low; a whole short day, its low.
-    if (d === cutDay) for (let hr = hrs.from; hr < 24; hr++) (short += Math.max(0, usual[hr]! * (r.low / r.expected) - got[hr]!)), (est += Math.max(0, usual[hr]! - got[hr]!));
-    else if (d !== end && st?.severity === 'alert') (short += Math.max(0, r.low - got.reduce((a, b) => a + b, 0))), (est += Math.max(0, r.expected - got.reduce((a, b) => a + b, 0)));
-    if (d !== first && d !== end && st?.severity === 'alert') (blank.push(d), (floor = Math.max(floor, ...got)));
+    ep.push({ day: d, got, low: r.low, expected: r.expected, alert: st?.severity === 'alert' });
+    if (d !== cutDay && st?.severity === 'alert') (blank.push(d), (floor = Math.max(floor, ...got)));
     return { label: ddd(d), got, usual, mark: st?.severity === 'alert' ? `alert${st.gate?.held ? ' held' : ''}` : st?.severity === 'warn' ? 'warn' : '' };
   }).filter((x): x is { label: string; got: number[]; usual: number[]; mark: string } => !!x);
   if (!days.length) return null;
+  const { estimate: est, bound: short } = shortfall(ep, { day: cutDay, ...hrs }, story.day);
   const firstIdx = span.indexOf(cutDay) >= 0 ? span.indexOf(cutDay) : 0;
   const cut = firstIdx * 24 + hrs.from;
   const lastBad = span.indexOf(last);
@@ -2874,16 +2871,21 @@ function hoursDetail(story: Story): HTMLElement | null {
   const shortLabel = `~${compact(est)} fewer (≥${bound})`;
   const floorLabel = blank.length ? `under ${Math.ceil(floor / 100) * 100}/h ${blank.length > 1 ? `${ddd(blank[0]!)}–${ddd(blank.at(-1)!)}` : ddd(blank[0]!)}` : undefined;
   const svg = svgNode(episodeBars({
-    days, cut, cutLabel: clockText(hrs.from * 60), floorLabel,
+    days, cut, cutLabel: clockText(hrs.from * 60), floorLabel, at: span.indexOf(story.day),
+    floorAt: blank.length ? ((span.indexOf(blank[0]!) + span.indexOf(blank.at(-1)!) + 1) * 24) / 2 : undefined,
     bracket: { from: cut, to: (lastBad + 1) * 24, label: shortLabel },
     aria: `Trips by hour, ${dayLabel(span[0]!)} to ${dayLabel(span.at(-1)!)}: a fall at ${clockText(hrs.from * 60)} ${ddd(cutDay)}, about ${fmtInt(est)} fewer than usual through ${ddd(last)}, at least ${fmtInt(sig(short))} against the low end of usual${floorLabel ? `, ${floorLabel.replace('/h', ' an hour')}` : ''}.`,
   }));
   const readout = h('p', { class: 'vf-readout', 'aria-live': 'polite' });
-  // First the fall as the head says it, over its hours (Thu from 13:00: 3,679 trips · usual ~80k, −95%); a tap then
-  // reads one hour.
+  // First the viewed day as its head says it: the fall over its hours on the day it began (Thu from 13:00: 3,679 trips
+  // · usual ~80k, −95%), else the day's own trips against a usual day (Fri: 4,633 trips · usual ~110k, −96%). A tap
+  // then reads one hour.
   const had = hrs.got.slice(hrs.from, hrs.to + 1).reduce((a, b) => a + b, 0);
   const want = hrs.usual.slice(hrs.from, hrs.to + 1).reduce((a, b) => a + b, 0);
-  readout.textContent = `${ddd(cutDay)} ${hrs.to === 23 ? `from ${clockText(hrs.from * 60)}` : `${clockText(hrs.from * 60)}–${clockText((hrs.to + 1) * 60)}`}: ${fmtInt(had)} trips · usual ~${compact(want)} (−${Math.round((1 - had / Math.max(1, want)) * 100)}%)`;
+  const amt = story.amount;
+  readout.textContent = story.day === cutDay || !amt
+    ? `${ddd(cutDay)} ${hrs.to === 23 ? `from ${clockText(hrs.from * 60)}` : `${clockText(hrs.from * 60)}–${clockText((hrs.to + 1) * 60)}`}: ${fmtInt(had)} trips · usual ~${compact(want)} (−${Math.round((1 - had / Math.max(1, want)) * 100)}%)`
+    : `${ddd(story.day)}: ${fmtInt(amt.value)} trips · usual ~${compact(amt.expected)} (${changeLabel(amt.value / Math.max(1, amt.expected) - 1)})`;
   const at = (i: number) => {
     const d = days[Math.floor(i / 24)];
     if (!d) return;
@@ -2895,7 +2897,8 @@ function hoursDetail(story: Story): HTMLElement | null {
     const i = Math.floor(((e as MouseEvent).clientX - box.left) / Math.max(1, box.width) * days.length * 24);
     at(Math.max(0, Math.min(days.length * 24 - 1, i)));
   });
-  return block(`${days[0]!.label} to ${days.at(-1)!.label}, trips by hour`, svg, readout);
+  const title = days.length > 1 ? `${days[0]!.label} to ${days.at(-1)!.label}, trips by hour` : `${days[0]!.label}, trips by hour`;
+  return block(title, svg, readout);
 }
 
 /** The checks' rules as rows: today's failing rows against a day like it's, the most first, rules that only warn last. */
@@ -3435,8 +3438,10 @@ async function historyTab(card: string, id: string, who: string): Promise<HTMLEl
   if (ranges) {
     const monday = mondayOf(day);
     const days = daysFrom(dayPlus(monday, -49), dayPlus(monday, 6));
+    // The days up to this one: those after it are drawn lighter, with no value (ADR 0008 §10).
+    const seen = days.filter((d) => d <= day);
     const fmt = metricFormat(choice.m);
-    const focus = historyFocus.get(card) && days.includes(historyFocus.get(card)!) ? historyFocus.get(card)! : day;
+    const focus = historyFocus.get(card) && seen.includes(historyFocus.get(card)!) ? historyFocus.get(card)! : day;
     const pick = (d: string) => {
       historyFocus.set(card, d);
       void renderSheet();
@@ -3444,12 +3449,12 @@ async function historyTab(card: string, id: string, who: string): Promise<HTMLEl
     const gate = gateStep();
     const limit = choice.m.of === 'dropped' && gate?.limit != null ? gate.limit : undefined;
     const bt = backtestLine(ranges, choice.m);
-    box.append(bandChart(ranges, days, focus, choice.m.of === 'trips' ? (v) => fmtCompact(v).replace('.0k', 'k') : fmt, pick, limit) ?? '',
+    box.append(bandChart(ranges, days, focus, choice.m.of === 'trips' ? (v) => fmtCompact(v).replace('.0k', 'k') : fmt, pick, limit, day) ?? '',
       h('div', { class: 'vf-key', 'aria-hidden': 'true' },
         h('span', {}, h('i', { class: 'k-band' }), 'usual'), h('span', {}, h('i', { class: 'k-exp' }), 'guess'), h('span', {}, h('i', { class: 'k-out' }), 'outside'),
         h('span', {}, h('i', { class: 'k-focus' }), 'this day'), h('span', {}, h('i', { class: 'k-hol' }), 'holiday'), limit !== undefined ? h('span', {}, h('i', { class: 'k-limit' }), 'limit') : null),
       h('details', { class: 'vf-why' }, h('summary', {}, 'How this day’s band is made', bt ? h('span', { class: 'vf-chip' }, bt.textContent!.match(/\(([\d.]+%)\)/)?.[1] ? `${bt.textContent!.match(/\(([\d.]+%)\)/)![1]} outside last year` : '') : null),
-        rangeWhy(ranges, days, focus, choice.m, fmt, pick, choice.label), bt ?? ''));
+        rangeWhy(ranges, seen, focus, choice.m, fmt, pick, choice.label), bt ?? ''));
   }
   if (kind === 'trips') box.append(calendarView(), incidentsList() ?? '');
   return box;
@@ -5230,20 +5235,24 @@ function renderLoads(): void {
   // Each day a micro bar of its trips against its own usual range, on one scale for the week, and its mark: a filled
   // hexagon for something wrong, an outlined triangle for unusual, ‖ where the checks held the run (ADR 0008).
   const tripsRanges = history && historyOpen() ? rangesOf({ of: 'trips' }) : null;
-  const ymax = Math.max(1, ...list.flatMap((k) => [loads.list[k]!.rows, tripsRanges?.at(loads.list[k]!.day)?.high ?? 0]));
+  const ymax = Math.max(1, ...list.flatMap((k) => [loads.list[k]!.day > (now?.day ?? '9') ? 0 : loads.list[k]!.rows, tripsRanges?.at(loads.list[k]!.day)?.high ?? 0]));
   // One scrolling row for the whole episode (ADR 0008), the loaded day in view.
+  // A day after the one on screen hasn't arrived yet, as a feed brings them (ADR 0008 §10): lighter, its usual range
+  // (made from the days before) but no count and no mark, whatever this visit ran.
+  const viewed = now?.day;
   const chips = list.map((k) => {
     const l = loads.list[k]!;
-    const r = runOfLoad(k);
-    const top = verdictOf(l.day);
+    const later = !!viewed && l.day > viewed;
+    const r = later ? undefined : runOfLoad(k);
+    const top = later ? undefined : verdictOf(l.day);
     const sev = top ? (top.severity === 'note' ? 'ok' : top.severity) : 'none';
-    const held = !!(history && historyOpen() && storyFor(l.day)?.gate?.held);
+    const held = !later && !!(history && historyOpen() && storyFor(l.day)?.gate?.held);
     const range = tripsRanges?.at(l.day);
-    const label = `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: ${fmtInt(l.rows)} trips${top ? `, ${VERDICT_WORD[top.severity]}${top.severity === 'alert' || top.severity === 'warn' ? `: ${top.title}` : ''}` : ''}${held ? ', held' : ''}${r ? '' : ', not run yet'}`;
-    return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', holidayOf(l.day) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
+    const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: ${fmtInt(l.rows)} trips${top ? `, ${VERDICT_WORD[top.severity]}${top.severity === 'alert' || top.severity === 'warn' ? `: ${top.title}` : ''}` : ''}${held ? ', held' : ''}${r ? '' : ', not run yet'}`;
+    return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', later ? 'later' : '', holidayOf(l.day) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
-      svgNode(stripBar({ v: l.rows, low: range?.low ?? null, high: range?.high ?? null, ymax, sev: sev === 'alert' || sev === 'warn' ? sev : null })),
+      svgNode(stripBar({ v: later ? 0 : l.rows, low: range?.low ?? null, high: range?.high ?? null, ymax, sev: sev === 'alert' || sev === 'warn' ? sev : null })),
       h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 14) : '', held ? glyphEl('held', 14) : ''));
   });
   const at = list.indexOf(loads.at);
@@ -5482,9 +5491,10 @@ const normalView = { metric: 'trips' as 'trips' | 'dropped', focus: '' };
 const backtests = new Map<string, Backtest>();
 
 /** Days as a band chart: the normal range a band, the guess a lighter solid line, the number a dot. Tap for a day. */
-function bandChart(ranges: NormalRanges, days: readonly string[], focus: string, fmt: (v: number) => string, pick: (day: string) => void, limit?: number): SVGSVGElement | null {
+function bandChart(ranges: NormalRanges, days: readonly string[], focus: string, fmt: (v: number) => string, pick: (day: string) => void, limit?: number, today?: string): SVGSVGElement | null {
   const [W, H, L, R, T, B] = [340, 172, 38, 6, 8, 26];
-  const pts = days.map((d) => ({ d, v: ranges.value(d), r: ranges.at(d) }));
+  // A day after the one on screen has its band (made from the days before it) but no value: it hasn't arrived.
+  const pts = days.map((d) => ({ d, v: today && d > today ? null : ranges.value(d), r: ranges.at(d) }));
   const all = [...pts.flatMap((p) => [p.v, p.r?.low, p.r?.high]), limit].filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
   if (!all.length) return null;
   let [lo, hi] = [Math.min(...all), Math.max(...all)];
@@ -5535,11 +5545,15 @@ function bandChart(ranges: NormalRanges, days: readonly string[], focus: string,
     const off = p.r ? ranges.place(p.r, p.v) !== 'within' : false;
     svg.append(s('circle', { class: ['pt', off ? 'out' : '', p.r ? '' : 'bare', p.d === focus ? 'focus' : ''].filter(Boolean).join(' '), cx: X(i).toFixed(1), cy: Y(p.v).toFixed(1), r: p.d === focus ? 4 : off ? 3.4 : 2.3 }));
   });
-  // A tap anywhere picks the nearest day: a day's column is narrower than a finger.
+  // The days after the one on screen lighter, as the weather's are: it is the day on screen, not the last one.
+  const after = today ? days.findIndex((d) => d > today) : -1;
+  if (after >= 0) svg.append(s('rect', { class: 'wx-after', x: (X(after) - step / 2).toFixed(1), y: 0, width: (W - R - (X(after) - step / 2)).toFixed(1), height: H - B }));
+  // A tap anywhere picks the nearest day up to the one on screen: a day's column is narrower than a finger.
+  const last = after >= 0 ? after - 1 : days.length - 1;
   svg.addEventListener('click', (e) => {
     const box = svg.getBoundingClientRect();
     const x = ((e.clientX - box.left) / Math.max(1, box.width)) * W;
-    pick(days[Math.max(0, Math.min(days.length - 1, Math.floor((x - L) / step)))]!);
+    pick(days[Math.max(0, Math.min(last, Math.floor((x - L) / step)))]!);
   });
   return svg;
 }

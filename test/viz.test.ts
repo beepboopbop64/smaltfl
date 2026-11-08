@@ -73,6 +73,24 @@ describe('the news’s charts', () => {
     expect([niceMax(8360), niceMax(10_800), niceMax(1), niceMax(21)]).toEqual([10_000, 12_000, 1, 25]);
   });
 
+  it('frames the day on screen in an episode’s hours, and draws no day after it (ADR 0008 §10)', () => {
+    const day = { label: 'Thu', got: hours, usual };
+    // Fri Sep 22: Thu and Fri only, Fri framed and its name bold; the bracket ends where the chart does.
+    const svg = episodeBars({ days: [day, { ...day, label: 'Fri', got: hours.map(() => 20) }], cut: 13, cutLabel: '13:00', at: 1, bracket: { from: 13, to: 48, label: '~187k fewer (≥130k)' }, aria: 'Trips by hour, Thu to Fri' });
+    expect(svg.match(/class="today-ring"/g)).toHaveLength(1);
+    expect(Number(/class="today-ring" x="([\d.]+)"/.exec(svg)![1])).toBeCloseTo(24 * (334 / 48) + 0.5, 0);
+    expect(svg).toMatch(/class="tick at"[^>]*>Fri</);
+    expect(svg).not.toContain('>Sat<');
+    // A lone day needs no frame; a late fall on it puts its shortfall under the bracket, clear of the hour's label.
+    expect(episodeBars({ days: [day], cut: 13, at: 0, aria: 'Trips by hour, Thu' })).not.toContain('today-ring');
+    const late = episodeBars({ days: [day], cut: 15, cutLabel: '15:00', at: 0, bracket: { from: 15, to: 24, label: '~52k fewer (≥45k)' }, aria: 'Trips by hour, Sat' });
+    expect(late).toMatch(/y="39" text-anchor="end" class="lbl-bad lbl-halo">~52k fewer/);
+    // A day after the one on screen in the loads strip: its usual range, no count.
+    const later = stripBar({ v: 0, low: 84912, high: 155515, ymax: 160000 });
+    expect(later).toContain('class="ghost"');
+    expect(later).not.toMatch(/class="(ink|sev-[a-z]+-fill)"/);
+  });
+
   it('keeps an episode’s shortfall, an estimate with its bound, clear of the hour it began', () => {
     const day = { label: 'Sat', got: hours, usual };
     const svg = episodeBars({ days: [day, { ...day, label: 'Sun', got: hours.map(() => 60) }], cut: 15, cutLabel: '15:00', bracket: { from: 15, to: 48, label: '~135k fewer (≥110k)' }, aria: 'Trips by hour, Sat to Sun: about 135,000 fewer, at least 110,000' });

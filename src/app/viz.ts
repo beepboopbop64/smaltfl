@@ -361,7 +361,7 @@ export function reachIcon({ n, state }: { n: number; state: 'held' | 'alert' }):
  * a bracket over the short span carrying the shortfall, the floor labelled, and each day's mark under its name. Each
  * bar carries its hour (data-k) for a readout.
  */
-export function episodeBars(o: { days: readonly { label: string; got: readonly number[]; usual: readonly number[]; mark?: string }[]; cut?: number; cutLabel?: string; bracket?: { from: number; to: number; label: string }; floorLabel?: string; aria: string; w?: number; h?: number }): string {
+export function episodeBars(o: { days: readonly { label: string; got: readonly number[]; usual: readonly number[]; mark?: string }[]; cut?: number; cutLabel?: string; bracket?: { from: number; to: number; label: string }; floorLabel?: string; floorAt?: number; at?: number; aria: string; w?: number; h?: number }): string {
   const w = o.w ?? 334;
   const h = o.h ?? 170;
   const top = 30;
@@ -386,9 +386,11 @@ export function episodeBars(o: { days: readonly { label: string; got: readonly n
     const g = got[i] ?? 0;
     if (g > 0) s += `<rect class="ink-strong" x="${f1(x0 + 0.3)}" y="${f1(Math.min(y(g), base - MIN_MARK))}" width="${f1(Math.max(0.6, xw - 1.2))}" height="${f1(Math.max(MIN_MARK, base - y(g)))}" data-k="${i}"/>`;
   }
+  // The day on screen framed, as a strip of days frames it, when the chart has more than it.
+  if (o.at !== undefined && o.at >= 0 && o.days.length > 1) s += `<rect class="today-ring" x="${f1(o.at * 24 * xw + 0.5)}" y="${top - 4}" width="${f1(24 * xw - 1)}" height="${f1(base - top + 20)}" rx="3"/>`;
   o.days.forEach((d, i) => {
     if (i) s += `<line class="hair" x1="${f1(i * 24 * xw)}" x2="${f1(i * 24 * xw)}" y1="${top - 4}" y2="${base}"/>`;
-    s += `<text x="${f1((i * 24 + 12) * xw)}" y="${base + 13}" text-anchor="middle" class="tick" aria-hidden="true">${esc(d.label)}</text>`;
+    s += `<text x="${f1((i * 24 + 12) * xw)}" y="${base + 13}" text-anchor="middle" class="tick${i === o.at ? ' at' : ''}" aria-hidden="true">${esc(d.label)}</text>`;
     if (d.mark) s += `<g transform="translate(${f1((i * 24 + 12) * xw - (d.mark.includes('held') ? 15 : 7))} ${base + 17})">${d.mark.split(' ').filter(Boolean).map((m, j) => `<g transform="translate(${j * 15} 0)">${glyph(m as Mark, 14)}</g>`).join('')}</g>`;
   });
   s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
@@ -404,9 +406,12 @@ export function episodeBars(o: { days: readonly { label: string; got: readonly n
     const half = (o.bracket.label.length * 6.6) / 2;
     const clear = o.cut !== undefined && o.cutLabel ? o.cut * xw + 4 + o.cutLabel.length * 7 + 8 : -Infinity;
     const mid = Math.min(w - half, Math.max((x1 + x2) / 2, clear + half));
-    s += `<path class="bracket" d="M${f1(x1)} ${top - 2}v-5H${f1(x2)}v5"/><text x="${f1(mid)}" y="${top - 10}" text-anchor="middle" class="lbl-bad lbl-halo">${esc(o.bracket.label)}</text>`;
+    s += `<path class="bracket" d="M${f1(x1)} ${top - 2}v-5H${f1(x2)}v5"/>`;
+    // A late fall on a lone day leaves no room beside the hour's label: the shortfall goes under the bracket instead.
+    s += mid - half < clear ? `<text x="${f1(w - 2)}" y="${top + 9}" text-anchor="end" class="lbl-bad lbl-halo">${esc(o.bracket.label)}</text>` : `<text x="${f1(mid)}" y="${top - 10}" text-anchor="middle" class="lbl-bad lbl-halo">${esc(o.bracket.label)}</text>`;
   }
-  if (o.floorLabel) s += `<text x="${f1(w * 0.62)}" y="${base - 10}" text-anchor="middle" class="lbl-m lbl-halo">${esc(o.floorLabel)}</text>`;
+  // The trickle's label over the days it describes, where the chart says which.
+  if (o.floorLabel) s += `<text x="${f1(o.floorAt !== undefined ? Math.min(w - (o.floorLabel.length * 6) / 2, Math.max((o.floorLabel.length * 6) / 2, o.floorAt * xw)) : w * 0.62)}" y="${base - 10}" text-anchor="middle" class="lbl-m lbl-halo">${esc(o.floorLabel)}</text>`;
   return `${s}</svg>`;
 }
 

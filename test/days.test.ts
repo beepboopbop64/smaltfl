@@ -3,7 +3,7 @@
  * passed, said as such; never a day after it, whatever order the days were run in.
  */
 import { describe, expect, it } from 'vitest';
-import { dayMid, dayShort, noRowsBefore, rowsFrom, shownRun, stoppedLine } from '../src/core/days.js';
+import { dayMid, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine, type EpisodeDay } from '../src/core/days.js';
 
 describe('the run a day shows', () => {
   it('is the day’s own newest run when it passed', () => {
@@ -69,5 +69,32 @@ describe('what the screens say of it', () => {
       said.push(held.has(day) ? stoppedLine({ refused: false, origin: 'trips_valid', shown, viewed: day }).tail : rowsFrom(shown, day));
     }
     expect(said).toEqual([null, null, null, null, 'outputs keep Thu 21', 'outputs keep Thu 21', 'outputs keep Thu 21', null, null, 'outputs keep Thu 21', null, 'outputs keep Thu 21']);
+  });
+});
+
+describe('an episode’s shortfall', () => {
+  const usual = Array.from({ length: 24 }, () => 5000);
+  const got = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
+  const fall = { day: '2023-09-21', from: 13, to: 23, got, usual };
+  const days: EpisodeDay[] = [
+    { day: '2023-09-21', got, low: 90_000, expected: 120_000, alert: true },
+    { day: '2023-09-22', got: got.map(() => 1), low: 85_000, expected: 110_000, alert: true },
+    { day: '2023-09-23', got: got.map(() => 1), low: 80_000, expected: 104_000, alert: true },
+  ];
+
+  it('counts the day the trips fell as its head does, and nothing after the viewed day', () => {
+    // Thu: 11 hours of 5,000 usual, 300 came: 51,700 missing; the bound scales the usual to the range's low.
+    expect(shortfall(days, fall, '2023-09-21')).toEqual({ estimate: 51_700, bound: 11 * 5000 * 0.75 - 3300 });
+    // Fri adds its own whole day, Sat not yet.
+    const fri = shortfall(days, fall, '2023-09-22');
+    expect(fri.estimate).toBe(51_700 + 110_000 - 24);
+    expect(fri.bound).toBe(11 * 5000 * 0.75 - 3300 + 85_000 - 24);
+    expect(shortfall(days, fall, '2023-09-23').estimate).toBe(51_700 + 110_000 - 24 + 104_000 - 24);
+  });
+
+  it('skips days that weren’t wrong, and days before the fall', () => {
+    const calm: EpisodeDay = { day: '2023-09-22', got: usual, low: 85_000, expected: 120_000, alert: false };
+    const before: EpisodeDay = { day: '2023-09-20', got: got.map(() => 0), low: 85_000, expected: 120_000, alert: true };
+    expect(shortfall([before, days[0]!, calm], fall, '2023-09-22').estimate).toBe(51_700);
   });
 });

@@ -142,6 +142,12 @@ where about 35,000 are usual, and everything else held.
     full-width hatched bar ("Rows from Thu Sep 21 · the last day that passed"), under the day's own figures where a
     panel has both (the gate, then the last day's dropped rows), and the day's marks and badges are never put beside
     those rows. A step after the one that held says "not built today", hatched, with no dot or seal from another day.
+    Nothing after the viewed day is drawn as known: the episode's hours run from its first day to the viewed one (Sep 21
+    shows Thu, Sep 22 Thu–Fri, the viewed day framed and its readout first: "Fri: 4,633 trips · usual ~115k (−96%)"),
+    its shortfall counts those days only, the day it began as its head counts it (Sep 21: "~77k fewer", as its hour
+    chart's "~77k missing"); a History chart draws the days after it lighter, their bands (made from days before) but no
+    value, and a tap picks no later day; the loads strip leaves them unmarked, a band and no count, whatever the visit
+    ran. The episode chips keep their ⚠: they are how to get to the incidents.
 
 ## Consequences
 

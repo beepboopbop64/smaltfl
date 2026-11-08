@@ -55,3 +55,38 @@ export function rowsFrom(shown: string | null | undefined, viewed: string | null
 
 /** A panel with no rows to show for the viewed day: no day before it passed in this visit. */
 export const noRowsBefore = (viewed: string) => `No rows: no day before ${dayShort(viewed)} passed in this visit`;
+
+/** A day of an episode, for its shortfall: its trips by hour, a usual day's, and its range. */
+export interface EpisodeDay {
+  day: string;
+  got: readonly number[];
+  /** Its range's low and its guess, for the day's trips. */
+  low: number;
+  expected: number;
+  /** Whether the day had something wrong. */
+  alert: boolean;
+}
+
+/**
+ * An episode's shortfall so far (ADR 0008 §6, §10): an estimate against a usual day and a bound against the low end of
+ * usual, over its days up to the viewed one and none after. The day the trips fell counts the hours of its fall as its
+ * head does (the finding's own usual hours), so the two say one number; a later day with something wrong counts whole.
+ */
+export function shortfall(days: readonly EpisodeDay[], fall: { day: string; from: number; to: number; got: readonly number[]; usual: readonly number[] }, viewed: string): { estimate: number; bound: number } {
+  let estimate = 0;
+  let bound = 0;
+  const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
+  for (const d of days) {
+    if (d.day > viewed) continue;
+    if (d.day === fall.day) {
+      const want = sum(fall.usual.slice(fall.from, fall.to + 1));
+      const had = sum(fall.got.slice(fall.from, fall.to + 1));
+      estimate += Math.max(0, want - had);
+      bound += Math.max(0, want * (d.low / Math.max(1, d.expected)) - had);
+    } else if (d.alert && d.day > fall.day) {
+      estimate += Math.max(0, d.expected - sum(d.got));
+      bound += Math.max(0, d.low - sum(d.got));
+    }
+  }
+  return { estimate, bound };
+}
