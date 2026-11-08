@@ -589,7 +589,7 @@ describe('an audit bag with a day filled (amendment 1 S11, Q-61)', () => {
     expect(out).toMatchObject({ outcome: 'applied', why: null });
     const relAbout: ReleaseAbout = { run: r.run, manifest: r.hash, outputs: keys, decision: decision.seq, leaf: LEAF(decision), outcome: out.outcome, why: out.why, from: { run: thu.r.run, manifest: thu.r.hash }, repair, filled: out.filled ?? 0 };
     const rel = await rec.append('release', 'owner', relAbout as unknown as JSONValue);
-    return { ...s, wed, thu, r, derived, decision, out, rel, keys, repair };
+    return { ...s, wed, thu, r, derived, decision, out, rel, keys, repair, runDay, derivedDoc, donorClaim };
   }
   /** The bag, with what the engine kept of the fills. */
   const fillBag = pausedBag;
@@ -632,6 +632,21 @@ describe('an audit bag with a day filled (amendment 1 S11, Q-61)', () => {
     const f = failed(await auditBag(await withRepairs(s)));
     expect(f).toContain(`release #${wrong.seq}: release #${s.rel.seq} withdrawn: 1 output back, citing decision #${withdraw.seq}: it doesn't point trip_hours back to what it showed before the fill`);
     expect(f).toContain(`release #${unamended.seq}: release #${s.rel.seq} withdrawn: 1 output back, citing decision #${loose.seq}: its decision, #${loose.seq}, doesn't amend the fill's decision, #${s.decision.seq}`);
+  });
+
+  it('holds a fill applied again to its day run once more (a reload): the same inputs, the same keys (S9)', async () => {
+    const s = await filled();
+    // The day run again, and the decision's repair made again from that run: other runs, the same inputs and keys.
+    const short = s.claim('2024-01-11', { state: 'wrong', below: true, head: 'Trips fall to trickle from 13:00' });
+    const thu = await s.runDay('2024-01-11', short);
+    const r = await runFlow(s.db, s.derivedDoc, { smaltdb: SMALTDB, parameters: { day: '2024-01-11' }, claims: [short, s.donorClaim], stage: true, from: { run: thu.r.run, manifest: thu.r.hash }, log: s.rec.head() });
+    expect(r.hash).not.toBe(s.r.hash);
+    const about: DerivedAbout = { run: r.run, manifest: r.hash, outcome: 'derived', day: '2024-01-11', inputs: inputsOf(r.manifest), holds: [...r.holds, ...r.derived!.holds], waiting: r.waiting, keys: s.keys, from: { run: thu.r.run, manifest: thu.r.hash }, repair: s.repair };
+    await keepRun(s.rec, s.db, r.manifest, r.hash, r.run, { ...(about as unknown as Record<string, JSONValue>), doc: await s.rec.keep('flow', withoutDisplay(s.derivedDoc)) });
+    const again = await s.rec.append('release', 'owner', { run: r.run, manifest: r.hash, outputs: s.keys, decision: s.decision.seq, leaf: LEAF(s.decision), outcome: 'applied', why: null, from: { run: thu.r.run, manifest: thu.r.hash }, repair: s.repair, filled: s.out.filled ?? 0 } as unknown as JSONValue);
+    const report = await auditBag(await withRepairs(s));
+    expect(failed(report).filter((l) => l.startsWith(`release #${again.seq}`))).toEqual([]);
+    expect(report.lines.map((l) => l.what)).toContain(`release #${again.seq}: 1 output of run ${r.run} released, citing decision #${s.decision.seq}`);
   });
 
   it('fails a derived run that isn’t its held run’s repair, a donor on a day its rule doesn’t allow, and a donor claim that says something wrong', async () => {

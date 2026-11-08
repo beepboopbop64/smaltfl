@@ -242,15 +242,22 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
   const remedyReleaseProblems = (e: LogEntry, a: ReleaseAbout, cited: LogEntry, decision: DecideAbout): string[] => {
     const problems: string[] = [];
     const named = decision.derived;
+    // The same inputs, a run's or a held run's, name the same day's version in another engine: a decision applied again
+    // after a reload releases the derived run made again there (S9), as a decision to publish as is releases the day's
+    // held run made again (ADR 0009 §10).
+    const inputsOfRun = (manifest: string | undefined) => {
+      const ab = manifest ? (runs.get(manifest)?.entry.about as { inputs?: unknown } | undefined) : undefined;
+      return isInputs(ab?.inputs) ? inputsKey(ab.inputs) : null;
+    };
     if (!named) problems.push(`its decision, #${cited.seq}, names no derived run to release`);
     else {
-      if (a.manifest !== named.manifest) problems.push(`it releases run ${a.run}, not the derived run its decision names`);
+      if (a.manifest !== named.manifest && (inputsOfRun(a.manifest) === null || inputsOfRun(a.manifest) !== inputsOfRun(named.manifest))) problems.push(`it releases run ${a.run}, not the derived run its decision names`);
       if (!isKeys(a.outputs) || !sameKeys(a.outputs, named.keys)) problems.push("its keys aren't those of the derived run its decision names");
       const run = runs.get(a.manifest);
       const ra = run?.entry.about as Partial<DerivedAbout> | undefined;
       if (!run || ra?.outcome !== 'derived' || run.entry.seq > e.seq) problems.push(`it releases run ${a.run} (${shortHash(a.manifest)}), which the record doesn't hold as a derived run before it`);
       else {
-        if (ra.from?.manifest !== decision.manifest) problems.push(`run ${a.run} repairs another run than its decision decides`);
+        if (ra.from?.manifest !== decision.manifest && (!isInputs(decision.inputs) || inputsOfRun(ra.from?.manifest) !== inputsKey(decision.inputs))) problems.push(`run ${a.run} repairs another run than its decision decides`);
         const repair = isRecord(a.repair) ? a.repair : decision.repair;
         if (canonicalJSON((ra.repair ?? null) as unknown as JSONValue) !== canonicalJSON((repair ?? null) as unknown as JSONValue)) problems.push(`run ${a.run} wasn't made by its decision's repair`);
         if (!run.manifest || Object.entries(a.outputs).some(([n, k]) => run.manifest!.outputs[n]?.key !== k)) problems.push(`its keys aren't the ones run ${a.run} made`);
