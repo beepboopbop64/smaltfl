@@ -232,26 +232,35 @@ published. Cached check counts must still hold. And older builds must refuse wha
     - **The day.** A paused day carries ‖ in the loads strip, the header and the tab title. A day published as is
       carries ⚑, and a day not published ✕. Output cards that wait say "‖ waits · shows Wed 20" (four words that fit a
       card), and once decided "⚑ as is · Thu 21" or "✕ unpublished · Wed 20".
+    - **The first screen.** The day line under the strip carries the pause and the day readers see, "‖ Paused · readers
+      see Wed 20", with **Decide ›**, which opens the decision sheet; once decided, "⚑ Published as is" or "✕ Not
+      published · readers see Wed 20". A waiting output's News leads with the staged bar and "‖ Waits for a decision ·
+      Decide ›", and what it says of its rows is "From its staged rows", never the day's own verdict.
     - **The cause card** keeps its head and its visual. Its reach row reads "‖ Paused · 3 outputs waiting", and its one
-      verb is **Decide**; "Tell the source" moves behind ⋯. Someone who may not decide sees "Paused · waiting on Owner"
+      verb is **Decide**, both under the visual, before the health row and the checks, so they are on the first screen;
+      "Tell the source" moves behind ⋯. Someone who may not decide sees "Paused · waiting on Owner"
       in the row itself, with no verb: a line of its own would take Sat Sep 18, 2022 to 61 words at a glance. A tap on
       the row lists the waiting outputs, and then "What readers get ›" opens the decision sheet read only: its rows
       greyed and "Only Owner decides" in place of the button. Once
       decided, the row becomes the receipt, the day's mark before it ("⚑ Published as is · Owner · 09:40", "✕ Not
-      published · under Fri's decision"), and the story's verbs stay behind ⋯. The day after an episode says what
+      published · under Fri's decision", "✕ Unpublished until a day publishes"), and the story's verbs stay behind ⋯. The day after an episode says what
       became of its days, what still waits first ("Thu as is · Fri–Sun not published"), and its strip marks them.
     - **The decision sheet** draws each option as what readers would get, all on one scale. The cause picks the
       drawing, as it picks the hero: 24 hour bars for a day that falls at an hour, the part bar for a split, a strip of
       days for an amount. Another day's rows are hatched (ADR 0008 §10), and absent ones dashed.
-      - Each option is one row: its mark, at most four words, the drawing and one number.
+      - Each option is one row: its mark, at most four words, the drawing and one number: the trips that reach the
+        outputs, past the checks (what readers would get, or keep), while the drawing keeps each day's shape as it
+        arrived.
       - Only the options the cause allows appear.
       - A reason is one tap on a chip.
       - The button names the result ("Publish as is · 3 outputs") beside the hash of what goes out.
-      - A receipt follows ("⚑ Published as is · Owner · 09:40").
+      - A receipt follows ("⚑ Published as is · Owner · 09:40"), and the sheet's head takes the day's new mark.
       - At most 45 words at a glance, and the paused card within its 60, in every state, on all 28 days `wrong` holds
         (src/core/decision.ts gives every word; test/story-real.test.ts counts them).
     - **The record of decisions.** The Runs view opens on a ribbon of paused days with their marks. Tapping a day
-      opens its hold, decision and release, with the hashes and the record entry one tap further.
+      opens its hold, decision and release, with the hashes and the record entry one tap further. A release's line
+      counts the outputs whose version it changed, as the button did; a day held again, or run again with nothing
+      waiting, is a routine line, marked with what became of its day.
     - **ADR 0008 changes:**
       - §6's "Nothing to do · held" and "Outputs not published" become "waiting" until someone decides.
       - §10's "outputs keep the last day that passed" becomes the last day published.
