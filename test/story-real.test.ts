@@ -37,7 +37,7 @@ describe.skipIf(!has)('the story on the real history', () => {
     // The trips go on after the fall (~330 an hour), the missing trips are counted, and the day's own change is on
     // the amount line, named as the whole day's so it can't fight the head; the morning ran close to usual (no label).
     // The detail's sentence says the others fell from 13:00, never that they almost stopped.
-    expect(s.hoursLabels).toEqual({ cut: '13:00', floor: 'still ~330/h', missing: '~77k missing', ghost: 'usual Thursday', before: null });
+    expect(s.hoursLabels).toEqual({ cut: '13:00', floor: 'still ~330/h', missing: '~77k fewer', ghost: 'usual Thursday', before: null });
     expect(s.labels.amount).toEqual(['41,939 trips', 'whole day −65%', 'usual 89k–160k']);
     expect(splitSentence(s)).toBe('Flex Fare as usual (4,657; usual 2.8k–5.4k); everything else fell from 13:00 (37,282; usual ~115k).');
   });
@@ -45,8 +45,8 @@ describe.skipIf(!has)('the story on the real history', () => {
   it('names each figure of an hour-fall day by its window, and the detail’s waterfall says the same (Sat Sep 17, 2022)', () => {
     const s = story('2022-09-17');
     expect(s.head).toBe('Trips fall to ~270/h from 15:00');
-    // ~52k missing from 15:00; the morning ~8.3k above a usual Saturday's; the whole day −42%: they add up.
-    expect(s.hoursLabels).toMatchObject({ missing: '~52k missing', before: '~8.3k above usual' });
+    // ~52k fewer from 15:00; the morning ~8.3k above a usual Saturday's; the whole day −42%: they add up.
+    expect(s.hoursLabels).toMatchObject({ missing: '~52k fewer', before: '~8.3k above usual' });
     expect(s.labels.amount).toEqual(['59,501 trips', 'whole day −42%', 'usual 91k–118k']);
     const steps = fallSteps(s)!;
     expect(steps.map((x) => x.name)).toEqual(['Usual', 'before 15:00', 'from 15:00', 'Today']);
@@ -72,10 +72,10 @@ describe.skipIf(!has)('the story on the real history', () => {
       });
       return shortfall(days, { day: first, ...fall }, viewed);
     };
-    // Thu Sep 21 alone: the same ~77k its hour chart says is missing, not Thu to Mon's ~375k.
+    // Thu Sep 21 alone: the same ~77k its hour chart says came fewer, not Thu to Mon's ~375k.
     const thu = ep('2023-09-21', '2023-09-21');
     expect(Math.round(thu.estimate / 1000)).toBe(77);
-    expect(story('2023-09-21').hoursLabels!.missing).toBe(`~${Math.round(thu.estimate / 1000)}k missing`);
+    expect(story('2023-09-21').hoursLabels!.missing).toBe(`~${Math.round(thu.estimate / 1000)}k fewer`);
     // Fri adds Fri, Sat adds Sat; Sun and Mon never reach Fri's figure.
     const fri = ep('2023-09-21', '2023-09-22');
     const sat = ep('2023-09-21', '2023-09-23');

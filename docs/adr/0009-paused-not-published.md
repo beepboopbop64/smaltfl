@@ -287,7 +287,7 @@ published. Cached check counts must still hold. And older builds must refuse wha
         unit: the trips as they arrived ("41,939 trips"), as the card and the Runs view count them, so the number and
         the drawing are one count. Under the day's own, the trips that reach the outputs, past the checks ("37,935 after
         checks"); under a day kept that is stale, its age ("3 days old"). The drawing says what it lacks in its own wash
-        ("~77k missing") and marks the hour the day fell on its row ("13h"), so the wash can't read as what goes out.
+        ("~77k fewer") and marks the hour the day fell on its row ("13h"), so the wash can't read as what goes out.
       - When the checks held the day too, the Publish row says what publishing overrides ("Overrides checks: 46% dropped
         (limit 10%)") and the button names it ("Publish over the checks · 3 outputs").
       - Only the options the cause allows appear.

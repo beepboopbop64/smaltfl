@@ -152,7 +152,7 @@ export interface SheetIn {
   later: string | null;
   /** The checks held the day too: publishing as is overrides them, and the sheet says so with their share and limit. */
   checks: Pick<Gate, 'share' | 'limit'> | null;
-  /** The drawing's own words: the part's label, the trips the short hours lack ("~77k missing"), the hour the trips
+  /** The drawing's own words: the part's label, the trips the short hours lack ("~77k fewer"), the hour the trips
    * fell ("13h", marked in the Publish row) and the axis under the last row. */
   part: string | null;
   missing?: string | null;

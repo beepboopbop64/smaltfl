@@ -98,11 +98,15 @@ where about 35,000 are usual, and everything else held.
    part that held and a rest that stopped read at their real sizes, each labelled "10,518 · usual ~4.5k" so it can't
    read as a fraction, trips beyond usual real trips filled in a lighter tone of the ink past a thin notch, said under
    them when the surge is the news, "+6k over usual", a sliver of them under 6 px taking no notch; 24 hour bars over a
-   ghost of a usual day, the short hours' trips one dark ribbon never under 5 px so a trickle reads as present and low,
-   its rate on a bracket above it ("still ~330/h"), the trips missing one wash 3 px clear of it whose dashed edge runs
-   up its sides and along the usual skyline, never along the trickle, labelled "~77k missing", and when the hours before
+   ghost of a usual day, the short hours' trips one dark ribbon never under 5 px, the trips missing one wash 3 px clear
+   of it whose dashed edge runs up its sides and along the usual skyline, never along the trickle, labelled "~77k
+   fewer" (the hours are short, never missing: "missing" over a ribbon read as the file cut off), and under the axis the
+   trickle zoomed, its hours widened into a panel joined to their span by the gate's zoom wedge, each hour a bar on the
+   zoom's own scale from 0, their mean a solid line labelled with the rate ("still ~330/h"), so a trickle reads as
+   trips still coming every hour and not as the end of the file (at the chart's scale ~330 an hour against a usual ~9k
+   is under 3 px, and a ribbon with its rate on a bracket still read as the file cut off), and when the hours before
    the fall ran a twentieth of the day or more off usual, a bracket over them saying by how much ("~8.3k above usual",
-   Sat Sep 17, 2022, so ~52k missing and the whole day's −42% are both read true); a day told by its hours shows the
+   Sat Sep 17, 2022, so ~52k fewer and the whole day's −42% are both read true); a day told by its hours shows the
    part and the rest beside them only when the part moved too; a strip of days each with its own range, 9 px at least,
    its tick 2 px on a band under 12 px and the band's edge drawn over the tick, four weeks on an amount day and the week
    on a calm one, an episode's days marked), the gate when it
@@ -190,7 +194,7 @@ where about 35,000 are usual, and everything else held.
     Nothing after the viewed day is drawn as known: the episode's hours run from its first day to the viewed one (Sep 21
     shows Thu, Sep 22 Thu–Fri, the viewed day framed and its readout first: "Fri: 4,633 trips · usual ~115k (−96%)"),
     its shortfall counts those days only, the day it began as its head counts it (Sep 21: "~77k fewer", as its hour
-    chart's "~77k missing"); a History chart, its weather and its calendar end at the viewed day, drawing no band,
+    chart's "~77k fewer"); a History chart, its weather and its calendar end at the viewed day, drawing no band,
     guess, rain or month after it; the loads strip leaves them unmarked, a band and no count, whatever the visit
     ran. The episode chips keep a mark: they are how to get to the incidents, each marked by its worst day (ADR 0009 §12). The History calendar gives each day the
     verdict its News tells (the same story, findings marked as expected left so, a refused file first), the viewed

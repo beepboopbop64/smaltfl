@@ -89,9 +89,10 @@ export interface Story {
   amount: { value: number; low: number; high: number; expected: number; change: number | null } | null;
   split: Split | null;
   hours: Finding['hours'] | null;
-  /** The hour chart's words: the first short hour, the trips an hour after it, the trips missing, the ghost's day; and,
-   * when the hours before the fall ran well off a usual day's, by how much ("~8k above usual"), so the trips missing
-   * from the fall and the whole day's change can both be read true (Sat Sep 17, 2022: ~52k missing, the day −42%). */
+  /** The hour chart's words: the first short hour, the trips an hour after it, how many fewer came than a usual day
+   * ("~77k fewer"; `missing` names the wash that draws them), the ghost's day; and, when the hours before the fall ran
+   * well off a usual day's, by how much ("~8k above usual"), so the trips missing from the fall and the whole day's
+   * change can both be read true (Sat Sep 17, 2022: ~52k fewer, the day −42%). */
   hoursLabels: { cut: string; floor: string; missing: string; ghost: string; before: string | null } | null;
   gate: Gate | null;
   /** The finding the head is about, when there is one. */
@@ -824,7 +825,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   if (shownHero === 'split' && split) heroLabels.push(partLabel(split), countLabel(split.part), 'Everything else', countLabel(split.rest), ...(overLabel(split) ? [overLabel(split)!] : []));
   if (shownHero === 'finding' && population && popShare) heroLabels.push(population.name, popShare.value, `usually ${popShare.range}`);
   // The hour chart: the hour they fall, what still came an hour after it (they don't stop: Sep 21, 2023 kept ~330 an
-  // hour), what is missing against a usual day, and which day that is.
+  // hour), how many fewer came than on a usual day ("~77k fewer": the hours are short, never missing, as trips still
+  // came in them; "missing" read as the file cut off), and which day that is.
   // The hours before a fall that runs to the day's end are said only when they ran a twentieth of the day or more off a
   // usual day's: then the trips missing from the fall and the whole day's change differ by them, and the chart says so.
   const hoursLabels = hoursF?.hours ? (() => {
@@ -835,7 +837,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     // What the hours before the fall add to the day's change, as the detail's waterfall counts them (fallSteps).
     const off = amount ? fallParts(hoursF.hours, amount)?.before ?? 0 : 0;
     const before = amount && Math.abs(off) >= 0.05 * amount.expected ? `~${compact(Math.abs(off))} ${off > 0 ? 'above' : 'below'} usual` : null;
-    return { cut: clock(from), floor: `${to === 23 ? 'still ' : ''}~${fmtInt(perHour ?? 0)}/h`, missing: `~${compact(Math.max(0, want - had))} missing`, ghost: `usual ${weekdayOf(day)}`, before };
+    return { cut: clock(from), floor: `${to === 23 ? 'still ' : ''}~${fmtInt(perHour ?? 0)}/h`, missing: `~${compact(Math.max(0, want - had))} fewer`, ghost: `usual ${weekdayOf(day)}`, before };
   })() : null;
   if (shownHero === 'hours' && hoursLabels) heroLabels.push(hoursLabels.cut, hoursLabels.floor, hoursLabels.missing, hoursLabels.ghost, ...(hoursLabels.before ? [hoursLabels.before] : []));
   // Beside the hours, the part and the rest only when the part moved too (a part that held is told in the detail).
@@ -939,7 +941,7 @@ export function splitSteps(s: Pick<Story, 'split' | 'amount'>): DayStep[] | null
 
 /**
  * A fall that runs to the day's end, as two parts of the day's change against its guess: the trips missing from the
- * hour it fell (the hour chart's "~52k missing": today's trips from that hour less a usual day's), and the rest of the
+ * hour it fell (the hour chart's "~52k fewer": today's trips from that hour less a usual day's), and the rest of the
  * change, which the hours before it make (Sat Sep 17, 2022: +8.3k, a morning busier than usual). They add up to the
  * day's change exactly. Null when the fall stops before the day ends.
  */
@@ -954,7 +956,7 @@ export function fallParts(hours: NonNullable<Finding['hours']>, amount: { value:
 /**
  * A day told by the hour its trips fell, as steps from a usual day to this one: the usual count, the hours before the
  * fall, the hours from it, and today's count, labelled at one precision (stepLabels), so the waterfall says the same
- * windows as the hour chart and the amount line ("~52k missing" from 15:00, "~8.3k above usual" before it, the whole
+ * windows as the hour chart and the amount line ("~52k fewer" from 15:00, "~8.3k above usual" before it, the whole
  * day −42%). The hours before are context, drawn neutral. Null on a day not told so.
  */
 export function fallSteps(s: Pick<Story, 'hours' | 'amount'>): DayStep[] | null {

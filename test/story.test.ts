@@ -110,14 +110,15 @@ describe('the cause, as a time', () => {
   it('leads with the hour the trips fall, and folds what follows from it', () => {
     const s = story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } });
     expect(s.hero).toBe('hours');
-    // Where the fall applies, and the rate the trips fell to, in the head; that they go on, and what is missing, on the
-    // chart.
+    // Where the fall applies, and the rate the trips fell to, in the head; that they go on, and how many fewer came, on
+    // the chart.
     expect(s.head).toMatch(/^Trips fall to ~[\d,]+\/h from 13:00$/);
     expect(s.head.match(/~[\d,]+\/h/)![0]).toBe(s.hoursLabels!.floor.replace(/^still /, ''));
     expect(s.hours).toMatchObject({ from: 13, to: 23 });
     expect(s.hoursLabels).toMatchObject({ cut: '13:00', ghost: 'usual Wednesday' });
     expect(s.hoursLabels!.floor).toMatch(/^still ~[\d,]+\/h$/);
-    expect(s.hoursLabels!.missing).toMatch(/^~[\d.]+k missing$/);
+    // How many fewer than a usual day, never "missing": the hours are short, trips still came in them.
+    expect(s.hoursLabels!.missing).toMatch(/^~[\d.]+k fewer$/);
     expect(s.labels.hero.slice(0, 4)).toEqual([s.hoursLabels!.cut, s.hoursLabels!.floor, s.hoursLabels!.missing, s.hoursLabels!.ghost]);
     // The day's own change sits on the amount line, since the head's fall is the hours', named as the whole day's.
     expect(s.labels.amount).toEqual([expect.stringMatching(/ trips$/), expect.stringMatching(/^whole day −\d+%$/), expect.stringMatching(/^usual /)]);

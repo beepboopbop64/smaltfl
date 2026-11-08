@@ -10,6 +10,7 @@ const usual = Array.from({ length: 24 }, () => 5000);
 const charts: [string, string, boolean][] = [
   ['split', splitRows({ rows: [{ name: 'Flex Fare', today: 4613, usual: 4800, todayLabel: '4,613', usualLabel: '~4.8k' }, { name: 'Everything else', today: 20, usual: 110_000, todayLabel: '20', usualLabel: '~110k', sev: 'alert' }], aria: 'Trips by kind: Flex Fare 4,613 of about 4,800; everything else 20 of about 110,000' }), true],
   ['hours', hourBars({ got: hours, usual, cut: 13, cutLabel: '13:00', floorLabel: '~300/h after', ghostLabel: 'usual Thursday', aria: 'Trips by hour: they fall 95% at 13:00' }), true],
+  ['hours zoomed', hourBars({ got: hours, usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~300/h', missingLabel: '~52k fewer', ghostLabel: 'usual Thursday', aria: 'Trips by hour: they fall 94% from 13:00 but don’t stop' }), true],
   ['gate', gateBars({ rows: 4633, dropped: 2116, limit: 0.1, usual: { low: 4531, high: 7472 }, shareLabel: '46% of arrived rows dropped', limitLabel: 'limit 10%', countLabel: ['2,116 rows dropped', 'usual 4.5k–7.5k'], aria: 'Checks held the run: 46% of arrived rows dropped, limit 10%' }), true],
   ['bullet', bulletTrack({ value: 77033, low: 54642, high: 118922, valueLabel: '77,033', bandLabel: 'usual 55k–119k', aria: 'Trips: 77,033, usual 55k to 119k' }), true],
   ['strip', dayStrip({ days: [{ day: '2024-01-01', v: 81013, low: 49479, high: 107687 }, { day: '2024-01-02', v: null, low: null, high: null }, { day: '2024-01-03', v: 90000, low: 80000, high: 120000, sev: 'warn' }], aria: 'Trips day by day' }), true],
@@ -40,9 +41,9 @@ describe('the news’s charts', () => {
     expect(widths[0]).toBeGreaterThan(0);
   });
 
-  it('draws the hours after a fall as a trickle still coming, the trips missing as missing, and labels the trickle above it', () => {
+  it('draws the hours after a fall as a trickle still coming, the trips missing as missing, and zooms the trickle under the axis', () => {
     const got = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 40));
-    const svg = hourBars({ got, usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~40/h', missingLabel: '~55k missing', ghostLabel: 'usual Thursday', aria: 'Trips by hour: they fall 99% from 13:00' });
+    const svg = hourBars({ got, usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~40/h', missingLabel: '~55k fewer', ghostLabel: 'usual Thursday', aria: 'Trips by hour: they fall 99% from 13:00' });
     // The short hours' trips are one unbroken dark ribbon, 5 px at least each hour though 40 of 5,000 is under 1 px:
     // never a row of separate dashes on the baseline.
     const ribbon = svg.match(/<path class="ink-strong trickle" d="([^"]+)"/)![1]!;
@@ -57,17 +58,59 @@ describe('the news’s charts', () => {
     const ys = [...edge.matchAll(/[ML][\d.]+ ([\d.]+)/g)].map((m) => Number(m[1]));
     for (const y of ys) expect(y).toBeLessThanOrEqual(base - 5 - 3 + 1e-9);
     expect(svg).not.toMatch(/class="absent"/);
-    // The trickle's rate on a bracket above it, clear of it; what is missing in words.
-    expect(svg).toContain('~55k missing');
-    const label = svg.match(/<text x="[\d.]+" y="([\d.]+)" class="lbl-b lbl-halo">still ~40\/h</)!;
-    expect(Number(label[1])).toBeLessThanOrEqual(base - 5 - 10);
-    expect(svg.match(/class="brace"/g)).toHaveLength(1);
-    // Without a span, no missing area: a finding's own small chart draws ghosts only.
+    // How many fewer came, in words on the wash ("fewer", never "missing", which read as the file cut off).
+    expect(svg).toContain('~55k fewer');
+    // The trickle zoomed under the axis: its eleven hours again, each a bar on the zoom's own scale from 0, under a
+    // wedge from their span on the axis (13:00 to 24:00), with their mean a solid line labelled with the rate, so the
+    // trickle reads as trips still coming every hour; no bracket over the ribbon then.
+    expect(svg.match(/class="brace"/g)).toBeNull();
+    const zoom = svg.slice(svg.indexOf('<g class="zoom">'));
+    expect(zoom).not.toBe(svg);
+    const cw = 334 / 24;
+    const wedge = zoom.match(/<path class="zoom-wedge" d="M([\d.]+) ([\d.]+)H([\d.]+)L/)!;
+    expect([Number(wedge[1]), Number(wedge[3])]).toEqual([Math.round(13 * cw * 10) / 10, 334]);
+    expect(Number(wedge[2])).toBeGreaterThan(base + 13);
+    const bars = [...zoom.matchAll(/<path class="ink-strong zoom-bar" d="M[\d.]+ ([\d.]+)V([\d.]+)/g)].map((m) => Number(m[1]) - Number(m[2]) + 1.5);
+    expect(bars).toHaveLength(11);
+    const zb = Number(zoom.match(/<line class="base" x1="[\d.]+" x2="334" y1="([\d.]+)"/)![1]) - 0.5;
+    const level = Number(zoom.match(/<line class="level" [^>]*y1="([\d.]+)"/)![1]);
+    // Every hour 40 of a zoom to niceMax(40.8) = 50: each bar, and the mean's line, at 40/50 of the zoom's 26 px.
+    for (const b of bars) expect(b).toBeCloseTo((40 / 50) * 26, 0);
+    expect(zb - level).toBeCloseTo((40 / 50) * 26, 0);
+    const label = zoom.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="end" class="lbl-b">still ~40\/h<\/text>/)!;
+    expect(Number(label[2]) - 4).toBeCloseTo(level, 0);
+    expect(zoom).toMatch(/class="tick" aria-hidden="true">13<\/text>/);
+    expect(zoom).toMatch(/class="tick" aria-hidden="true">24<\/text>/);
+    // The chart grows to hold the zoom, its axis's ticks where they were.
+    expect(Number(svg.match(/height="([\d.]+)"/)![1])).toBeGreaterThan(zb + 12);
+    expect(svg).toContain(`y="${base + 13}" text-anchor="middle" class="tick" aria-hidden="true">18</text>`);
+    // Nothing came in the short hours: nothing to zoom, the rate on a bracket above the (empty) ribbon.
+    const none = hourBars({ got: got.map((n, h) => (h < 13 ? n : 0)), usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: '~0/h', aria: 'Trips by hour' });
+    expect(none).not.toContain('class="zoom"');
+    expect(none.match(/class="brace"/g)).toHaveLength(1);
+    expect(none).toMatch(/class="lbl-b lbl-halo">~0\/h</);
+    // Without a rate, no zoom (the Hours detail's chart); without a span, no missing area: a finding's own small chart
+    // draws ghosts only.
+    expect(hourBars({ got, usual, cut: 13, to: 23, aria: 'Trips by hour' })).not.toContain('zoom');
     expect(hourBars({ got, usual, cut: 13, aria: 'Trips by hour' })).not.toContain('absent');
     // The hours before the fall, bracketed and said, when given.
     const before = hourBars({ got, usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~40/h', beforeLabel: '~8.3k above usual', aria: 'Trips by hour' });
     expect(before).toContain('~8.3k above usual');
-    expect(before.match(/class="brace"/g)).toHaveLength(2);
+    expect(before.match(/class="brace"/g)).toHaveLength(1);
+  });
+
+  it('zooms a real trickle to its own scale: Thu Sep 21, 2023 from 13:00, its mean the rate the head says', () => {
+    const thu = [2577, 1196, 677, 419, 431, 731, 2000, 4290, 5131, 4840, 5020, 5359, 5589, 742, 150, 206, 244, 315, 317, 279, 283, 393, 399, 351];
+    const svg = hourBars({ got: thu, usual: thu.map((n, h) => (h < 13 ? n : 8000)), cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~330/h', missingLabel: '~77k fewer', ghostLabel: 'usual Thursday', aria: 'Trips by hour' });
+    const zoom = svg.slice(svg.indexOf('<g class="zoom">'));
+    const zb = Number(zoom.match(/<line class="base" x1="[\d.]+" x2="334" y1="([\d.]+)"/)![1]) - 0.5;
+    const level = Number(zoom.match(/<line class="level" [^>]*y1="([\d.]+)"/)![1]);
+    // 3,679 trips in eleven hours: a mean of 334 an hour, on a zoom to 800 (the 13:00 hour's 742 its tallest bar).
+    expect(zb - level).toBeCloseTo((3679 / 11 / 800) * 26, 0);
+    const bars = [...zoom.matchAll(/<path class="ink-strong zoom-bar" d="M[\d.]+ ([\d.]+)V([\d.]+)/g)].map((m) => Number(m[1]) - Number(m[2]) + 1.5);
+    expect(bars.map((b) => Math.round((b / 26) * 800))).toEqual(thu.slice(13).map((n) => expect.closeTo(n, -1.5)));
+    // At the chart's own scale the same hours are the ribbon, 5 px each: under 3 px of a usual ~9k.
+    expect(svg).toContain('class="ink-strong trickle"');
   });
 
   it('puts the day’s change on the amount line when it is given', () => {
