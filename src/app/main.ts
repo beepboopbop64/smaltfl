@@ -6336,7 +6336,11 @@ function sealOf(card: string): 'ok' | 'bad' | 'amber' | null {
   const id = dataOf(card);
   // No tick from another day's run: on a held or refused day, what the load reaches has no run of its own to seal.
   const src = loadSource();
-  if (rowsFrom(shownDay(), viewedDay()) && src && (id === src || downstreamOf(src).includes(id))) return null;
+  if (rowsFrom(shownDay(), viewedDay()) && src && (id === src || downstreamOf(src).includes(id))) {
+    // A refused file still shows its broken seal: that is about today's bytes, not another day's run.
+    if (id === src && integrityNews(id)[0]?.severity === 'alert') return 'bad';
+    return null;
+  }
   const r = latest();
   const v = r?.verified;
   if (v && !v.ok && v.checks.some((c) => !c.ok && c.node === -1)) return 'bad';
