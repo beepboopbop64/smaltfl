@@ -225,7 +225,8 @@ published. Cached check counts must still hold. And older builds must refuse wha
 
 12. **On screen.** ADR 0008's rules apply: shape first, and words budgeted.
     - **The day.** A paused day carries ‖ in the loads strip, the header and the tab title. A day published as is
-      carries ⚑, and a day not published ✕. Output cards that wait say "‖ waiting · shows Wed 20".
+      carries ⚑, and a day not published ✕. Output cards that wait say "‖ waits · shows Wed 20" (four words that fit a
+      card), and once decided "⚑ as is · Thu 21" or "✕ unpublished · Wed 20".
     - **The cause card** keeps its head and its visual. Its reach row reads "‖ Paused · 3 outputs waiting", and its one
       verb is **Decide**; "Tell the source" moves behind ⋯. Someone who may not decide sees "Waiting on Owner".
     - **The decision sheet** draws each option as what readers would get, all on one scale. The cause picks the

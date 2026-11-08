@@ -95,7 +95,7 @@ where about 35,000 are usual, and everything else held.
    over a ghost of a usual day, the short hours' trips dark and never under 3 px so a trickle reads as present and low,
    the trips missing one wash with a dashed edge, labelled "still ~330/h" and "~77k missing"; a strip of days each with
    its own range, four weeks on an amount day and the week on a calm one, an episode's days marked), the gate when it
-   held, came near, or the day had something wrong, what it reaches ("Outputs not published", "Outputs built from a short day", never "published" alone; §10), the folded findings as counted rows ("16
+   held, came near, or the day had something wrong, what it reaches ("Paused · 3 outputs waiting" on a day held, ADR 0009 §12; "Outputs built from a short day", never "published" alone; §10), the folded findings as counted rows ("16
    changes this explains", with what they are in words: "shares · values gone · times"; "12 more this day" under it,
    "12 more changes this day" alone) that open in place into compact rows, a column's together, three and then "Show
    all", each today against its usual, and one verb with the others behind ⋯. The health row (§11) sits in the card,
@@ -137,15 +137,20 @@ where about 35,000 are usual, and everything else held.
    their ranges): Sep 11–16, 2022 become notes, Sep 7–10 stay unusual. Over Jan 2023 to Jan 2024 no day changes; over
    2022 to Jan 2024, 8 days go from unusual to notes (those six and Jan 10 and 13, 2022, weeks of fewer trips).
 
-10. **A day shows that day** (src/core/days.ts). Loads arrive one a day, as a feed brings them, and the flow publishes
-    only a run that passes, so after a held or refused run its outputs keep the last day that passed. Every view reads
-    one run: the viewed day's own, else the newest run of the latest day before it that passed in this visit, never a
-    later day's (stepping to Tue 26 and back to Sat 23 shows Thu 21's rows, not Tue 26's; a day reached straight from
-    the episode's first shows that first day, said so). The held line says what stopped the run and what the outputs
-    keep ("‖ Held at trips_valid · outputs keep Thu 21"); a panel whose rows are another day's carries that day as a
-    full-width hatched bar ("Rows from Thu Sep 21 · the last day that passed"), under the day's own figures where a
-    panel has both (the gate, then the last day's dropped rows), and the day's marks and badges are never put beside
-    those rows. A step after the one that held says "not built today", hatched, with no dot or seal from another day.
+10. **A day shows that day** (src/core/days.ts). Loads arrive one a day, as a feed brings them, and readers get only a
+    day that isn't held: while a day waits for a decision they keep the last day published (ADR 0009). Every view reads
+    one run: the viewed day's own, published or staged. A held day's own rows are built, checked and kept staged, and
+    every panel showing them sits under a full-width hatched bar ("Staged Thu 21 · readers see Wed 20"); views of what
+    readers get (who sees what, the objects actions act on) read the published names and say so ("As published · Wed
+    20"). Only a day with no run of its own (a refused file) falls back to the newest run of the latest day before it
+    that was published in this visit, never a later day's (stepping to Tue 26 and back to a refused day shows the day
+    before it, not Tue 26's; a day reached straight from the episode's first shows that first day, said so). A panel
+    whose rows are another day's carries that day as a full-width hatched bar ("Rows from Thu Sep 21 · the last day
+    published"), under the day's own figures where a panel has both (the gate, then the last day's dropped rows), and
+    the day's marks and badges are never put beside those rows. A flow that doesn't say what holds it keeps the gate
+    as it was: a run the checks hold builds nothing, its held line says what stopped it and what the outputs keep
+    ("‖ Held at trips_valid · outputs keep Thu 21"), its rows are the last day published, and a step after the one
+    that held says "not built today", hatched, with no dot or seal from another day.
     Nothing after the viewed day is drawn as known: the episode's hours run from its first day to the viewed one (Sep 21
     shows Thu, Sep 22 Thu–Fri, the viewed day framed and its readout first: "Fri: 4,633 trips · usual ~115k (−96%)"),
     its shortfall counts those days only, the day it began as its head counts it (Sep 21: "~77k fewer", as its hour
@@ -160,15 +165,17 @@ where about 35,000 are usual, and everything else held.
     first row. The band's "outside last year" is another measure (days outside their range), said as such. A day with
     something wrong shows its checks whether they held, came near or passed ("Checks passed", Sat Sep 17, 2022), their
     sheet titled with the share their bars say and marked as the checks are (wrong when held, unusual when near the
-    limit or their own findings are, no mark when they passed as usual), and says what its outputs are: "Outputs not published" when held, else what they were built from, "Outputs built from
+    limit or their own findings are, no mark when they passed as usual), and says what its outputs are: on a day paused
+    "Paused · 3 outputs waiting" until a person decides, then "Published as is" or "Not published" (ADR 0009 §12);
+    with a flow that doesn't hold, "Outputs not published" when held; else what they were built from, "Outputs built from
     a short day", "Outputs built without Vendor 1" (under a tenth of its usual count came, as its head's "almost
     nothing") or "with Vendor 1 short" (Aug 10, 2022: 85% short), published ones ticked in their icon, not drawn in a
     severity colour; its boxes carry up to three outputs, so their number is said only past three. A tap lists them,
     each with its rows and a tap to its card. An output (or a step after the load) built from such a day says what its
     load lacked above its own rows' news, with its head's figures ("Built from a load 95% short from 13:00", "Its load:
     Trips fall 95% from 13:00"; hours are short, never missing, as trips still came in them), for the day its rows are:
-    on a held day the last day that passed, itself short at times. Holding such outputs, and
-    never keeping a day that was itself wrong, change what the flow publishes: an open question (Q-45). One colour
+    on a held day its own staged rows (with a flow that doesn't hold, the last day published, itself short at times).
+    Holding such outputs was Q-45: ADR 0009 answers it, a day that is off is paused, not published. One colour
     rule: a canvas card's line and its badge take the card's own severity and nothing else does (a routine count, such
     as Nov 15, 2022's ordinary 4.6% dropped, is neutral ink); the status line after a run takes its day's verdict,
     held or published alike; and no tick (seal) shows on what the load reaches when the day has no run of its own.
