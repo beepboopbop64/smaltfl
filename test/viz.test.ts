@@ -3,7 +3,7 @@
  * broken numbers, and escapes what it is given.
  */
 import { describe, expect, it } from 'vitest';
-import { amountLine, bandSpan, degrees, weatherHours, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
+import { amountLine, bandSpan, notJudgedMark, degrees, weatherHours, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -140,11 +140,11 @@ describe('the news’s charts', () => {
   });
 
   it('puts the day’s change on the amount line when it is given', () => {
-    const svg = amountLine({ value: 41939, low: 89028, high: 160128, valueLabel: '41,939', bandLabel: 'usual 89k–160k', changeLabel: '−65%', sev: 'alert', aria: '41,939 trips, −65%' });
+    const svg = amountLine({ value: 41939, low: 89028, high: 160128, valueLabel: '41,939', unit: 'trips', bandLabel: 'usual 89k–160k', changeLabel: '−65%', sev: 'alert', aria: '41,939 trips, −65%' });
     expect(svg).toContain('class="count-chg chg-alert" dx="8">−65%</tspan>');
-    expect(amountLine({ value: 1, low: 0, high: 2, valueLabel: '1', bandLabel: 'usual 0–2', aria: 'one trip' })).not.toContain('count-chg');
+    expect(amountLine({ value: 1, low: 0, high: 2, valueLabel: '1', unit: 'trips', bandLabel: 'usual 0–2', aria: 'one trip' })).not.toContain('count-chg');
     // Beside a head about part of the day, the change says its window in small type before it.
-    expect(amountLine({ value: 41939, low: 89028, high: 160128, valueLabel: '41,939', bandLabel: 'usual 89k–160k', changeLabel: '−65%', changeWindow: 'whole day', sev: 'alert', aria: '41,939 trips, whole day −65%' })).toContain('<tspan class="count-unit" dx="8">whole day</tspan><tspan class="count-chg chg-alert" dx="4">−65%</tspan>');
+    expect(amountLine({ value: 41939, low: 89028, high: 160128, valueLabel: '41,939', unit: 'trips', bandLabel: 'usual 89k–160k', changeLabel: '−65%', changeWindow: 'whole day', sev: 'alert', aria: '41,939 trips, whole day −65%' })).toContain('<tspan class="count-unit" dx="8">whole day</tspan><tspan class="count-chg chg-alert" dx="4">−65%</tspan>');
   });
 
   it('draws trips beyond the usual count filled past a notch, said under them, and a sliver of them without a notch', () => {
@@ -367,7 +367,7 @@ describe('the news’s charts', () => {
 
   it('keeps the band’s ends standing past the amount line’s dot, so a value on an end never hides it', () => {
     // Sat Jan 6, 2024: 97,117 just inside a 94k–156k range.
-    const svg = amountLine({ value: 97_117, low: 94_000, high: 156_000, valueLabel: '97,117', bandLabel: 'usual 94k–156k', aria: 'Trips' });
+    const svg = amountLine({ value: 97_117, low: 94_000, high: 156_000, valueLabel: '97,117', unit: 'trips', bandLabel: 'usual 94k–156k', aria: 'Trips' });
     const ends = /<path class="band-end" d="M([\d.]+) ([\d.]+)V([\d.]+)M([\d.]+) [\d.]+V[\d.]+"/.exec(svg)!;
     const dot = /<circle class="dot" cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"/.exec(svg)!;
     // Taller than the dot and its halo (5.5 + 2), above and below; and drawn first, so the dot sits on the band, not under.
@@ -655,5 +655,32 @@ describe('a held day’s options, drawn as what readers get (ADR 0009 §12)', ()
 
   it('marks a decided day at 14 px by shape: ⚑ a flag on its pole, ✕ a box crossed out', () => {
     for (const g of ['held', 'flag', 'closed'] as const) expect(glyph(g, 14)).toMatch(/^<svg width="14" height="14" viewBox="0 0 16 16"/);
+  });
+});
+
+describe('a day not judged yet (ADR 0010 §12)', () => {
+  it('is a dashed ring at the marks’ 14 px, never a severity’s colour', () => {
+    const svg = notJudgedMark();
+    expect(svg).toContain('class="g g-unlearned"');
+    expect(svg).toContain('width="14" height="14"');
+    expect(svg).toContain('<circle class="g-unlearned"');
+    expect(svg).not.toMatch(/sev-|g-fill|g-tri/);
+    expect(glyph('unlearned')).toContain('width="16"');
+  });
+
+  it('draws in a strip of days as its count with no band, under ◌, the inverse of a day not run, and keys it', () => {
+    const svg = dayStrip({ days: [{ day: '2021-11-23', v: 100, low: 90, high: 110 }, { day: '2021-11-24', v: 95, low: 85, high: 115, notRun: true }, { day: '2021-11-25', v: 70, low: null, high: null, unlearned: true }], key: ['usual', 'actual'], more: {}, aria: 'x' });
+    expect(svg).toContain('>not judged</text>');
+    expect(svg).not.toContain('>no usual</text>');
+    // Two bands (the day judged and the day not run), two ticks (the day not run has none), one ring.
+    expect(svg.match(/<rect class="ghost(-2)?"/g)!.length).toBe(2 + 1); // and the key's swatch
+    expect(svg.match(/<rect class="ink"/g)!.length).toBe(2 + 1); // and the key's swatch
+    expect(svg.match(/g-unlearned"/g)!.length).toBe(2 + 2); // the day's ring and the key's, each an svg and a circle
+    // A day with no band that isn't marked so keeps its own key, "no usual".
+    expect(dayStrip({ days: [{ day: '2021-11-25', v: 70, low: null, high: null }], key: ['usual', 'actual'], more: {}, aria: 'x' })).toContain('>no usual</text>');
+  });
+
+  it('says the source’s noun beside the day’s count', () => {
+    expect(amountLine({ value: 981, low: 900, high: 1200, valueLabel: '981', unit: 'sign-ins', bandLabel: 'usual 900–1.2k', aria: '981 sign-ins' })).toContain('<tspan class="count-unit" dx="6">sign-ins</tspan>');
   });
 });

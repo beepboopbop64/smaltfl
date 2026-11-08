@@ -167,13 +167,13 @@ const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
  * count came, as the head's "almost gone"; else it was short ("with Vendor 1 short"). Hours are short, never missing:
  * the trips fall, they don't end. Null when the day had nothing wrong.
  */
-export function lacked(s: LoadStory): { short: string; long: string } | null {
+export function lacked(s: LoadStory, noun = 'rows'): { short: string; long: string } | null {
   if (s.severity !== 'alert') return null;
   const sp = s.split;
   if (sp?.kind === 'vanished') {
     const ratio = sp.part.today / Math.max(1, sp.part.usual);
-    if (ratio < 0.1) return { short: `without ${sp.name}`, long: `Built without ${sp.name}’s trips` };
-    return { short: `with ${sp.name} short`, long: `Built with ${sp.name}’s trips ${Math.round((1 - ratio) * 100)}% short` };
+    if (ratio < 0.1) return { short: `without ${sp.name}`, long: `Built without ${sp.name}’s ${noun}` };
+    return { short: `with ${sp.name} short`, long: `Built with ${sp.name}’s ${noun} ${Math.round((1 - ratio) * 100)}% short` };
   }
   if (s.hours) {
     const { from, to, fall } = s.hours;
@@ -182,7 +182,7 @@ export function lacked(s: LoadStory): { short: string; long: string } | null {
   }
   if (s.amount && s.amount.value < s.amount.low) {
     const change = Math.round((1 - s.amount.value / Math.max(1, s.amount.expected)) * 100);
-    return { short: 'from a short day', long: `Built from a short day (−${change}% trips)` };
+    return { short: 'from a short day', long: `Built from a short day (−${change}% ${noun})` };
   }
   return { short: 'from a day with an alert', long: 'Built from a day with something wrong' };
 }
@@ -214,13 +214,13 @@ export type PauseState = 'waiting' | 'asis' | 'dont';
  * On a day paused (ADR 0009 §12), `n` counts the outputs that wait and the row says what became of them: "Paused · 3
  * outputs waiting" until someone decides, then "Published as is" or "Not published".
  */
-export function reachLabel(s: LoadStory, n: number, pause?: PauseState): string {
+export function reachLabel(s: LoadStory, n: number, pause?: PauseState, noun = 'rows'): string {
   if (pause === 'waiting') return `Paused · ${n} output${n === 1 ? '' : 's'} waiting`;
   if (pause === 'asis') return 'Published as is';
   if (pause === 'dont') return 'Not published';
   const outs = n > 3 ? `${n} outputs` : n === 1 ? 'Output' : 'Outputs';
   if (s.gate?.held) return `${outs} not published`;
-  const l = lacked(s);
+  const l = lacked(s, noun);
   return l ? `${outs} built ${l.short}` : `Reaches ${n > 3 ? outs : `${n} output${n === 1 ? '' : 's'}`}`;
 }
 

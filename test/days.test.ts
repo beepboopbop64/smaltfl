@@ -120,9 +120,12 @@ describe('what the outputs of a day with something wrong say', () => {
     expect(lacked({ ...base, hours: { from: 6, to: 15, fall: 97 } })!.long).toBe('Built from a load 97% short 06:00–16:00');
     expect(lacked({ ...base, hours: { from: 0, to: 6, fall: 90 } })!.long).toBe('Built from a load 90% short until 07:00');
     // A part is "without" only under a tenth of its usual count, as its head's "almost gone"; else it was short.
-    expect(lacked({ ...base, split: { kind: 'vanished', name: 'Vendor 1', part: { today: 3, usual: 35_000 } } })).toEqual({ short: 'without Vendor 1', long: 'Built without Vendor 1’s trips' });
-    expect(lacked({ ...base, split: { kind: 'vanished', name: 'Vendor 1', part: { today: 5197, usual: 33_607 } } })).toEqual({ short: 'with Vendor 1 short', long: 'Built with Vendor 1’s trips 85% short' });
-    expect(lacked(base)).toEqual({ short: 'from a short day', long: 'Built from a short day (−67% trips)' });
+    expect(lacked({ ...base, split: { kind: 'vanished', name: 'Vendor 1', part: { today: 3, usual: 35_000 } } }, 'trips')).toEqual({ short: 'without Vendor 1', long: 'Built without Vendor 1’s trips' });
+    expect(lacked({ ...base, split: { kind: 'vanished', name: 'Vendor 1', part: { today: 5197, usual: 33_607 } } }, 'trips')).toEqual({ short: 'with Vendor 1 short', long: 'Built with Vendor 1’s trips 85% short' });
+    expect(lacked(base, 'trips')).toEqual({ short: 'from a short day', long: 'Built from a short day (−67% trips)' });
+    // Said with the source's noun (ADR 0010 §8), rows when nothing names it.
+    expect(lacked(base, 'sign-ins')!.long).toBe('Built from a short day (−67% sign-ins)');
+    expect(lacked(base)!.long).toBe('Built from a short day (−67% rows)');
     expect(lacked({ ...base, amount: { value: 100_000, low: 90_000, expected: 120_000 } })!.short).toBe('from a day with an alert');
     expect(lacked({ ...base, severity: 'warn' })).toBeNull();
   });

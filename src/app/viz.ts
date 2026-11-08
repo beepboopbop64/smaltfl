@@ -12,11 +12,14 @@
 
 import type { DrawCause, ReaderRows } from '../core/decision.js';
 
-export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack' | 'publish' | 'keep';
+export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack' | 'publish' | 'keep' | 'unlearned';
 
 export const esc = (s: unknown): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
 const f1 = (x: number) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : 0);
+
+/** ◌, a day not judged yet (ADR 0010 §12), at the marks' 14 px. */
+export const notJudgedMark = (size = 14): string => glyph('unlearned', size);
 
 /** A severity or state glyph, 16 units square, aria-hidden: the words beside it say what it means. */
 export function glyph(kind: Mark, size = 16): string {
@@ -43,6 +46,10 @@ export function glyph(kind: Mark, size = 16): string {
       return `<svg ${a}><path class="g-arrow" d="M4 2.5v6.5h8M9.2 6.2L12 9l-2.8 2.8"/></svg>`;
     case 'note':
       return `<svg ${a}><circle class="g-note" cx="8" cy="8" r="3"/></svg>`;
+    // A day not judged yet (ADR 0010 §12): a dashed ring, grey, never a severity's colour. Dashes mean absent, and here
+    // the judgement is what's absent.
+    case 'unlearned':
+      return `<svg ${a}><circle class="g-unlearned" cx="8" cy="8" r="6.2"/></svg>`;
     case 'info':
       return `<svg ${a}><circle class="g-ring" cx="8" cy="8" r="6.6"/><rect class="g-i" x="7.2" y="6.9" width="1.6" height="5" rx=".8"/><circle class="g-i" cx="8" cy="4.7" r="1.05"/></svg>`;
     case 'chev':
@@ -358,11 +365,11 @@ export function gateBars(o: { rows: number; dropped: number; limit: number | nul
  * The day's count on a track from 0: the number large, in its severity when the amount is the news; its usual range as
  * a band with an edge; today a dot. One chart, so the first numbers on the screen are drawn, not said.
  */
-export function amountLine(o: { value: number; low: number; high: number; valueLabel: string; bandLabel: string; changeLabel?: string; changeWindow?: string; sev?: 'alert' | 'warn' | null; aria: string; w?: number }): string {
+export function amountLine(o: { value: number; low: number; high: number; valueLabel: string; unit: string; bandLabel: string; changeLabel?: string; changeWindow?: string; sev?: 'alert' | 'warn' | null; aria: string; w?: number }): string {
   const w = o.w ?? 334;
-  // The count's width, roughly (32 px tabular digits, "trips", the change and its window): the range's words go under
-  // it if they'd meet.
-  const countEnd = [...o.valueLabel].reduce((t, c) => t + (/\d/.test(c) ? 19.2 : 9), 0) + 39 + (o.changeLabel ? 8 + o.changeLabel.length * 10.5 : 0) + (o.changeLabel && o.changeWindow ? 6 + o.changeWindow.length * 7 : 0);
+  // The count's width, roughly (32 px tabular digits, its unit, the source's noun (ADR 0010 §8), the change and its
+  // window): the range's words go under it if they'd meet.
+  const countEnd = [...o.valueLabel].reduce((t, c) => t + (/\d/.test(c) ? 19.2 : 9), 0) + 6 + o.unit.length * 6.6 + (o.changeLabel ? 8 + o.changeLabel.length * 10.5 : 0) + (o.changeLabel && o.changeWindow ? 6 + o.changeWindow.length * 7 : 0);
   const below = countEnd + 8 > w - 30 - o.bandLabel.length * 6.4;
   // The axis's numbers sit 3 px below the band's end ticks, so a band reaching the scale's end never touches them.
   const h = below ? 79 : 65;
@@ -372,7 +379,7 @@ export function amountLine(o: { value: number; low: number; high: number; valueL
   const x = (v: number) => (v / max) * (w - 8) + 4;
   let s = open(w, h, o.aria, 'data-y0="0"');
   // The change says its window in small type before it when the head speaks of part of the day ("whole day −65%").
-  s += `<text x="0" y="30" class="count${o.sev === 'alert' ? ' count-bad' : ''}">${esc(o.valueLabel)}<tspan class="count-unit" dx="6">trips</tspan>${o.changeLabel ? `${o.changeWindow ? `<tspan class="count-unit" dx="8">${esc(o.changeWindow)}</tspan>` : ''}<tspan class="count-chg${o.sev ? ` chg-${o.sev}` : ''}" dx="${o.changeWindow ? 4 : 8}">${esc(o.changeLabel)}</tspan>` : ''}</text>`;
+  s += `<text x="0" y="30" class="count${o.sev === 'alert' ? ' count-bad' : ''}">${esc(o.valueLabel)}<tspan class="count-unit" dx="6">${esc(o.unit)}</tspan>${o.changeLabel ? `${o.changeWindow ? `<tspan class="count-unit" dx="8">${esc(o.changeWindow)}</tspan>` : ''}<tspan class="count-chg${o.sev ? ` chg-${o.sev}` : ''}" dx="${o.changeWindow ? 4 : 8}">${esc(o.changeLabel)}</tspan>` : ''}</text>`;
   s += `<text x="${w - 30}" y="${below ? 47 : 30}" text-anchor="end" class="lbl-m">${esc(o.bandLabel)}</text>`;
   s += `<line class="base" x1="4" x2="${w - 4}" y1="${ty}" y2="${ty}"/>`;
   // The band shows past the dot (its 11 px and 4 more) however narrow the range; its ends stand above and below the
@@ -592,6 +599,9 @@ export interface StripDay {
   /** A day of the loads this visit didn't run, its fate unknown here: its band, no tick and no mark, its column dashed
    * (absent), and the key says "not run". */
   notRun?: boolean;
+  /** A day not judged yet (ADR 0010 §12): its count and no band, the inverse of a day not run, under ◌; the key says
+   * "not judged". */
+  unlearned?: boolean;
 }
 
 /** What a strip's second key row may name: the weekday its darker bands are ("Mondays"), and words for its marks. */
@@ -622,7 +632,8 @@ function stripKeyRow(days: readonly StripDay[], more: StripKey, w: number): stri
   const wd = last ? new Date(`${last.day}T00:00:00Z`).getUTCDay() : -1;
   // Darker bands only where another day than the last shares its weekday.
   if (more.same && days.slice(0, -1).some((d) => d.low !== null && new Date(`${d.day}T00:00:00Z`).getUTCDay() === wd)) items.push({ sw: '<rect class="ghost-2" x="0" y="3" width="12" height="8" rx="2"/>', word: more.same });
-  if (days.some((d) => !d.notRun && d.v !== null && (d.low === null || d.high === null))) items.push({ sw: '<rect class="ink" x="0" y="5.5" width="12" height="3" rx="1"/>', word: 'no usual' });
+  if (days.some((d) => !d.notRun && !d.unlearned && d.v !== null && (d.low === null || d.high === null))) items.push({ sw: '<rect class="ink" x="0" y="5.5" width="12" height="3" rx="1"/>', word: 'no usual' });
+  if (days.some((d) => d.unlearned)) items.push({ sw: `<g transform="translate(0 0)">${notJudgedMark(13)}</g>`, word: 'not judged' });
   const drawn = new Set(days.flatMap((d) => (d.marks?.length ? d.marks : d.mark ? [d.mark] : [])));
   for (const [m, word] of Object.entries(more.marks ?? {}) as [Mark, string][]) if (drawn.has(m)) items.push({ sw: `<g transform="translate(0 0)">${glyph(m, 13)}</g>`, word });
   if (!items.length) return '';
@@ -648,7 +659,7 @@ function stripKeyRow(days: readonly StripDay[], more: StripKey, w: number): stri
 export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number; labels?: [number, string, string?][]; aria: string; bandLabel?: string; zero?: boolean; key?: readonly [string, string]; unit?: string; more?: StripKey }): string {
   const w = o.w ?? 334;
   const n = o.days.length;
-  const marks = o.days.some((d) => d.mark || d.marks?.length);
+  const marks = o.days.some((d) => d.mark || d.marks?.length || d.unlearned);
   // A second key row for what else the strip draws (ADR 0008 §7), only what it does draw: the weekday its darker bands
   // are, a day with no usual of its own, and each mark on its days with its word.
   const extra = o.key && o.more ? stripKeyRow(o.days, o.more, w) : '';
@@ -692,7 +703,7 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
     const sev = inside ? null : d.sev;
     if (vy !== null) s += `<rect class="${sev ? `sev-${sev}-fill` : 'ink'}" x="${f1(cx - bw / 2 - 1)}" y="${f1(vy - tick / 2)}" width="${f1(bw + 2)}" height="${tick}" rx="1"/>`;
     s += edge;
-    const ms = d.marks?.length ? d.marks : d.mark ? [d.mark] : [];
+    const ms = d.marks?.length ? d.marks : d.mark ? [d.mark] : d.unlearned ? (['unlearned'] as const) : [];
     ms.forEach((m, j) => {
       const x0 = cx - (ms.length * 14 + (ms.length - 1) * 2) / 2 + j * 16;
       s += `<g transform="translate(${f1(x0)} ${keyH})">${glyph(m, 14)}</g>`;

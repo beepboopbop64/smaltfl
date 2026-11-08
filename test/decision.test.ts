@@ -69,9 +69,20 @@ describe('what readers would get, drawn by the day’s cause (ADR 0009 §12)', (
 });
 
 describe('the decision sheet’s words (ADR 0009 §12: 45 at a glance)', () => {
-  const thu: SheetIn = { day: '2023-09-21', waited: 120, otherBuild: false, outputs: 3, rows: 41_939, reach: 37_935, readers: { day: '2023-09-20', rows: 108_434 }, later: null, checks: null, part: null, missing: '~77k missing', cut: '13h', ticks: [], unjudged: false, hash: '8324c8f4ab', may: true, deciders: 'Owner', head: 'Trips fall 95% from 13:00' };
+  const thu: SheetIn = { day: '2023-09-21', waited: 120, otherBuild: false, outputs: 3, rows: 41_939, reach: 37_935, readers: { day: '2023-09-20', rows: 108_434 }, later: null, checks: null, part: null, missing: '~77k missing', cut: '13h', ticks: [], unjudged: false, hash: '8324c8f4ab', may: true, deciders: 'Owner', head: 'Trips fall 95% from 13:00', noun: { one: 'trip', many: 'trips' } };
   const rest: SheetPick = { option: null, scope: 'day', reason: null };
   const words = (t: SheetText, p: SheetPick) => sheetShown(t, p).reduce((n, x) => n + wordsIn(x), 0);
+
+  it('says every count with the held source’s noun (ADR 0010 §8, C3)', () => {
+    const t = sheetText({ ...thu, noun: { one: 'sign-in', many: 'sign-ins' } });
+    expect(t.options.map((o) => o.number)).toEqual(['41,939 sign-ins', '108,434 sign-ins']);
+    expect(t.options[0]!.aria).toContain('as it came, 41,939 sign-ins, 37,935 of them past its checks');
+    expect(sheetText({ ...thu, rows: 1, noun: { one: 'sign-in', many: 'sign-ins' } }).options[0]!.number).toBe('1 sign-in');
+    // A noun of two words is said once, on the first row (Q-78); the aria keeps it on both.
+    const two = sheetText({ ...thu, noun: { one: 'endpoint event', many: 'endpoint events' } });
+    expect(two.options.map((o) => o.number)).toEqual(['41,939 endpoint events', '108,434']);
+    expect(two.options[1]!.aria).toContain('108,434 endpoint events');
+  });
 
   it('names the day, each option with what its drawing shows and its unit, the trips past the checks under it, and Keep beside the day readers keep', () => {
     const t = sheetText(thu);

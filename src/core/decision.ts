@@ -20,6 +20,7 @@
  */
 import { dayMid, dayShort, readersSee, type PauseState } from './days.js';
 import type { HistoryRanges } from './history.js';
+import { counted, type Noun } from './ontology.js';
 import type { Hold } from './hold.js';
 import type { DecideOption } from './policy.js';
 import { CONTEXT_TAG, gateLabels, wordsIn, type Gate, type Story } from './story.js';
@@ -166,6 +167,8 @@ export interface SheetIn {
   deciders: string;
   /** The day's head, for the rows' accessible names. */
   head: string | null;
+  /** What a row of the held source is called (ADR 0010 §8, C3): every count the sheet says carries it. */
+  noun: Noun;
 }
 
 export interface SheetOption {
@@ -242,7 +245,10 @@ function checksSaid(c: Pick<Gate, 'share' | 'limit'>): string {
  */
 export function sheetText(o: SheetIn): SheetText {
   const name = o.day ? dayMid(o.day) : 'This run';
-  const trips = (n: number) => `${fmtInt(n)} trip${n === 1 ? '' : 's'}`;
+  const trips = (n: number) => counted(n, o.noun);
+  // A noun of two words is said once, on the first row, and the numbers after it are bare (Q-78), so the sheet keeps
+  // its 45 words with "endpoint events".
+  const bare = (n: number) => (wordsIn(o.noun.many) > 1 ? fmtInt(n) : trips(n));
   const past = o.reach !== null && o.reach !== o.rows ? `${fmtInt(o.reach)} after checks` : null;
   const age = o.readers && o.day ? Math.round((Date.parse(`${o.day}T12:00:00Z`) - Date.parse(`${o.readers.day}T12:00:00Z`)) / 864e5) : 0;
   const see = o.readers ? readersSee(o.readers.day, null) : 'nothing published yet';
@@ -258,7 +264,7 @@ export function sheetText(o: SheetIn): SheetText {
         aria: o.later ? `Publish as is: not possible, ${dayMid(o.later)} is what readers see now` : `Publish as is: readers get ${name} as it came, ${trips(o.rows)}${past ? `, ${fmtInt(o.reach!)} of them past its checks` : ''}${o.head ? `, ${o.head}` : ''}${o.checks ? `; this overrides its checks, which held it: ${checksSaid(o.checks)}` : ''}`,
       },
       {
-        option: 'dont', label: o.readers ? `Keep ${dayShort(o.readers.day)}` : 'Don’t publish', number: o.readers ? trips(o.readers.rows) : 'nothing shown', sub: age >= 2 ? `${age} days old` : null, warn: null, off: false,
+        option: 'dont', label: o.readers ? `Keep ${dayShort(o.readers.day)}` : 'Don’t publish', number: o.readers ? bare(o.readers.rows) : 'nothing shown', sub: age >= 2 ? `${age} days old` : null, warn: null, off: false,
         aria: o.readers ? `Don’t publish: readers keep ${dayMid(o.readers.day)}, ${trips(o.readers.rows)}${age >= 2 ? `, ${age} days old` : ''}, and this day is never published` : 'Don’t publish: readers get nothing, nothing is published yet',
       },
     ],

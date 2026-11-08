@@ -3162,7 +3162,7 @@ function amountVisual(story: Story): Element | null {
   // Beside a head about the hours from a fall, it says its window ("whole day −65%").
   const said = story.labels.amount.map((l) => /^(?:(.+) )?([+−]\d+%)$/.exec(l)).find((m) => !!m);
   const change = said?.[2];
-  return svgNode(amountLine({ value: a.value, low: a.low, high: a.high, valueLabel: fmtInt(a.value), bandLabel: `usual ${compact(a.low)}–${compact(a.high)}`, changeLabel: change, changeWindow: said?.[1], sev, aria: `${fmtInt(a.value)} trips on ${dayLabel(story.day)}${change ? `, ${said?.[1] ? `${said[1]} ` : ''}${change} against a usual ${wd}` : ''}, where a usual ${wd} has ${fmtInt(a.low)} to ${fmtInt(a.high)}.` }));
+  return svgNode(amountLine({ value: a.value, low: a.low, high: a.high, valueLabel: fmtInt(a.value), unit: NEWS_NAMES.noun(a.value), bandLabel: `usual ${compact(a.low)}–${compact(a.high)}`, changeLabel: change, changeWindow: said?.[1], sev, aria: `${fmtInt(a.value)} trips on ${dayLabel(story.day)}${change ? `, ${said?.[1] ? `${said[1]} ` : ''}${change} against a usual ${wd}` : ''}, where a usual ${wd} has ${fmtInt(a.low)} to ${fmtInt(a.high)}.` }));
 }
 
 /** The hero of a story's cause card: the one visual its cause calls for. */
@@ -3863,8 +3863,8 @@ function causeCard(story: Story, card: string): HTMLElement {
         : h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', ...(checks?.full ? { 'aria-label': 'Checks held: open' } : {}), onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held && !checks?.head ? glyphEl('held', 14) : '', checks?.full ? (checks.head ?? '') : held ? 'Checks held' : g.near ? 'Checks near the limit' : 'Checks passed'), gateVisual(g, false, gateScale(story)))
       : null,
     // What the day's outputs are: never "published" alone, which reads as good news; a tap names them.
-    !paused && story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${reachLabel(story, outs.length)}: ${outs.join(', ')}. Open the list.`, onclick: () => outputsDetail(story, outs) },
-      svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'published' })), reachLabel(story, outs.length), h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
+    !paused && story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${reachLabel(story, outs.length, undefined, NEWS_NAMES.noun())}: ${outs.join(', ')}. Open the list.`, onclick: () => outputsDetail(story, outs) },
+      svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'published' })), reachLabel(story, outs.length, undefined, NEWS_NAMES.noun()), h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
     // The changes it explains and the ones the same day: one row, its first change named (ADR 0008 §6), opening into
     // the two groups, each headed by what it is.
     story.labels.folded ? foldedRow(story, card, profileOf(card) !== undefined) : null,
@@ -4155,6 +4155,7 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
   const draw = decisionDrawing(history, story, day ?? '', readers?.day ?? null, { day: rows, readers: arrived });
   const t: SheetText = sheetText({
     // How long it has waited, only while it waits (a day not published, opened to change its decision, isn't waiting).
+    noun: rowNoun(loadSource() ?? ''),
     day, waited: opened && pauseOf(r)?.state === 'waiting' ? (Date.now() - Date.parse(opened)) / 60000 : null, since: opened && new Date(opened).toDateString() === new Date().toDateString() ? clock(opened) : null, otherBuild: !!pause?.otherBuild, outputs: n, rows, reach: tripsKept(r) ?? null, readers, later, checks: heldChecks(r, story),
     part: draw.part, missing: draw.cause === 'hours' ? (story?.hoursLabels?.missing ?? null) : null, cut: draw.cut?.[1] ?? null, ticks: draw.ticks.map(([, x]) => x),
     unjudged: r.result.holds.some((x) => x.by === 'unjudged'), hash: r.result.hash, may: anyone, deciders: deciders(), head: story?.head ?? null,
@@ -4259,7 +4260,7 @@ function receiptBox(l: { head: string; sub: string; change: string | null }, st:
  */
 function outputsDetail(story: Story, outs: string[]): void {
   const held = !!story.gate?.held;
-  const l = lacked(story);
+  const l = lacked(story, NEWS_NAMES.noun());
   const keep = held && story.day === viewedDay() ? stoppedWords({ refused: false, origin: story.gate!.step, shown: keptDay(), viewed: story.day }).tail : null;
   const list = h('ul', { class: 'vf-outlist' }, ...outs.map((o) => {
     const n = held ? undefined : nodeOf(o);
@@ -4269,7 +4270,7 @@ function outputsDetail(story: Story, outs: string[]): void {
       h('span', { class: 'o-rows' }, held ? 'not published' : n?.rows !== undefined ? `${fmtInt(n.rows)} rows` : 'published'),
       glyphEl('chev', 13)));
   }));
-  openDetail(reachLabel(story, outs.length), story.severity, [oneLine(held ? (keep ? keep.replace(/^./, (c) => c.toUpperCase()) : null) : (l?.long ?? null)), list]);
+  openDetail(reachLabel(story, outs.length, undefined, NEWS_NAMES.noun()), story.severity, [oneLine(held ? (keep ? keep.replace(/^./, (c) => c.toUpperCase()) : null) : (l?.long ?? null)), list]);
 }
 
 /**
@@ -4458,7 +4459,7 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
   const fromStory = built && rowsDay ? storyFor(rowsDay) : null;
   // Whatever held the day, its story or its checks (ADR 0009 §12); not over a step a stopped run didn't build, which
   // says so above.
-  const short = fromStory && !(state.failed && rowsDay === viewedDay()) ? lacked(fromStory) : null;
+  const short = fromStory && !(state.failed && rowsDay === viewedDay()) ? lacked(fromStory, NEWS_NAMES.noun()) : null;
   // To someone who can't read the day's story (the trips closed to them, or the column it is about), a held load is
   // said from the flow's own verdict, naming no source, value or figure.
   const ownRun = built && !state.failed ? onScreen() : undefined;

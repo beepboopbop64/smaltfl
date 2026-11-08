@@ -130,7 +130,7 @@ describe.skipIf(!has)('the story on the real history', () => {
     // A part that only fell partway is short, never "without" (Aug 10, 2022: 5,197 of ~33.6k Vendor 1 trips came).
     expect(story('2022-08-10').head).toBe('Vendor 1 records 85% short');
     expect(reachLabel(story('2022-08-10'), 3)).toBe('Outputs built with Vendor 1 short');
-    expect(lacked(story('2022-08-10'))!.long).toBe('Built with Vendor 1’s trips 85% short');
+    expect(lacked(story('2022-08-10'), 'trips')!.long).toBe('Built with Vendor 1’s trips 85% short');
     expect(reachLabel(story('2023-11-07'), 3)).toBe('Outputs built with Extras 7.5 short');
     expect(reachLabel(story('2023-09-22'), 3)).toBe('Outputs not published');
     expect(lacked(story('2023-09-25'))).toBeNull();
@@ -452,9 +452,23 @@ describe.skipIf(!has)('the story on the real history', () => {
       // and for someone who may not decide, what readers see until the owner does. With a later day published, Publish
       // as is can't be picked.
       for (const [later, readersAt, may] of [[null, -1, true], [null, -3, true], [plus(d, 4), -1, true], [null, -3, false]] as const) {
-        const t = sheetText({ day: d, waited: 3000, otherBuild: true, outputs: 3, rows: rows(d), reach: rows(d) - file!.dropped[file!.days.indexOf(d)]!, readers: { day: plus(d, readersAt), rows: rows(plus(d, readersAt)) }, later, checks: s.gate?.held ? s.gate : null, part: draw.part, missing: draw.cause === 'hours' ? s.hoursLabels?.missing ?? null : null, cut: draw.cut?.[1] ?? null, ticks: draw.ticks.map(([, x]) => x), unjudged: false, hash: 'a'.repeat(64), may, deciders: 'Owner', head: s.head });
+        const t = sheetText({ day: d, waited: 3000, otherBuild: true, outputs: 3, rows: rows(d), reach: rows(d) - file!.dropped[file!.days.indexOf(d)]!, readers: { day: plus(d, readersAt), rows: rows(plus(d, readersAt)) }, later, checks: s.gate?.held ? s.gate : null, part: draw.part, missing: draw.cause === 'hours' ? s.hoursLabels?.missing ?? null : null, cut: draw.cut?.[1] ?? null, ticks: draw.ticks.map(([, x]) => x), unjudged: false, hash: 'a'.repeat(64), may, deciders: 'Owner', head: s.head, noun: { one: 'trip', many: 'trips' } });
         expect(sheetWords(t), `${d}: ${JSON.stringify(t)}`).toBeLessThanOrEqual(45);
       }
+    }
+    // The same budgets with the tests' longest noun, a two-word one (ADR 0010 §8, Q-78): each day's card at a glance,
+    // and its sheet at its wordiest, say "endpoint events" where they say trips.
+    const events: Names = { ...names, noun: (n) => (n === 1 ? 'endpoint event' : 'endpoint events') };
+    for (const d of WRONG) {
+      const s = storyOf(h!, d, newsOf(h!, d, events), { names: events, step: 'trips_valid', limit: 0.1 });
+      expect(glanceStrings(s).filter((x) => /trip/i.test(x)), d).toEqual([]);
+      const l = pauseLines({ state: 'waiting', names: ['zone_hour', 'borough_hour', 'weather_effect'], by: s.gate?.held ? ['trips', 'checks'] : ['trips'], readers: plus(d, -1), who: 'Owner', at: '23:59', under: null, may: true, deciders: 'Owner', standing: false });
+      const said = pausedGlance(s, l, false);
+      expect(said.reduce((t, x) => t + wordsIn(x), 0), `${d}: ${said.join(' | ')}`).toBeLessThanOrEqual(60);
+      const draw = decisionDrawing(h, s, d, plus(d, -1), { day: rows(d), readers: rows(plus(d, -1)) });
+      const t = sheetText({ day: d, waited: 3000, otherBuild: true, outputs: 3, rows: rows(d), reach: rows(d) - file!.dropped[file!.days.indexOf(d)]!, readers: { day: plus(d, -3), rows: rows(plus(d, -3)) }, later: null, checks: s.gate?.held ? s.gate : null, part: draw.part, missing: draw.cause === 'hours' ? s.hoursLabels?.missing ?? null : null, cut: draw.cut?.[1] ?? null, ticks: draw.ticks.map(([, x]) => x), unjudged: false, hash: 'a'.repeat(64), may: true, deciders: 'Owner', head: s.head, noun: { one: 'endpoint event', many: 'endpoint events' } });
+      expect(t.options[0]!.number, d).toMatch(/ endpoint events$/);
+      expect(sheetWords(t), `${d}: ${JSON.stringify(t)}`).toBeLessThanOrEqual(45);
     }
     // Thu Sep 21: its hours, Wed 20 kept, on one scale; Mon Nov 14, 2022: Vendor 1's 2 trips beside 82,276.
     const thu = decisionDrawing(h, story('2023-09-21'), '2023-09-21', '2023-09-20', { day: 41_939, readers: rows('2023-09-20') });
