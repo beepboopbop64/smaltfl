@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
-import { CELL_KINDS, HEALTH_HEAD, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, shortWho, splitOf, splitSentence, stepLabels, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
+import { ACT_VERB, CELL_KINDS, CONTEXT_TAG, HEALTH_HEAD, SETTLE_LINE, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, rowName, shortWho, splitOf, splitSentence, stepLabels, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
 import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
 const DAY = '2023-10-11'; // a Wednesday
@@ -56,11 +56,28 @@ describe('the cause, as a population', () => {
     expect(words(s)).toBeLessThanOrEqual(60);
   });
 
-  it('names a part that surged, as unusual, with OK this day as its verb', () => {
+  it('names a part that surged, as unusual, with marking it as expected its verb, said optional', () => {
     const s = story({ [DAY]: { vendorSurge: 2.3 } });
     expect(s.split).toMatchObject({ kind: 'surged', name: 'Vendor 1' });
     expect(s.head).toMatch(/^Vendor 1 records 2\.\d× usual$/);
     expect(s.primary).toBe('expected');
+    expect(s.labels.primary).toBe('Mark as expected (optional)');
+    expect(ACT_VERB.expected).toBe('Mark as expected (optional)');
+  });
+
+  it('says there is nothing to do under an unusual head only when the day’s total is in its range (ADR 0008 §6)', () => {
+    // (A day whose total is in its range says it: New Year's Day 2024, test/story-real.test.ts.) Fewer trips, or more,
+    // than the range: unusual, but its total isn't in range, so nothing is said of acting.
+    for (const t of [{ more: 0.8 }, { vendorSurge: 1.6 }]) {
+      const low = story({ [DAY]: t });
+      expect(low.state).toBe('unusual');
+      expect(low.amount!.value < low.amount!.low || low.amount!.value > low.amount!.high).toBe(true);
+      expect(low.labels.settle).toBeNull();
+    }
+    expect(SETTLE_LINE).toBe('Total in range · nothing to do');
+    // Something wrong, and a calm day: never.
+    expect(story({ [DAY]: { onlyVendor1: true, dropShare: 0.105 } }).labels.settle).toBeNull();
+    expect(story({}, '2023-10-04').labels.settle).toBeNull();
   });
 
   it('finds no split on an ordinary day, and none from a symptom: the named side is the smaller one', () => {
@@ -276,6 +293,32 @@ describe('the words at a glance', () => {
     for (const k of s.labels.kinds) expect(k).toMatch(/^(shares|values gone|blanks|spreads|times|checks|new values|new pairs|other)$/);
     expect(s.labels.kinds.length).toBeLessThanOrEqual(3);
   });
+
+  it('folds the changes it explains and the same day’s into one row at a glance, its first named (ADR 0008 §6)', () => {
+    const s = story({ [DAY]: { vendorSurge: 1.6 } });
+    const all = [...s.follows, ...s.sameDay];
+    expect(all.length).toBeGreaterThan(1);
+    const first = all[0]!;
+    expect(s.labels.folded).toBe(`${rowName(first, first.columns?.[0] ? vendorNames.column(first.columns[0]) : null)} + ${all.length - 1} more`);
+    // At a glance the one row stands for both; their own heads show once it opens.
+    const g = glanceStrings(s);
+    expect(g).toContain(s.labels.folded);
+    expect(g).not.toContain(s.labels.follows);
+    expect(g).not.toContain(s.labels.sameDay);
+    for (const k of s.labels.kinds) expect(g).not.toContain(k);
+    // A calm day has nothing to fold.
+    expect(story({}, '2023-10-04').labels.folded).toBeNull();
+  });
+
+  it('names a finding short by its title up to its figures, with what a share is', () => {
+    expect(rowName({ title: 'Passengers 1: 0.2% (usually 70–75%)', kind: 'share' })).toBe('Passengers 1 share');
+    expect(rowName({ title: 'Extras 2.5: 0.02% (usually 12–14%)', kind: 'gone' })).toBe('Extras 2.5 gone');
+    expect(rowName({ title: 'Duration rule: 1.7% fail (usually 1.2–1.6%)', kind: 'rule' })).toBe('Duration rule');
+    expect(rowName({ title: 'Checks dropped 9.5% (usually 4.0–6.4%)', kind: 'dropped' })).toBe('Checks dropped');
+    expect(rowName({ title: 'Distance: the lowest tenth higher', kind: 'shape' })).toBe('Distance');
+    // A title still over four words is said by its column.
+    expect(rowName({ title: 'Pickup time earlier in the day than usual', kind: 'shape' }, 'Pickup time')).toBe('Pickup time');
+  });
 });
 
 describe('the context, the health row and the tiers (ADR 0008 §6)', () => {
@@ -284,7 +327,8 @@ describe('the context, the health row and the tiers (ADR 0008 §6)', () => {
     const calm = story({ '2023-10-04': { snow: 6 } }, '2023-10-04');
     expect(calm.chip).toBeNull();
     expect(calm.labels.context).toBe('❄ 6.0 cm today');
-    expect(glanceStrings(calm)).toContain('❄ 6.0 cm today');
+    // Tagged as context where it shows, the tag counted at a glance (ADR 0008 §11).
+    expect(glanceStrings(calm)).toContain(`${CONTEXT_TAG} ❄ 6.0 cm today`);
     expect(words(calm)).toBeLessThanOrEqual(16);
     // A day of fewer trips after a snowy one: today's and the day before's, its weekday named.
     const before = plusDays(DAY, -1);

@@ -3,7 +3,7 @@
  * broken numbers, and escapes what it is given.
  */
 import { describe, expect, it } from 'vitest';
-import { amountLine, bandSpan, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
+import { amountLine, bandSpan, degrees, weatherHours, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -335,6 +335,44 @@ describe('the news’s charts', () => {
     const tops = bar.map((b) => Number(b[3]));
     expect(Number(labels[0]![2])).toBeLessThan(Math.min(...tops));
     expect(bars).not.toMatch(/sev-|ghost/);
+    // Its 0 at the baseline, in the gutter; with the strip's dates, the same dates under the same columns.
+    expect(bars).toMatch(/<text x="0" y="[\d.]+" class="tick" aria-hidden="true">0<\/text>/);
+    const dated = contextBars({ values, note: '', label: (v) => `${v.toFixed(1)} cm`, kind: 'snow', gx: 12, aria: 'Snow', labels: [[0, 'Nov 13', 'start'], [55, 'Jan 7', 'end']] });
+    const stripDated = dayStrip({ days, unit: '/day', aria: 'Trips', labels: [[0, 'Nov 13', 'start'], [55, 'Jan 7', 'end']] });
+    const at = (svg: string, t: string) => new RegExp(`<text x="([\\d.]+)" y="[\\d.]+" text-anchor="\\w+" class="tick" aria-hidden="true">${t}<`).exec(svg)?.[1];
+    expect(at(dated, 'Jan 7')).toBe(at(stripDated, 'Jan 7'));
+    expect(at(dated, 'Nov 13')).toBe(at(stripDated, 'Nov 13'));
+  });
+
+  it('keys a strip’s darker weekday, a day with no usual and its marks, only what it draws', () => {
+    const days = Array.from({ length: 14 }, (_, i) => ({ day: `2024-01-${String(i + 1).padStart(2, '0')}`, v: 90_000, low: i === 2 ? null : 80_000, high: i === 2 ? null : 120_000, ...(i === 5 ? { marks: ['alert', 'held'] as ('alert' | 'held')[] } : {}) }));
+    const svg = dayStrip({ days, key: ['usual', 'actual'], aria: 'Trips', more: { same: 'Sundays', marks: { alert: 'wrong', held: 'paused', flag: 'as is' } } });
+    expect(svg).toContain('>Sundays<');
+    expect(svg).toContain('>no usual<');
+    expect(svg).toContain('>wrong<');
+    expect(svg).toContain('>paused<');
+    // A mark the strip doesn't draw has no key.
+    expect(svg).not.toContain('>as is<');
+    // Without `more`, one row as before.
+    expect(dayStrip({ days, key: ['usual', 'actual'], aria: 'Trips' })).not.toContain('>Sundays<');
+  });
+
+  it('draws a day’s weather by the hour as the trips’ hours are drawn: rain from 0, the temperature a line, never “−0”', () => {
+    const temp = Array.from({ length: 24 }, (_, h) => -0.4 + (h > 12 ? 3 : 0));
+    const precip = Array.from({ length: 24 }, (_, h) => (h === 5 ? 1.2 : h === 6 ? 0.3 : 0));
+    const snow = Array.from({ length: 24 }, (_, h) => (h === 5 ? 0.8 : 0));
+    const svg = weatherHours({ temp, precip, snow, aria: 'Weather by the hour' });
+    // A column for each hour with rain or snow, snow in its own colour, from the 0 baseline.
+    expect([...svg.matchAll(/class="wx-bar (snow|rain)"/g)].map((m) => m[1])).toEqual(['snow', 'rain']);
+    expect(svg).toMatch(/>0<\/text>/);
+    // The temperature a line through each hour with its lowest and highest said in whole degrees: 0 °C, not "−0 °C".
+    expect(svg).toContain('class="line temp"');
+    expect(svg).toContain('>3 °C<');
+    expect(svg).toContain('>0 °C<');
+    expect(svg).not.toMatch(/[−-]0 °C/);
+    expect([degrees(-0.4), degrees(-0.6), degrees(2.5)]).toEqual(['0 °C', '−1 °C', '3 °C']);
+    // The hour axis as the trips': 0, 6, 12, 18, 24.
+    expect([...svg.matchAll(/class="tick" aria-hidden="true">(\d+)<\/text>/g)].map((m) => m[1]).slice(-5)).toEqual(['0', '6', '12', '18', '24']);
   });
 
   it('draws an episode’s days in its chip, each against a usual day, the viewed day darker', () => {

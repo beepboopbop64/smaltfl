@@ -279,6 +279,8 @@ export function gateBars(o: { rows: number; dropped: number; limit: number | nul
     const zmax = niceMax(Math.max(share, limit) * 1.5);
     const z = (p: number) => (Math.min(p, zmax) / zmax) * w;
     s += `<path class="zoom-wedge" d="M0 ${sy + sbH + 1}H${f1(x(zmax))}L${w} ${zy - 1}H0Z"/>`;
+    // Its two sides drawn as lines, so the zoom reads as the full bar's first stretch made wide, in any theme.
+    s += `<path class="zoom-edge" d="M0.5 ${sy + sbH + 1}V${zy - 1}M${f1(x(zmax))} ${sy + sbH + 1}L${w - 0.5} ${zy - 1}"/>`;
     s += `<rect class="track" x="0" y="${zy}" width="${w}" height="${zH}" rx="2"/>`;
     if (o.dropped > 0) s += `<path class="ink-strong" d="${barPath(0, zy, Math.max(MIN_MARK, z(share)), zH, 2)}"/>`;
     s += tick(z(limit), zy, zH);
@@ -316,7 +318,8 @@ export function amountLine(o: { value: number; low: number; high: number; valueL
   // it if they'd meet.
   const countEnd = [...o.valueLabel].reduce((t, c) => t + (/\d/.test(c) ? 19.2 : 9), 0) + 39 + (o.changeLabel ? 8 + o.changeLabel.length * 10.5 : 0) + (o.changeLabel && o.changeWindow ? 6 + o.changeWindow.length * 7 : 0);
   const below = countEnd + 8 > w - 30 - o.bandLabel.length * 6.4;
-  const h = below ? 76 : 62;
+  // The axis's numbers sit 3 px below the band's end ticks, so a band reaching the scale's end never touches them.
+  const h = below ? 79 : 65;
   const ty = below ? 60 : 46;
   const raw = Math.max(o.high, o.value) * 1.05;
   const max = Math.ceil(raw / 10_000) * 10_000 || 1;
@@ -480,7 +483,12 @@ export function episodeBars(o: { days: readonly { label: string; got: readonly n
     s += mid - half < clear ? `<text x="${f1(w - 2)}" y="${top + 9}" text-anchor="end" class="lbl-bad lbl-halo">${esc(o.bracket.label)}</text>` : `<text x="${f1(mid)}" y="${top - 10}" text-anchor="middle" class="lbl-bad lbl-halo">${esc(o.bracket.label)}</text>`;
   }
   // The trickle's label over the days it describes, where the chart says which.
-  if (o.floorLabel) s += `<text x="${f1(o.floorAt !== undefined ? Math.min(w - (o.floorLabel.length * 6) / 2, Math.max((o.floorLabel.length * 6) / 2, o.floorAt * xw)) : w * 0.62)}" y="${base - 10}" text-anchor="middle" class="lbl-m lbl-halo">${esc(o.floorLabel)}</text>`;
+  // On a plate of the card's own colour, as it sits over the usual hours' grey (a halo alone left it hard to read).
+  if (o.floorLabel) {
+    const fx = o.floorAt !== undefined ? Math.min(w - (o.floorLabel.length * 6) / 2, Math.max((o.floorLabel.length * 6) / 2, o.floorAt * xw)) : w * 0.62;
+    const fw = o.floorLabel.length * 6.2 + 8;
+    s += `<rect class="lbl-plate" x="${f1(fx - fw / 2)}" y="${base - 22}" width="${f1(fw)}" height="16" rx="3"/><text x="${f1(fx)}" y="${base - 10}" text-anchor="middle" class="lbl-m lbl-halo">${esc(o.floorLabel)}</text>`;
+  }
   return `${s}</svg>`;
 }
 
@@ -540,6 +548,31 @@ export interface StripDay {
   notRun?: boolean;
 }
 
+/** What a strip's second key row may name: the weekday its darker bands are ("Mondays"), and words for its marks. */
+export interface StripKey { same?: string; marks?: Partial<Record<Mark, string>> }
+
+/** The second key row of a strip of days, right-aligned under its first: only what the strip draws. */
+function stripKeyRow(days: readonly StripDay[], more: StripKey, w: number): string {
+  const items: { sw: string; word: string }[] = [];
+  const last = days.at(-1);
+  const wd = last ? new Date(`${last.day}T00:00:00Z`).getUTCDay() : -1;
+  // Darker bands only where another day than the last shares its weekday.
+  if (more.same && days.slice(0, -1).some((d) => d.low !== null && new Date(`${d.day}T00:00:00Z`).getUTCDay() === wd)) items.push({ sw: '<rect class="ghost-2" x="0" y="3" width="12" height="8" rx="2"/>', word: more.same });
+  if (days.some((d) => !d.notRun && d.v !== null && (d.low === null || d.high === null))) items.push({ sw: '<rect class="ink" x="0" y="5.5" width="12" height="3" rx="1"/>', word: 'no usual' });
+  const drawn = new Set(days.flatMap((d) => (d.marks?.length ? d.marks : d.mark ? [d.mark] : [])));
+  for (const [m, word] of Object.entries(more.marks ?? {}) as [Mark, string][]) if (drawn.has(m)) items.push({ sw: `<g transform="translate(0 0)">${glyph(m, 13)}</g>`, word });
+  if (!items.length) return '';
+  let x = w;
+  let out = '';
+  for (const it of [...items].reverse()) {
+    const tw = it.word.length * 6.2;
+    x -= tw;
+    out += `<g transform="translate(${f1(x - 17)} 16)">${it.sw}</g><text x="${f1(x)}" y="27" class="lbl-m key">${esc(it.word)}</text>`;
+    x -= 17 + 12;
+  }
+  return out;
+}
+
 /**
  * One column per day, each the day's own usual range as a band (the same weekday as the last day a step darker), at
  * least the tick's height and 4 px more so a narrow one shows past it, with the day's value as an ink tick, the last
@@ -548,11 +581,14 @@ export interface StripDay {
  * a one-line key over it (band, tick, and "not run" when a day wasn't); `unit` prints the axis's top (a round number)
  * with its unit and 0. A day not run keeps its band, with no tick or mark, inside a dashed frame: absent.
  */
-export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number; labels?: [number, string, string?][]; aria: string; bandLabel?: string; zero?: boolean; key?: readonly [string, string]; unit?: string }): string {
+export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number; labels?: [number, string, string?][]; aria: string; bandLabel?: string; zero?: boolean; key?: readonly [string, string]; unit?: string; more?: StripKey }): string {
   const w = o.w ?? 334;
   const n = o.days.length;
   const marks = o.days.some((d) => d.mark || d.marks?.length);
-  const keyH = o.key ? 16 : 0;
+  // A second key row for what else the strip draws (ADR 0008 §7), only what it does draw: the weekday its darker bands
+  // are, a day with no usual of its own, and each mark on its days with its word.
+  const extra = o.key && o.more ? stripKeyRow(o.days, o.more, w) : '';
+  const keyH = o.key ? (extra ? 32 : 16) : 0;
   const h = (o.h ?? 64) + keyH + (marks ? 4 : 0);
   // With an axis printed, its 0 sits in a gutter of its own, clear of the first day's band.
   const gx = o.zero || o.unit ? 12 : 0;
@@ -580,6 +616,7 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
     s += `<rect class="ghost" x="${f1(x1)}" y="3" width="12" height="8" rx="2"/><text x="${f1(x1 + 16)}" y="11" class="lbl-m key">${esc(kb)}</text>`;
     s += `<rect class="ink" x="${f1(x2 - 18)}" y="5.5" width="14" height="3" rx="1"/><text x="${f1(x2)}" y="11" class="lbl-m key">${esc(kt)}</text>`;
     if (kn) s += `<rect class="notrun" x="${f1(x3 - 16)}" y="2.5" width="11" height="9" rx="2"/><text x="${f1(x3)}" y="11" class="lbl-m key">${esc(kn)}</text>`;
+    s += extra;
   }
   s += `<line class="base" x1="${gx}" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
   o.days.forEach((d, i) => {
@@ -631,18 +668,22 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
  * last days' amounts at the top right, in the order their bars stand ("Sat 7.2 cm · Sun 1.5 cm"), clear of every bar; a
  * larger day further back is labelled over its own bar. No band and no severity: there is no usual to be outside of.
  */
-export function contextBars(o: { values: readonly number[]; note: string; label: (v: number) => string; kind: 'snow'; gx?: number; w?: number; h?: number; aria: string }): string {
+export function contextBars(o: { values: readonly number[]; note: string; label: (v: number) => string; kind: 'snow'; gx?: number; w?: number; h?: number; aria: string; labels?: [number, string, string?][] }): string {
   const w = o.w ?? 334;
   const n = o.values.length;
   const gx = o.gx ?? 12;
-  const h = o.h ?? 52;
+  // Dates under it, as its strip of days has them, and its 0 in the gutter: a count from nothing (ADR 0008 §7).
+  const dates = o.labels?.length ? 14 : 0;
+  const h = (o.h ?? 52) + dates;
   const cw = (w - gx) / Math.max(1, n);
   const bw = Math.min(14, cw - 2);
-  const base = h - 1.5;
+  const base = h - 1.5 - dates;
   const top = 18;
   const max = Math.max(0, ...o.values);
   let s = open(w, h, o.aria, 'data-y0="0"');
   s += `<line class="base" x1="${gx}" x2="${w}" y1="${base}" y2="${base}"/>`;
+  if (gx) s += `<text x="0" y="${f1(base)}" class="tick" aria-hidden="true">0</text>`;
+  for (const [i, t, anchor] of o.labels ?? []) s += `<text x="${f1(gx + i * cw + cw / 2)}" y="${h - 2}" text-anchor="${anchor ?? 'middle'}" class="tick" aria-hidden="true">${esc(t)}</text>`;
   if (o.note) s += `<text x="${w}" y="11" text-anchor="end" class="lbl-m">${esc(o.note)}</text>`;
   if (!(max > 0)) return `${s}</svg>`;
   o.values.forEach((v, i) => {
@@ -656,6 +697,49 @@ export function contextBars(o: { values: readonly number[]; note: string; label:
   const cx = gx + tall * cw + cw / 2;
   const noteLeft = w - o.note.length * 6.2 - 8;
   if (cx + 20 < noteLeft) s += `<text x="${f1(Math.max(20, cx))}" y="${top - 3}" text-anchor="middle" class="lbl-m">${esc(o.label(max))}</text>`;
+  return `${s}</svg>`;
+}
+
+/** Whole degrees, rounded first, so a cold hour never reads "−0". */
+export const degrees = (c: number) => `${Math.round(c) < 0 ? '−' : ''}${Math.abs(Math.round(c) || 0)} °C`;
+
+/**
+ * A day's weather by the hour (ADR 0008 §12), in the shape of the trips' hour chart: 24 columns of rain (snow in its own
+ * colour) from 0, and the temperature as a line over them on its own scale, its lowest and highest hours labelled. The
+ * hour axis as the trips' (0, 6, 12, 18, 24). Hours with no reading are left out of the line and take no column.
+ */
+export function weatherHours(o: { temp: readonly (number | null)[]; precip: readonly (number | null)[]; snow: readonly (number | null)[]; w?: number; aria: string }): string {
+  const w = o.w ?? 334;
+  const h = 96;
+  const gx = 12;
+  const top = 16;
+  const base = h - 16;
+  const cw = (w - gx) / 24;
+  const bw = Math.max(2, cw - 3);
+  const maxP = Math.max(1, ...o.precip.map((p) => p ?? 0));
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  s += `<line class="base" x1="${gx}" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/><text x="0" y="${base}" class="tick" aria-hidden="true">0</text>`;
+  s += `<text x="${gx}" y="10" class="tick" aria-hidden="true">${esc(`${Number(maxP.toPrecision(2))} mm/h`)}</text>`;
+  o.precip.forEach((p, i) => {
+    if (!(p && p > 0)) return;
+    const bh = Math.max(MIN_MARK, (p / maxP) * (base - top));
+    s += `<path class="wx-bar ${(o.snow[i] ?? 0) > 0 ? 'snow' : 'rain'}" d="${colPath(gx + i * cw + (cw - bw) / 2, base, bw, bh, 1.5)}"/>`;
+  });
+  const temps = o.temp.map((t, i) => [i, t] as const).filter((x): x is readonly [number, number] => x[1] !== null && Number.isFinite(x[1]));
+  if (temps.length) {
+    const lo = Math.min(...temps.map(([, t]) => t));
+    const hi = Math.max(...temps.map(([, t]) => t));
+    const span = Math.max(4, hi - lo);
+    const ty = (t: number) => top + 6 + ((hi + (span - (hi - lo)) / 2 - t) / span) * (base - top - 18);
+    const cx = (i: number) => gx + i * cw + cw / 2;
+    s += `<path class="line temp" d="${temps.map(([i, t], k) => `${k ? 'L' : 'M'}${f1(cx(i))} ${f1(ty(t))}`).join('')}"/>`;
+    const at = (t: number) => temps.find(([, x]) => x === t)![0];
+    const [ilo, ihi] = [at(lo), at(hi)];
+    const anchor = (i: number) => (i < 3 ? 'start' : i > 20 ? 'end' : 'middle');
+    s += `<text x="${f1(cx(ihi))}" y="${f1(ty(hi) - 5)}" text-anchor="${anchor(ihi)}" class="lbl-m lbl-halo">${esc(degrees(hi))}</text>`;
+    if (Math.round(lo) !== Math.round(hi)) s += `<text x="${f1(cx(ilo))}" y="${f1(ty(lo) + 13)}" text-anchor="${anchor(ilo)}" class="lbl-m lbl-halo">${esc(degrees(lo))}</text>`;
+  }
+  for (const [hr, a] of [[0, 'start'], [6, 'middle'], [12, 'middle'], [18, 'middle'], [24, 'end']] as const) s += `<text x="${f1(gx + hr * cw)}" y="${h - 2}" text-anchor="${a}" class="tick" aria-hidden="true">${hr}</text>`;
   return `${s}</svg>`;
 }
 

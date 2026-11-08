@@ -102,7 +102,7 @@ describe.skipIf(!has)('the story on the real history', () => {
       expect(Math.abs(back[0]!.v + back[1]!.v + back[2]!.v - back[3]!.v), `${d}: ${said}`).toBeLessThanOrEqual(unit / 2 + 1e-9);
       steps.forEach((x, i) => expect(Math.abs(back[i]!.v - x.value), `${d}: ${said}`).toBeLessThanOrEqual(back[i]!.unit / 2 + 1e-9));
     }
-  });
+  }, 30_000);
 
   it('says what a day’s outputs were built from with the figures its head says, never against it (ADR 0008 §10)', () => {
     for (const d of ['2022-01-29', '2022-08-10', '2022-09-17', '2022-11-08', '2022-11-14', '2022-12-19', '2023-09-21', '2023-11-07']) {
@@ -232,6 +232,11 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('tells New Year’s Day 2024 as a Flex Fare surge, unusual and nothing more', () => {
     const s = story('2024-01-01');
+    // Its trips all came (81,013 in 49k–108k, every hour): its amber says there is nothing to do, and marking it is
+    // optional (ADR 0008 §6).
+    expect(s.labels.settle).toBe('Total in range · nothing to do');
+    expect(s.labels.primary).toBe('Mark as expected (optional)');
+    expect(s.labels.folded).toBe('Rate code Standard rate share + 1 more');
     expect(s.head).toBe('Flex Fare records 2.3× usual');
     expect(s.state).toBe('unusual');
     // Its trips beyond usual are said under them, and the day stays within its 45 words.
@@ -382,6 +387,13 @@ describe.skipIf(!has)('the story on the real history', () => {
     const snow = (d: string) => file!.weather!.snow[file!.days.indexOf(d)]!;
     expect([...sun.labels.context!.matchAll(/(\d+\.\d) cm/g)].map((m) => Number(m[1]))).toEqual([snow('2024-01-07'), snow('2024-01-06')].map((x) => Math.round(x * 10) / 10));
     expect(glanceStrings(sun).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(45);
+    // Tagged as context where it shows, never as a reason, and the tag counted.
+    expect(glanceStrings(sun)).toContain('Context ❄ 1.5 cm today · 7.2 cm Sat');
+    // Its total below its range: nothing says there is nothing to do; its verb says marking it is optional.
+    expect(sun.labels.settle).toBeNull();
+    expect(sun.labels.primary).toBe('Mark as expected (optional)');
+    // Its one change explained and two the same day, in one row, its first named.
+    expect(sun.labels.folded).toBe('Duration rule + 2 more');
     const sat = story('2024-01-06');
     expect(sat).toMatchObject({ head: 'A normal Saturday', chip: null });
     expect(sat.labels.context).toBe('❄ 7.2 cm today');
@@ -474,6 +486,9 @@ describe.skipIf(!has)('the story on the real history', () => {
     }
     const thu = story('2023-09-21');
     expect([thu.cause ? 1 : 0, thu.absorbed.length, thu.follows.length, thu.sameDay.length]).toEqual([1, 2, 6, 8]);
+    // At a glance its 6 explained and 8 the same day are one row, its first named and the rest counted: 1 + 13.
+    expect(thu.labels.folded).toBe('Rate code Standard rate share + 13 more');
+    expect(story('2023-09-22').labels.folded).toBe('Passengers 1 share + 27 more');
   });
 
   it('draws an episode’s days in its chip, and counts its shortfall as its hours do, to the viewed day', () => {

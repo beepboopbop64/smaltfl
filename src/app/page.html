@@ -133,7 +133,7 @@ section.view { display: grid; gap: 14px; }
 .canvas-tools button { pointer-events: auto; min-width: 40px; height: 38px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-weight: 600; color: var(--ink); padding: 0 11px; }
 .canvas-tools button.accent { color: var(--smalt); border-color: var(--smalt); }
 .canvas-tools button.primary { background: var(--smalt); border-color: var(--smalt); color: var(--surface); }
-.canvas-hint { position: absolute; left: 12px; right: 12px; top: 8px; margin: 0; font-size: 11.5px; color: var(--muted); pointer-events: none; }
+.canvas-hint { position: absolute; left: 12px; right: 12px; top: 8px; margin: 0; font-size: 11.5px; color: var(--muted); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #canvas.arranging { border-color: var(--smalt); box-shadow: inset 0 0 0 1px var(--smalt); }
 #canvas.arranging .canvas-hint { color: var(--smalt); font-weight: 600; }
 #canvas.arranging .card, #canvas.arranging .section .hit { cursor: move; }
@@ -200,6 +200,10 @@ section.view { display: grid; gap: 14px; }
 .chart .bar.rain { fill: var(--smalt); } .chart .bar.heavy { fill: var(--teal-fill); } .chart .bar.snow { fill: var(--muted); }
 
 .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.scroll.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+/* The busiest zones fit a phone: a zone's name wraps, its numbers stay narrow. */
+#zones-table td:first-child { white-space: normal; min-width: 7em; }
+#zones-table th, #zones-table td { padding: 6px 6px; }
 table { border-collapse: collapse; font-size: 13px; width: 100%; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { font-weight: 600; color: var(--ink-2); background: var(--sunk); position: sticky; top: 0; }
@@ -254,12 +258,18 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .day-pick { display: flex; align-items: center; gap: 6px; padding: 8px 0 0; min-width: 0; }
 .day-pick .btn { flex: none; min-width: 40px; min-height: 34px; }
 .day-pick .btn.gone { visibility: hidden; }
+.day-pick .btn.day-first { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); opacity: 1; font-size: 12px; white-space: nowrap; }
+.day-pick .btn.day-first span { font-size: 11.5px; }
 .day-at { flex: 1; min-width: 0; text-align: center; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tabs { display: flex; gap: 0; overflow-x: auto; scrollbar-width: none; margin-top: 4px; }
 .tabs.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
 .tabs.fade-l { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); }
 .tabs.fade-l.fade-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
 .tabs::-webkit-scrollbar { display: none; }
+.tabs-wrap { position: relative; }
+.tabs-more { position: absolute; top: 4px; bottom: 2px; width: 28px; border: 0; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--ink-2); background: none; cursor: pointer; }
+.tabs-more.r { right: -6px; }
+.tabs-more.l { left: -6px; transform: scaleX(-1); }
 .tabs button { flex: none; border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; padding: 10px 12px 9px; min-height: 44px; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 6px; }
 .tabs button[aria-selected="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--smalt); }
 .tab-badge { font-family: var(--mono); font-size: 10.5px; min-width: 16px; padding: 0 5px; border-radius: 999px; color: var(--surface); background: var(--warn); line-height: 16px; text-align: center; }
@@ -320,6 +330,7 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .v-head { margin: 0; font-size: 20px; }
 .verdict.warn .v-head { color: var(--warn); } .verdict.alert .v-head { color: var(--bad); } .verdict.ok .v-head { color: var(--teal); }
 .v-line { margin: 0; font-size: 14px; color: var(--ink-2); }
+.v-line:empty { display: none; }
 .health { display: grid; gap: 4px; }
 .hl { display: grid; grid-template-columns: 12px 76px minmax(0, 1fr); gap: 8px; align-items: center; text-align: left; border: 0; border-radius: 8px; padding: 7px 10px; background: var(--sunk); color: var(--ink-2); font: inherit; font-size: 13px; min-height: 40px; }
 .hl:disabled { cursor: default; opacity: 1; }
@@ -561,6 +572,7 @@ th.hit, td.hit { background: var(--warn-wash); }
 .c-line.muted { color: var(--muted); font-size: 12px; }
 .bandchart .wx-caret { fill: var(--ink); } .bandchart .wx-after { fill: var(--surface); opacity: 0.55; pointer-events: none; }
 .vf-key .k-rain { background: var(--smalt); opacity: 0.45; } .vf-key .k-snow { background: var(--teal-fill); }
+.vf-key .k-temp { height: 2px; background: var(--ink-2); }
 .vf-key .k-caret { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid var(--ink); border-radius: 0; }
 .vf-hashes { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 13px; color: var(--ink-2); }
 .vf-hashes code { font-family: var(--mono); color: var(--ink); background: var(--sunk); padding: 1px 6px; border-radius: 5px; }
@@ -594,7 +606,7 @@ th.hit, td.hit { background: var(--warn-wash); }
 .vf-cal { display: grid; gap: 6px; }
 .viz.cal .cal-ok { fill: var(--ghost); } .viz.cal .cal-wait { fill: none; stroke: var(--line); stroke-width: 0.6; }
 .viz.cal .cal-alert { fill: var(--bad); } .viz.cal .cal-warn { fill: var(--warn-wash); stroke: var(--warn); stroke-width: 1.4; }
-.viz.cal .cal-now { fill: none; stroke: var(--smalt); stroke-width: 1.8; }
+.viz.cal .cal-now { fill: none; stroke: var(--smalt); stroke-width: 2.8; }
 /* The calendar's key and its progress while days are still being checked (ADR 0008 §10). */
 .vf-key .k-cal { width: 9px; height: 9px; box-sizing: border-box; }
 .vf-key .k-cal.ok { background: var(--ghost); border: 1px solid var(--edge); }
@@ -602,7 +614,7 @@ th.hit, td.hit { background: var(--warn-wash); }
 .vf-key .k-cal.alert { background: var(--bad); }
 .vf-key .k-cal.wait { background: none; border: 1px solid var(--line); }
 .vf-key .k-cal.after, .viz.cal .cal-after { background: var(--sunk); fill: var(--sunk); opacity: 0.6; }
-.vf-key .k-cal.now { background: none; width: 12px; height: 12px; border: 1.8px solid var(--smalt); border-radius: 3px; }
+.vf-key .k-cal.now { background: none; width: 12px; height: 12px; border: 2.8px solid var(--smalt); border-radius: 3px; box-sizing: border-box; }
 .cal-progress { display: inline-block; width: 64px; height: 4px; margin-left: 8px; vertical-align: 1px; border-radius: 2px; background: var(--sunk); border: 1px solid var(--edge); overflow: hidden; }
 .cal-progress i { display: block; height: 100%; background: var(--smalt); }
 .viz.cal rect { cursor: pointer; }
@@ -639,7 +651,8 @@ th.hit, td.hit { background: var(--warn-wash); }
 .bandchart .hol { fill: var(--violet, var(--smalt)); opacity: 0.7; }
 .bandchart .hol.season { opacity: 0.3; }
 .load.holiday.season::after { opacity: 0.3; }
-.loads-key { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; font-size: 11.5px; color: var(--ink-2); }
+.loads-key { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 2px 0 0; font-size: 11.5px; color: var(--ink-2); }
+.loads-key .lk-hol.season { opacity: 0.3; }
 .loads-key .lk-hol { display: inline-block; width: 16px; height: 3px; border-radius: 2px; background: var(--violet, var(--smalt)); opacity: 0.7; }
 .loads-key .lk { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
 /* A day this visit didn't run (ADR 0008 §7: dashes mean absent): its outline dashed, its band and no count. */
@@ -790,18 +803,22 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
 /* ---- news, drawn (ADR 0008): marks, charts and the cause card ---- */
 /* Usual is a light ghost whose edge (--edge) is 3:1 against the card in both themes, as are tracks and the borders of
    controls; axis hairlines (--hair) are 1.8:1 at least. */
-:root { --ghost: color-mix(in srgb, var(--muted) 28%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 44%, var(--surface)); --edge: color-mix(in srgb, var(--muted) 76%, var(--surface)); --hair: color-mix(in srgb, var(--muted) 46%, var(--surface)); }
+/* A band's edge 3:1 or more against the card in both themes even drawn 1 px at a phone's 1x (about 4:1 nominal), and in
+   dark mode its fill lifted so the band shows as a shape too (ADR 0008 §7). */
+:root { --ghost: color-mix(in srgb, var(--muted) 28%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 44%, var(--surface)); --edge: color-mix(in srgb, var(--muted) 84%, var(--surface)); --hair: color-mix(in srgb, var(--muted) 46%, var(--surface)); }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --ghost: color-mix(in srgb, var(--muted) 30%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 44%, var(--surface)); --edge: color-mix(in srgb, var(--muted) 64%, var(--surface)); --hair: color-mix(in srgb, var(--muted) 36%, var(--surface)); }
+  :root:not([data-theme="light"]) { --ghost: color-mix(in srgb, var(--muted) 40%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 54%, var(--surface)); --edge: color-mix(in srgb, var(--muted) 80%, var(--surface)); --hair: color-mix(in srgb, var(--muted) 40%, var(--surface)); }
 }
-:root[data-theme="dark"] { --ghost: color-mix(in srgb, var(--muted) 30%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 44%, var(--surface)); --edge: color-mix(in srgb, var(--muted) 64%, var(--surface)); --hair: color-mix(in srgb, var(--muted) 36%, var(--surface)); }
+:root[data-theme="dark"] { --ghost: color-mix(in srgb, var(--muted) 40%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 54%, var(--surface)); --edge: color-mix(in srgb, var(--muted) 80%, var(--surface)); --hair: color-mix(in srgb, var(--muted) 40%, var(--surface)); }
 .g { flex: none; overflow: visible; vertical-align: -2px; }
 .g-fill { fill: var(--bad); } .g-cut { fill: var(--surface); }
 .g-tri { fill: var(--warn-wash); stroke: var(--warn); stroke-width: 2; stroke-linejoin: round; } .g-mark { fill: var(--warn); }
 .g-wall { fill: var(--ink); }
 .g-box { fill: none; stroke: var(--ink); stroke-width: 1.8; } .g-x { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
 .g-arrow { fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.g-note { fill: var(--muted); }
+/* A note is a hollow ring, the shape a number outside its range without being news takes (ADR 0008 §7): never a
+   filled dot, which reads as a badge to clear. */
+.g-note { fill: none; stroke: var(--muted); stroke-width: 1.6; }
 .g-ring { fill: none; stroke: currentColor; stroke-width: 1.4; } .g-i { fill: currentColor; }
 .g-chev { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .g-seal { fill: var(--ok); } .g-sealmark { fill: none; stroke: var(--surface); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -815,26 +832,29 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .lbl-in { fill: var(--ink); font-size: 11.5px; font-weight: 600; }
 .viz .lbl-on-dark { fill: var(--surface); font-size: 11.5px; font-weight: 600; }
 .viz .lbl-halo { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.viz .lbl-plate { fill: var(--surface); stroke: var(--edge); stroke-width: 1; }
 .viz text.tick { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
 .viz text.tick.at { fill: var(--ink); font-weight: 700; }
 .viz text.mono { font-family: var(--mono); font-size: 11px; fill: var(--ink); }
 .viz .tag { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
-.viz .ghost { fill: var(--ghost); stroke: var(--edge); stroke-width: 1; } .viz .ghost-2 { fill: var(--ghost-2); stroke: var(--edge); stroke-width: 1; }
+.viz .ghost { fill: var(--ghost); stroke: var(--edge); stroke-width: 1.2; } .viz .ghost-2 { fill: var(--ghost-2); stroke: var(--edge); stroke-width: 1.2; }
 .viz .ghost.flat { stroke: none; }
 .viz .band-line { fill: none; stroke: var(--edge); stroke-width: 1; }
 .viz .skyline { fill: none; stroke: var(--edge); stroke-width: 1; stroke-linejoin: round; }
 .viz .track { fill: var(--ghost); stroke: var(--edge); stroke-width: 1; }
 .viz .ink { fill: var(--ink-2); } .viz .ink-strong { fill: var(--ink); }
-.viz .ink-outline { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
+.viz .ink-outline { fill: none; stroke: var(--ink-2); stroke-width: 2; }
 .viz .base, .viz .hair { stroke: var(--hair); stroke-width: 1; }
 .viz .link { stroke: var(--hair); stroke-width: 1; }
 .viz .leader { stroke: var(--ink-2); stroke-width: 1; }
 .viz .brace { fill: none; stroke: var(--ink-2); stroke-width: 1.2; }
 .viz .pointer { fill: var(--ink); }
 .viz .zoom-wedge { fill: var(--sunk); }
+.viz .zoom-edge { fill: none; stroke: var(--edge); stroke-width: 1.2; }
 .viz text.key { font-size: 11px; }
 .viz .cut { stroke: var(--ink); stroke-width: 1.5; }
 .viz .line { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.viz .line.temp { stroke: var(--ink-2); stroke-width: 1.8; }
 /* A usual count's end and a range's ends are soft (thin, the band's own edge); only a real limit is a heavy tick. */
 .viz .usual-end { stroke: var(--edge); stroke-width: 1.2; }
 .viz .band-end { stroke: var(--edge); stroke-width: 1; fill: none; }
@@ -879,7 +899,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .node { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.2; }
 .viz .edge-t { fill: none; stroke: var(--bad); stroke-width: 1.6; } .viz .edge-t.dash { stroke-dasharray: 3 3; }
 .viz .hatch-box { fill: url(#viz-hatch); stroke: var(--muted); stroke-width: 1.2; }
-.hatch-bg { fill: var(--surface); } .hatch-line { stroke: var(--muted); stroke-width: 1.2; }
+.hatch-bg { fill: var(--surface); } .hatch-line { stroke: var(--muted); stroke-width: 1.4; }
 /* A held day's options (ADR 0009 §12): each drawn as what readers get; another day's rows hatched, absent ones dashed. */
 .viz .hatch-col { fill: url(#viz-hatch); stroke: var(--ink-2); stroke-width: 1; }
 .viz text.opt-l { font-size: 15px; font-weight: 600; fill: var(--ink); }
@@ -1004,8 +1024,16 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-cell.explained, .vf-cell.ok, .vf-cell.note { color: var(--ink-2); }
 .vf-cell.alert, .vf-cell.warn { font-weight: 650; }
 .vf-cell:active { background: var(--sunk); }
-/* The weather after the day's numbers: a plain note, nothing to tap. */
-.vf-wx { margin: -4px 0 0; font-size: 13px; color: var(--muted); }
+/* The weather the card notes: a tagged note at its end, context and nothing to tap. */
+.vf-wx { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 13px; color: var(--muted); }
+.vf-tag { flex: none; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--edge); border-radius: 4px; padding: 0 5px; line-height: 16px; }
+/* Under an unusual head whose day's trips all came: nothing to do, said plainly. */
+.vf-settle { margin: -6px 0 0; font-size: 13.5px; color: var(--ink-2); }
+.vf-group-h { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+/* A term the head names, glossed a tap away: dotted under, as a definition is. */
+.vf-term { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: help; text-decoration: underline dotted; text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
+.vf-gloss { margin: -6px 0 0; padding: 6px 9px; border-radius: 8px; background: var(--sunk); font-size: 13px; color: var(--ink-2); display: grid; gap: 2px; }
+.vf-gloss p { margin: 0; }
 .vf-told { display: flex; align-items: center; gap: 6px; margin: -6px 0 0; font-size: 13px; color: var(--ink-2); }
 .vf-chip-btn .viz.trend { display: inline-block; margin-right: 6px; }
 .vf-sub { font-size: 12px; color: var(--muted); }
@@ -1059,6 +1087,8 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-after { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .vf-after.waiting { color: var(--ink); font-weight: 500; }
 .vf-after .btn { margin-left: auto; }
+.after-part { white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; }
+.after-parts { display: inline; }
 .loads-pause.after { font-weight: 400; }
 /* A held day's mark by its date and on its News tab. */
 .day-mark { display: inline-flex; margin-right: 6px; vertical-align: -2px; }

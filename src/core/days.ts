@@ -69,8 +69,8 @@ export function readersSee(published: string | null | undefined, day: string | n
 }
 
 /**
- * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Staged Thu 21 ·
- * readers see Wed 20", "… · readers see Mon 18 · 3 days old", or "… · nothing published yet". Null when the day is the
+ * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Thu 21 built, not
+ * published · readers see Wed 20", "… · readers see Mon 18 · 3 days old", or "… · nothing published yet". Null when the day is the
  * one published. A day a later one has passed since is no longer staged for readers, and is said as it stood then,
  * naming no later day (ADR 0008 §10): "Not published · readers kept Thu 21" (`then`, the last day published before it),
  * or "Not published" when that isn't known here.
@@ -78,7 +78,8 @@ export function readersSee(published: string | null | undefined, day: string | n
 export function stagedBar(day: string, published: string | null | undefined, then?: string | null): string | null {
   if (published === day) return null;
   if (published && published > day) return `Not published${then && then < day ? ` · readers kept ${dayShort(then)}` : ''}`;
-  return `Staged ${dayShort(day)} · ${readersSee(published, day)}`;
+  // In plain words, never "Staged": the day's own rows, built and not published (ADR 0009 §12).
+  return `${dayShort(day)} built, not published · ${readersSee(published, day)}`;
 }
 
 /** A panel with no rows to show for the viewed day: no day before it passed in this visit. */

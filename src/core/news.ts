@@ -309,7 +309,7 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     // A time's quantile is said as what it is: "90% before 12:54", never "they end by" (10% come later).
     const title = time
       ? `${sentence(names.column(column))}: ${q === 3 ? 'half' : q === 5 ? '90%' : '10%'} before ${at(j.value)} (usually ${at(j.range.low)}–${at(j.range.high)})`
-      : `${sentence(names.column(column))}: ${up ? 'higher' : 'lower'} ${q === 5 ? 'at the top' : q === 1 ? 'at the bottom' : 'in the middle'}`;
+      : `${sentence(names.column(column))}: the ${q === 5 ? 'highest tenth' : q === 1 ? 'lowest tenth' : 'middle'} ${up ? 'higher' : 'lower'}`;
     const far = time ? Math.abs(j.value - j.range.expected) >= 3 * MATERIAL.minutes : Math.abs(j.value - j.range.expected) >= 3 * MATERIAL.relative * Math.abs(j.range.expected);
     out.push(quiet({ key: `shape:${column}`, kind: 'shape', severity: far && q === 3 && Math.abs(j.d) >= 6 ? 'warn' : 'note', score: cap(j.d), title, detail: `${time ? `${Math.round(QUANTILES[q]! * 100)}% of them come before ${at(j.value)}` : `${which} ${at(j.value)}`}; a day like it has ${at(j.range.low)}–${at(j.range.high)}.`, look: 'columns', columns: [column], metric: { of: 'quantile', column, q }, value: j.value, range: j.range, acts: ['expected', 'rule'] }, j));
   });
@@ -343,7 +343,9 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     const snow = w.snow[k] ?? 0;
     const rain = w.precip[k] ?? 0;
     const gaps = w.boroughs.filter((_, b) => (w.hours[k]?.[b] ?? 24) < 24);
-    const temps = w.tmin[k] != null && w.tmax[k] != null ? `between ${w.tmin[k]!.toFixed(0)} and ${w.tmax[k]!.toFixed(0)} °C` : 'its temperatures not on record';
+    // Whole degrees, rounded first: never "−0".
+    const deg = (x: number) => String(Math.round(x) || 0);
+    const temps = w.tmin[k] != null && w.tmax[k] != null ? `between ${deg(w.tmin[k]!)} and ${deg(w.tmax[k]!)} °C` : 'its temperatures not on record';
     if (snow >= 1) out.push({ key: 'weather', kind: 'weather', severity: 'note', score: snow, title: `Snow: ${snow.toFixed(1)} cm in Manhattan`, detail: `With ${rain.toFixed(1)} mm of rain and snow in all, ${temps}.`, look: 'history', acts: [] });
     else if (rain >= 15) out.push({ key: 'weather', kind: 'weather', severity: 'note', score: rain / 10, title: `Heavy rain: ${rain.toFixed(0)} mm in Manhattan`, detail: `${sentence(temps)}.`, look: 'history', acts: [] });
     else out.push({ key: 'weather', kind: 'weather', severity: 'ok', score: 0, title: rain >= 1 ? `Some rain: ${rain.toFixed(0)} mm in Manhattan` : 'A dry day in Manhattan', detail: `${sentence(temps)}${gaps.length ? '' : ', every district’s 24 hours on record'}.`, look: 'history', acts: [] });

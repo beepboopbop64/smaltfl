@@ -115,7 +115,15 @@ export interface Story {
   health: { cell: Cell; severity: Severity | null; explained: boolean; follows: number; sameDay: number }[];
   primary: Act | null;
   /** Labels the screen shows at a glance, so their words can be counted: rows, chips, the hero's marks. */
-  labels: { amount: string[]; hero: string[]; gate: string[]; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[]; after: string | null; key: string[]; context: string | null; health: string };
+  labels: {
+    amount: string[]; hero: string[]; gate: string[];
+    /** The changes it explains and the ones the same day, as one row at a glance: its first named, the rest counted
+     * ("Passengers 1 share + 27 more"); `follows` and `sameDay` head their groups once it opens, `kinds` beside them. */
+    folded: string | null; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[]; after: string | null;
+    /** Under an unusual head whose day's total is in its range and whose verb is only marking it: whether to act. */
+    settle: string | null;
+    key: string[]; context: string | null; health: string;
+  };
   findings: Told[];
 }
 
@@ -137,7 +145,8 @@ export interface StoryOptions {
 }
 
 export const ACT_VERB: Record<Act, string> = {
-  expected: 'OK this day',
+  // Marking a day as expected publishes nothing and is never required (ADR 0008 §6): said so on it.
+  expected: 'Mark as expected (optional)',
   incident: 'Open an incident',
   notify: 'Tell the source',
   rule: 'Add a check',
@@ -151,6 +160,10 @@ export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['in
 export const CELL_NAMES: Record<Cell, string> = { file: 'File', amount: 'Amount', hours: 'Hours', values: 'Values', shape: 'Shape' };
 /** The health row's heading: what the five cells are, said once and counted at a glance. */
 export const HEALTH_HEAD = 'Health';
+/** The tag before the weather a card notes (ADR 0008 §11): context, never a cause; counted at a glance. */
+export const CONTEXT_TAG = 'Context';
+/** Under an unusual head whose day's total is in its range, with nothing to decide: the day's trips all came. */
+export const SETTLE_LINE = 'Total in range · nothing to do';
 
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const VALUE_KINDS = new Set<Finding['kind']>(['gone', 'share', 'missing']);
@@ -185,6 +198,18 @@ export const countLabel = (c: Count) => `${fmtInt(c.today)} · usual ~${approx(c
 /** The trips a part that surged has beyond its usual count, said under them on its bar ("+6k over usual"); null for
  * any other split (a part that held a little above its usual is within its range, and isn't news). */
 export const overLabel = (sp: Pick<Split, 'kind' | 'part'>) => (sp.kind === 'surged' && sp.part.today > sp.part.usual ? `+${compact(sp.part.today - sp.part.usual)} over usual` : null);
+
+/**
+ * A finding named short, as a row of changes names its first one (ADR 0008 §6): its title up to its figures, with what
+ * a share is ("Passengers 1 share", "Extras 2.5 gone", "Duration rule", "Checks dropped"); a title still over four words
+ * is said by its column (`column`), when it has one.
+ */
+export function rowName(f: Pick<Finding, 'title' | 'kind'>, column?: string | null): string {
+  const base = f.title.replace(/\s*\(usually [^)]*\)\s*$/, '').replace(/:.*$/, '').replace(/\s+[−+-]?[\d.,]+[%×](\s.*)?$/, '').trim() || f.title;
+  const what = f.kind === 'share' ? ' share' : f.kind === 'gone' ? ' gone' : f.kind === 'missing' ? ' blank' : '';
+  const named = wordsIn(base) > 4 && column ? column : base;
+  return `${named}${what}`;
+}
 
 /** The split's part as its visuals name it: its name, and who a code names beside it ("Vendor 1 · Creative Mobile"). */
 export const partLabel = (sp: Pick<Split, 'name' | 'who'>) => (sp.who ? `${sp.name} · ${sp.who}` : sp.name);
@@ -832,6 +857,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const kinds = new Map<string, number>();
   for (const f of follows) kinds.set(wordOf(f), (kinds.get(wordOf(f)) ?? 0) + 1);
   const shownKinds = [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w]) => w);
+  // The changes it explains, then the ones the same day: one row at a glance.
+  const folded = [...follows, ...sameDay];
   const stories = standalone.filter((f) => f !== cause).slice(0, 2);
   const more = standalone.filter((f) => f !== cause && !stories.includes(f));
 
@@ -845,6 +872,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       amount: amount ? [`${fmtInt(amount.value)} trips`, ...(amount.change !== null && hero !== 'amount' && cause?.kind !== 'volume' ? [`${hero === 'hours' ? 'whole day ' : ''}${changeLabel(amount.change)}`] : []), `usual ${compact(amount.low)}–${compact(amount.high)}`] : [],
       hero: heroLabels,
       gate: gateWords,
+      // At a glance one row for both: its first change named, the rest counted ("Passengers 1 share + 27 more").
+      folded: folded.length ? `${rowName(folded[0]!, folded[0]!.columns?.[0] ? o.names.column(folded[0]!.columns[0]) : null)}${folded.length > 1 ? ` + ${folded.length - 1} more` : ''}` : null,
       follows: follows.length ? `${follows.length} ${follows.length === 1 ? 'change' : 'changes'} this explains` : null,
       // Under the row of changes it explains, "12 more this day" says the noun once; alone, it says it.
       sameDay: sameDay.length ? `${sameDay.length} more ${follows.length ? '' : `${sameDay.length === 1 ? 'change' : 'changes'} `}this day` : null,
@@ -853,8 +882,12 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       primary: primary ? ACT_VERB[primary] : null,
       kinds: shownKinds,
       after,
+      // An unusual day whose trips all came (its total within its range, every hour) and whose one verb is marking it,
+      // which is never required: it says there is nothing to do, so its amber can't read as a broken feed to act on.
+      settle: state === 'unusual' && amount && amount.value >= amount.low && amount.value <= amount.high && !hoursF && (primary === 'expected' || primary === null) ? SETTLE_LINE : null,
       // A strip of days at a glance (a calm day's week, an amount day's four weeks) carries its one-line key.
-      key: shownHero === 'calm' || ((shownHero === 'amount' || shownHero === 'finding') && cause?.kind === 'volume') ? [...STRIP_KEY] : [],
+      // Four weeks of days say too what their darker bands are: the viewed day's weekday ("Sundays").
+      key: shownHero === 'calm' ? [...STRIP_KEY] : (shownHero === 'amount' || shownHero === 'finding') && cause?.kind === 'volume' ? [...STRIP_KEY, `${weekdayOf(day)}s`] : [],
       context: state === 'recovery' ? null : contextLabel,
       // A calm day's cells, none marked, say so: a blank cell can't be told from one not checked.
       health: state === 'calm' && health.every((c) => !c.severity && !c.explained) ? `${HEALTH_HEAD} · all normal` : HEALTH_HEAD,
@@ -966,7 +999,7 @@ export function splitSentence(s: Story): string | null {
 
 /** Every string a story shows at a glance (head, chip, the hero's labels, rows, the verb), for its word budget. */
 export function glanceStrings(s: Story): string[] {
-  return [s.head, s.chip ?? '', s.labels.after ?? '', ...s.labels.amount, ...s.labels.hero, ...s.labels.key, s.labels.context ?? '', s.labels.health, s.labels.follows ?? '', ...s.labels.kinds, s.labels.sameDay ?? '', s.labels.more ?? '', s.labels.notes ?? '', s.labels.primary ?? '', ...s.stories.map((f) => f.title)].filter(Boolean);
+  return [s.head, s.chip ?? '', s.labels.after ?? '', s.labels.settle ?? '', ...s.labels.amount, ...s.labels.hero, ...s.labels.key, s.labels.context ? `${CONTEXT_TAG} ${s.labels.context}` : '', s.labels.health, s.labels.folded ?? '', s.labels.more ?? '', s.labels.notes ?? '', s.labels.primary ?? '', ...s.stories.map((f) => f.title)].filter(Boolean);
 }
 
 export { shareWords };

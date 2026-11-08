@@ -106,10 +106,19 @@ where about 35,000 are usual, and everything else held.
    part and the rest beside them only when the part moved too; a strip of days each with its own range, 9 px at least,
    its tick 2 px on a band under 12 px and the band's edge drawn over the tick, four weeks on an amount day and the week
    on a calm one, an episode's days marked), the gate when it
-   held, came near, or the day had something wrong, what it reaches ("Paused · 3 outputs waiting" on a day held, ADR 0009 §12; "Outputs built from a short day", never "published" alone; §10), the folded findings as counted rows ("16
-   changes this explains", with what they are in words: "shares · values gone · times"; "12 more this day" under it,
-   "12 more changes this day" alone) that open in place into compact rows, a column's together, three and then "Show
-   all", each today against its usual, and one verb with the others behind ⋯. The health row (§11) sits in the card,
+   held, came near, or the day had something wrong, what it reaches ("Paused · 3 outputs waiting" on a day held, ADR 0009 §12; "Outputs built from a short day", never "published" alone; §10), the folded findings as one row at a glance,
+   ↳ and its first change named with the rest counted ("Passengers 1 share + 27 more": what it holds, never "16
+   changes this explains · shares" alone), that opens in place into its two groups, each headed by what it is ("16
+   changes this explains · shares · values gone · times", "12 more this day"), their compact rows a column's together,
+   three and then "Show all", each today against its usual; and one verb with the others behind ⋯. An unusual head
+   whose day's total is in its range and whose one verb is marking it says under it "Total in range · nothing to do",
+   so its amber can't read as a broken feed to act on (New Year's Day 2024's Flex Fare surge; never on a day whose
+   total is outside its range, Sun Jan 7's fewer trips); marking a day is "Mark as expected (optional)", never "OK this
+   day", which read as a sign-off. The part a head names is glossed a tap away where it first appears, from what the
+   ontology says of it, in twenty words at most (ontology.ts glossOf: "Flex Fare: payment type 0, booked in an app at a
+   price set up front, not by the meter"; "Vendor 1: Creative Mobile Technologies, LLC, the technology company whose
+   system in the cab recorded the trip"), with whom "Tell the source" reaches when it is among the day's verbs (whoever
+   publishes the source, never the part's company). The health row (§11) sits in the card,
    after its visuals and before the gate. Then at most two more stories, and counted rows for the rest and the notes,
    each row carrying the mark its findings carry in the health row. A tap opens a sheet that is visual too, its
    sections in the cause's order (a day told by its hours leads with them): a waterfall from a usual day to this one (a
@@ -123,14 +132,14 @@ where about 35,000 are usual, and everything else held.
    code, "Vendor 1 · Creative Mobile", as the hero bar names it too; a value gone today takes no width and is named
    under its bar), the split in one sentence; the episode's hours, its readout first saying
    the fall as the head does ("Thu from 13:00: 3,679 trips · usual ~80k (−95%)") and its shortfall an estimate with
-   its bound ("~375k fewer (≥270k)"), never the bound alone; the checks rule by rule against their usual rows, on one
+   its bound in words ("~375k fewer (at least 270k)"), never the bound alone; the checks rule by rule against their usual rows, on one
    count scale over an incident's days so far, and the outputs the held run didn't publish. Numbers that sit beside a
    difference are rounded finely enough to subtract ("~68.5k" beside "+2k"); a waterfall's labels are whole counts in
    one format on every day, adding up exactly and ending on the count the card prints ("114,913 −110,137 −143 →
    4,633"; never "Today 6k" beside a head's 5,732).
 
 7. **Marks** carry severity by shape and fill first and colour third (the tokens' hues are too close in greyscale):
-   something wrong is a filled hexagon with "!", unusual an outlined triangle on a wash, a note a small dot, ok no mark,
+   something wrong is a filled hexagon with "!", unusual an outlined triangle on a wash, a note a hollow ring (the shape of a number outside its range that isn't news; never a filled dot, which reads as a badge to clear), ok no mark,
    held ‖, explained ↳, marked as expected ✓. Folded findings keep their shape in grey. A number outside its range
    without being news is a shape, a ring, never a severity's colour; the day picked on a History chart takes its
    verdict's colour, the one its News, the strip and the calendar give it. A range's ends and a usual notch are soft,
@@ -139,7 +148,13 @@ where about 35,000 are usual, and everything else held.
    on 0–100% or a printed zoom; each day draws its own range; usual is a light ghost behind today's ink, its edge 3:1
    against the card in both themes (tracks and control borders too; hairlines 1.8:1), never thinner than today's mark
    and 4 px more, grown away from a value outside it so the gap stays true. A strip of days carries a one-line key
-   where it is first shown ("usual", "actual"; counted in the glance budget). Dashes mean absent and nothing else: a
+   where it is first shown ("usual", "actual"; counted in the glance budget; four weeks add the weekday its darker
+   bands are, "Sundays"); in a sheet a second row keys what else it draws (a day with no usual of its own, each mark
+   with its word); the canvas's loads strip keys each mark it draws with its word, "holiday season" apart from
+   "holiday"; and the day after an episode keys ‖ ⚑ ✕ in its line, each beside the days it marks, at no cost in words.
+   Every band's edge is 3:1 or more against the card in both themes even drawn at a phone's 1x, the dark theme's band
+   fill lifted to show as a shape; the gate's zoom draws its two sides as lines; the History calendar's day on screen
+   is a heavy ring. Dashes mean absent and nothing else: a
    limit is a solid tick, a guess a lighter solid line, a grouped card a tinted border, a link a solid hairline. Marks in
    tabs and strips are 14 px; a mark for a number that isn't zero is never under 3 px.
 
@@ -160,7 +175,8 @@ where about 35,000 are usual, and everything else held.
 10. **A day shows that day** (src/core/days.ts). Loads arrive one a day, as a feed brings them, and readers get only a
     day that isn't held: while a day waits for a decision they keep the last day published (ADR 0009). Every view reads
     one run: the viewed day's own, published or staged. A held day's own rows are built, checked and kept staged, and
-    every panel showing them sits under a full-width hatched bar ("Staged Thu 21 · readers see Wed 20"); views of what
+    every panel showing them sits under a full-width hatched bar ("Thu 21 built, not published · readers see Wed 20",
+    in plain words, never "Staged"; at the top of the panel, as on the Dropped tab); views of what
     readers get (who sees what, the objects actions act on) read the published names and say so ("As published · Wed
     20"). Only a day with no run of its own (a refused file) falls back to the newest run of the latest day before it
     that was published in this visit, never a later day's (stepping to Tue 26 and back to a refused day shows the day
@@ -202,15 +218,17 @@ where about 35,000 are usual, and everything else held.
 
 11. **The card's context, its health row, and the sheet's chrome.** The weather is context and never takes the chip a
     cause takes: on a day that isn't wrong, today's snow (and the day before's when the day's trips are the news) is a
-    plain note after the day's visuals, "❄ 1.5 cm today · 7.2 cm Sat" (Sun Jan 7, 2024; Sat Jan 6 says "❄ 7.2 cm
-    today" under "A normal Saturday"), nothing to tap, counted at a glance; not on a day with something wrong (its cause
+    note at the card's end, tagged as context ("Context ❄ 1.5 cm today · 7.2 cm Sat", Sun Jan 7, 2024; Sat Jan 6 says
+    "Context ❄ 7.2 cm today" under "A normal Saturday"; its title "Snow, for context: not tested as a cause"), nothing to
+    tap, the tag and the note counted at a glance; not on a day with something wrong (its cause
     is told) nor on the day after an episode (it says what is left of it): their weather is on the weather's card. The
-    detail draws it under the eight weeks of trips, in their columns, headed "Snow, for context", with no sentence. The
+    detail draws it under the eight weeks of trips, in their columns and with their dates and its 0, headed "Snow, for
+    context", with no sentence, so Saturday's 7.2 cm over a normal Saturday is there to see. The
     health row is headed once ("Health", counted) and is the same on every day: five cells (File, Amount, Hours, Values,
     Shape), no mark where nothing is out of the ordinary, ↳ where the cause groups them, and each a tap from what it
     measured: the file check in words over the list → file → load chain ("5,732 trips in the day's file, its bytes as
     published"), the amount line and four weeks, the day's hours over a usual day's, and every finding of its kinds,
-    the ones the cause absorbed too, worst first; a dot in it is the dot on "7 notes" under it. It sits in the cause
+    the ones the cause absorbed too, worst first; a ring in it is the ring on "7 notes" under it. It sits in the cause
     card after the visuals, so a day with something wrong keeps it in the first screen. Every finding is in one tier,
     and the rows on screen add up to what was found (Thu Sep 21, 2023: 1 cause, 2 absorbed, 6 explained, 8 the same
     day: 17); what the cause absorbed is one tap away in its health cell. An episode's chip draws its days so far as a
@@ -224,9 +242,11 @@ where about 35,000 are usual, and everything else held.
     ago" in September 2022, "the 3 days around it last year", a holiday named against itself last year), the band said
     wide when it is more than half its middle across, with the reason its inputs show; the rest of the method behind
     "More on the method"; "About this flow" says the same.
-    The sheet's head fits 390 px: the day on its own row, no arrow past the first or last load; what it reads and what
+    The sheet's head fits 390 px: the day on its own row, a greyed "‹ first day" on the first load (no arrow there read
+    as broken) and no arrow past the last; what it reads and what
     reads it under it, each chip cut short and two or more folded into one ("‹ 2 inputs"); the tabs scrolled to the one
-    chosen, their edges faded while tabs lie past them. A held gate is said from its figures wherever its message would
+    chosen with a tab's room either side, their edges faded with a chevron while tabs lie past them; a table wider than
+    the phone keeps its first column and fades at the edge it scrolls past. A held gate is said from its figures wherever its message would
     show ("Held at trips_valid: 10.45% of arrived rows dropped · limit 10%"), and the runtime prints its counts with
     thousands separators. A part's mark sits against its own name on the bar's outer side.
 
@@ -242,9 +262,12 @@ where about 35,000 are usual, and everything else held.
     codes, never a bound (weather codes over 12 are rain and snow, said so), and a bound is suggested only for a tail
     fewer than 1% of the rows reach, counted over every row; a file of many days says "in this file", not "today". A
     table that measures an effect against a baseline (a `vs_<baseline>` column, weather_effect's vs_dry; core/effect.ts)
-    says "No effect to measure today" when its rows are all the baseline, and draws each ratio against the baseline's
-    1× otherwise. A column whose values tie says "all equal"; a column's top value is its name and share apart ("Curb
-    Mobility · 75%", "$0.50 · 96%"); the Columns tab keys its marks (↳ ▲▼ ○) and every sample says its size ("1,976 of
+    says "No effect to measure today" when its rows are all the baseline, and draws each ratio as a bar from the
+    baseline's 1×, left for fewer and right for more, on a doubling scale with its ticks printed ("dry 1×", "4×"), so
+    +1% and −13% read apart. The weather's News draws its day by the hour in the trips' hour shape (rain and snow from 0,
+    the temperature a line with its lowest and highest hours in whole degrees, never "−0 °C"), and a note's sentence is
+    said once. A column whose values tie says "all equal"; a column's top value is its name and share apart, named as the
+    news names it ("Curb Mobility · 75%", "$0.50 · 96%", "Flex Fare · 100%", a zone by its name where it fits); the Columns tab keys its marks (↳ ▲▼ ○) and every sample says its size ("1,976 of
     81,013 rows"); a rename is said as one ("Renamed LocationID → location_id"); a dropped row's why is said from its
     values and what its rule needs ("Duration 19 s (needs 1 min–3 h)"); History's chips are named by the number each
     draws ("Extras $2.50 share"), its picker a neutral control. On a phone the canvas stacks its sections one under the

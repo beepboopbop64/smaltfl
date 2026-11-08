@@ -176,6 +176,8 @@ published. Cached check counts must still hold. And older builds must refuse wha
    - An older build's validator rejects the action, since it is not an ontology action type, so it refuses the
      document.
    - Until principals are bound to identity cards (ADR 0006 §8), this is a convenience, not a guard.
+   - Policies → Rules lists it with the rules, "Decide paused days · for Owner" (and whoever a rule for it names), as a
+     paused day says "Only Owner decides".
 
 9. **The record.** Three kinds of log/1 entry. Kinds and `about` are data, so log/1 doesn't change.
    - `run`, with the outcome `held`. It carries the run, manifest, plan and files as an `ok` run does; the holds, each
@@ -265,12 +267,12 @@ published. Cached check counts must still hold. And older builds must refuse wha
       becomes the receipt, the day's mark before it ("⚑ Published as is · Owner · 09:40", "✕ Not published · under
       Fri's decision", "✕ Not published until a day passes"), with the day readers keep ("readers keep Wed 20") and the
       outputs, and the story's verbs stay behind a labelled ⋯ ("More") at the end of the row, never alone in an empty
-      row. While a day waits, "OK this day" is not among them (it would read as approving the day, and publishes
+      row. While a day waits, "Mark as expected (optional)" is not among them (it would read as approving the day, and publishes
       nothing), and ⋯ holds only what the viewer may do (exporting the record is the owner's). A detail opened from a
       paused card leads with Decide too, the story's own verb ("Tell the source", "Open an incident") beside it.
     - **The day after an episode** says what became of its days, the day on screen first once it published: "Mon 25
-      published · Thu–Sat still wait" with **Decide** (on the canvas too) while one waits, else "Mon 25 published · Thu as
-      is · Fri–Sun unpublished"; its chip names the episode's days from the hour its first fell ("after Thu 13:00–Sun"),
+      published · ‖ Thu–Sat still wait" with **Decide** (on the canvas too) while one waits, else "Mon 25 published · ⚑ Thu
+      as is · ✕ Fri–Sun unpublished", each mark beside the days it marks, so the line keys the strip above it; its chip names the episode's days from the hour its first fell ("after Thu 13:00–Sun"),
       never what its last day was. A day held keeps its marks (! ‖, ! ⚑, ! ✕) in every later strip of days.
     - **The episode's chip** draws its days as a calendar page, the viewed day dark (never a battery, never ‖), and
       counts the trips short so far ("Day 3 · ~290k short", as its hours count them; a part that vanished counts each
@@ -292,6 +294,8 @@ published. Cached check counts must still hold. And older builds must refuse wha
       - Picking an option shows the reasons that fit it under "Why?" ("Why? (needed)" for Publish as is: Real change,
         Source confirmed; Known outage, Re-send expected for not publishing), one tap each; the scope only under Don't
         publish ("Just Thu 21", "Until a later day passes"). What is under each number shows on the row picked.
+      - Its head says since when the day has waited, by the clock it was held at that day ("Paused since 10:31"), never
+        "Waiting <1 min".
       - The button says what is missing while it can't go ("Pick an option", "Pick a reason"), then names the result in
         the primary fill ("Publish as is · 3 outputs", "Don't publish from Thu 21"); the hash of what goes out is its
         title and is in the receipt.
@@ -329,7 +333,7 @@ published. Cached check counts must still hold. And older builds must refuse wha
       - §6's "Nothing to do · held" and "Outputs not published" become "waiting" until someone decides.
       - §10's "outputs keep the last day that passed" becomes the last day published.
       - A held day now has its own rows, staged. Every view reads the viewed day's own run, published or staged, and a
-        staged one sits under a full-width hatched bar ("Staged Thu 21 · readers see Wed 20"). Falling back to an
+        staged one sits under a full-width hatched bar ("Thu 21 built, not published · readers see Wed 20"). Falling back to an
         earlier day stays only for a refused file.
 
 ## Encodings

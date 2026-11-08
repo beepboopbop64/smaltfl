@@ -100,6 +100,29 @@ export function meaningOf(property: PropertyType | undefined, value: unknown): s
   return Object.prototype.hasOwnProperty.call(property.values, String(value)) ? property.values[String(value)] : undefined;
 }
 
+/**
+ * A coded value glossed once where a head first names it (ADR 0008 §5), from what its property type says, in twenty
+ * words at most: its code and what it is, the clause its note gives it ("Flex Fare: payment type 0, booked in an app at
+ * a price set up front, not by the meter"), else its meaning and what the column's description says each value is
+ * ("Vendor 1: Creative Mobile Technologies, LLC, the technology company whose system in the cab recorded the trip").
+ * Null when the value has no meaning listed.
+ */
+export function glossOf(property: PropertyType | undefined, value: unknown, name: string): string | null {
+  const meaning = meaningOf(property, value);
+  if (!property || !meaning) return null;
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // A note that says what a value is: "A Flex Fare trip is booked in an app at a price set up front, not by the meter: …".
+  const said = property.note ? new RegExp(`^(?:An?|The) ${esc(meaning)} (?:is|are) ([^:.]+)`, 'i').exec(property.note)?.[1] : undefined;
+  // Else what the column's description says each of its values is, its aside between commas left out: "the technology
+  // company whose system in the cab recorded the trip".
+  const each = !said && property.description ? /:\s+(.+?)\.?$/.exec(property.description)?.[1]?.replace(/,[^,]+,\s*/, ' ') : undefined;
+  const column = property.title;
+  const code = name.toLowerCase().startsWith(column.toLowerCase()) ? meaning : `${column.charAt(0).toLowerCase()}${column.slice(1)} ${String(value)}`;
+  const text = `${name}: ${code}${said ? `, ${said.trim()}` : each ? `, ${each.trim()}` : ''}.`;
+  const words = text.split(/\s+/).filter((t) => /[\p{L}\p{N}]/u.test(t));
+  return words.length <= 20 ? text : `${name}: ${code}.`;
+}
+
 /** One recorded edit, or a refusal. `hash` chains it to the edit before it. */
 export interface Edit {
   seq: number;

@@ -266,6 +266,17 @@ export function emitLookup(sql: string, key: string, label: string): string {
   return `SELECT ${q(key)}, ${q(label)} FROM (\n${sql}\n) WHERE ${q(key)} IS NOT NULL AND ${q(label)} IS NOT NULL`;
 }
 
+/**
+ * One day's hours of a relation of hourly rows, each measure averaged over its places (the districts): the hour of
+ * day (0–23) and each column's mean. `shift` moves the stamp first, for a source that stamps an hour at its end
+ * (Open-Meteo: "-1 hour"), as its own step reads it. For a card that draws the day's 24 hours.
+ */
+export function emitDayHours(sql: string, time: string, day: string, columns: readonly string[], shift: string | null = null): string {
+  const t = shift ? `${q(time)}, '${shift.replace(/'/g, "''")}'` : q(time);
+  const avg = columns.map((c) => `avg(${q(c)}) AS ${q(c)}`).join(', ');
+  return `SELECT CAST(strftime('%H', ${t}) AS INTEGER) AS "hour", ${avg} FROM (\n${sql}\n) WHERE date(${t}) = '${day.replace(/'/g, "''")}' GROUP BY 1 ORDER BY 1`;
+}
+
 /** Up to `limit` distinct values of one column of a relation. */
 export function emitDistinct(sql: string, column: string, limit: number): string {
   return `SELECT DISTINCT ${q(column)} FROM (\n${sql}\n) LIMIT ${Math.max(1, Math.floor(limit))}`;

@@ -280,7 +280,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     }
     allowed.set(e.seq, problems.length === 0);
     const option = a.option === 'asis' ? 'publish as is' : "don't publish";
-    say(problems.length === 0, `${where}: ${option}${a.scope === 'untilPass' ? ' until a day publishes' : ''} for ${a.day ?? `run ${a.run}`}, by ${e.by.as}${a.under !== undefined ? `, under #${a.under}` : ''}${problems.length ? `: ${problems.join('; ')}` : `${rule ? ` (rule ${rule})` : ''}, on run ${a.run}'s keys`}`);
+    say(problems.length === 0, `${where}: ${option}${a.scope === 'untilPass' ? ' until a later day passes' : ''} for ${a.day ?? `run ${a.run}`}, by ${e.by.as}${a.under !== undefined ? `, under #${a.under}` : ''}${problems.length ? `: ${problems.join('; ')}` : `${rule ? ` (rule ${rule})` : ''}, on run ${a.run}'s keys`}`);
   }
 
   // Each release: it cites an earlier decide entry by its leaf, one that publishes and was allowed; it releases a held

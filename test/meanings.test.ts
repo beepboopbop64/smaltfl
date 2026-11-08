@@ -10,8 +10,8 @@ import io from '@smaltdb/io';
 import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../src/plugin/index.js';
-import { meaningOf, propertyOf, runFlow, translate, validateDocument, type FlowDocument, type FlowPlan, type RunResult } from '../src/index.js';
-import { emitDistinct, emitRead, emitSample, type EmitContext } from '../src/core/emit.js';
+import { glossOf, meaningOf, propertyOf, runFlow, translate, validateDocument, type FlowDocument, type FlowPlan, type RunResult } from '../src/index.js';
+import { emitDayHours, emitDistinct, emitRead, emitSample, type EmitContext } from '../src/core/emit.js';
 import { insertAfter } from '../src/core/document.js';
 import { nodeKey } from '../src/core/keys.js';
 import { shapeOf } from '../src/core/optimize.js';
@@ -68,6 +68,16 @@ describe('what the columns mean', () => {
     const pay = propertyOf(o, 'trips', 'payment_type');
     expect([meaningOf(pay, 1), meaningOf(pay, 0), meaningOf(pay, 1n), meaningOf(pay, 9), meaningOf(pay, null)]).toEqual(['Credit card', 'Flex Fare trip', 'Credit card', undefined, undefined]);
     expect(meaningOf(propertyOf(o, 'trips', 'trip_distance'), 1)).toBeUndefined();
+  });
+
+  it('glosses a code a head names, from its note or its column’s description, in twenty words at most', () => {
+    const o = example().ontology;
+    expect(glossOf(propertyOf(o, 'trips', 'payment_type'), 0, 'Flex Fare')).toBe('Flex Fare: payment type 0, booked in an app at a price set up front, not by the meter.');
+    expect(glossOf(propertyOf(o, 'trips', 'VendorID'), 1, 'Vendor 1')).toBe('Vendor 1: Creative Mobile Technologies, LLC, the technology company whose system in the cab recorded the trip.');
+    for (const g of [glossOf(propertyOf(o, 'trips', 'payment_type'), 0, 'Flex Fare'), glossOf(propertyOf(o, 'trips', 'VendorID'), 1, 'Vendor 1')]) expect(g!.split(/\s+/).length).toBeLessThanOrEqual(20);
+    // A code with no meaning listed, or a column of no codes, has none.
+    expect(glossOf(propertyOf(o, 'trips', 'payment_type'), 9, 'Payment type 9')).toBeNull();
+    expect(glossOf(propertyOf(o, 'trips', 'trip_distance'), 1, 'Distance 1')).toBeNull();
   });
 
   it('stays out of the keys: what a column means changes no step', async () => {
@@ -149,6 +159,15 @@ describe('the example on real data', () => {
     const [[pairs, same]] = (await db.queryAsync(`SELECT count(*), sum(j.precip_mm = w.precipitation) FROM (${joined}) j JOIN weather_file w ON w.borough = j.pu_borough AND w."time" = strftime('%Y-%m-%dT%H:00', j.pu_hour, '+1 hour')`)).rows as [[number, number]];
     expect(pairs).toBeGreaterThan(1000);
     expect(same).toBe(pairs);
+  });
+
+  it('reads one day’s 24 hours of the weather, its districts averaged, each hour the one its stamp closes', async () => {
+    const weather = emitRead(plan, at('weather'), ctx);
+    const rows = (await db.queryAsync(emitDayHours(weather, 'time', '2024-01-01', ['temperature_2m', 'precipitation', 'snowfall'], '-1 hour'))).rows as [number, number, number, number][];
+    expect(rows.map((r) => r[0])).toEqual(Array.from({ length: 24 }, (_, h) => h));
+    // Hour 7 is the hour stamped 08:00, averaged over the districts.
+    const [[want]] = (await db.queryAsync("SELECT avg(precipitation) FROM weather_file WHERE \"time\" = '2024-01-01T08:00'")).rows as [[number]];
+    expect(rows[7]![2]).toBeCloseTo(want, 9);
   });
 
   it('finds the checks that judge a step: after a source, before what follows a plain select, none past an aggregate', () => {

@@ -22,7 +22,7 @@ import { dayMid, dayShort, readersSee, type PauseState } from './days.js';
 import type { HistoryRanges } from './history.js';
 import type { Hold } from './hold.js';
 import type { DecideOption } from './policy.js';
-import { gateLabels, wordsIn, type Gate, type Story } from './story.js';
+import { CONTEXT_TAG, gateLabels, wordsIn, type Gate, type Story } from './story.js';
 
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
 /** A count's axis end said short: "120k", "4.8k", "900". */
@@ -134,6 +134,8 @@ export interface SheetIn {
   day: string | null;
   /** Minutes since the day was held. */
   waited: number | null;
+  /** The clock time it was held, when that was today ("10:31"): said as "Paused since 10:31", not as minutes waited. */
+  since?: string | null;
   /** A decision for the day was made under another build. */
   otherBuild: boolean;
   /** The outputs that wait. */
@@ -247,7 +249,7 @@ export function sheetText(o: SheetIn): SheetText {
   const checks = o.checks ? `Overrides checks: ${checksSaid(o.checks)}` : null;
   return {
     title: `${o.day ? `${dayMid(o.day)} · w` : 'W'}hat readers get`,
-    status: o.may ? (o.otherBuild ? 'Other build’s decision' : waitedLabel(o.waited)) : null,
+    status: o.may ? (o.otherBuild ? 'Other build’s decision' : o.since && o.waited !== null ? `Paused since ${o.since}` : waitedLabel(o.waited)) : null,
     waitsOn: o.may ? null : `${see.replace(/^./, (c) => c.toUpperCase())} until ${o.deciders} decides`,
     ask: o.may ? null : 'Ask ›',
     options: [
@@ -399,7 +401,7 @@ export function pausedGlance(s: Story, row: PauseRow): string[] {
   const l = s.labels;
   const checks = pausedChecks(s.gate);
   const gate = l.gate.length ? (checks.full ? l.gate.slice(1) : checks.line ? [checks.line] : []) : [];
-  return [s.head, s.chip ?? '', ...l.amount, ...l.hero.slice(0, l.hero.length - l.gate.length), ...gate, ...l.key, l.context ?? '', l.follows ?? '', l.sameDay ?? '', l.more ?? '', l.notes ?? '', ...s.stories.map((f) => f.title), row.reach, row.see ?? '', ...row.names, row.verb ?? '', row.waits ?? ''].filter(Boolean);
+  return [s.head, s.chip ?? '', ...l.amount, ...l.hero.slice(0, l.hero.length - l.gate.length), ...gate, ...l.key, l.context ? `${CONTEXT_TAG} ${l.context}` : '', l.folded ?? '', l.more ?? '', l.notes ?? '', ...s.stories.map((f) => f.title), row.reach, row.see ?? '', ...row.names, row.verb ?? '', row.waits ?? ''].filter(Boolean);
 }
 
 /**
@@ -478,17 +480,25 @@ function spans(days: readonly string[]): string {
  * waits (the days decided are left to the strip's marks), else "Mon 25 published · Thu as is · Fri–Sun unpublished".
  * Days not run here are left out (the strip draws them not run); null when nothing is known.
  */
-export function afterLine(days: readonly { day: string; state: PauseState | 'published' | null }[], o: { today?: { day: string; state: PauseState | 'published' | null } | null; may?: boolean } = {}): { text: string; verb: string | null } | null {
+export function afterLine(days: readonly { day: string; state: PauseState | 'published' | null }[], o: { today?: { day: string; state: PauseState | 'published' | null } | null; may?: boolean } = {}): { text: string; verb: string | null; parts: AfterPart[] } | null {
   const known = days.filter((d): d is { day: string; state: PauseState | 'published' } => d.state !== null);
-  const lead = o.today?.state === 'published' ? `${dayShort(o.today.day)} published` : null;
-  if (!known.length) return lead ? { text: lead, verb: null } : null;
+  const lead: AfterPart | null = o.today?.state === 'published' ? { state: 'published', text: `${dayShort(o.today.day)} published` } : null;
+  // Each part with its state, so the screen draws its mark beside its words (‖ still wait, ⚑ as is, ✕ unpublished):
+  // the line keys the strip's marks above it, at no cost in words.
+  const line = (parts: (AfterPart | null)[], verb: string | null) => {
+    const ps = parts.filter((p): p is AfterPart => !!p);
+    return { text: ps.map((p) => p.text).join(' · '), verb, parts: ps };
+  };
+  if (!known.length) return lead ? line([lead], null) : null;
   const of = (s: PauseState | 'published') => known.filter((d) => d.state === s).map((d) => d.day);
   const waiting = of('waiting');
-  if (waiting.length) return { text: [lead, `${spans(waiting)} still wait`].filter(Boolean).join(' · '), verb: o.may === false ? null : 'Decide' };
+  if (waiting.length) return line([lead, { state: 'waiting', text: `${spans(waiting)} still wait` }], o.may === false ? null : 'Decide');
   const words: [PauseState | 'published', string][] = [['asis', 'as is'], ['dont', 'unpublished'], ['published', 'published']];
-  const said = words.map(([s, w]) => [of(s), w] as const).filter(([ds]) => ds.length).map(([ds, w]) => `${spans(ds)} ${w}`);
-  return { text: [lead, ...said].filter(Boolean).join(' · '), verb: null };
+  return line([lead, ...words.map(([s, w]) => [s, of(s), w] as const).filter(([, ds]) => ds.length).map(([s, ds, w]) => ({ state: s, text: `${spans(ds)} ${w}` }))], null);
 }
+
+/** A part of the line under the day after an episode: some of its days, what became of them, in words. */
+export interface AfterPart { state: PauseState | 'published'; text: string }
 
 /** The Runs view's ribbon (ADR 0009 §12): the paused days by month, each its date and what became of it. */
 export function ribbonOf(days: readonly { day: string; state: PauseState }[]): { month: string; days: { day: string; date: string; state: PauseState }[] }[] {

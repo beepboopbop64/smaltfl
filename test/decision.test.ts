@@ -90,6 +90,10 @@ describe('the decision sheet’s words (ADR 0009 §12: 45 at a glance)', () => {
     expect(sheetText({ ...thu, readers: null }).options[1]).toMatchObject({ label: 'Don’t publish', number: 'nothing shown' });
     // A day kept that is stale says its age under it.
     expect(sheetText({ ...thu, readers: { day: '2023-09-18', rows: 89_571 } }).options[1]!.sub).toBe('3 days old');
+    // How long it has waited, said by the clock it was held at when that was today: "Paused since 10:31", never
+    // "Waiting <1 min"; held on an earlier day, by how long.
+    expect(sheetText({ ...thu, waited: 0.4, since: '10:31' }).status).toBe('Paused since 10:31');
+    expect(sheetText({ ...thu, waited: 60 * 50, since: null }).status).toBe('Waiting 2 days');
   });
 
   it('says on the Publish row what it overrides when the checks held the day too, and the button names it', () => {
@@ -255,16 +259,17 @@ describe('the cause card’s pause row, the day after an episode, and the record
 
   it('says what became of an episode’s days the day after it: the day on screen once it published, what still waits with Decide', () => {
     const today = { day: '2023-09-25', state: 'published' } as const;
+    // Each part carries its state, so the screen draws its mark beside its words: the line keys the strip's ‖ ⚑ ✕.
     expect(afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'dont' }, { day: '2023-09-23', state: 'dont' }, { day: '2023-09-24', state: 'dont' }], { today }))
-      .toEqual({ text: 'Mon 25 published · Thu as is · Fri–Sun unpublished', verb: null });
+      .toEqual({ text: 'Mon 25 published · Thu as is · Fri–Sun unpublished', verb: null, parts: [{ state: 'published', text: 'Mon 25 published' }, { state: 'asis', text: 'Thu as is' }, { state: 'dont', text: 'Fri–Sun unpublished' }] });
     // Thu–Sat wait (Sun not run here, left to the strip): the row says so with Decide, whatever else became of them.
     expect(afterLine([{ day: '2023-09-21', state: 'waiting' }, { day: '2023-09-22', state: 'waiting' }, { day: '2023-09-23', state: 'waiting' }, { day: '2023-09-24', state: null }], { today }))
-      .toEqual({ text: 'Mon 25 published · Thu–Sat still wait', verb: 'Decide' });
+      .toEqual({ text: 'Mon 25 published · Thu–Sat still wait', verb: 'Decide', parts: [{ state: 'published', text: 'Mon 25 published' }, { state: 'waiting', text: 'Thu–Sat still wait' }] });
     expect(afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'waiting' }, { day: '2023-09-23', state: 'waiting' }], { may: false }))
-      .toEqual({ text: 'Fri–Sat still wait', verb: null });
-    expect(afterLine([{ day: '2022-11-14', state: 'published' }, { day: '2022-11-16', state: 'published' }])).toEqual({ text: 'Mon, Wed published', verb: null });
+      .toMatchObject({ text: 'Fri–Sat still wait', verb: null });
+    expect(afterLine([{ day: '2022-11-14', state: 'published' }, { day: '2022-11-16', state: 'published' }])).toMatchObject({ text: 'Mon, Wed published', verb: null });
     expect(afterLine([{ day: '2023-09-21', state: null }])).toBeNull();
-    expect(afterLine([{ day: '2023-09-21', state: null }], { today })).toEqual({ text: 'Mon 25 published', verb: null });
+    expect(afterLine([{ day: '2023-09-21', state: null }], { today })).toMatchObject({ text: 'Mon 25 published', verb: null });
   });
 
   it('puts the paused days on a ribbon by month, each once, and says a day’s decision in three lines', () => {
