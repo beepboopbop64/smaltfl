@@ -451,6 +451,35 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
 }
 
 /**
+ * The days a flow's record says were published, in the order they were: by a passing run, or by an applied release
+ * (its decision's day). A day published twice is listed twice.
+ */
+function publishedDays(entries: readonly EntryLike[], period: string | null | undefined): { seq: number; day: string }[] {
+  const decisionDay = new Map<number, string | null>();
+  const out: { seq: number; day: string }[] = [];
+  for (const e of entries) {
+    const a = e.about as JSONValue;
+    if (!isRecord(a)) continue;
+    let d: string | null = null;
+    if (e.kind === 'decide' && isDecide(a)) decisionDay.set(e.seq, a.day);
+    else if (e.kind === 'run' && a.outcome === 'ok') d = dayOf(a, period);
+    else if (e.kind === 'release' && a.outcome === 'applied') d = (Number.isInteger(a.decision) ? decisionDay.get(a.decision as number) : null) ?? dayOf(a, period);
+    if (d) out.push({ seq: e.seq, day: d });
+  }
+  return out;
+}
+
+/**
+ * The day readers saw at the end of a flow's record: the day of its last publication (a passing run, or an applied
+ * release), since each one points the names at its day (an earlier day passing moves them back, Q-51). Read before a
+ * decision's entry, the day readers had when it was made: what a decision not to publish kept. Null when nothing has
+ * published.
+ */
+export function lastPublished(entries: readonly EntryLike[], period?: string | null): string | null {
+  return publishedDays(entries, period).at(-1)?.day ?? null;
+}
+
+/**
  * The standing decision a held day falls under (ADR 0009 §6), if any: the decision not to publish "until a day
  * passes" made for the nearest day before it (the latest such entry for that day, never one amended since, never one
  * applied under another), when no day after that one and before this one has published, by a passing run or an
@@ -458,29 +487,31 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
  */
 export function standingFor(entries: readonly EntryLike[], day: string, period?: string | null): Decided | null {
   const amended = new Set(entries.filter((e) => e.kind === 'decide' && e.amends !== null).map((e) => e.amends));
-  const decides = new Map<number, Decided>();
-  const published: string[] = [];
+  let best: Decided | null = null;
   for (const e of entries) {
     const a = e.about as JSONValue;
-    if (!isRecord(a)) continue;
-    if (e.kind === 'decide' && isDecide(a)) decides.set(e.seq, decided(e, a));
-    else if (e.kind === 'run' && a.outcome === 'ok') {
-      const d = dayOf(a, period);
-      if (d) published.push(d);
-    } else if (e.kind === 'release' && a.outcome === 'applied') {
-      const d = (Number.isInteger(a.decision) ? decides.get(a.decision as number)?.about.day : null) ?? dayOf(a, period);
-      if (d) published.push(d);
-    }
-  }
-  let best: Decided | null = null;
-  for (const d of decides.values()) {
-    const a = d.about;
-    if (a.option !== 'dont' || a.scope !== 'untilPass' || a.under !== undefined || amended.has(d.seq) || a.day === null || !(a.day < day)) continue;
-    if (!best || a.day > best.about.day! || (a.day === best.about.day && d.seq > best.seq)) best = d;
+    if (e.kind !== 'decide' || !isDecide(a)) continue;
+    if (a.option !== 'dont' || a.scope !== 'untilPass' || a.under !== undefined || amended.has(e.seq) || a.day === null || !(a.day < day)) continue;
+    if (!best || a.day > best.about.day! || (a.day === best.about.day && e.seq > best.seq)) best = decided(e, a);
   }
   if (!best) return null;
   const from = best.about.day!;
-  return published.some((p) => p > from && p < day) ? null : best;
+  return publishedDays(entries, period).some((p) => p.day > from && p.day < day) ? null : best;
+}
+
+/**
+ * The standing decision an entry ends (ADR 0009 §12's "· ends #26"), by standingFor's own rule: a passing run, or an
+ * applied release, publishes its day, and a decision that stood for that day just before it stands for no day after
+ * it. Null for any other entry, for a day the decision is not before (a day before it publishing ends nothing), for a
+ * decision amended or applied under another, and for a day already published (a run again ends nothing again).
+ */
+export function standingEnds(entries: readonly EntryLike[], index: number, period?: string | null): number | null {
+  const e = entries[index];
+  if (!e) return null;
+  const before = entries.slice(0, index);
+  const mine = publishedDays(entries.slice(0, index + 1), period).find((p) => p.seq === e.seq);
+  if (!mine || publishedDays(before, period).some((p) => p.day === mine.day)) return null;
+  return standingFor(before, mine.day, period)?.seq ?? null;
 }
 
 /**

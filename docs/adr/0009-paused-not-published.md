@@ -238,7 +238,7 @@ published. Cached check counts must still hold. And older builds must refuse wha
     - **The first screen.** The day line under the strip carries the pause and the day readers see, "‖ Paused · readers
       see Wed 20", with **Decide ›**, which opens the decision sheet; once decided, the decision's receipt, as the sheet
       collapses to it (below). A waiting output's News leads with the staged bar and "‖ Waits for a decision ·
-      Decide ›", and what it says of its rows is "From its staged rows", never the day's own verdict.
+      Decide ›", and what it says of its rows is "From its rows not yet published", never the day's own verdict.
     - **What each viewer may see.** The status line after a run is one day sentence for every viewer, of what their
       policy lets them see: the day's head where its story is theirs to read, else what became of the day ("Thu Sep
       21: paused · readers see Wed 20 · waits on Owner"); the run's figures sit in its title, a node closed to the
@@ -257,10 +257,11 @@ published. Cached check counts must still hold. And older builds must refuse wha
       weather_effect"); its one verb is **Decide**, under it, before the health cells and the checks, so they are on the
       first screen; "Tell the source" moves behind ⋯. Someone who may not decide sees who does in the verb's place
       ("Owner decides"). The day's mark sits by its date and on its News tab too. On a paused card the checks are drawn
-      in full only when they held the day too, under their ‖ (the row has named them); checks that passed, near their
+      in full only when they held the day too, under their ‖ (the row has named them), headed "Checks held" once the day
+      is decided; checks that passed, near their
       limit or not, are one line, "Checks passed: 9.55% dropped", a tap from their sheet, never a second problem nor a
-      contradiction of the pause. For the budget, a paused card leaves out the health cells' head and the kinds under its
-      rows of changes, and readers' day goes without its age there (the day line, the staged bar and the list carry it).
+      contradiction of the pause. For the budget, a paused card leaves out the health cells' head (as does the day after
+      an episode while a day of it waits) and the kinds under its rows of changes, and readers' day goes without its age there (the day line, the staged bar and the list carry it).
       A tap on the row lists the waiting outputs, the day's other outputs as up to date (the held run made the versions
       readers have: Thu Sep 21's zone_list, districts and weather_hourly), and then "What readers get ›" opens the
       decision sheet read only: its rows greyed, whom it waits on at its top, and no button. Once decided, the row
@@ -293,7 +294,8 @@ published. Cached check counts must still hold. And older builds must refuse wha
       - Only the options the cause allows appear.
       - Picking an option shows the reasons that fit it under "Why?" ("Why? (needed)" for Publish as is: Real change,
         Source confirmed; Known outage, Re-send expected for not publishing), one tap each; the scope only under Don't
-        publish ("Just Thu 21", "Until a later day passes"). What is under each number shows on the row picked.
+        publish ("Just Thu 21", "Until a later day passes"), and not once readers see a later day (one has passed: the
+        decision would stand already ended). What is under each number shows on the row picked.
       - Its head says since when the day has waited, by the clock it was held at that day ("Paused since 10:31"), never
         "Waiting <1 min".
       - The button says what is missing while it can't go ("Pick an option", "Pick a reason"), then names the result in
@@ -325,7 +327,9 @@ published. Cached check counts must still hold. And older builds must refuse wha
       again, or run again with nothing waiting, is a routine line, marked with what became of its day.
     - **Status words say the state.** A day not published that a later day has passed since says so in its own views,
       as it stood then and naming no later day (ADR 0008 §10): "Not published · readers kept Thu 21", never "Staged … ·
-      readers see Tue 26" nor "superseded by Tue 26"; the checks' sheet says the steps
+      readers see Tue 26" nor "superseded by Tue 26"; one that still waits, "Thu 21 built, not published · readers kept
+      Mon 18" over its Decide, and its row, day line, cards and status line "readers kept Mon 18" (days.readersOf),
+      never "Not published" before anyone decided; the checks' sheet says the steps
       after them were "built, not published" under a flow that holds, and which day the outputs keep ("Outputs keep Mon
       18"); a source file matched to the data's list is "Sealed: this file matches the source's list", not "the bytes
       published".

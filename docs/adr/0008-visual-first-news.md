@@ -161,7 +161,8 @@ where about 35,000 are usual, and everything else held.
    where it is first shown ("usual", "actual"; counted in the glance budget; four weeks add the weekday its darker
    bands are, "Sundays"); in a sheet a second row keys what else it draws (a day with no usual of its own, each mark
    with its word); the canvas's loads strip keys each mark it draws with its word, "holiday season" apart from
-   "holiday"; and the day after an episode keys ‖ ⚑ ✕ in its line, each beside the days it marks, at no cost in words.
+   "holiday"; and the day after an episode keys ‖ ⚑ ✕ in its line, each beside the days it marks, at no cost in words,
+   and its strip keys the episode's ! ("wrong") and its days not run; an episode's sheet keys its bars as a strip does.
    Every band's edge is 3:1 or more against the card in both themes even drawn at a phone's 1x, the dark theme's band
    fill lifted to show as a shape; the gate's zoom draws its two sides as lines; the History calendar's day on screen
    is a heavy ring. Dashes mean absent and nothing else: a

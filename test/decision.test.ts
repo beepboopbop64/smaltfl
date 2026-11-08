@@ -132,8 +132,11 @@ describe('the decision sheet’s words (ADR 0009 §12: 45 at a glance)', () => {
     expect(dont).not.toContain('37,935 after checks');
     expect(sheetWords(t)).toBe(Math.max(words(t, rest), words(t, { option: 'asis', scope: 'day', reason: 'x' }), words(t, { option: 'dont', scope: 'untilPass', reason: null })));
     expect(sheetWords(t)).toBeLessThanOrEqual(45);
-    // A run with no day is decided for itself: no scope.
+    // A run with no day is decided for itself: no scope. Nor once readers see a later day (Mon 25 passed before Thu 21
+    // was decided): "until a later day passes" would stand already ended, and close Fri on its next run.
     expect(sheetText({ ...thu, day: null }).scopes).toBeNull();
+    expect(sheetText({ ...thu, later: '2023-09-25' }).scopes).toBeNull();
+    expect(sheetShown(sheetText({ ...thu, later: '2023-09-25' }), { option: 'dont', scope: 'untilPass', reason: null }).at(-1)).toBe('Don’t publish Thu 21');
     // A day not judged (no history) offers its reason to publish.
     expect(sheetText({ ...thu, unjudged: true }).chips.asis[0]).toBe('No history');
   });
@@ -167,6 +170,9 @@ describe('the decision sheet’s words (ADR 0009 §12: 45 at a glance)', () => {
       .toEqual({ head: 'Not published · readers keep Thu 21 until a day passes', sub: 'Owner · 10:33 · record #26', change: 'Change decision' });
     expect(receiptLines({ state: 'dont', day: '2023-09-23', readers: '2023-09-21', released: 0, who: 'Owner', at: '10:33', seq: 29, under: 'Fri', standing: true }))
       .toEqual({ head: 'Not published · readers keep Thu 21', sub: 'Under Fri’s decision · record #29', change: 'Change decision' });
+    // Once a later day has published, the day kept then; never the later day.
+    expect(receiptLines({ state: 'dont', day: '2023-09-23', readers: '2023-09-21', past: true, released: 0, who: 'Owner', at: null, seq: 29, under: 'Fri', standing: true }).head).toBe('Not published · readers kept Thu 21');
+    expect(receiptLines({ state: 'dont', day: '2023-09-23', readers: null, past: true, released: 0, who: 'Owner', at: null, seq: 29, under: null, standing: false }).head).toBe('Not published');
     expect(receiptLines({ state: 'waiting', day: '2023-09-21', readers: '2023-09-20', released: 0, who: 'Owner', at: '10:32', seq: 20, under: null, standing: false }).head).toBe('Decided, not yet published');
     // A line and a second line, not a paragraph.
     for (const state of ['asis', 'dont'] as const) {
@@ -201,6 +207,11 @@ describe('the cause card’s pause row, the day after an episode, and the record
     expect(pauseLines({ ...base, state: 'dont', who: 'Owner', at: '09:24', standing: true }).reach).toBe('Not published until a day passes');
     // Every held output already showing its versions: published as is, by nobody.
     expect(pauseLines({ ...base, state: 'asis' }).reach).toBe('Published as is');
+    // Once a later day has published (Mon 25), the day's own row says what readers kept then, never the later day:
+    // Fri 22 waiting, or decided under Thu's rule, with Thu 21 published before it.
+    expect(pauseLines({ ...base, state: 'waiting', readers: '2023-09-21', past: true }).see).toBe('readers kept Thu 21');
+    expect(pauseLines({ ...base, state: 'dont', under: 'Fri', readers: '2023-09-21', past: true }).see).toBe('readers kept Thu 21');
+    expect(pauseLines({ ...base, state: 'waiting', readers: null, past: true }).see).toBeNull();
     // A row and its verb, not a paragraph: at most 13 words with three outputs named, in every state (the card's budget
     // holds it: test/story-real.test.ts).
     for (const s of ['waiting', 'asis', 'dont'] as const) for (const may of [true, false]) for (const standing of [false, true]) {
@@ -223,10 +234,13 @@ describe('the cause card’s pause row, the day after an episode, and the record
   it('draws a paused card’s checks in full only when they held the day too, else says in one line that they passed', () => {
     const g = { step: 'trips_valid', rows: 41_939, dropped: 4_004, share: 0.0955, limit: 0.1, held: false, near: true, usual: { low: 3_700, high: 9_100, expected: 6_000 } };
     // Thu Sep 21, 2023: near its limit and under it, so fine: one line, its share as its bars say it.
-    expect(pausedChecks(g)).toEqual({ full: false, line: 'Checks passed: 9.55% dropped' });
-    expect(pausedChecks({ ...g, share: 0.06, near: false })).toEqual({ full: false, line: 'Checks passed: 6.0% dropped' });
-    expect(pausedChecks({ ...g, held: true, near: false, share: 0.4567 })).toEqual({ full: true, line: null });
-    expect(pausedChecks(null)).toEqual({ full: false, line: null });
+    expect(pausedChecks(g)).toEqual({ full: false, line: 'Checks passed: 9.55% dropped', head: null });
+    expect(pausedChecks({ ...g, share: 0.06, near: false })).toEqual({ full: false, line: 'Checks passed: 6.0% dropped', head: null });
+    expect(pausedChecks({ ...g, held: true, near: false, share: 0.4567 })).toEqual({ full: true, line: null, head: null });
+    // Once the day is decided (✕ or ⚑ on its header and tab), the held checks are headed in words, never a lone ‖.
+    expect(pausedChecks({ ...g, held: true, near: false, share: 0.4567 }, true)).toEqual({ full: true, line: null, head: 'Checks held' });
+    expect(pausedChecks(g, true).head).toBeNull();
+    expect(pausedChecks(null)).toEqual({ full: false, line: null, head: null });
   });
 
   it('says the day held under the strip, readers’ day and Decide; and atop a waiting output’s News, that it waits', () => {
@@ -237,6 +251,11 @@ describe('the cause card’s pause row, the day after an episode, and the record
     // The day readers see, with its age once it is stale: Tue 19 and Wed 20 not run in this visit.
     expect(dayPausedLine({ state: 'waiting', readers: '2023-09-18', may: true, standing: false, day: '2023-09-21' })).toEqual({ text: 'Paused · readers see Mon 18 · 3 days old', verb: 'Decide' });
     expect(dayPausedLine({ state: 'waiting', readers: '2023-09-20', may: true, standing: false, day: '2023-09-21' }).text).toBe('Paused · readers see Wed 20');
+    // A later day published since: the day kept then, in the past tense, or the pause alone when that isn't known here.
+    expect(dayPausedLine({ state: 'waiting', readers: '2023-09-18', past: true, may: true, standing: false, day: '2023-09-22' }).text).toBe('Paused · readers kept Mon 18');
+    expect(dayPausedLine({ state: 'waiting', readers: null, past: true, may: true, standing: false, day: '2023-09-22' }).text).toBe('Paused');
+    expect(dayPausedLine({ state: 'dont', readers: '2023-09-21', past: true, may: true, standing: false }).text).toBe('Not published · readers kept Thu 21');
+    expect(dayPausedLine({ state: 'dont', readers: null, past: true, may: true, standing: false }).text).toBe('Not published');
     expect(outputPausedLine({ state: 'waiting', may: true, deciders: 'Owner', standing: false })).toEqual({ text: 'Waits for a decision', verb: 'Decide' });
     expect(outputPausedLine({ state: 'waiting', may: false, deciders: 'Owner', standing: false })).toEqual({ text: 'Waits on Owner', verb: null });
     expect(outputPausedLine({ state: 'dont', may: true, deciders: 'Owner', standing: false }).text).toBe('Not published');
@@ -267,6 +286,10 @@ describe('the cause card’s pause row, the day after an episode, and the record
       .toEqual({ text: 'Mon 25 published · Thu–Sat still wait', verb: 'Decide', parts: [{ state: 'published', text: 'Mon 25 published' }, { state: 'waiting', text: 'Thu–Sat still wait' }] });
     expect(afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'waiting' }, { day: '2023-09-23', state: 'waiting' }], { may: false }))
       .toMatchObject({ text: 'Fri–Sat still wait', verb: null });
+    // One day waiting takes the singular: "Fri still waits", never "Fri still wait"; two days apart are two.
+    expect(afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'waiting' }], { today }))
+      .toMatchObject({ text: 'Mon 25 published · Fri still waits', verb: 'Decide' });
+    expect(afterLine([{ day: '2023-09-21', state: 'waiting' }, { day: '2023-09-23', state: 'waiting' }], { today })!.text).toBe('Mon 25 published · Thu, Sat still wait');
     expect(afterLine([{ day: '2022-11-14', state: 'published' }, { day: '2022-11-16', state: 'published' }])).toMatchObject({ text: 'Mon, Wed published', verb: null });
     expect(afterLine([{ day: '2023-09-21', state: null }])).toBeNull();
     expect(afterLine([{ day: '2023-09-21', state: null }], { today })).toMatchObject({ text: 'Mon 25 published', verb: null });
@@ -298,6 +321,8 @@ describe('the cause card’s pause row, the day after an episode, and the record
     expect(daySentence({ day: '2023-09-21', head: null, wrong: false, pause: { ...waiting, state: 'asis' } })).toBe('Thu Sep 21: published as is');
     expect(daySentence({ day: '2023-09-22', head: null, wrong: false, pause: { ...waiting, state: 'dont', standing: true } })).toBe('Fri Sep 22: not published until a day passes · readers keep Wed 20');
     expect(daySentence({ day: '2023-09-18', head: null, wrong: false, pause: null })).toBe('Mon Sep 18: published');
+    // Ana on Fri 22 once Mon 25 has published: as it stood then, naming no later day.
+    expect(daySentence({ day: '2023-09-22', head: null, wrong: false, pause: { ...waiting, readers: '2023-09-18', past: true } })).toBe('Fri Sep 22: paused · readers kept Mon 18 · waits on Owner');
     // Dev on Tue Nov 8, 2022: held for Extras, a column closed to him, his own story calm: the pause, not a calm head.
     expect(daySentence({ day: '2022-11-08', head: 'A normal Tuesday', wrong: false, pause: waiting })).toBe('Tue Nov 8: paused · readers see Wed 20 · waits on Owner');
   });
@@ -320,5 +345,7 @@ describe('the cause card’s pause row, the day after an episode, and the record
     expect(figures(dev)).toBe('Thu Sep 21: Run 15 took 820 ms: 3 built, 1 reused, 1 folded; held: trips; trips_valid.');
     // A run that published says nothing held; the engine in the page says so.
     expect(runFigures({ day: null, run: 2, ms: '1.2 s', nodes, holds: [], sight: () => 'all', page: true })).toBe('Run 2 took 1.2 s: 3 built, 1 reused, 1 folded (the engine runs in the page here).');
+    // Named as the Runs view names the run, by its record entry: one run, one number.
+    expect(runFigures({ day: '2023-09-23', run: '#34', ms: '154 ms', nodes, holds: [], sight: () => 'all', page: false })).toMatch(/^Sat Sep 23: Run #34 took 154 ms: /);
   });
 });

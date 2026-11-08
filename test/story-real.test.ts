@@ -437,7 +437,7 @@ describe.skipIf(!has)('the story on the real history', () => {
       const by = s.gate?.held ? ['trips', 'checks'] : ['trips'];
       for (const [state, may, under, standing] of [['waiting', true, null, false], ['waiting', false, null, false], ['asis', true, null, false], ['dont', true, null, false], ['dont', true, null, true], ['dont', true, 'Wed', true]] as const) {
         const l = pauseLines({ state, names: ['zone_hour', 'borough_hour', 'weather_effect'], by, readers: plus(d, -1), who: 'Owner', at: '23:59', under, may, deciders: 'Owner', standing });
-        const said = pausedGlance(s, l);
+        const said = pausedGlance(s, l, state !== 'waiting');
         expect(words(said), `${d} ${state}${may ? '' : ' (may not decide)'}: ${said.join(' | ')}`).toBeLessThanOrEqual(60);
       }
       // The sheet, drawn as the page draws it, the day before what readers keep; at its wordiest, the day after already
@@ -472,7 +472,10 @@ describe.skipIf(!has)('the story on the real history', () => {
       const states: ('waiting' | 'asis' | 'dont' | null)[][] = [days.map(() => 'waiting'), days.map((_, i) => (i === 0 ? 'asis' : 'dont')), days.map((_, i) => (i === days.length - 1 ? null : 'waiting'))];
       for (const fates of states) {
         const after = afterLine(days.map((x, i) => ({ day: x, state: fates[i]! })), { today: { day, state: 'published' } })!;
-        const said = [...glanceStrings(mon).filter((x) => x !== mon.labels.after), after.text, after.verb ?? '', fates.includes(null) ? 'not run' : ''];
+        // Its strip keys the episode's ! ("wrong"); while a day of it waits, the health cells go without their head, as
+        // on a paused card (its line, with Decide, and its strip are named around them).
+        const said = [...glanceStrings(mon).filter((x) => x !== mon.labels.after && !(fates.includes('waiting') && x === mon.labels.health)), after.text, after.verb ?? '', fates.includes(null) ? 'not run' : ''];
+        expect(said).toContain('wrong');
         expect(said.reduce((t, x) => t + wordsIn(x), 0), `${day}: ${said.join(' | ')}`).toBeLessThanOrEqual(24);
       }
     }

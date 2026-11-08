@@ -17,11 +17,13 @@ import {
   inputsKey,
   inputsOf,
   judgeClaims,
+  lastPublished,
   pausesOf,
   pauseState,
   reachOf,
   sameKeys,
   stagedKeys,
+  standingEnds,
   standingFor,
   tripped,
   waitingOf,
@@ -397,6 +399,52 @@ describe('a decision that stands until a day publishes (ADR 0009 §6)', () => {
     const sat = decide('2023-09-23', 4, 'dont', 'untilPass', { under: fri.seq });
     // Sat applied Fri's decision: Sun stands under Fri's, not Sat's.
     expect(standingFor([fri, sat], '2023-09-24')!.seq).toBe(fri.seq);
+  });
+
+  it('is said to end where standingFor stops applying it, and nowhere else (the record\'s "· ends #N")', () => {
+    const at = (log: LogEntry[], e: LogEntry) => standingEnds(log, log.indexOf(e));
+    const thu = decide('2023-09-21', 1, 'dont', 'untilPass');
+    // A day after it publishes: it ends, and Fri no longer stands under it.
+    const mon = ok('2023-09-25', 6);
+    const log = [held('2023-09-21', 1), thu, mon];
+    expect(at(log, mon)).toBe(thu.seq);
+    expect(standingFor(log, '2023-09-26')).toBeNull();
+    // A day before it publishing (Wed 20 run after Thu was decided) ends nothing: Fri still stands under it.
+    const wed = ok('2023-09-20', 2);
+    const early = [held('2023-09-21', 1), thu, wed];
+    expect(at(early, wed)).toBeNull();
+    expect(standingFor(early, '2023-09-22')!.seq).toBe(thu.seq);
+    // Amended to publish as is: it stopped standing when amended, so the day that publishes later ends nothing.
+    const amend = decide('2023-09-21', 1, 'asis', 'day', {}, { amends: thu.seq });
+    const mon2 = ok('2023-09-25', 6);
+    const amended = [held('2023-09-21', 1), thu, amend, mon2];
+    expect(standingFor(amended.slice(0, 3), '2023-09-22')).toBeNull();
+    expect(at(amended, mon2)).toBeNull();
+    // A release that publishes a day after it ends it, and the day that passes after that ends nothing more.
+    const fri = decide('2023-09-22', 3, 'asis');
+    const rel = release(fri.seq);
+    const mon3 = ok('2023-09-25', 6);
+    const released = [held('2023-09-21', 1), thu, held('2023-09-22', 3), fri, rel, mon3];
+    expect(at(released, rel)).toBe(thu.seq);
+    expect(at(released, mon3)).toBeNull();
+    // The same day run again ends nothing again; held runs and decisions end nothing.
+    const again = ok('2023-09-25', 7);
+    expect(at([...log, again], again)).toBeNull();
+    expect(at(log, thu)).toBeNull();
+  });
+
+  it('says the day readers had when a decision was made: the day of the last publication before it', () => {
+    const fri = decide('2023-09-22', 3, 'dont');
+    // Readers had Thu 21 (published as is) when Fri was decided; Mon 25 passing after it changes nothing of that.
+    const thu = decide('2023-09-21', 1, 'asis');
+    const log = [ok('2023-09-18', 1), held('2023-09-21', 1), thu, release(thu.seq), held('2023-09-22', 3), fri, ok('2023-09-25', 6)];
+    expect(lastPublished(log.slice(0, log.indexOf(fri)))).toBe('2023-09-21');
+    expect(lastPublished(log)).toBe('2023-09-25');
+    // An earlier day passing moves the names back (Q-51): readers then had that day.
+    expect(lastPublished([ok('2024-01-01', 1), ok('2023-09-20', 2)])).toBe('2023-09-20');
+    // A refused release published nothing; nothing published yet, nothing.
+    expect(lastPublished([ok('2023-09-18', 1), thu, release(thu.seq, 'refused')])).toBe('2023-09-18');
+    expect(lastPublished([held('2023-09-21', 1)])).toBeNull();
   });
 
   it('takes the nearest day before, and reads a day from the period when an entry has none', () => {

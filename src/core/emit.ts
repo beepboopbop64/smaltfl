@@ -8,7 +8,7 @@
  */
 import { foldedInto } from './optimize.js';
 import type { Column, ColumnType, ExpectNode, FlowPlan, FormulaNode, Named, PlanNode } from './plan.js';
-import { identifiers, quoteIdent as q } from './sqltext.js';
+import { identifiers, quoteIdent as q, tokens, type Token } from './sqltext.js';
 
 export interface EmitContext {
   /** The table a stored node is read from; undefined when the node is folded into the statement. */
@@ -266,13 +266,56 @@ export function emitLookup(sql: string, key: string, label: string): string {
   return `SELECT ${q(key)}, ${q(label)} FROM (\n${sql}\n) WHERE ${q(key)} IS NOT NULL AND ${q(label)} IS NOT NULL`;
 }
 
+/** The engine's date and time functions, which take a stamp and then modifiers ("-1 hour"). */
+const TIME_FUNCTIONS = new Set(['strftime', 'datetime', 'date', 'time', 'julianday', 'unixepoch']);
+/** A modifier that moves a stamp by a whole amount of a unit: "-1 hour", "+30 minutes", "-60 minutes". */
+const SHIFT = /^[+-]?\d+(\.\d+)? (hours?|minutes?|seconds?|days?)$/i;
+
+/**
+ * The shift that expressions people wrote give a stamp column, read in the engine's own terms (ADR 0004 §5: only the
+ * emitter knows its language): the modifiers that follow `column` in one of its date and time functions, as written
+ * ("strftime('%Y-%m-%d %H:00', \"time\", '-1 hour')", "datetime(time, '-60 minutes')"); the first expression that has
+ * one wins. Null when none moves it. emitDayHours applies them, so a card reads the stamp as the flow's step does.
+ */
+export function stampShift(exprs: readonly string[], column: string): string[] | null {
+  const named = (t: Token) => (t.kind === 'word' && t.text.toLowerCase() === column.toLowerCase()) || (t.kind === 'quoted' && t.text.slice(1, -1).replace(/""/g, '"') === column);
+  for (const expr of exprs) {
+    let toks: Token[];
+    try {
+      toks = tokens(expr).filter((t) => t.kind !== 'space' && t.kind !== 'comment');
+    } catch {
+      continue;
+    }
+    for (let i = 0; i + 1 < toks.length; i++) {
+      if (toks[i]!.kind !== 'word' || !TIME_FUNCTIONS.has(toks[i]!.text.toLowerCase()) || toks[i + 1]!.text !== '(') continue;
+      // Its arguments, split at its own commas.
+      const args: Token[][] = [[]];
+      let depth = 0;
+      for (let j = i + 2; j < toks.length; j++) {
+        const t = toks[j]!;
+        if (t.text === '(') depth++;
+        else if (t.text === ')' && depth-- === 0) break;
+        if (t.text === ',' && depth === 0) args.push([]);
+        else args.at(-1)!.push(t);
+      }
+      const at = args.findIndex((a) => a.length === 1 && named(a[0]!));
+      if (at < 0) continue;
+      const mods = args.slice(at + 1).map((a) => (a.length === 1 && a[0]!.kind === 'string' ? a[0]!.text.slice(1, -1).replace(/''/g, "'") : null));
+      const shift = mods.filter((m): m is string => m !== null && SHIFT.test(m.trim())).map((m) => m.trim());
+      if (shift.length) return shift;
+    }
+  }
+  return null;
+}
+
 /**
  * One day's hours of a relation of hourly rows, each measure averaged over its places (the districts): the hour of
  * day (0–23) and each column's mean. `shift` moves the stamp first, for a source that stamps an hour at its end
- * (Open-Meteo: "-1 hour"), as its own step reads it. For a card that draws the day's 24 hours.
+ * (Open-Meteo: "-1 hour"), as its own step reads it (stampShift). For a card that draws the day's 24 hours.
  */
-export function emitDayHours(sql: string, time: string, day: string, columns: readonly string[], shift: string | null = null): string {
-  const t = shift ? `${q(time)}, '${shift.replace(/'/g, "''")}'` : q(time);
+export function emitDayHours(sql: string, time: string, day: string, columns: readonly string[], shift: string | readonly string[] | null = null): string {
+  const mods = shift === null ? [] : typeof shift === 'string' ? [shift] : shift;
+  const t = [q(time), ...mods.map((m) => `'${m.replace(/'/g, "''")}'`)].join(', ');
   const avg = columns.map((c) => `avg(${q(c)}) AS ${q(c)}`).join(', ');
   return `SELECT CAST(strftime('%H', ${t}) AS INTEGER) AS "hour", ${avg} FROM (\n${sql}\n) WHERE date(${t}) = '${day.replace(/'/g, "''")}' GROUP BY 1 ORDER BY 1`;
 }

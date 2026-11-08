@@ -127,6 +127,14 @@ describe('the cause, as a time', () => {
     expect(fifth.hero).toBe('hours');
     expect(fifth.head).toMatch(/^Trips fall to ~[\d,]+\/h from 13:00$/);
     expect(fifth.head.match(/~[\d,]+\/h/)![0]).toBe(fifth.hoursLabels!.floor.replace(/^still /, ''));
+    // No trips at all after the fall (a file cut off at 13:00) is no trickle and no rate: headed as found, with no
+    // "still" over hours that have no ribbon.
+    const cut = story({ [DAY]: { stopAt: 13, keep: 0, vendorShare: 0.5 } });
+    expect(cut.hero).toBe('hours');
+    expect(cut.head).toBe('Trips fall 100% from 13:00');
+    expect(cut.head).not.toMatch(/~0\/h|trickle/);
+    expect(cut.hoursLabels!.floor).toBe('');
+    expect(cut.labels.hero.join(' ')).not.toMatch(/still/);
     // The vendors' mix moved with it, within what the cause moved: folded as the same day's, told as a note.
     const mix = s.findings.find((f) => f.key === 'share:VendorID=1')!;
     expect(['follows', 'sameDay', 'absorbed']).toContain(mix.tier);
@@ -244,6 +252,19 @@ describe('the words at a glance', () => {
     expect(hair.share).not.toMatch(/^10(\.0+)?%/);
     expect(gateLabels(gate(3, 10_000)).said).toBe('<0.1%');
     expect(gateLabels(gate(500, 4000, null))).toMatchObject({ limit: null, margin: null, zoom: false, share: '12.5% of arrived rows dropped' });
+    // The gap is worked out from the share as printed, so they subtract to the limit on exact halves too: 117 of 1,040
+    // (11.25%) is "11.3% … 1.3 pt over", 96 of 1,024 (9.375%) "9.38% … 0.62 pt under".
+    expect(gateLabels(gate(117, 1040))).toMatchObject({ said: '11.3%', margin: '1.3 pt over' });
+    expect(gateLabels(gate(13, 1040))).toMatchObject({ said: '1.3%', margin: '8.7 pt under' });
+    expect(gateLabels(gate(96, 1024))).toMatchObject({ said: '9.38%', margin: '0.62 pt under' });
+    for (let rows = 1000; rows < 1400; rows++) for (let dropped = 1; dropped <= rows * 0.3; dropped++) {
+      const l = gateLabels(gate(dropped, rows));
+      if (!l.margin || l.said === '<0.1%') continue;
+      const dec = l.said.split('.')[1]!.length - 1;
+      const [pt, side] = l.margin.split(' pt ');
+      const back = Number(l.said.slice(0, -1)) + (side === 'over' ? -1 : 1) * Number(pt);
+      expect(back.toFixed(dec), `${dropped} of ${rows}: ${l.said} … ${l.margin}`).toBe((10).toFixed(dec));
+    }
   });
 
   it('says a rule’s usual one way, and orders the rules one way (tabs #12)', () => {

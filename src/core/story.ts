@@ -93,6 +93,7 @@ export interface Story {
    * ("~77k fewer"; `missing` names the wash that draws them), the ghost's day; and, when the hours before the fall ran
    * well off a usual day's, by how much ("~8k above usual"), so the trips missing from the fall and the whole day's
    * change can both be read true (Sat Sep 17, 2022: ~52k fewer, the day −42%). */
+  /** The hour chart's words; `floor` the short hours' rate ("still ~330/h"), empty when no trips came in them. */
   hoursLabels: { cut: string; floor: string; missing: string; ghost: string; before: string | null } | null;
   gate: Gate | null;
   /** The finding the head is about, when there is one. */
@@ -282,15 +283,20 @@ export function gateLabels(g: Gate): { said: string; share: string; limit: strin
   // One rule wherever a share of the checks is printed: one decimal, two within a point of the limit, more only when it
   // would read as the limit itself; and the gap to the limit always, to the same decimals, so one is the other less the
   // limit ("45.7% … 35.7 pt over", "9.55% … 0.45 pt under", "4.6% … 5.4 pt under").
+  // The share is rounded once and the gap worked out from the share as printed, so the two always subtract to the limit
+  // (11.25% printed "11.3%" is "1.3 pt over", never "1.2").
+  const lim = g.limit === null ? null : Math.round(g.limit * 1e6) / 1e4;
+  const shown = (d: number) => Number((g.share * 100).toFixed(d));
   let dec = off !== null && Math.abs(off) <= 0.01 ? 2 : 1;
-  while (off !== null && off !== 0 && (Number(pts.toFixed(dec)) === 0 || Number((g.share * 100).toFixed(dec)) === Math.round(g.limit! * 1e6) / 1e4) && dec < 4) dec++;
+  while (off !== null && off !== 0 && shown(dec) === lim && dec < 4) dec++;
+  const gap = lim === null ? 0 : Math.abs(shown(dec) - lim);
   // A share that isn't nothing never prints as 0.0% (ADR 0008 §12).
-  const share = g.share > 0 && Number((g.share * 100).toFixed(dec)) === 0 ? '<0.1%' : `${(g.share * 100).toFixed(dec)}%`;
+  const share = g.share > 0 && shown(dec) === 0 ? '<0.1%' : `${(g.share * 100).toFixed(dec)}%`;
   return {
     said: share,
     share: `${share} of arrived rows dropped`,
     limit: g.limit !== null ? `limit ${Math.round(g.limit * 100)}%` : null,
-    margin: off !== null && off !== 0 ? `${pts.toFixed(dec)} pt ${off > 0 ? 'over' : 'under'}` : null,
+    margin: off !== null && off !== 0 ? `${gap.toFixed(dec)} pt ${off > 0 ? 'over' : 'under'}` : null,
     // Within two points of the limit the share is drawn again on a zoom, its margin said there.
     zoom: off !== null && off !== 0 && Math.abs(off) <= NEAR_LIMIT,
     rows: `${fmtInt(g.dropped)} rows dropped`,
@@ -735,9 +741,12 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     const hours = got.slice(from, to + 1);
     return hours.every((n) => n > 0) && hours.reduce((a, b) => a + b, 0) < 0.1 * usual.slice(from, to + 1).reduce((a, b) => a + b, 0);
   })() : false;
+  // No trips at all in those hours is no trickle and no rate: the fall is headed as it was found ("Trips fall 100% from
+  // 13:00"), never as trips still coming at ~0 an hour.
+  const none = !!hoursF?.hours && hoursF.hours.got.slice(hoursF.hours.from, hoursF.hours.to + 1).every((n) => n === 0);
   let head: string;
   if (o.refused) head = 'File refused: bytes don’t match';
-  else if (hero === 'hours' && hoursF) head = hoursF.hours && hoursF.hours.to === 23 && perHour !== null ? (trickle ? `Trips fall to trickle from ${clock(hoursF.hours.from)}` : `Trips fall to ~${fmtInt(perHour)}/h from ${clock(hoursF.hours.from)}`) : hoursF.title;
+  else if (hero === 'hours' && hoursF) head = hoursF.hours && hoursF.hours.to === 23 && perHour !== null && !none ? (trickle ? `Trips fall to trickle from ${clock(hoursF.hours.from)}` : `Trips fall to ~${fmtInt(perHour)}/h from ${clock(hoursF.hours.from)}`) : hoursF.title;
   else if (hero === 'split' && split) {
     const restRatio = split.rest.today / Math.max(1, split.rest.usual);
     const partRatio = split.part.today / Math.max(1, split.part.usual);
@@ -846,7 +855,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     // What the hours before the fall add to the day's change, as the detail's waterfall counts them (fallSteps).
     const off = amount ? fallParts(hoursF.hours, amount)?.before ?? 0 : 0;
     const before = amount && Math.abs(off) >= 0.05 * amount.expected ? `~${compact(Math.abs(off))} ${off > 0 ? 'above' : 'below'} usual` : null;
-    return { cut: clock(from), floor: `${to === 23 ? 'still ' : ''}~${fmtInt(perHour ?? 0)}/h`, missing: `~${compact(Math.max(0, want - had))} fewer`, ghost: `usual ${weekdayOf(day)}`, before };
+    // No trips in the short hours: no rate to bracket and nothing "still" coming (the chart draws no ribbon there).
+    return { cut: clock(from), floor: had === 0 ? '' : `${to === 23 ? 'still ' : ''}~${fmtInt(perHour ?? 0)}/h`, missing: `~${compact(Math.max(0, want - had))} fewer`, ghost: `usual ${weekdayOf(day)}`, before };
   })() : null;
   if (shownHero === 'hours' && hoursLabels) heroLabels.push(hoursLabels.cut, hoursLabels.floor, hoursLabels.missing, hoursLabels.ghost, ...(hoursLabels.before ? [hoursLabels.before] : []));
   // Beside the hours, the part and the rest only when the part moved too (a part that held is told in the detail).
@@ -898,7 +908,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       settle: state === 'unusual' && amount && amount.value >= amount.low && amount.value <= amount.high && !hoursF && (primary === 'expected' || primary === null) ? SETTLE_LINE : null,
       // A strip of days at a glance (a calm day's week, an amount day's four weeks) carries its one-line key.
       // Four weeks of days say too what their darker bands are: the viewed day's weekday ("Sundays").
-      key: shownHero === 'calm' ? [...STRIP_KEY] : (shownHero === 'amount' || shownHero === 'finding') && cause?.kind === 'volume' ? [...STRIP_KEY, `${weekdayOf(day)}s`] : [],
+      // The day after an episode keys its days' ! too ("wrong"); its line keys ‖ ⚑ ✕.
+      key: shownHero === 'calm' ? [...STRIP_KEY, ...(state === 'recovery' ? ['wrong'] : [])] : (shownHero === 'amount' || shownHero === 'finding') && cause?.kind === 'volume' ? [...STRIP_KEY, `${weekdayOf(day)}s`] : [],
       context: state === 'recovery' ? null : contextLabel,
       // A calm day's cells, none marked, say so: a blank cell can't be told from one not checked.
       health: state === 'calm' && health.every((c) => !c.severity && !c.explained) ? `${HEALTH_HEAD} · all normal` : HEALTH_HEAD,

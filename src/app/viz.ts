@@ -207,7 +207,8 @@ export function hourBars(o: { got: readonly number[]; usual: readonly number[]; 
     // The trickle's rate sits above it on a bracket that spans its hours, clear of the ribbon and of the wash's edge,
     // unless the trickle is zoomed below, where its rate labels the zoom's own line.
     const floorY = zoomed ? barTop - 2 : barTop - 11;
-    if (o.floorLabel && !zoomed) {
+    // No trips in those hours: no rate to bracket over a ribbon that isn't there (nothing "still" came).
+    if (o.floorLabel && !zoomed && sum(o.got.slice(o.cut, end + 1)) > 0) {
       s += `<path class="brace" d="M${f1(cx + 2.5)} ${f1(barTop - 4)}V${f1(barTop - 7)}H${f1((end + 1) * cw - 2.5)}V${f1(barTop - 4)}"/>`;
       s += `<text x="${f1(cx + 5)}" y="${f1(floorY)}" class="lbl-b lbl-halo">${esc(o.floorLabel)}</text>`;
     }
@@ -596,6 +597,24 @@ export interface StripDay {
 /** What a strip's second key row may name: the weekday its darker bands are ("Mondays"), and words for its marks. */
 export interface StripKey { same?: string; marks?: Partial<Record<Mark, string>> }
 
+/**
+ * A strip's one-line key, right-aligned along its top (ADR 0008 §7): a band swatch and its word ("usual"), a tick
+ * swatch and its word ("actual"), and a dashed one, "not run", when a day wasn't.
+ */
+function keyRow([kb, kt]: readonly [string, string], notRun: boolean, w: number): string {
+  const kn = notRun ? 'not run' : '';
+  const nw = kn ? kn.length * 6.2 : 0;
+  const tw = kt.length * 6.2;
+  const bwid = kb.length * 6.2;
+  const x3 = w - nw;
+  const x2 = (kn ? x3 - 16 - 14 : w) - tw;
+  const x1 = x2 - 22 - bwid - 18;
+  let s = `<rect class="ghost" x="${f1(x1)}" y="3" width="12" height="8" rx="2"/><text x="${f1(x1 + 16)}" y="11" class="lbl-m key">${esc(kb)}</text>`;
+  s += `<rect class="ink" x="${f1(x2 - 18)}" y="5.5" width="14" height="3" rx="1"/><text x="${f1(x2)}" y="11" class="lbl-m key">${esc(kt)}</text>`;
+  if (kn) s += `<rect class="notrun" x="${f1(x3 - 16)}" y="2.5" width="11" height="9" rx="2"/><text x="${f1(x3)}" y="11" class="lbl-m key">${esc(kn)}</text>`;
+  return s;
+}
+
 /** The second key row of a strip of days, right-aligned under its first: only what the strip draws. */
 function stripKeyRow(days: readonly StripDay[], more: StripKey, w: number): string {
   const items: { sw: string; word: string }[] = [];
@@ -648,21 +667,7 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
   const wd = last ? new Date(`${last.day}T00:00:00Z`).getUTCDay() : -1;
   const TICK = 3;
   let s = open(w, h, o.aria, 'data-y0="0"');
-  if (o.key) {
-    // The key, right-aligned: a band swatch and its word, a tick swatch and its word, and a dashed one for a day not run.
-    const [kb, kt] = o.key;
-    const kn = o.days.some((d) => d.notRun) ? 'not run' : '';
-    const nw = kn ? kn.length * 6.2 : 0;
-    const tw = kt.length * 6.2;
-    const bwid = kb.length * 6.2;
-    const x3 = w - nw;
-    const x2 = (kn ? x3 - 16 - 14 : w) - tw;
-    const x1 = x2 - 22 - bwid - 18;
-    s += `<rect class="ghost" x="${f1(x1)}" y="3" width="12" height="8" rx="2"/><text x="${f1(x1 + 16)}" y="11" class="lbl-m key">${esc(kb)}</text>`;
-    s += `<rect class="ink" x="${f1(x2 - 18)}" y="5.5" width="14" height="3" rx="1"/><text x="${f1(x2)}" y="11" class="lbl-m key">${esc(kt)}</text>`;
-    if (kn) s += `<rect class="notrun" x="${f1(x3 - 16)}" y="2.5" width="11" height="9" rx="2"/><text x="${f1(x3)}" y="11" class="lbl-m key">${esc(kn)}</text>`;
-    s += extra;
-  }
+  if (o.key) s += keyRow(o.key, o.days.some((d) => d.notRun), w) + extra;
   s += `<line class="base" x1="${gx}" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
   o.days.forEach((d, i) => {
     const cx = gx + i * cw + cw / 2;
@@ -834,24 +839,28 @@ export function episodeIcon({ n, at }: { n: number; at: number | null }): string
 
 /**
  * An episode's days so far (its sheet): one bar a day from 0, the day's trips in ink over its usual day's ghost, its
- * count above it and its date under it, each day's marks under its date (what became of it: ! ‖, ! ⚑, ! ✕; a day this
- * visit didn't run dashed, no bar); then the trips short so far as one bar from 0, a segment a day (absent: a wash with
- * a dashed edge), its total at its end. No day after the viewed one is drawn.
+ * count at the top of its own bar (inside the ghost, so the ghost never reads as that count) and its date under it,
+ * each day's marks under its date (what became of it: ! ‖, ! ⚑, ! ✕; a day this visit didn't run dashed, no bar),
+ * under a one-line key ("usual", "actual", "not run" when a day wasn't); then the trips short so far as one bar, a
+ * segment a day (absent: a wash with a dashed edge), its total over it: a share of the whole, with no axis. No day
+ * after the viewed one is drawn.
  */
-export function episodeDays(o: { days: readonly { label: string; trips: number; usual: number; low: number; short: number; marks: readonly Mark[]; notRun?: boolean; at?: boolean }[]; total: string | null; aria: string; w?: number }): string {
+export function episodeDays(o: { days: readonly { label: string; trips: number; usual: number; low: number; short: number; marks: readonly Mark[]; notRun?: boolean; at?: boolean }[]; total: string | null; aria: string; w?: number; key?: readonly [string, string] }): string {
   const w = o.w ?? 334;
   const n = o.days.length;
   const cw = w / Math.max(1, n);
   const bw = Math.min(30, cw - 10);
-  const top = 16;
-  const base = 104;
+  const keyH = o.key ? 16 : 0;
+  const top = 16 + keyH;
+  const base = 104 + keyH;
   const ymax = Math.max(1, ...o.days.map((d) => Math.max(d.trips, d.usual))) * 1.04;
   const y = (v: number) => base - (v / ymax) * (base - top);
   const shortSum = o.days.reduce((t, d) => t + Math.max(0, d.short), 0);
   const sy = base + 54;
-  const h = o.total ? sy + 30 : base + 44;
+  const h = o.total ? sy + 16 : base + 44;
   const k = (v: number) => (v >= 10_000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(Math.round(v)));
   let s = open(w, h, o.aria, 'data-y0="0"');
+  if (o.key) s += keyRow(o.key, o.days.some((d) => d.notRun), w);
   s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
   o.days.forEach((d, i) => {
     const cx = i * cw + cw / 2;
@@ -862,7 +871,9 @@ export function episodeDays(o: { days: readonly { label: string; trips: number; 
     else {
       const th = Math.max(d.trips > 0 ? MIN_MARK : 0, base - y(d.trips));
       s += `<rect class="${d.trips < d.low ? 'sev-alert-fill' : 'ink'}" x="${f1(x + 4)}" y="${f1(base - th)}" width="${f1(bw - 8)}" height="${f1(th)}" rx="1.5"/>`;
-      s += `<text x="${f1(cx)}" y="${f1(Math.min(base - th, y(d.usual)) - 4)}" text-anchor="middle" class="lbl-m lbl-halo">${esc(k(d.trips))}</text>`;
+      // The count at its own bar's top, inside the ghost where the day fell short of it: never on the ghost's top, where
+      // it read as the ghost's height.
+      s += `<text x="${f1(cx)}" y="${f1(base - th - 4)}" text-anchor="middle" class="lbl-m lbl-halo">${esc(k(d.trips))}</text>`;
     }
     if (d.at) s += `<rect class="today-ring" x="${f1(i * cw + 2)}" y="${top - 14}" width="${f1(cw - 4)}" height="${base - top + 30}" rx="3"/>`;
     s += `<text x="${f1(cx)}" y="${base + 13}" text-anchor="middle" class="${d.at ? 'lbl-b' : 'tick'}">${esc(d.label)}</text>`;
@@ -881,7 +892,7 @@ export function episodeDays(o: { days: readonly { label: string; trips: number; 
       if (dw >= 1) s += `<rect class="absent" x="${f1(x + 0.75)}" y="${sy}" width="${f1(Math.max(1, dw - 1.5))}" height="10" rx="2"/>`;
       x += dw;
     });
-    s += `<text x="0" y="${sy - 5}" class="lbl-m">${esc(o.total)}</text><text x="0" y="${sy + 24}" class="tick">0</text>`;
+    s += `<text x="0" y="${sy - 5}" class="lbl-m">${esc(o.total)}</text>`;
   }
   return `${s}</svg>`;
 }

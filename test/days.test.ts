@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { wordsIn } from '../src/core/story.js';
-import { calendarHead, dayMid, heldLoadLine, judgedWords, lacked, readersSee, reachLabel, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine, toldLine, type EpisodeDay } from '../src/core/days.js';
+import { calendarHead, dayMid, heldLoadLine, judgedWords, lacked, readersOf, readersSee, reachLabel, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine, toldLine, type EpisodeDay } from '../src/core/days.js';
 
 describe('the run a day shows', () => {
   it('is the day’s own newest run when it passed', () => {
@@ -175,6 +175,18 @@ describe('a held day’s own rows, staged (ADR 0009 §12)', () => {
     expect(stagedBar('2023-09-23', '2023-09-26', '2023-09-21')).toBe('Not published · readers kept Thu 21');
     expect(stagedBar('2023-09-23', '2023-09-26')).toBe('Not published');
     expect(stagedBar('2023-09-23', '2023-09-26', '2023-09-26')).toBe('Not published');
+    // A day that still waits for a decision isn't "Not published" over its own Decide: it was built, not published, and
+    // readers kept the day before it then (Thu 21 waiting, Mon 25 published since, Mon 18 the last day before).
+    expect(stagedBar('2023-09-21', '2023-09-25', '2023-09-18', true)).toBe('Thu 21 built, not published · readers kept Mon 18');
+    expect(stagedBar('2023-09-21', '2023-09-25', null, true)).toBe('Thu 21 built, not published');
+    expect(stagedBar('2023-09-21', '2023-09-20', '2023-09-20', true)).toBe('Thu 21 built, not published · readers see Wed 20');
+    // The day readers have, in a day's own views: today's, or once a later day published, the day kept then.
+    expect(readersOf('2023-09-20', '2023-09-21', '2023-09-20')).toEqual({ day: '2023-09-20', past: false });
+    expect(readersOf('2023-09-25', '2023-09-22', '2023-09-21')).toEqual({ day: '2023-09-21', past: true });
+    expect(readersOf('2023-09-25', '2023-09-22', null)).toEqual({ day: null, past: true });
+    expect(readersOf(null, '2023-09-22', null)).toEqual({ day: null, past: false });
+    expect(readersSee('2023-09-18', '2023-09-22', true)).toBe('readers kept Mon 18');
+    expect(readersSee(null, '2023-09-22', true)).toBe('');
   });
 
   it('say how old the day readers see is once it is two days or more before the day held', () => {

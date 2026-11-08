@@ -11,7 +11,7 @@ import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../src/plugin/index.js';
 import { glossOf, meaningOf, propertyOf, runFlow, translate, validateDocument, type FlowDocument, type FlowPlan, type RunResult } from '../src/index.js';
-import { emitDayHours, emitDistinct, emitRead, emitSample, type EmitContext } from '../src/core/emit.js';
+import { emitDayHours, emitDistinct, emitRead, emitSample, stampShift, type EmitContext } from '../src/core/emit.js';
 import { insertAfter } from '../src/core/document.js';
 import { nodeKey } from '../src/core/keys.js';
 import { shapeOf } from '../src/core/optimize.js';
@@ -168,6 +168,23 @@ describe('the example on real data', () => {
     // Hour 7 is the hour stamped 08:00, averaged over the districts.
     const [[want]] = (await db.queryAsync("SELECT avg(precipitation) FROM weather_file WHERE \"time\" = '2024-01-01T08:00'")).rows as [[number]];
     expect(rows[7]![2]).toBeCloseTo(want, 9);
+  });
+
+  it('reads the stamp’s shift from the flow’s own step in the engine’s terms, however it is written (emit.ts stampShift)', async () => {
+    // weather_hourly's expression, as the example writes it.
+    const exprs = example().steps.filter((st) => st.inputs.includes('weather') && 'columns' in st && Array.isArray(st.columns)).flatMap((st) => (st as { columns: { expr?: string }[] }).columns.map((c) => c.expr ?? ''));
+    expect(stampShift(exprs, 'time')).toEqual(['-1 hour']);
+    // Written another way, the same shift; a stamp no function moves, none.
+    expect(stampShift(['datetime("time", \'-1 hour\')'], 'time')).toEqual(['-1 hour']);
+    expect(stampShift(["strftime('%H', time, '-60 minutes')"], 'time')).toEqual(['-60 minutes']);
+    expect(stampShift(["date([time], '+1 day', 'start of day')"], 'time')).toEqual(['+1 day']);
+    expect(stampShift(["strftime('%H', \"time\")", "upper(borough)"], 'time')).toBeNull();
+    expect(stampShift(["datetime(other_time, '-1 hour')"], 'time')).toBeNull();
+    // Any of them moves the hours as the step reads them: -60 minutes is the -1 hour above.
+    const weather = emitRead(plan, at('weather'), ctx);
+    const a = (await db.queryAsync(emitDayHours(weather, 'time', '2024-01-01', ['precipitation'], stampShift(["strftime('%H', time, '-60 minutes')"], 'time')))).rows;
+    const b = (await db.queryAsync(emitDayHours(weather, 'time', '2024-01-01', ['precipitation'], '-1 hour'))).rows;
+    expect(a).toEqual(b);
   });
 
   it('finds the checks that judge a step: after a source, before what follows a plain select, none past an aggregate', () => {

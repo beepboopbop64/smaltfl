@@ -106,11 +106,12 @@ describe('the news’s charts', () => {
     // A finding's own small chart, with no span and so no wash, keeps the rule through the plot.
     const plain = hourBars({ got, usual, cut: 13, aria: 'Trips by hour' }).match(/<line class="cut-bad" x1="[\d.]+" x2="[\d.]+" y1="[\d.]+" y2="([\d.]+)"\/>/)!;
     expect(Number(plain[1])).toBe(80);
-    // Nothing came in the short hours: nothing to zoom, the rate on a bracket above the (empty) ribbon.
+    // Nothing came in the short hours: nothing to zoom, and no rate bracketed over a ribbon that isn't there (the story
+    // gives none; a "~0/h" passed anyway is left off too).
     const none = hourBars({ got: got.map((n, h) => (h < 13 ? n : 0)), usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: '~0/h', aria: 'Trips by hour' });
     expect(none).not.toContain('class="zoom"');
-    expect(none.match(/class="brace"/g)).toHaveLength(1);
-    expect(none).toMatch(/class="lbl-b lbl-halo">~0\/h</);
+    expect(none).not.toContain('class="brace"');
+    expect(none).not.toContain('~0/h');
     // Without a rate, no zoom (the Hours detail's chart); without a span, no missing area: a finding's own small chart
     // draws ghosts only.
     expect(hourBars({ got, usual, cut: 13, to: 23, aria: 'Trips by hour' })).not.toContain('zoom');
@@ -484,6 +485,19 @@ describe('the news’s charts', () => {
     expect([...svg.matchAll(/class="absent"/g)].length).toBe(3);
     expect(svg).toContain('>~291k short so far (≥210k)</text>');
     expect(svg).toContain('class="today-ring"');
+    // Each count sits at its own bar's top, inside the ghost, never on the ghost's top: Thu's 42k is well under its
+    // ~119k usual. The shortfall bar is a share of the whole, with no lone 0 under it.
+    const keyed = episodeDays({ days, total: '~291k short so far (≥210k)', aria: 'Trips each day', key: ['usual', 'actual'] });
+    const bar = (cls: string, i: number) => [...keyed.matchAll(new RegExp(`<rect class="${cls}" x="[\\d.]+" y="([\\d.]+)" width="[\\d.]+" height="([\\d.]+)"`, 'g'))][i]!;
+    const thuInk = bar('sev-alert-fill', 0);
+    const thuGhost = bar('ghost', 1);
+    const thuLabel = Number(keyed.match(/<text x="[\d.]+" y="([\d.]+)" text-anchor="middle" class="lbl-m lbl-halo">42k<\/text>/)![1]);
+    expect(thuLabel).toBeCloseTo(Number(thuInk[1]) - 4, 0);
+    expect(thuLabel).toBeGreaterThan(Number(thuGhost[1]) + 10);
+    // The key: usual, actual, and not run (Sat 23 wasn't).
+    for (const word of ['usual', 'actual', 'not run']) expect(keyed).toContain(`class="lbl-m key">${word}</text>`);
+    expect(keyed).not.toMatch(/class="tick">0<\/text>/);
+    expect([...keyed.matchAll(/class="tick" aria-hidden="true">0<\/text>/g)]).toHaveLength(1);
   });
 
   it('draws a held day’s severity and what became of it side by side in a strip of days', () => {

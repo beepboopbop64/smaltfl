@@ -59,10 +59,22 @@ export function rowsFrom(shown: string | null | undefined, viewed: string | null
 }
 
 /**
- * The day readers see while a day waits (ADR 0009 §12), with its age once it is two days or more before the day held,
- * so a stale one reads stale: "readers see Wed 20", "readers see Mon 18 · 3 days old"; "nothing published yet".
+ * The day readers have, as a held day's own views say it (ADR 0008 §10, ADR 0009 §12): the day readers see now while
+ * it isn't after the day; once a later day has published, the day readers kept then (`then`, the last day published
+ * before it), in the past tense, naming no later day; with that not known here, no day (`day` null, `past` true).
  */
-export function readersSee(published: string | null | undefined, day: string | null | undefined): string {
+export function readersOf(published: string | null | undefined, day: string | null | undefined, then?: string | null): { day: string | null; past: boolean } {
+  if (published && day && published > day) return { day: then && then < day ? then : null, past: true };
+  return { day: published ?? null, past: false };
+}
+
+/**
+ * The day readers see while a day waits (ADR 0009 §12), with its age once it is two days or more before the day held,
+ * so a stale one reads stale: "readers see Wed 20", "readers see Mon 18 · 3 days old"; "nothing published yet". Said
+ * as it stood then (`past`, readersOf): "readers kept Mon 18", or nothing when the day kept isn't known here.
+ */
+export function readersSee(published: string | null | undefined, day: string | null | undefined, past = false): string {
+  if (past) return published ? `readers kept ${dayShort(published)}` : '';
   if (!published) return 'nothing published yet';
   const age = day ? Math.round((at(day).getTime() - at(published).getTime()) / 864e5) : 0;
   return `readers see ${dayShort(published)}${age >= 2 ? ` · ${age} days old` : ''}`;
@@ -71,15 +83,18 @@ export function readersSee(published: string | null | undefined, day: string | n
 /**
  * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Thu 21 built, not
  * published · readers see Wed 20", "… · readers see Mon 18 · 3 days old", or "… · nothing published yet". Null when the day is the
- * one published. A day a later one has passed since is no longer staged for readers, and is said as it stood then,
- * naming no later day (ADR 0008 §10): "Not published · readers kept Thu 21" (`then`, the last day published before it),
- * or "Not published" when that isn't known here.
+ * one published. A day a later one has passed since is said as it stood then, naming no later day (ADR 0008 §10),
+ * with the last day published before it (`then`) where it is known here: while it still waits for a decision
+ * (`waiting`), "Thu 21 built, not published · readers kept Mon 18"; once decided not to publish, "Not published ·
+ * readers kept Thu 21".
  */
-export function stagedBar(day: string, published: string | null | undefined, then?: string | null): string | null {
+export function stagedBar(day: string, published: string | null | undefined, then?: string | null, waiting = false): string | null {
   if (published === day) return null;
-  if (published && published > day) return `Not published${then && then < day ? ` · readers kept ${dayShort(then)}` : ''}`;
+  const r = readersOf(published, day, then);
+  const kept = r.past ? readersSee(r.day, day, true) : '';
+  if (r.past && !waiting) return `Not published${kept ? ` · ${kept}` : ''}`;
   // In plain words, never "Staged": the day's own rows, built and not published (ADR 0009 §12).
-  return `${dayShort(day)} built, not published · ${readersSee(published, day)}`;
+  return `${dayShort(day)} built, not published${r.past ? (kept ? ` · ${kept}` : '') : ` · ${readersSee(published, day)}`}`;
 }
 
 /** A panel with no rows to show for the viewed day: no day before it passed in this visit. */
