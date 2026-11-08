@@ -248,7 +248,7 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .nav-fold > summary { list-style: none; display: block; cursor: pointer; line-height: 22px; }
 .drill-nav .nav-fold > summary.nav-chip { max-width: 100%; }
 .nav-fold > summary::-webkit-details-marker { display: none; }
-.nav-fold .nav-list { position: absolute; top: calc(100% + 4px); z-index: 5; display: grid; gap: 6px; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 18px rgb(0 0 0 / 0.16); }
+.nav-fold .nav-list { position: absolute; top: calc(100% + 4px); z-index: 5; display: grid; gap: 6px; padding: 8px; width: max-content; max-width: calc(100vw - 40px); justify-items: start; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 18px rgb(0 0 0 / 0.16); }
 .nav-fold.up .nav-list { left: 0; } .nav-fold.down .nav-list { right: 0; }
 .nav-fold .nav-list .nav-chip { max-width: 70vw; }
 .day-pick { display: flex; align-items: center; gap: 6px; padding: 8px 0 0; min-width: 0; }

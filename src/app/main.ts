@@ -17,7 +17,7 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, t
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, type EpisodeDay } from '../core/days.js';
+import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, toldLine, type EpisodeDay } from '../core/days.js';
 import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
@@ -3212,10 +3212,8 @@ function toldBefore(day: string): boolean {
 
 /** Whether the source was told on a day of the story's episode, today or before: "Source told on Fri". */
 function toldOf(story: Story): string | null {
-  const from = story.episode?.since ?? story.day;
-  const e = dataLog.entries.filter((x) => x.act === 'notify' && x.day >= from && x.day <= story.day).at(-1);
   // Said by the load's day, as the app's days are: the clock time is in the record's line under the verbs.
-  return e ? `Source told ${e.day === story.day ? 'today' : `on ${WEEKDAY_NAMES[dateOf(e.day).getUTCDay()]!.slice(0, 3)}`}` : null;
+  return toldLine(dataLog.entries, story.episode?.since ?? story.day, story.day);
 }
 
 /**
@@ -4071,7 +4069,9 @@ async function ask(f: Finding, card: string, act: LogAct): Promise<void> {
 function publisherOf(f: Finding): string {
   const from = f.table ? [f.table, ...upstreamOf(f.table)].find((x) => state.doc.sources.some((src) => src.id === x)) : loadSource();
   const source = state.doc.sources.find((src) => src.id === from);
-  return source?.description ? `the ${source.description.charAt(0).toLowerCase()}${source.description.slice(1)}` : from ?? 'the data';
+  // Lower-cased to sit in a sentence, unless it starts with an acronym ("NYC TLC yellow taxi trip records").
+  const d = source?.description;
+  return d ? `the ${/^\p{Lu}{2}/u.test(d) ? d : `${d.charAt(0).toLowerCase()}${d.slice(1)}`}` : from ?? 'the data';
 }
 
 /** The tables a table reads, near or far. */
@@ -4102,7 +4102,7 @@ function tellSource(f: Finding, day: string, el: HTMLElement | null): void {
     h('pre', { class: 'code' }, `${subject}\n\n${body}`),
     h('div', { class: 'row' },
       h('button', { type: 'button', class: 'btn small', onclick: () => void share() }, 'share' in navigator ? 'Send it…' : 'Copy it'),
-      h('a', { class: 'btn small quiet', href: `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, onclick: () => void logRecord(day, f, 'notify', 'an email drafted') }, 'Email it'),
+      h('a', { class: 'btn small quiet', href: `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, onclick: () => void logRecord(day, f, 'notify', 'an email drafted').then(() => renderSheet()) }, 'Email it'),
       h('button', { type: 'button', class: 'btn small quiet', onclick: () => panel.remove() }, 'Cancel')));
   el?.querySelector('.f-form')?.remove();
   el?.append(panel);

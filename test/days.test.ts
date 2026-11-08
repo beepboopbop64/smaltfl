@@ -3,7 +3,7 @@
  * passed, said as such; never a day after it, whatever order the days were run in.
  */
 import { describe, expect, it } from 'vitest';
-import { calendarHead, dayMid, lacked, reachLabel, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine, type EpisodeDay } from '../src/core/days.js';
+import { calendarHead, dayMid, lacked, reachLabel, dayShort, noRowsBefore, rowsFrom, shortfall, shownRun, stoppedLine, toldLine, type EpisodeDay } from '../src/core/days.js';
 
 describe('the run a day shows', () => {
   it('is the day’s own newest run when it passed', () => {
@@ -127,5 +127,17 @@ describe('what the outputs of a day with something wrong say', () => {
     expect(reachLabel(base, 5)).toBe('5 outputs built from a short day');
     expect(reachLabel({ ...base, gate: { held: true } }, 3)).toBe('Outputs not published');
     expect(reachLabel({ ...base, severity: 'warn' }, 2)).toBe('Reaches 2 outputs');
+  });
+});
+
+describe('a source told during an episode (ADR 0008 §11)', () => {
+  it('is said on each later day of the episode by the load’s day, and never from a day after the one viewed', () => {
+    const log = [{ day: '2023-09-20', act: 'notify' }, { day: '2023-09-22', act: 'expected' }, { day: '2023-09-22', act: 'notify' }];
+    // Told on Fri 22: Sat 23 says so; Fri 22 says today; Thu 21, before it, doesn't.
+    expect(toldLine(log, '2023-09-21', '2023-09-23')).toBe('Source told on Fri');
+    expect(toldLine(log, '2023-09-21', '2023-09-22')).toBe('Source told today');
+    expect(toldLine(log, '2023-09-21', '2023-09-21')).toBeNull();
+    // A note before the episode began is another episode's.
+    expect(toldLine([{ day: '2023-09-20', act: 'notify' }], '2023-09-21', '2023-09-23')).toBeNull();
   });
 });

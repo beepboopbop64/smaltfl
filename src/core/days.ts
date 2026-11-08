@@ -102,6 +102,15 @@ export function calendarHead(verdicts: ReadonlyMap<string, string>, total: numbe
   return `${n(total)} days${to ? ` to ${dayMid(to)}` : ''} · ${v.filter((x) => x === 'alert').length} wrong · ${v.filter((x) => x === 'warn').length} unusual`;
 }
 
+/**
+ * Whether the source was told on a day of an episode, its first day to the viewed one and none after (ADR 0008 §11):
+ * "Source told today", "Source told on Fri", by the load's day as the app's days are. Null when it wasn't.
+ */
+export function toldLine(entries: readonly { day: string; act: string }[], since: string, viewed: string): string | null {
+  const e = entries.filter((x) => x.act === 'notify' && x.day >= since && x.day <= viewed).at(-1);
+  return e ? `Source told ${e.day === viewed ? 'today' : `on ${WD[at(e.day).getUTCDay()]}`}` : null;
+}
+
 /** What an output of a day says of its load: the story's parts it needs. */
 type LoadStory = { severity: string; split: { kind: string; name: string } | null; hours?: { from: number; to: number } | null; amount: { value: number; low: number; expected: number } | null; gate: { held: boolean } | null };
 
