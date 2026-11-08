@@ -38,6 +38,8 @@ import { consistencyProof, entryLeaf, parseCheckpoint, rootOf, verifyCheckpoint,
 import { manifestHash, planHash, policiesHash, type IdentityCard, type RunManifest } from './manifest.js';
 import { flowHash, planPeriod, watchesOf, type FlowPlan } from './plan.js';
 import { checkDecision, DECIDE_OPTIONS } from './policy.js';
+import { isHistory, type HistoryFile } from './history.js';
+import { retellClaims, type Retold } from './retell.js';
 
 export interface AuditLine {
   ok: boolean;
@@ -113,6 +115,8 @@ const shortHash = (h: unknown) => `${String(h).slice(0, 16)}…`;
 export interface AuditTrust {
   signer?: string;
   list?: Uint8Array;
+  /** The base history a flow's claim/2 were told from (ADR 0010 §6): with it, each is told again (`--history`). */
+  history?: Uint8Array;
 }
 
 /**
@@ -560,6 +564,26 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       else shown++;
     }
     if (shown === names.length) say(true, `the engine's ${names.length} dataset name${names.length === 1 ? '' : 's'} show versions their runs in the record made, and no output a run held without a release`);
+  }
+
+  // The verdicts told again from the record (ADR 0010 §6, --history): each claim/2 against the tail the record's run
+  // entries make before it, the days it left out, its load's measures and the base history the auditor brings.
+  if (trust.history) {
+    const baseFile = JSON.parse(text(trust.history)) as HistoryFile;
+    const base = isHistory(baseFile) ? { file: baseFile, sha256: await sha256Hex(new Uint8Array(trust.history) as Uint8Array<ArrayBuffer>) } : null;
+    if (!base) say(false, "the history you gave isn't a smaltfl history");
+    const told: Retold[] = [];
+    for (const [manifest, run] of runs) {
+      const judged = engineHolds.get(manifest)?.judged ?? [];
+      const fromHolds = ((run.entry.about as Partial<HeldAbout>).holds ?? []).flatMap((h) => (h.by === 'story' && h.claim ? [h.claim] : []));
+      for (const claim of [...fromHolds, ...judged.flatMap((j) => ('claim' in j ? [j.claim] : []))].filter(isClaim2).filter((c, i, all) => all.findIndex((x) => x.source === c.source) === i)) {
+        told.push({ seq: run.entry.seq, claim, doc: run.manifest ? flowOf(flows, run.manifest.flow.hash) : null });
+      }
+    }
+    const period = [...runs.values()].map((x) => (x.plan ? planPeriod(x.plan.publish) : null)).find((x) => x !== null) ?? null;
+    const again = await retellClaims(entries, told.sort((a, b) => a.seq - b.seq), base, period);
+    for (const a of again) say(a.problems.length === 0, a.problems.length ? `#${a.seq} (${a.slot}), told again: ${a.problems.join('; ')}` : `#${a.seq} (${a.slot}): its verdict told again from the base, the record's tail and its load's measures says what its claim said`);
+    if (!again.length) say(true, 'no claim/2 in the record to tell again');
   }
 
   // A checkpoint the auditor kept.

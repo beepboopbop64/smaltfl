@@ -149,3 +149,20 @@ describe('what the record leaves out of learning (skipOf)', () => {
     expect(skipOf(entries as never, 'day')).toEqual(['2024-03-05', '2024-03-06', '2024-03-07']);
   });
 });
+
+describe('the verdict told again from the record (audit --history)', () => {
+  it('rebuilds the tail from the run entries, and tells the claim again from it and the load\'s measures', async () => {
+    const { db, tail, measures, told } = await setup();
+    db.close();
+    const entry = (seq: number, m: Measures, about: Record<string, unknown> = {}) => ({ seq, kind: 'run', at: '', by: { as: 'owner' }, reason: null, amends: null, about: { outcome: 'ok', measures: [m], ...about } });
+    // A derived run's measures never reach the tail; a re-run of a day already in it adds nothing.
+    const entries = [entry(1, tail[0]!), entry(2, tail[1]!), entry(3, { ...tail[1]!, rows: 1 }, { outcome: 'derived' }), entry(4, tail[2]!), entry(5, tail[2]!), entry(6, measures)];
+    const { retellClaims, tailFromRecord } = await import('../src/core/retell.js');
+    expect(tailFromRecord(entries as never, 6, 'auth', null).map((m) => m.slot)).toEqual(tail.map((m) => m.slot));
+    const again = (claim: StoryClaim2, es = entries) => retellClaims(es as never, [{ seq: 6, claim, doc }], null, 'day');
+    expect(await again(told.claim)).toEqual([{ seq: 6, slot: DAY, problems: [] }]);
+    expect((await again({ ...told.claim, head: 'Something else' }))[0]!.problems[0]).toMatch(/^told again, its story says unlearned "Not judged yet", and the claim unlearned "Something else"$/);
+    expect((await again(told.claim, entries.slice(1)))[0]!.problems).toContain('its claim names a tail of 3, and the record\'s before it is 2');
+    expect((await again(told.claim, [...entries.slice(0, 5), entry(6, { ...measures, rows: 299 })]))[0]!.problems).toContain('its claim was told from other measures of auth than its entry keeps');
+  });
+});

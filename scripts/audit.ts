@@ -11,9 +11,11 @@ const [command, ...rest] = process.argv.slice(2);
 const trust: AuditTrust = {};
 const args: string[] = [];
 let listPath: string | undefined;
+let historyPath: string | undefined;
 for (let i = 0; i < rest.length; i++) {
   if (rest[i] === '--signer' && rest[i + 1]) trust.signer = rest[++i]!;
   else if (rest[i] === '--list' && rest[i + 1]) listPath = rest[++i]!;
+  else if (rest[i] === '--history' && rest[i + 1]) historyPath = rest[++i]!;
   else args.push(rest[i]!);
 }
 
@@ -35,13 +37,15 @@ function readBag(path: string): BagFile[] {
 
 async function main(): Promise<number> {
   if (listPath) trust.list = new Uint8Array(readFileSync(listPath));
+  // The base history a flow's claim/2 were told from (ADR 0010 §6): each verdict is told again from it and the record.
+  if (historyPath) trust.history = new Uint8Array(readFileSync(historyPath));
   if (command === 'check' && args.length === 1) {
     return report(await auditBag(readBag(args[0]!), undefined, trust), false);
   }
   if (command === 'consistent' && args.length === 2) {
     return report(await auditBag(readBag(args[1]!), JSON.parse(readFileSync(args[0]!, 'utf8')), trust), true);
   }
-  console.error('usage: node scripts/audit.mjs check [--signer <fingerprint>] [--list <MANIFEST.json>] <bag.zip | bag folder>\n       node scripts/audit.mjs consistent [--signer <fingerprint>] [--list <MANIFEST.json>] <your-checkpoint.json> <bag.zip | bag folder>');
+  console.error('usage: node scripts/audit.mjs check [--signer <fingerprint>] [--list <MANIFEST.json>] [--history <history.json>] <bag.zip | bag folder>\n       node scripts/audit.mjs consistent [--signer <fingerprint>] [--list <MANIFEST.json>] <your-checkpoint.json> <bag.zip | bag folder>');
   return 2;
 }
 

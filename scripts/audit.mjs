@@ -7,6 +7,8 @@
 // A bag carries its own card and data list. To tie it to its signer and to the data branch, bring them yourself:
 //   --signer <fingerprint>   the signer's card fingerprint, from its owner
 //   --list <MANIFEST.json>   the data's list, from git show <Data-Commit>:MANIFEST.json
+//   --history <history.json> the base history a flow's claim/2 were told from: each verdict is told again from it, the
+//                            record's tail and each load's measures (ADR 0010 §6)
 import { build } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
