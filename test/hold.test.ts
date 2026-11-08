@@ -289,6 +289,21 @@ describe('pauses, read from the record (ADR 0009 §10)', () => {
     expect(pausesOf([held('2023-09-23', 5, {})])).toEqual([]);
   });
 
+  it('names every held output by key, so a reload that leaves every output waiting keeps the same decision', () => {
+    const ALL = { ...KEYS, districts: 'kd', weather_hourly: 'kw', zone_list: 'kl' };
+    const reheld = (run: number, waiting: string[]) => entry('run', { run, manifest: SHA(String(run % 10)), outcome: 'held', day: '2023-09-21', inputs: inputs('2023-09-21'), holds: [], waiting, keys: ALL } satisfies HeldAbout);
+    // The first visit: the zones and the weather reuse their keys, so three outputs wait; the decision names all six.
+    const log = [reheld(41, Object.keys(KEYS)), decide('2023-09-21', 41, 'asis', 'day', { outputs: ALL })];
+    expect(pausesOf(log)[0]).toMatchObject({ state: 'decided', waiting: Object.keys(KEYS), keys: ALL });
+    // After a reload the engine is empty: every held output waits, with the same keys. Still the same decision.
+    const after = [...log, reheld(1, Object.keys(ALL))];
+    expect(pausesOf(after)[0]).toMatchObject({ run: 1, state: 'decided', otherBuild: false, waiting: Object.keys(ALL) });
+    expect(decisionFor(after, inputs('2023-09-21'), ALL)!.kind).toBe('same');
+    // Run again once it is published: held, its keys named, nothing waiting. It opens and changes nothing.
+    expect(pausesOf([...after, reheld(2, [])])[0]).toMatchObject({ run: 1, state: 'decided' });
+    expect(pausesOf([reheld(3, [])])).toEqual([]);
+  });
+
   it('compares inputs and keys exactly', () => {
     expect(inputsKey(inputs('2023-09-21'))).toBe(inputsKey(inputs('2023-09-21')));
     expect(inputsKey(inputs('2023-09-21'))).not.toBe(inputsKey(inputs('2023-09-22')));

@@ -294,8 +294,13 @@ export interface HeldAbout {
   day: string | null;
   inputs: Inputs;
   holds: Hold[];
+  /** The held outputs whose staged key isn't the one their name showed: a pause opens only when one waits. */
   waiting: string[];
-  /** The waiting outputs' staged keys. */
+  /**
+   * Every held output's staged key (`stagedKeys(manifest, held)`): what a decision names. Not only the waiting ones:
+   * the same day run again after a reload, in an empty engine, has every held output waiting, and the same keys, so
+   * the decision is still the same one.
+   */
   keys: Record<string, string>;
 }
 
@@ -409,9 +414,10 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
       const key = inputsKey(a.inputs);
       // Nothing waits (every held output's staged key is already current, as after a day published as is is run
       // again): there is nothing to decide, and nothing to open or change.
-      if (Object.keys(a.keys).length === 0) continue;
+      const waiting = Array.isArray(a.waiting) ? a.waiting : Object.keys(a.keys);
+      if (waiting.length === 0 || Object.keys(a.keys).length === 0) continue;
       const p = pauses.get(key) ?? { key, inputs: a.inputs, day: null, run: a.run, manifest: a.manifest, keys: {}, waiting: [], holds: [], opened: e.seq, seq: e.seq, state: 'open' as const, decision: null, otherBuild: false, released: null };
-      Object.assign(p, { day: dayOf(a, period), run: a.run, manifest: a.manifest, keys: { ...a.keys }, waiting: Array.isArray(a.waiting) ? [...a.waiting] : Object.keys(a.keys), holds: Array.isArray(a.holds) ? a.holds : [], seq: e.seq });
+      Object.assign(p, { day: dayOf(a, period), run: a.run, manifest: a.manifest, keys: { ...a.keys }, waiting: [...waiting], holds: Array.isArray(a.holds) ? a.holds : [], seq: e.seq });
       p.otherBuild = !!p.decision && !sameKeys(p.decision.about.outputs, p.keys);
       p.state = p.decision && !p.otherBuild ? 'decided' : 'open';
       pauses.set(key, p);
@@ -470,8 +476,9 @@ export function standingFor(entries: readonly EntryLike[], day: string, period?:
 /**
  * A decision to apply again to a day held once more (ADR 0009 §10): the latest decision for the same inputs, `same`
  * when it names these keys (applied again, recorded as citing it) or `otherBuild` when it names others (shown, and
- * applied only by a person, as an amendment). Null when the day was never decided. `keys` are the run's waiting
- * outputs with their staged keys: with none waiting there is nothing to apply.
+ * applied only by a person, as an amendment). Null when the day was never decided. `keys` are the run's held outputs
+ * with their staged keys (`stagedKeys(manifest, held)`), as its record entry names them; with none waiting there is
+ * nothing to apply.
  */
 export function decisionFor(entries: readonly EntryLike[], inputs: Inputs, keys: Readonly<Record<string, string>>): { kind: 'same' | 'otherBuild'; decision: Decided } | null {
   const key = inputsKey(inputs);
