@@ -201,6 +201,24 @@ describe('the news’s charts', () => {
     expect(rules.indexOf('class="ghost"')).toBeLessThan(rules.indexOf('class="ink-outline"'));
   });
 
+  it('marks a count past its usual range past a notch, and ends a row with no range on its count (tabs #12)', () => {
+    // Jan 1, 2024: Distance 4,305 against 365–2.6k, Fare 1,306 with no range of its own, In month never failing.
+    const svg = ruleRows({ rules: [{ label: 'Distance', warns: false, rows: 4305, low: 365, high: 2605, usualLabel: 'usual 365–2.6k' }, { label: 'Fare', warns: false, rows: 1306, low: null, high: null, usualLabel: '' }, { label: 'In month', warns: false, rows: 0, low: 0.5, high: 0.5, usualLabel: 'never fails' }], aria: 'Rows each rule failed' });
+    // One row past its range: the outlined box past a notch; the others none.
+    expect(svg.match(/class="over"/g)).toHaveLength(1);
+    expect(svg.match(/class="usual-end"/g)).toHaveLength(1);
+    expect(svg).not.toMatch(/ · <\/text>/);
+    expect(svg).toContain('1,306</tspan></text>');
+    expect(svg).toContain('never fails');
+    // A band of less than one row is no band.
+    expect(svg.match(/class="ghost"/g)).toHaveLength(1);
+    // The gate's count bar the same: 6,942 rows dropped against 2.1k–6.3k.
+    const gate = gateBars({ rows: 81013, dropped: 6942, limit: 0.1, usual: { low: 2119, high: 6327 }, shareLabel: '8.6% of arrived rows dropped', limitLabel: 'limit 10%', countLabel: ['6,942 rows dropped', 'usual 2.1k–6.3k'], aria: 'The checks: 8.6%' });
+    expect(gate.match(/class="over"/g)).toHaveLength(1);
+    const inside = gateBars({ rows: 81013, dropped: 4000, limit: 0.1, usual: { low: 2119, high: 6327 }, shareLabel: '4.9% of arrived rows dropped', limitLabel: 'limit 10%', countLabel: ['4,000 rows dropped', 'usual 2.1k–6.3k'], aria: 'The checks: 4.9%' });
+    expect(inside).not.toContain('class="over"');
+  });
+
   it('escapes the names it is given', () => {
     const svg = splitRows({ rows: [{ name: '<b>"x"&', today: 1, usual: 2, todayLabel: '1', usualLabel: '2' }], aria: 'a "quoted" <label>' });
     expect(svg).not.toContain('<b>');

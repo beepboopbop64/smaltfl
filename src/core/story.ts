@@ -59,7 +59,8 @@ export interface Gate {
   /** Not held, but within a point of its limit: shown, as a near miss is worth seeing. */
   near: boolean;
   usual: { expected: number; low: number; high: number } | null;
-  rules: { name: string; warns: boolean; rows: number; share: number; usual: { low: number; high: number } | null }[];
+  /** Each rule's failing rows today against a day like it; `never` when no day of the history to this one failed it. */
+  rules: { name: string; warns: boolean; rows: number; share: number; usual: { low: number; high: number } | null; never: boolean }[];
 }
 
 export type Tier = 'cause' | 'absorbed' | 'follows' | 'sameDay' | 'standalone' | 'note';
@@ -181,6 +182,25 @@ export const countLabel = (c: Count) => `${fmtInt(c.today)} · usual ~${approx(c
 /** The split's part as its visuals name it: its name, and who a code names beside it ("Vendor 1 · Creative Mobile"). */
 export const partLabel = (sp: Pick<Split, 'name' | 'who'>) => (sp.who ? `${sp.name} · ${sp.who}` : sp.name);
 
+/**
+ * A rule's usual failing rows, said one way wherever its row is drawn: "never fails" when no day to this one failed it,
+ * "usual 0" when a day like it fails less than one row, one number when both ends round to it ("usual 1"), else the
+ * range; nothing when it has no range (and its row then ends on its count, no dangling "·").
+ */
+export function ruleUsual(r: Pick<Gate['rules'][number], 'usual' | 'never' | 'rows'>): string {
+  if (r.never && r.rows === 0) return 'never fails';
+  if (!r.usual) return '';
+  if (r.usual.high < 1) return 'usual 0';
+  const lo = compact(r.usual.low);
+  const hi = compact(r.usual.high);
+  return lo === hi ? `usual ${hi}` : `usual ${lo}–${hi}`;
+}
+
+/** The checks' rules in one order wherever they are drawn: the rules that drop by rows today, the most first; the
+ * rules that only warn last. */
+export const ruleOrder = <R extends Pick<Gate['rules'][number], 'warns' | 'rows' | 'name'>>(rules: readonly R[]): R[] =>
+  [...rules].sort((a, b) => Number(a.warns) - Number(b.warns) || b.rows - a.rows || a.name.localeCompare(b.name));
+
 /** A strip of days' key, where it is first shown: each day's usual range as a box, and what it had as a tick. */
 export const STRIP_KEY = ['usual', 'actual'] as const;
 
@@ -200,9 +220,10 @@ export const NEAR_LIMIT = 0.02;
 /**
  * The checks' words (ADR 0008), one per bar so neither reads as the other: the share of the rows that arrived that they
  * dropped ("46% of arrived rows dropped"), the limit, how far from it within two points ("0.45 pt over"), and the rows
- * they dropped against the rows a day like it drops ("2,116 rows dropped", "usual 3.2k–7.7k").
+ * they dropped against the rows a day like it drops ("2,116 rows dropped", "usual 3.2k–7.7k"). `said` is the share alone,
+ * for a head over those bars ("Passed: 8.6% dropped", never 9% over a bar that says 8.6%).
  */
-export function gateLabels(g: Gate): { share: string; limit: string | null; margin: string | null; rows: string; usual: string | null } {
+export function gateLabels(g: Gate): { said: string; share: string; limit: string | null; margin: string | null; rows: string; usual: string | null } {
   const off = g.limit === null ? null : g.share - g.limit;
   const pts = off === null ? 0 : Math.abs(off) * 100;
   const near = off !== null && off !== 0 && Math.abs(off) <= NEAR_LIMIT;
@@ -211,6 +232,7 @@ export function gateLabels(g: Gate): { share: string; limit: string | null; marg
   while (near && Number(pts.toFixed(dec)) === 0 && dec < 4) dec++;
   const share = near ? `${(g.share * 100).toFixed(dec)}%` : pastLimit(g.share, g.limit);
   return {
+    said: share,
     share: `${share} of arrived rows dropped`,
     limit: g.limit !== null ? `limit ${Math.round(g.limit * 100)}%` : null,
     margin: near ? `${pts.toFixed(dec)} pt ${off! > 0 ? 'over' : 'under'}` : null,
@@ -387,7 +409,9 @@ export function gateOf(h: HistoryRanges, day: string, step: string, limit: numbe
     rules: file.rules.map((r, i) => {
       const u = h.of({ of: 'ruleRows', name: r.name })?.at(day);
       const n = file.failed[k]![i] ?? 0;
-      return { name: r.name, warns: r.onFail === 'warn', rows: n, share: rows ? n / rows : 0, usual: u ? { low: u.low, high: u.high } : null };
+      let never = true;
+      for (let j = 0; j <= k && never; j++) if ((file.failed[j]?.[i] ?? 0) > 0) never = false;
+      return { name: r.name, warns: r.onFail === 'warn', rows: n, share: rows ? n / rows : 0, usual: u ? { low: u.low, high: u.high } : null, never };
     }),
   };
 }

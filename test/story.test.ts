@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
-import { CELL_KINDS, HEALTH_HEAD, STRIP_KEY, approx, compact, countLabel, gateLabels, glanceStrings, partLabel, shortWho, splitOf, splitSentence, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
+import { CELL_KINDS, HEALTH_HEAD, STRIP_KEY, approx, compact, countLabel, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, shortWho, splitOf, splitSentence, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
 import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
 const DAY = '2023-10-11'; // a Wednesday
@@ -195,7 +195,7 @@ describe('the words at a glance', () => {
   it('labels the gate’s two bars by what they count, and says a margin within two points of the limit', () => {
     const gate = (dropped: number, rows: number, limit: number | null = 0.1): Gate => ({ step: 'trips_valid', rows, dropped, share: dropped / rows, limit, held: limit !== null && dropped / rows > limit, near: false, usual: { expected: 5000, low: 3800, high: 5400 }, rules: [] });
     // Just over: the share and its margin to the same decimals, so one is the other less the limit.
-    expect(gateLabels(gate(442, 4229))).toEqual({ share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
+    expect(gateLabels(gate(442, 4229))).toEqual({ said: '10.45%', share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
     expect(gateLabels(gate(4004, 41_939))).toMatchObject({ share: '9.55% of arrived rows dropped', margin: '0.45 pt under' });
     // Within two points, a whole point and more is said to a tenth; past them, no margin and the share as before.
     expect(gateLabels(gate(1150, 10_000)).margin).toBe('1.5 pt over');
@@ -205,6 +205,22 @@ describe('the words at a glance', () => {
     expect(hair.margin).toBe('0.0004 pt over');
     expect(hair.share).not.toMatch(/^10(\.0+)?%/);
     expect(gateLabels(gate(500, 4000, null))).toMatchObject({ limit: null, margin: null, share: '13% of arrived rows dropped' });
+  });
+
+  it('says a rule’s usual one way, and orders the rules one way (tabs #12)', () => {
+    // A rule no day has failed: "never fails", not a band of half a row rounded to "usual 1–1".
+    expect(ruleUsual({ rows: 0, never: true, usual: { low: 0.5, high: 0.5 } })).toBe('never fails');
+    expect(ruleUsual({ rows: 3, never: false, usual: { low: 0.5, high: 0.5 } })).toBe('usual 0');
+    expect(ruleUsual({ rows: 1, never: false, usual: { low: 1.2, high: 1.4 } })).toBe('usual 1');
+    expect(ruleUsual({ rows: 4305, never: false, usual: { low: 365.4, high: 2604.8 } })).toBe('usual 365–2.6k');
+    // No range: nothing, so the row ends on its count.
+    expect(ruleUsual({ rows: 1306, never: false, usual: null })).toBe('');
+    const order = ruleOrder([{ name: 'in_month', warns: false, rows: 0 }, { name: 'passengers', warns: true, rows: 10_518 }, { name: 'duration', warns: false, rows: 1553 }, { name: 'distance', warns: false, rows: 4305 }]).map((r) => r.name);
+    expect(order).toEqual(['distance', 'duration', 'in_month', 'passengers']);
+    // The head over the gate says its share as its bar does: 8.6%, never 9% over a bar labelled 8.6%.
+    const g: Gate = { step: 'trips_valid', rows: 81_013, dropped: 6942, share: 6942 / 81_013, limit: 0.1, held: false, near: false, usual: null, rules: [] };
+    expect(gateLabels(g).said).toBe('8.6%');
+    expect(gateLabels(g).share.startsWith(gateLabels(g).said)).toBe(true);
   });
 
   it('names who a vendor’s code is beside it, short', () => {

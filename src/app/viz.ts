@@ -249,7 +249,7 @@ export function gateBars(o: { rows: number; dropped: number; limit: number | nul
     const cmax = niceMax(Math.max(o.usual.high, o.dropped, o.countMax ?? 0, 1) * 1.08);
     const c = (v: number) => (v / cmax) * w;
     s += `<rect class="ghost-2 edge" x="${f1(c(o.usual.low))}" y="${cy}" width="${f1(Math.max(2, c(o.usual.high) - c(o.usual.low)))}" height="${cbH}" rx="2"/>`;
-    if (o.dropped > 0) s += `<path class="ink-strong" d="${barPath(0, cy + 2, Math.max(MIN_MARK, c(o.dropped)), cbH - 4, 1.5)}"/>`;
+    if (o.dropped > 0) s += countPast({ y: cy + 2, h: cbH - 4, end: Math.max(MIN_MARK, c(o.dropped)), high: c(o.usual.high), cls: 'ink-strong' });
     // The usual range's words end over its band, but never over the count's own words.
     const clear = o.countLabel[0].length * 6.9 + 10 + o.countLabel[1].length * 6.4;
     if (o.countLabel[1]) s += `<text x="${f1(Math.min(w, Math.max(c(o.usual.high), clear)))}" y="${cy - 6}" text-anchor="end" class="lbl-m">${esc(o.countLabel[1])}</text>`;
@@ -820,8 +820,23 @@ export function episodeLine(o: { days: readonly { label: string; got: readonly n
   return `${s}</svg>`;
 }
 
+/**
+ * A count bar from 0 that shows where it passes its usual range: ink to the range's top, a notch there standing out
+ * above and below the bar, and the rows beyond it an outlined box (6 px at least), as the part bar draws trips beyond
+ * usual. Within or under its range it is one bar. `cls` is the bar's own class ('ink-outline' for a rule that warns).
+ */
+function countPast(o: { y: number; h: number; end: number; high: number | null; cls: string; r?: number }): string {
+  const r = o.r ?? 1.5;
+  if (o.high === null || !(o.end > o.high + 1) || o.high < 1) return `<path class="${o.cls}" d="${barPath(0, o.y, o.end, o.h, r)}"/>`;
+  const ow = Math.max(6, o.end - o.high - 2);
+  return `<path class="${o.cls}" d="${barPath(0, o.y, Math.max(MIN_MARK, o.high), o.h, r)}"/>` +
+    `<rect class="over" x="${f1(o.high + 2.75)}" y="${f1(o.y + 0.75)}" width="${f1(Math.max(1, ow - 1.5))}" height="${f1(o.h - 1.5)}" rx="${r}"/>` +
+    `<line class="usual-end" x1="${f1(o.high + 1)}" x2="${f1(o.high + 1)}" y1="${f1(o.y - 4)}" y2="${f1(o.y + o.h + 4)}"/>`;
+}
+
 /** One row per check: today's failing rows (ink from 0, hollow for a rule that only warns, so the band shows through)
- * over the rule's usual range (a band behind it), on one shared count axis. */
+ * over the rule's usual range (a band behind it), on one shared count axis. Rows past the range's top run on past a
+ * notch as an outlined box (countPast); a row with no range ends on its count. */
 export function ruleRows({ rules, w = 334, aria }: { rules: readonly { label: string; warns: boolean; rows: number; low: number | null; high: number | null; usualLabel: string; sev?: 'alert' | 'warn' | null }[]; w?: number; aria: string }): string {
   const rowH = 40;
   const cmax = Math.max(1, ...rules.flatMap((r) => [r.rows, r.high ?? 0])) * 1.06;
@@ -831,11 +846,11 @@ export function ruleRows({ rules, w = 334, aria }: { rules: readonly { label: st
     const y0 = i * rowH;
     if (i) s += `<line class="hair" x1="0" x2="${w}" y1="${y0 + 0.5}" y2="${y0 + 0.5}"/>`;
     s += `<text x="0" y="${y0 + 15}" class="lbl-b">${esc(r.label)}${r.warns ? `<tspan class="tag" dx="6">warns</tspan>` : ''}</text>`;
-    s += `<text x="${w}" y="${y0 + 15}" text-anchor="end" class="lbl-m"><tspan class="lbl-b">${esc(r.rows.toLocaleString('en-US'))}</tspan> · ${esc(r.usualLabel)}</text>`;
+    s += `<text x="${w}" y="${y0 + 15}" text-anchor="end" class="lbl-m"><tspan class="lbl-b">${esc(r.rows.toLocaleString('en-US'))}</tspan>${r.usualLabel ? ` · ${esc(r.usualLabel)}` : ''}</text>`;
     const by = y0 + 22;
-    if (r.low !== null && r.high !== null && r.high > 0) s += `<rect class="ghost" x="${f1(x(r.low))}" y="${by}" width="${f1(Math.max(2, x(r.high) - x(r.low)))}" height="10" rx="2"/>`;
+    if (r.low !== null && r.high !== null && r.high >= 1) s += `<rect class="ghost" x="${f1(x(r.low))}" y="${by}" width="${f1(Math.max(2, x(r.high) - x(r.low)))}" height="10" rx="2"/>`;
     s += `<line class="base" x1="0" x2="${w}" y1="${by + 5}" y2="${by + 5}"/>`;
-    if (r.rows > 0) s += `<path class="${r.warns ? 'ink-outline' : r.sev ? `sev-${r.sev}-fill` : 'ink'}" d="${barPath(0, by + 2, Math.max(MIN_MARK, x(r.rows)), 6, 1.5)}"/>`;
+    if (r.rows > 0) s += countPast({ y: by + 2, h: 6, end: Math.max(MIN_MARK, x(r.rows)), high: r.high !== null && r.high >= 1 ? x(r.high) : null, cls: r.warns ? 'ink-outline' : r.sev ? `sev-${r.sev}-fill` : 'ink' });
   });
   return `${s}</svg>`;
 }

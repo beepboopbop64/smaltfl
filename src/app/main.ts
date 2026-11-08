@@ -18,7 +18,7 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, toldLine, type EpisodeDay } from '../core/days.js';
-import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
+import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, ruleOrder, ruleUsual, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
@@ -185,7 +185,9 @@ const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
 const fmtMs = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
 const short = (hash?: string) => (hash ? `${hash.slice(0, 12)}…` : '—');
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+/** A share to a tenth of a point; a share that isn't nothing never reads as 0.0% (<0.1%), nor one short of all as
+ * 100.0% (>99.9%). */
+const pct = (x: number) => (x > 0 && x < 0.0005 ? '<0.1%' : x < 1 && x >= 0.9995 ? '>99.9%' : `${(x * 100).toFixed(1)}%`);
 /** Short counts for cards: 9,555 · 12.3k · 456k · 1.2M. */
 const fmtCompact = (n: number) => (Math.abs(n) < 10000 ? fmtInt(n) : Math.abs(n) < 1e6 ? `${(n / 1000).toFixed(Math.abs(n) < 1e5 ? 1 : 0)}k` : `${(n / 1e6).toFixed(1)}M`);
 
@@ -2970,12 +2972,15 @@ function hoursDetail(story: Story): HTMLElement | null {
   return block(title, svg, readout);
 }
 
-/** The checks' rules as rows: today's failing rows against a day like it's, the most first, rules that only warn last. */
-function rulesVisual(g: Gate): Element {
-  const rules = [...g.rules].sort((a, b) => Number(a.warns) - Number(b.warns) || b.rows - a.rows);
+/** The checks' rules as rows, drawn one way wherever they show (the card, its sheet, the Dropped tab): one order
+ * (story.ruleOrder), one label (story.ruleUsual: "never fails", no dangling "·"), a rule told as a finding in its
+ * severity, and rows past their usual range marked past a notch. */
+function rulesVisual(g: Gate, findings: readonly Finding[] = [], day?: string): Element {
+  const rules = ruleOrder(g.rules);
+  const sevOf = (name: string) => findings.find((f) => f.kind === 'rule' && f.metric?.of === 'rule' && f.metric.name === name && (f.severity === 'alert' || f.severity === 'warn'))?.severity as 'alert' | 'warn' | undefined;
   return svgNode(ruleRows({
-    rules: rules.map((r) => ({ label: RULE_TITLE(r.name), warns: r.warns, rows: r.rows, low: r.usual?.low ?? null, high: r.usual?.high ?? null, usualLabel: r.usual ? (r.usual.high < 0.5 ? 'never fails' : `usual ${compact(r.usual.low)}–${compact(r.usual.high)}`) : '' })),
-    aria: `Rows each rule failed, against a day like it: ${rules.map((r) => `${r.name} ${fmtInt(r.rows)}`).join(', ')}.`,
+    rules: rules.map((r) => ({ label: RULE_TITLE(r.name), warns: r.warns, rows: r.rows, low: r.usual?.low ?? null, high: r.usual?.high ?? null, usualLabel: ruleUsual(r), sev: sevOf(r.name) ?? null })),
+    aria: `Rows each rule failed${day ? ` on ${dayLabel(day)}` : ''}, against a day like it: ${rules.map((r) => `${RULE_TITLE(r.name)} ${fmtInt(r.rows)}${r.usual && r.usual.high >= 1 && r.rows > r.usual.high ? ' (past its usual range)' : ''}`).join(', ')}.`,
   }));
 }
 
@@ -2999,7 +3004,7 @@ function lineageVisual(g: Gate): Element | null {
 }
 
 /** The gate, told in visuals: the share against the limit and the rows against a day like it, each rule, what it held. */
-function gateBlocks(g: Gate, day: string, countMax?: number): (Node | null)[] {
+function gateBlocks(g: Gate, day: string, countMax?: number, findings: readonly Finding[] = []): (Node | null)[] {
   const wd = WEEKDAY_NAMES[dateOf(day).getUTCDay()]!;
   // What the outputs keep: said only of the day on screen, whose held run left them so.
   const keep = day === viewedDay() ? stoppedWords({ refused: false, origin: g.step, shown: shownDay(), viewed: day }).tail : null;
@@ -3010,7 +3015,7 @@ function gateBlocks(g: Gate, day: string, countMax?: number): (Node | null)[] {
   return [
     g.held && g.usual && g.dropped < g.usual.low && why ? oneLine(`Fewer rows dropped than on a usual ${wd}; ${why}.`) : null,
     block('Dropped, and the limit', gateVisual(g, true, countMax)),
-    block('Rows each rule failed', rulesVisual(g)),
+    block('Rows each rule failed', rulesVisual(g, findings, day)),
     g.held ? block('What it held back', lineageVisual(g), keep ? h('p', { class: 'vf-sub' }, keep.replace(/^./, (c) => c.toUpperCase())) : null) : null,
   ];
 }
@@ -3021,13 +3026,23 @@ function gateSheet(story: Story, card: string): void {
   if (!g) return;
   const said = pastLimit(g.rows ? g.dropped / g.rows : 0, g.limit);
   const anchor = anchorOf(story);
-  openDetail(g.held ? `Held at ${g.step}: ${said} dropped` : `${g.step}: ${said} dropped`, g.held ? 'alert' : 'warn', gateBlocks(g, story.day, gateScale(story)), anchor, card, g.held ? 'notify' : story.primary);
+  openDetail(g.held ? `Held at ${g.step}: ${said} dropped` : `${g.step}: ${said} dropped`, g.held ? 'alert' : 'warn', gateBlocks(g, story.day, gateScale(story), story.findings), anchor, card, g.held ? 'notify' : story.primary);
 }
 
-/** The checks, rule by rule, against a day like it, and what the held run didn't publish (inside another sheet). */
-function gateDetail(g: Gate): HTMLElement {
-  const day = newsDay() ?? loads.list[loads.at]?.day ?? '';
-  return h('div', { class: 'vf-blocks' }, ...gateBlocks(g, day).filter((x): x is Node => !!x));
+/** What a tap on the checks' card opens: what the card above doesn't show. The rows dropped day by day, each day
+ * against its own usual range (the card has today only), what a held run kept back, and the rows themselves a tap
+ * away on Dropped. */
+function checksDetail(g: Gate, story: Story, card: string, sev: Severity): (Node | null)[] {
+  const day = story.day;
+  // Today's tick takes the card's own severity only when more rows were dropped than a day like it drops: fewer (the
+  // kept rows went missing, Fri Sep 22, 2023) is drawn plain under its band.
+  const days = stripOf({ of: 'droppedRows' }, day, 28, g.usual && g.dropped > g.usual.high ? sev : undefined);
+  const keep = g.held && day === viewedDay() ? stoppedWords({ refused: false, origin: g.step, shown: shownDay(), viewed: day }).tail : null;
+  return [
+    days.length ? block('Rows dropped, day by day', svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, unit: ' rows/day', key: STRIP_KEY, aria: `Rows the checks dropped day by day for four weeks to ${dayLabel(day)}, each against its own usual range: today ${fmtInt(g.dropped)}${g.usual ? `, usual ${fmtInt(g.usual.low)} to ${fmtInt(g.usual.high)}` : ''}.` }))) : null,
+    g.held ? block('What it held back', lineageVisual(g), keep ? h('p', { class: 'vf-sub' }, keep.replace(/^./, (c) => c.toUpperCase())) : null) : null,
+    h('button', { type: 'button', class: 'linkish vf-to', onclick: () => { document.querySelector('.vf-detail-wrap')?.remove(); openTab(card, 'dropped'); } }, 'The rows it dropped ›'),
+  ];
 }
 
 /** A share as a bar's label says it: none, under 0.1%, or to a tenth of a point. */
@@ -3069,9 +3084,12 @@ function findingDetail(f: Finding, card: string): void {
 
 /** The method, once: how a day is judged (the brief's 'How it's judged'), drawn from the day's own trips: the points
  * its range is learned from, named, and two sentences; the rest of the method one tap further. */
-function judgedDetail(story: Story | null): void {
+function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): void {
   const day = story?.day ?? newsDay();
-  const r = day ? rangesOf({ of: 'trips' })?.at(day) : null;
+  // The metric in view: the day's trips, or the rows its checks dropped (the checks' card), each with today's value.
+  const r = day ? rangesOf(of === 'dropped' ? { of: 'droppedRows' } : { of: 'trips' })?.at(day) : null;
+  const value = of === 'dropped' ? (story?.gate?.dropped ?? null) : (story?.amount?.value ?? null);
+  const what = of === 'dropped' ? 'rows dropped' : 'trips';
   const body: (Node | null)[] = [];
   const band = r ? `usual ${compact(r.low)}–${compact(r.high)}` : '';
   const wd = day ? WEEKDAY_NAMES[dateOf(day).getUTCDay()]! : '';
@@ -3082,12 +3100,15 @@ function judgedDetail(story: Story | null): void {
     // Last year's days as they were, and their date: the guess moves them by how this year has compared lately.
     const span = (a: string, b: string) => (a === b ? shortDay(a) : a.slice(0, 7) === b.slice(0, 7) ? `${shortDay(a)}–${Number(b.slice(8))}` : `${shortDay(a)}–${shortDay(b)}`);
     const yearLabel: [string, string] = ['last year', yd.length ? span(yd[0]!, yd.at(-1)!) : ''];
+    const outside = value !== null && (value < r.low || value > r.high);
+    // Coloured only outside its range; rows dropped only when more than usual (fewer is the kept rows gone missing).
+    const sev = of === 'dropped' ? (story?.gate?.held && value !== null && value > r.high ? 'alert' : null) : story?.severity === 'alert' || story?.severity === 'warn' ? story.severity : null;
     body.push(svgNode(learnStrip({
       weeks: weeks?.from.map((x) => x.value) ?? [], weeksLabel: weeks ? `${weeks.from.length} ${wd}s before` : '',
       year: year?.from.map((x) => x.value) ?? [], yearLabel,
-      today: { v: story?.amount?.value ?? null, low: r.low, high: r.high, sev: story?.severity === 'alert' || story?.severity === 'warn' ? story.severity : null },
+      today: { v: value, low: r.low, high: r.high, sev: outside ? sev : null },
       bandLabel: band,
-      aria: `${weeks ? `The ${weeks.from.length} ${wd}s before (${weeks.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}${weeks && year ? ' and ' : ''}${year ? `the day last year (${year.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}: today's range from them, ${fmtInt(r.low)} to ${fmtInt(r.high)}.`,
+      aria: `${what === 'trips' ? 'Trips' : 'Rows dropped'}: ${weeks ? `the ${weeks.from.length} ${wd}s before (${weeks.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}${weeks && year ? ' and ' : ''}${year ? `the day last year (${year.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}: today's range from them, ${fmtInt(r.low)} to ${fmtInt(r.high)}${value !== null ? `; today ${fmtInt(value)}` : ''}.`,
     })));
   }
   // Two sentences, as the picture has it; the rules for shares, levels and quantiles are a tap further.
@@ -3098,7 +3119,7 @@ function judgedDetail(story: Story | null): void {
     oneLine(r ? `The band is that guess give or take its typical misses: ${band.replace(/^usual /, '')} for this ${r.special ? 'day' : wd}.` : 'The band is that guess give or take its typical misses.'),
     h('details', { class: 'fold vf-more-method' }, h('summary', {}, 'More on the method'),
       h('p', { class: 'vf-sub' }, 'A share or a level is told only a typical miss past its band’s edge. Shares are over all trips, blanks included; quantiles come from a 2,000-row sample; hours count trips before the checks.')));
-  openDetail('How it’s judged', 'ok', body);
+  openDetail(of === 'dropped' ? 'How the rows dropped are judged' : 'How it’s judged', 'ok', body);
 }
 
 /** One verb, and the others behind ⋯. */
@@ -3316,16 +3337,16 @@ function storyNews(card: string, story: Story): HTMLElement[] {
 function checksNews(card: string, story: Story): HTMLElement[] {
   const g = story.gate;
   if (!g) return [];
-  const share = g.rows ? g.dropped / g.rows : 0;
   const findings = story.findings.filter((f) => (f.kind === 'dropped' || f.kind === 'rule') && f.severity !== 'ok');
   const worst: Severity = g.held ? 'alert' : findings.reduce<Severity>((w, f) => (SEV_RANK[f.severity] < SEV_RANK[w] ? f.severity : w), 'ok');
   const m = sevMark(worst);
-  const head = `${g.held ? 'Held' : 'Passed'}: ${Math.round(share * 100) === 0 ? pct(share) : `${Math.round(share * 100)}%`} dropped`;
+  // Said as its bar says it (8.6%, not 9% over a bar labelled 8.6%), never equal to the limit it passed or missed.
+  const head = `${g.held ? 'Held' : 'Passed'}: ${gateLabels(g).said} dropped`;
   const anchor = findings[0] ? { ...findings[0], title: head } : null;
   return [h('section', { class: `vf-card ${g.held ? 'wrong' : worst === 'warn' ? 'unusual' : 'calm'}`, role: 'status', ...(anchor ? { id: `finding-${anchor.key}` } : {}) },
-    h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head' }, m && worst !== 'note' ? glyphEl(g.held ? 'held' : m, 18) : '', head), h('button', { type: 'button', class: 'vf-info', 'aria-label': 'How it’s judged', onclick: () => judgedDetail(story) }, glyphEl('info', 16))),
-    h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${head}: open`, onclick: () => openDetail(head, worst, [gateDetail(g)]) }, gateVisual(g, true, gateScale(story))),
-    svgNode(ruleRows({ rules: g.rules.map((r) => ({ label: RULE_TITLE(r.name), warns: r.warns, rows: r.rows, low: r.usual?.low ?? null, high: r.usual?.high ?? null, usualLabel: r.usual ? `usual ${compact(r.usual.low)}–${compact(r.usual.high)}` : '' })), aria: `Rows each check failed, against a day like it.` })),
+    h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head' }, m && worst !== 'note' ? glyphEl(g.held ? 'held' : m, 18) : '', head), h('button', { type: 'button', class: 'vf-info', 'aria-label': 'How the rows dropped are judged', onclick: () => judgedDetail(story, 'dropped') }, glyphEl('info', 16))),
+    h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${head}: open`, onclick: () => openDetail(head, worst, checksDetail(g, story, card, worst)) }, gateVisual(g, true, gateScale(story))),
+    rulesVisual(g, story.findings, story.day),
     anchor ? actionsOf(anchor, card, g.held ? 'notify' : anchor.acts[0] ?? null) : null)];
 }
 
@@ -3537,7 +3558,7 @@ async function droppedTab(card: string, id: string, who: string): Promise<HTMLEl
   if (story?.gate) {
     const g = story.gate;
     box.append(gateVisual(g, true, gateScale(story)),
-      svgNode(ruleRows({ rules: g.rules.map((r) => ({ label: RULE_TITLE(r.name), warns: r.warns, rows: r.rows, low: r.usual?.low ?? null, high: r.usual?.high ?? null, usualLabel: r.usual ? `usual ${compact(r.usual.low)}–${compact(r.usual.high)}` : '' })), aria: `Rows each check failed on ${dayLabel(day!)}, against a day like it: ${g.rules.map((r) => `${r.name} ${fmtInt(r.rows)}`).join(', ')}.` })));
+      rulesVisual(g, story.findings, day!));
     const reasons = ruleReasons(id);
     box.append(h('details', { class: 'vf-why' }, h('summary', {}, 'What each check tests'),
       h('ul', { class: 'rule-list' }, ...history!.file.rules.map((r) => h('li', {}, h('div', { class: 'rl-head' }, h('b', {}, RULE_TITLE(r.name)), r.onFail === 'warn' ? h('span', { class: 'warns' }, 'warns, keeps') : null), h('p', { class: 'rl-why' }, reasons.get(r.name) ?? r.check))))));
@@ -4572,9 +4593,10 @@ async function rulesTable(insp: Inspection, i: number, rows: HTMLElement, who = 
   );
   const inn = (await rowsAs(insp, n.inputs[0]!, who)) ?? 0;
   const reasons = ruleReasons(insp.plan.nodes[i]!.origin);
-  const body = rules.map((r) =>
+  // In the order the checks' card draws them (story.ruleOrder): the most rows first, the rules that only warn last.
+  const body = ruleOrder(rules.map((r) => ({ ...r, warns: r.onFail === 'warn', rows: r.failed ?? -1 }))).map((r) =>
     h('tr', {},
-      h('td', {}, r.name, r.onFail === 'warn' ? h('span', { class: 'warns' }, 'warns') : null, reasons.get(r.name) ? h('span', { class: 'rule-why' }, reasons.get(r.name)!) : null),
+      h('td', {}, RULE_TITLE(r.name), r.onFail === 'warn' ? h('span', { class: 'warns' }, 'warns') : null, reasons.get(r.name) ? h('span', { class: 'rule-why' }, reasons.get(r.name)!) : null),
       h('td', { class: 'n' }, r.failed === null ? 'closed' : fmtInt(r.failed)),
       h('td', { class: 'n' }, r.failed === null ? '' : pct(r.failed / Math.max(1, inn))),
       h('td', {}, r.failed && r.sql ? h('button', { class: 'btn small', type: 'button', onclick: () => void showRows(rows, `Rows that fail ${r.name}${r.onFail === 'warn' ? ' (kept, with a warning)' : ''}`, r.sql!, r.reads, meaningsOf(insp.plan.nodes[i]!.origin)) }, 'Show') : null),

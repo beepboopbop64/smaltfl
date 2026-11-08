@@ -8,7 +8,7 @@ import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
 import { lacked, reachLabel, shortfall, type EpisodeDay } from '../src/core/days.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
-import { CELL_KINDS, countRange, gateLabels, glanceStrings, partLabel, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
+import { CELL_KINDS, countRange, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
 
 const HISTORY = new URL('../dist/app/data/history.json', import.meta.url);
 const has = existsSync(HISTORY) && (JSON.parse(readFileSync(HISTORY, 'utf8')) as HistoryFile).days.length > 400;
@@ -229,11 +229,29 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('labels the gate’s two bars, and says a margin within two points of the limit to the share’s decimals', () => {
     // Sun Sep 18, 2022: held at 10.45% of 4,229 rows against a 10% limit; Thu Sep 21, 2023: 9.55%, just under.
-    expect(gateLabels(story('2022-09-18').gate!)).toEqual({ share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
+    expect(gateLabels(story('2022-09-18').gate!)).toEqual({ said: '10.45%', share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
     expect(gateLabels(story('2023-09-21').gate!)).toMatchObject({ share: '9.55% of arrived rows dropped', margin: '0.45 pt under', rows: '4,004 rows dropped' });
     // Far past it, no margin and no zoom: Fri Sep 22, 2023.
     expect(gateLabels(story('2023-09-22').gate!)).toMatchObject({ share: '46% of arrived rows dropped', margin: null, rows: '2,116 rows dropped' });
     expect(glanceStrings(story('2022-09-18')).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(60);
+  });
+
+  it('says each rule of the checks one way on the real days: in_month never fails, no range no "·" (tabs #12)', () => {
+    for (const day of ['2024-01-01', '2023-09-22', '2023-09-21', '2022-11-15']) {
+      const g = story(day).gate!;
+      const inMonth = g.rules.find((r) => r.name === 'in_month')!;
+      expect(inMonth.never, day).toBe(true);
+      expect(ruleUsual(inMonth), day).toBe('never fails');
+      for (const r of g.rules) expect(ruleUsual(r), `${day} ${r.name}`).not.toMatch(/usual (\S+)–\1$/);
+    }
+    // New Year's Day 2024: Fare, Known zones and Passengers have no range of their own, and say none.
+    const jan1 = story('2024-01-01').gate!;
+    expect(jan1.rules.filter((r) => !r.usual).map((r) => [r.name, ruleUsual(r)])).toEqual([['fare', ''], ['known_zones', ''], ['passengers', '']]);
+    // Past its range: Distance 4,305 (usual 365–2.6k) and Duration 1,553 (679–1.3k), and the rows dropped, 6,942.
+    expect(jan1.rules.filter((r) => r.usual && r.rows > r.usual.high).map((r) => r.name).sort()).toEqual(['distance', 'duration']);
+    expect(jan1.dropped).toBeGreaterThan(jan1.usual!.high);
+    expect(ruleOrder(jan1.rules).map((r) => r.name)).toEqual(['distance', 'duration', 'fare', 'known_zones', 'in_month', 'passengers']);
+    expect(gateLabels(jan1).said).toBe('8.6%');
   });
 
   it('names vendor 1 beside its code where the head names it', () => {
