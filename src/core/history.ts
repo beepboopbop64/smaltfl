@@ -152,6 +152,11 @@ export class HistoryRanges {
     return this.made.get(key)!;
   }
 
+  /** How many days are left out of what a normal day is learned from: none for the flow's own verdict (ADR 0009 §3). */
+  get skipped(): number {
+    return this.skip.size;
+  }
+
   /** How many different medians a column had over the history: a few, for one whose values are a few amounts. */
   medians(column: string): number {
     const k = this.file.columns.indexOf(column);

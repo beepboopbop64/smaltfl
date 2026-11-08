@@ -19,6 +19,7 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, toldLine, type EpisodeDay } from '../core/days.js';
+import { countedChecks } from '../core/hold.js';
 import { CELL_KINDS, CELL_NAMES, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
@@ -5892,9 +5893,7 @@ function historyOpen(): boolean {
  * box put in front of them would leave them other rows to count).
  */
 function checksAsCounted(): boolean {
-  const step = history ? state.doc.steps.find((x) => x.id === history!.file.step) : undefined;
-  return !!history && step?.kind === 'expectations' && step.inputs.length === 1 && step.inputs[0] === loadSource()
-    && history.sameChecks(step.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })));
+  return !!history && countedChecks(state.doc, history, loadSource());
 }
 
 interface Judged {

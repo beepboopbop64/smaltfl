@@ -3,6 +3,10 @@
  * only a run that passes (src/plugin/runtime.ts): after a held or refused run its outputs keep the last day that
  * passed. A day's view shows its own run, or, when it has none that passed, the latest day before it that did, said as
  * such on every panel that shows those rows; never a day after it, whose rows weren't there yet.
+ *
+ * A flow that says what holds it (ADR 0009) pauses a day that is off instead: the held run's versions are staged,
+ * readers keep the last day published, and the day waits until a person decides. Its views read its own staged run,
+ * under a bar that says so (`stagedBar`); falling back to an earlier day stays only for a refused file.
  */
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -51,6 +55,15 @@ export function stoppedLine(o: { refused: boolean; origin?: string | undefined; 
 export function rowsFrom(shown: string | null | undefined, viewed: string | null | undefined): string | null {
   if (!shown || !viewed || shown === viewed) return null;
   return `Rows from ${dayMid(shown)} · the last day that passed`;
+}
+
+/**
+ * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Staged Thu 21 ·
+ * readers see Wed 20", or "… · nothing published yet". Null when the day is the one published.
+ */
+export function stagedBar(day: string, published: string | null | undefined): string | null {
+  if (published === day) return null;
+  return `Staged ${dayShort(day)} · ${published ? `readers see ${dayShort(published)}` : 'nothing published yet'}`;
 }
 
 /** A panel with no rows to show for the viewed day: no day before it passed in this visit. */
@@ -143,13 +156,22 @@ export function lacked(s: LoadStory): { short: string; long: string } | null {
   return { short: 'from a day with an alert', long: 'Built from a day with something wrong' };
 }
 
+/** What became of a paused day's outputs (ADR 0009): waiting for a decision, published as is, or not published. */
+export type PauseState = 'waiting' | 'asis' | 'dont';
+
 /**
  * The outputs row on a day with something wrong: never "published" alone, which reads as good news. Held: "Outputs
  * not published"; else what they were built from: "Outputs built from a short day", "Outputs built without Vendor 1",
  * "Outputs built with Vendor 1 short".
  * Its icon draws a box for each of up to three outputs, so their number is said only past three ("5 outputs …").
+ *
+ * On a day paused (ADR 0009 §12), `n` counts the outputs that wait and the row says what became of them: "Paused · 3
+ * outputs waiting" until someone decides, then "Published as is" or "Not published".
  */
-export function reachLabel(s: LoadStory, n: number): string {
+export function reachLabel(s: LoadStory, n: number, pause?: PauseState): string {
+  if (pause === 'waiting') return `Paused · ${n} output${n === 1 ? '' : 's'} waiting`;
+  if (pause === 'asis') return 'Published as is';
+  if (pause === 'dont') return 'Not published';
   const outs = n > 3 ? `${n} outputs` : n === 1 ? 'Output' : 'Outputs';
   if (s.gate?.held) return `${outs} not published`;
   const l = lacked(s);

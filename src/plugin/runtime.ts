@@ -17,6 +17,7 @@ import { flowHash } from '../core/plan.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, ColumnType, ExpectNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
 import { validatePlan } from '../core/plan.js';
+import { tripped } from '../core/hold.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 import type { Declared, TableHash } from './dataset-hash.js';
@@ -335,19 +336,15 @@ export function countExpectations(db: Database, plan: FlowPlan, node: number, ct
   };
 }
 
-/** Fail the run when a `fail` rule failed for any row, or more rows were dropped than allowed. */
+/**
+ * Fail the run when a `fail` rule failed for any row, or more rows were dropped than allowed: what a hold says of the
+ * same counts (core/hold.ts `tripped`), so a flow that holds and one that throws say it the same way.
+ */
 function enforce(n: ExpectNode, result: ExpectationResult): ExpectationResult {
-  const failing = result.rules.filter((r) => r.onFail === 'fail' && r.failed > 0);
-  if (failing.length > 0) throw new RunError(`expectations failed: ${failing.map((r) => `${r.name} (${count(r.failed)} row${r.failed === 1 ? '' : 's'})`).join(', ')}`, n.origin);
-  if (n.maxDropped !== null && result.rows > 0 && result.dropped / result.rows > n.maxDropped) {
-    throw new RunError(`dropped ${count(result.dropped)} of ${count(result.rows)} rows (${percent(result.dropped / result.rows)}), more than the ${percent(n.maxDropped)} allowed`, n.origin);
-  }
+  const said = tripped(n, result);
+  if (said) throw new RunError(said, n.origin);
   return result;
 }
-
-const percent = (x: number) => `${(x * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
-/** A count as the app prints one: 4,229. */
-const count = (n: number) => n.toLocaleString('en-US');
 
 /** Run engine work, naming the step an engine error came from. */
 function engine<T>(origin: string, work: () => T): T {
