@@ -1,0 +1,735 @@
+{
+  "built": "2026-11-08T16:42:15+00:00",
+  "month": "2024-01",
+  "sources": {
+    "trips": "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet",
+    "history": "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_YYYY-MM.parquet, 2021-10 to 2024-01",
+    "zones": "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv",
+    "weather": "https://archive-api.open-meteo.com/v1/archive (hourly temperature_2m,precipitation,rain,snowfall,snow_depth,wind_speed_10m,weather_code; America/New_York; points: {\"Manhattan\": [40.7831, -73.9712], \"Brooklyn\": [40.6782, -73.9442], \"Queens\": [40.7282, -73.7949], \"Bronx\": [40.8448, -73.8648], \"Staten Island\": [40.5795, -74.1502], \"EWR\": [40.6895, -74.1745]})"
+  },
+  "samples": {
+    "seed": 2024,
+    "method": "random.Random(seed).sample over row positions, kept in file order"
+  },
+  "loads": {
+    "days": [
+      "2024-01-01",
+      "2024-01-02",
+      "2024-01-03",
+      "2024-01-04",
+      "2024-01-05",
+      "2024-01-06",
+      "2024-01-07",
+      "2024-01-08",
+      "2024-01-09",
+      "2024-01-10",
+      "2024-01-11",
+      "2024-01-12",
+      "2024-01-13",
+      "2024-01-14",
+      "2024-01-15",
+      "2024-01-16",
+      "2024-01-17",
+      "2024-01-18",
+      "2024-01-19",
+      "2024-01-20",
+      "2024-01-21",
+      "2024-01-22",
+      "2024-01-23",
+      "2024-01-24",
+      "2024-01-25",
+      "2024-01-26",
+      "2024-01-27",
+      "2024-01-28",
+      "2024-01-29",
+      "2024-01-30",
+      "2024-01-31"
+    ],
+    "episodes": [
+      {
+        "name": "September 2023",
+        "about": "The records stop part way through Thursday the 21st, and hold almost no trips from Friday to Sunday.",
+        "days": [
+          "2023-09-18",
+          "2023-09-19",
+          "2023-09-20",
+          "2023-09-21",
+          "2023-09-22",
+          "2023-09-23",
+          "2023-09-24",
+          "2023-09-25",
+          "2023-09-26"
+        ]
+      },
+      {
+        "name": "September 2022",
+        "about": "The records stop part way through Saturday the 17th, and hold almost no trips on Sunday.",
+        "days": [
+          "2022-09-14",
+          "2022-09-15",
+          "2022-09-16",
+          "2022-09-17",
+          "2022-09-18",
+          "2022-09-19",
+          "2022-09-20"
+        ]
+      },
+      {
+        "name": "November 2022",
+        "about": "A week with about a quarter fewer trips than the weeks around it, every day.",
+        "days": [
+          "2022-11-12",
+          "2022-11-13",
+          "2022-11-14",
+          "2022-11-15",
+          "2022-11-16",
+          "2022-11-17",
+          "2022-11-18",
+          "2022-11-19",
+          "2022-11-20",
+          "2022-11-21"
+        ]
+      }
+    ],
+    "donors": [
+      "2022-09-10",
+      "2022-09-11",
+      "2022-11-01",
+      "2022-11-04",
+      "2022-11-07",
+      "2022-11-09",
+      "2022-11-10",
+      "2023-09-14",
+      "2023-09-15",
+      "2023-09-16",
+      "2023-09-17"
+    ],
+    "weather": "weather/open-meteo_loads.csv",
+    "method": "every trip picked up on the day (tpep_pickup_datetime, local time), in file order; an episode's days in the month's columns"
+  },
+  "history": {
+    "from": "2021-10-01",
+    "to": "2024-01-31",
+    "days": 853,
+    "method": "each day's trips as a daily load, measured by scripts/data/history.ts: the example's trip checks run on the runtime; the trips profiled as the app's profile box does (exact counts, a median and quantiles from an even sample of 2,000 rows); every row of the coded columns counted, value by value and in pairs, and of the zones; the trips by pickup hour; each day's weather and each month's file's own columns from this script"
+  },
+  "schema": {
+    "VendorID": "int32",
+    "tpep_pickup_datetime": "timestamp[us]",
+    "tpep_dropoff_datetime": "timestamp[us]",
+    "passenger_count": "int64",
+    "trip_distance": "double",
+    "RatecodeID": "int64",
+    "store_and_fwd_flag": "large_string",
+    "PULocationID": "int32",
+    "DOLocationID": "int32",
+    "payment_type": "int64",
+    "fare_amount": "double",
+    "extra": "double",
+    "mta_tax": "double",
+    "tip_amount": "double",
+    "tolls_amount": "double",
+    "improvement_surcharge": "double",
+    "total_amount": "double",
+    "congestion_surcharge": "double",
+    "Airport_fee": "double"
+  },
+  "files": [
+    {
+      "path": "history.json",
+      "bytes": 1619528,
+      "sha256": "61c5e9232b9712c037f5f49533e567cf4efc9e1088cb62ccee7991c7ae23af64"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-09-10.parquet",
+      "bytes": 2395550,
+      "sha256": "8f713b620ce78225add8fbe805f601d70649f835a7840a0fdcbed4dfeb62af31",
+      "rows": 117628,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-09-11.parquet",
+      "bytes": 2151561,
+      "sha256": "9cffd1c8b875af49222c024165f192bf27a0eeed09eafdd1921a9b6825138010",
+      "rows": 101167,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-09-14.parquet",
+      "bytes": 2475464,
+      "sha256": "4816232e3feb206803681486b6448738adce462ce81c49d55d23a2a7c8223c19",
+      "rows": 124052,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-09-15.parquet",
+      "bytes": 2559691,
+      "sha256": "500bf3e528fa0988c352428dbe952ed92fc0e8f6598985b155706d2163a4af75",
+      "rows": 127956,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-09-16.parquet",
+      "bytes": 2553645,
+      "sha256": "bbbb144fcbc499b754e20e27e4147d266fe5fcca25b7ea2e3651059fc6233fd9",
+      "rows": 125862,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-09-17.parquet",
+      "bytes": 1278068,
+      "sha256": "e219aa45b8a4a7c952b623af82060bcc9abe87910e32d5f3467e3b17ab47b9ad",
+      "rows": 59501,
+      "row_groups": 1,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-09-18.parquet",
+      "bytes": 130249,
+      "sha256": "2b04df478308b8514570c8aec8e056be0774090e467627c2be72b50e704203e8",
+      "rows": 4229,
+      "row_groups": 1,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-09-19.parquet",
+      "bytes": 2192623,
+      "sha256": "2888f64c2279b8ca513a07d336db1a0be3e133130a925c279b222c607170a430",
+      "rows": 105585,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-09-20.parquet",
+      "bytes": 2203710,
+      "sha256": "59d26932dd80331a65f7d54129629e6c422099eb2459599e8b3fdfa71c1d6e33",
+      "rows": 106678,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-01.parquet",
+      "bytes": 2432810,
+      "sha256": "8b6079d2953880771e348d7418579713479e4192800e6f5cf718702ecccbb5b8",
+      "rows": 120506,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-04.parquet",
+      "bytes": 2610056,
+      "sha256": "c8a6ea3e2f854d0ffc92d3df5f6fc1f5c1bc7a08d293608eb36fcb77605b487a",
+      "rows": 130682,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-07.parquet",
+      "bytes": 2291705,
+      "sha256": "6e79b1432c048512154cfab3fff8bf2f1e2c6fa4de574466eccba966bca6878e",
+      "rows": 112135,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-09.parquet",
+      "bytes": 2535915,
+      "sha256": "95679527ca812ab996677a6b3aa38914ca259ba15d404cc6374d1aadfe714e70",
+      "rows": 128700,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-10.parquet",
+      "bytes": 2629247,
+      "sha256": "4a6ca5932585ede8a978aa7cc7b0486737767b03421af35626c1632452df8658",
+      "rows": 132727,
+      "row_groups": 3,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-12.parquet",
+      "bytes": 2602631,
+      "sha256": "3bced1f1afa25f28fddf9cfab672bddbf29c9c96bf94925be045d2a03e1150bb",
+      "rows": 130944,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-13.parquet",
+      "bytes": 2382975,
+      "sha256": "1a64a8c5c7738f0357ff68bc32f89284ef3af2aab65f982a321c81e3a451f2ac",
+      "rows": 114269,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-14.parquet",
+      "bytes": 1741599,
+      "sha256": "4b46d4a9e4cde718f80a49a882953247f91ad40b3a87c4b489f2d434482835ca",
+      "rows": 82278,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-15.parquet",
+      "bytes": 1875256,
+      "sha256": "c4ef74683b80192cccd76934509bce0c504272849cc8038935aad2439c697306",
+      "rows": 90728,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-16.parquet",
+      "bytes": 1916932,
+      "sha256": "0eba37429cce534a14b9cfe1ca6dee4e84a15ed3ece35fba320a6a26474cbae9",
+      "rows": 92660,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-17.parquet",
+      "bytes": 1976091,
+      "sha256": "743b91e1b057315466e56308b5a5f7666aa2bf4b9109640c9e79110121d45f0c",
+      "rows": 95344,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-18.parquet",
+      "bytes": 1998589,
+      "sha256": "f96b1cfcbdd362ba264262398e61f8ded4db42c290e0f6b9281fe76777c5db8a",
+      "rows": 95454,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-19.parquet",
+      "bytes": 1971179,
+      "sha256": "7d48258e2488a17b79eed3d1ad5ccb68465f53d0af7defe1f43cdd1bc8cdd9a3",
+      "rows": 94932,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-20.parquet",
+      "bytes": 1743746,
+      "sha256": "7ba0f140c65059f96aa4b9ad061f5b1aabe4cee63e34d203f93e9a83cfee498b",
+      "rows": 81125,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2022-11-21.parquet",
+      "bytes": 2223024,
+      "sha256": "24042060c02d09145f3d87d41dcd12a1b4d58f16566ec3da27485a7250ad0e60",
+      "rows": 108526,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-14.parquet",
+      "bytes": 2549847,
+      "sha256": "46aad9417092a94e1fafe5d056c8c92cafabf06521e8247ffd7dcc86dc0bef25",
+      "rows": 125129,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-15.parquet",
+      "bytes": 2436059,
+      "sha256": "99c770a0318727aaa94988d016d7174c1536c2cd414cf1efed028806b4835c7c",
+      "rows": 116571,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-16.parquet",
+      "bytes": 2357612,
+      "sha256": "4a70f84a1dd1780c8ec035460cd24f52e5c5334e1f9d88be16eae26c7e44ede8",
+      "rows": 111808,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-17.parquet",
+      "bytes": 2119049,
+      "sha256": "8c5811bb68bfbb0480ca780d68e7f0002510530f5fd22fddd0dde2974d4226a3",
+      "rows": 95051,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-18.parquet",
+      "bytes": 2112578,
+      "sha256": "d2e2d52d8cf26b5f80bdf2ae37ccc1c4292aebb7926213da4176e58d569b2ce1",
+      "rows": 96460,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-19.parquet",
+      "bytes": 2213980,
+      "sha256": "1ee62a572bbf136a7f3d016e9e993717d788014e119f04eac74861bbed68de5e",
+      "rows": 104565,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-20.parquet",
+      "bytes": 2283495,
+      "sha256": "7a3eff28c56ea76b636466bbc142f29a8e315fb1be4d91cd143dc175c85757bf",
+      "rows": 108434,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-21.parquet",
+      "bytes": 949820,
+      "sha256": "cf4c229194803532af0721f529f6656a619ea8b18da87221564d421dd0f861f9",
+      "rows": 41939,
+      "row_groups": 1,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-22.parquet",
+      "bytes": 146946,
+      "sha256": "6fd200a2e297f2479c9550c626b706aa5be248df29ffd76acce1378a253a6a12",
+      "rows": 4633,
+      "row_groups": 1,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-23.parquet",
+      "bytes": 171349,
+      "sha256": "036cc5969fccf99b375275e361bdb3dd2e36cbed8727b0f3287ddb654e32cf6d",
+      "rows": 5732,
+      "row_groups": 1,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-24.parquet",
+      "bytes": 150188,
+      "sha256": "0bba14b711eea7749106bdae272c92ca2625225d8d8b2dfe626d5018291bdc02",
+      "rows": 4813,
+      "row_groups": 1,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-25.parquet",
+      "bytes": 1982804,
+      "sha256": "05e47f302f9f2836a9059dab814dfcec17641667f33f9ba5adf51890d1a3f7b6",
+      "rows": 91341,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2023-09-26.parquet",
+      "bytes": 2332230,
+      "sha256": "eaa0b0b808126e28f6a538586d9f9a5b1a3e9d923331c38d064473334864f5a5",
+      "rows": 112520,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-01.parquet",
+      "bytes": 1861983,
+      "sha256": "31b2c154c75a0cddcb322556be08251f4a81dc36a333dc1ff35157afbf1e424c",
+      "rows": 81013,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-02.parquet",
+      "bytes": 1694539,
+      "sha256": "96b169a37748a3099ae5741afa480309b08de73494a3bbd0f6cc36dc66a2b754",
+      "rows": 75519,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-03.parquet",
+      "bytes": 1811454,
+      "sha256": "129e842c49461410a77969ce18a25646d253588fd60b483e919c515bd23dc5f2",
+      "rows": 82427,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-04.parquet",
+      "bytes": 2144623,
+      "sha256": "e817c503f73151d3d968b89498e02741a6d8bb1efef4a1412a13a6dabc951b6e",
+      "rows": 102901,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-05.parquet",
+      "bytes": 2156938,
+      "sha256": "c6ba042edbe9aff6e851a13f0013f3a3e175368ba4a9e6b0cd99817136c86d9e",
+      "rows": 103178,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-06.parquet",
+      "bytes": 2066626,
+      "sha256": "d467b3778148aa61851ef5b4042ce88a201e63c1f0c60211b3d8f9df01d97035",
+      "rows": 97117,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-07.parquet",
+      "bytes": 1553584,
+      "sha256": "81ccfa49ac121704d439e175757895d85870b1bb8bfb965df88bebd749b7d239",
+      "rows": 67543,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-08.parquet",
+      "bytes": 1752450,
+      "sha256": "978d0d48a3a017490aee7646ba4984df47233dfee6f5bdd8cbabe11d6d0e3358",
+      "rows": 80034,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-09.parquet",
+      "bytes": 1992707,
+      "sha256": "5e4bac1589e4454d680a7999cfa290a925b1711f4981e53fa1a8a90dd75b9e67",
+      "rows": 93962,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-10.parquet",
+      "bytes": 2014896,
+      "sha256": "2182983bba7a091867e17034547f47bcb7d9dfe6ea9b1995e4b8e8eaa8c78e00",
+      "rows": 95000,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-11.parquet",
+      "bytes": 2195447,
+      "sha256": "cac2af6f6fd482c57fc6947ac5b7055e83f46e7563629f3b69f3aae95ec45b18",
+      "rows": 105010,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-12.parquet",
+      "bytes": 2193712,
+      "sha256": "affe366c9b3fa95b6221faf281b65716a5882ee30b3350186ff4eb8f5a7e38b3",
+      "rows": 103655,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-13.parquet",
+      "bytes": 2195083,
+      "sha256": "aa986aa43b0db789e4614b23062cfc10d58b8e04e239a69d489b54a377a3940e",
+      "rows": 104758,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-14.parquet",
+      "bytes": 2059191,
+      "sha256": "0fcbc27ec64466c417000fae29ac14bae143be7f528861b629ceb3ab1f0a3f06",
+      "rows": 94420,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-15.parquet",
+      "bytes": 1718737,
+      "sha256": "9eb133a3dda90acf878f2f6a6db2b6580a1b7ac6dec6f3f63ebe5e27fc59c617",
+      "rows": 77033,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-16.parquet",
+      "bytes": 2004752,
+      "sha256": "9cbdf7affeba45563665ecfd57fe61bcf156d737bde6572767c8d158e77613b8",
+      "rows": 93057,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-17.parquet",
+      "bytes": 2292265,
+      "sha256": "7c9cc43aa16d4d873322b067442082a06926f9e9f07dd670231af56a8e2020c8",
+      "rows": 110365,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-18.parquet",
+      "bytes": 2284147,
+      "sha256": "6b6f774751adae7e14e9bc6dc806cbf9ebb4e422cda1742f5d87facf7d87f672",
+      "rows": 110358,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-19.parquet",
+      "bytes": 2044186,
+      "sha256": "4414e9ab4c694a1c5621f09bb0c3c989f2e4518180834656ef277c2ba0485e16",
+      "rows": 95951,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-20.parquet",
+      "bytes": 2241587,
+      "sha256": "167aca5ea72c65882e9091cc27d30ebd22eddec3faa64e600ec4557b22483d69",
+      "rows": 108768,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-21.parquet",
+      "bytes": 1878717,
+      "sha256": "939880136533d40d2a38b81c44f1f1f51c7c17a2aaa631264d306cd5a7802177",
+      "rows": 84502,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-22.parquet",
+      "bytes": 1859462,
+      "sha256": "1b788144cf839cf541a7ec4efe9fa7df5be01fde9d8a369dcf1eb364597257f2",
+      "rows": 85650,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-23.parquet",
+      "bytes": 2096036,
+      "sha256": "48abae49bf7eec5eb1969afc462ac89e8fff7d10b8c3a69eaa77f328c6fcd538",
+      "rows": 99891,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-24.parquet",
+      "bytes": 2171524,
+      "sha256": "3c8a705f7870d6d9c6f63db25c9b17efa232072628221ccdec808548cd2a8bc1",
+      "rows": 105120,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-25.parquet",
+      "bytes": 2283364,
+      "sha256": "61542348752a2223e3587d3df5b1bd6b43fc1e4f698cc99ef08daebb969c2c65",
+      "rows": 110318,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-26.parquet",
+      "bytes": 2219825,
+      "sha256": "440e34adb543b064087ba7350731140eaf6b227e773314c1f1085db1b4b1e764",
+      "rows": 105804,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-27.parquet",
+      "bytes": 2276452,
+      "sha256": "187650266cd03d0e9834e20c0442fe56a2be97e0aa85099ed85f9aa499b330ce",
+      "rows": 110515,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-28.parquet",
+      "bytes": 2040593,
+      "sha256": "36dfb20592a7ff2df2d48f69218520ce3cf6012bb2e6da579d19ab805c2c8901",
+      "rows": 92837,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-29.parquet",
+      "bytes": 1840987,
+      "sha256": "7f178c762f9598883aed79f643a7c40cf32331efd04cebe98ccc2229be7e6f42",
+      "rows": 84547,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-30.parquet",
+      "bytes": 2105179,
+      "sha256": "ae329c9290064cd3d06266d0c482441e27275374a7f29d2a38c70325be8d0b25",
+      "rows": 101233,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "loads/yellow_tripdata_2024-01-31.parquet",
+      "bytes": 2120867,
+      "sha256": "46862dc083f26cdb450fd318c0832eacd6998f81c40648e064ee45faa1a2f283",
+      "rows": 102120,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "samples/yellow_tripdata_2024-01_100k.parquet",
+      "bytes": 2732861,
+      "sha256": "0f1c42e5234e1d15dd2f3726d721b34f347c0e39ce43ec6360d117eacde9c3c9",
+      "rows": 100000,
+      "row_groups": 2,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "samples/yellow_tripdata_2024-01_10k.parquet",
+      "bytes": 292959,
+      "sha256": "a46aca91e65bf0733b7c00f349231ff6d01fedf07d738d3cb7b051d8d8fa26cc",
+      "rows": 10000,
+      "row_groups": 1,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "samples/yellow_tripdata_2024-01_first-week.parquet",
+      "bytes": 13249619,
+      "sha256": "432aa197ffb9193fd2dcf4e1cafc30eb6f9380b1ff354bd47e8fbc82ecf7737f",
+      "rows": 609698,
+      "row_groups": 10,
+      "compression": "SNAPPY"
+    },
+    {
+      "path": "tlc/taxi_zone_lookup.csv",
+      "bytes": 12331,
+      "sha256": "1a99e105092230f8620f301edcca7f80d3080642ff404d28ed957d3fa222c8ed"
+    },
+    {
+      "path": "tlc/yellow_tripdata_2024-01.parquet",
+      "bytes": 49961641,
+      "sha256": "c4d59da7bbc8abaeeeb1727947ee93d9891a71acb42854bd80db1571b2030510",
+      "rows": 2964624,
+      "row_groups": 3,
+      "compression": "ZSTD"
+    },
+    {
+      "path": "weather/open-meteo_2024-01.csv",
+      "bytes": 237604,
+      "sha256": "f7d01c07fcc8fb11e70f1b1c349566449b08c6e194907a7782ecabb974b0302f"
+    },
+    {
+      "path": "weather/open-meteo_loads.csv",
+      "bytes": 633979,
+      "sha256": "96d47aa50191eb0dea475f5c2ccdf49b6e8ad437a31b197ac1c810b0b162aa18"
+    }
+  ]
+}
