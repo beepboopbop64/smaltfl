@@ -1,7 +1,8 @@
 name: Data
 
-# Downloads the scenario's data (scripts/data/build.py) and publishes it as the `data` branch: one commit, replaced on
-# every run. It runs on GitHub's runners because they can reach the data hosts. It runs when the script or this file
+# Downloads the scenario's data (scripts/data/build.py) and publishes it as the `data` branch: one new commit on top of
+# the last on every run, so every data commit a run or an audit bag names stays fetchable (ADR 0009, the owner's
+# "we should always be able to get back to what was true"). It runs on GitHub's runners because they can reach the data hosts. It runs when the script or this file
 # changes, or on demand. The history (each day's numbers for two years and a quarter) is measured on the runtime, in
 # Node, so the job installs the project as CI does.
 on:
@@ -46,7 +47,10 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git init -q
-          git checkout -q -b data
+          git symbolic-ref HEAD refs/heads/data
+          git remote add origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # The new commit's parent is the branch as it is: its tree is this run's files alone, its history every run's.
+          if git fetch -q --depth 1 origin data; then git reset -q --soft FETCH_HEAD; fi
           git add -A
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -q -m "Data for $(jq -r .month MANIFEST.json), built $(jq -r .built MANIFEST.json) from ${GITHUB_SHA::7}"
-          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
+          git push -q origin HEAD:data
