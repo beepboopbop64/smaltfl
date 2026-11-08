@@ -1,8 +1,8 @@
 // Builds the app into dist/app: page.html (the page's content; the artifact host adds the document skeleton),
 // app.js (the page), worker.js (the engine worker), inline.js (the engine in the page, for browsers without the
-// worker), and data/ (the example's files: from the data branch when it has been fetched, the month's daily loads and
-// the days of a few real incidents, listed in data/loads.json, and the history each day's normal range and news come
-// from, data/history.json; else the XS fixtures, as one load).
+// worker), and data/ (the example's files: from the data branch when it has been fetched, the month's daily loads, the
+// days of a few real incidents and the days a paused one may be filled from, listed in data/loads.json, and the history
+// each day's normal range and news come from, data/history.json; else the XS fixtures, as one load).
 //
 //   node scripts/build-app.mjs            the daily loads from origin/data, or the 10k fixtures
 //   node scripts/build-app.mjs --xs       the 10k fixtures
@@ -99,12 +99,15 @@ if (days.length) {
   const list = days.map(entryOf);
   // Real incidents in the records, a few days each, to step through as the month is.
   const episodes = (manifest.loads.episodes ?? []).map((e) => ({ name: e.name, about: e.about, loads: e.days.map(entryOf) }));
+  // The days a paused day may be filled from that aren't loads already (ADR 0009 amendment 1 S13): checked against the
+  // list like every file, pinned by the page only when a fill needs one. Not loads: the strip doesn't step through them.
+  const donors = (manifest.loads.donors ?? []).map(entryOf);
   // Each day's numbers, for each load's normal range: a data branch built before the history has none.
   if (manifest.history) files.history = file('history.json', 'history.json');
-  const index = { month: manifest.month, built: manifest.built, data: { commit: data, manifest: sha256(manifestBytes), bytes: manifestBytes.length }, files, loads: list, episodes, ...(files.history ? { history: 'history.json' } : {}) };
+  const index = { month: manifest.month, built: manifest.built, data: { commit: data, manifest: sha256(manifestBytes), bytes: manifestBytes.length }, files, loads: list, episodes, donors, ...(files.history ? { history: 'history.json' } : {}) };
   writeFileSync(`${out}/data/loads.json`, JSON.stringify(index, null, 2) + '\n');
   const trips = (ls) => ls.reduce((n, l) => n + l.rows, 0).toLocaleString('en-US');
-  console.log(`built ${out} (${commit.slice(0, 12)}) with ${list.length} daily loads from data ${data.slice(0, 12)} (${trips(list)} trips), ${episodes.map((e) => `${e.loads.length} of ${e.name}`).join(', ') || 'no episodes'}${files.history ? `, and the history from ${manifest.history.from} to ${manifest.history.to}` : ''}; every file checked against MANIFEST.json`);
+  console.log(`built ${out} (${commit.slice(0, 12)}) with ${list.length} daily loads from data ${data.slice(0, 12)} (${trips(list)} trips), ${episodes.map((e) => `${e.loads.length} of ${e.name}`).join(', ') || 'no episodes'}, ${donors.length} donor days${files.history ? `, and the history from ${manifest.history.from} to ${manifest.history.to}` : ''}; every file checked against MANIFEST.json`);
 } else {
   // The fixtures: hashed here, as this build's own list, never as the data branch's.
   const files = {};
@@ -113,6 +116,6 @@ if (days.length) {
     put(name, bytes);
     files[name.split('.')[0]] = { path: name, from: `fixtures/xs/${name}`, sha256: sha256(bytes), bytes: bytes.length };
   }
-  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ data: null, files, loads: [] }, null, 2) + '\n');
+  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ data: null, files, loads: [], donors: [] }, null, 2) + '\n');
   console.log(`built ${out} (${commit.slice(0, 12)}) with data from fixtures/xs (10,000 trips)`);
 }

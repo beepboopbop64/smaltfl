@@ -22,7 +22,7 @@ import io from '@smaltdb/io';
 import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../../src/plugin/index.js';
-import { runFlow, type ExpectationsStep, type FlowDocument, type FlowPlan } from '../../src/index.js';
+import { runFlow, sourceOf, type ExpectationsStep, type FlowDocument, type FlowPlan } from '../../src/index.js';
 import { emitColumnFacts, emitRead, emitSample, type EmitContext } from '../../src/core/emit.js';
 import { shapeOf } from '../../src/core/optimize.js';
 import { minuteOfDay, numbersOf, profileColumn, quantile, type Kind } from '../../src/core/quality.js';
@@ -76,6 +76,10 @@ const step: ExpectationsStep = (() => {
   if (!found) throw new Error(`the example has no ${STEP} checks`);
   return found;
 })();
+// The source the checks count: the one they read, or the one their fill step reads (ADR 0009 amendment 1 S1). A fill
+// step fills nothing here, so the history counts what arrived either way, and its file doesn't change.
+const source = step.inputs.length === 1 ? sourceOf(doc, step.inputs[0]!) : undefined;
+if (!source || !doc.sources.some((s) => s.id === source)) throw new Error(`${STEP} doesn't read a source alone`);
 // The checks alone, over the trips. The history counts every day's failures, so a day over the step's limit on
 // dropped rows still runs to the end: the limit stops a run, it doesn't change what the checks count.
 // Format 1: the checks alone hold nothing, so they carry no publish block (ADR 0009 §2: format 2 is only for one).
@@ -84,8 +88,8 @@ const checks: FlowDocument = {
   id: `${doc.id}-history`,
   name: `${doc.name}: the trip checks`,
   parameters: doc.parameters,
-  sources: doc.sources.filter((s) => step.inputs.includes(s.id)),
-  steps: [{ ...step, maxDropped: 1 }],
+  sources: doc.sources.filter((s) => s.id === source),
+  steps: [{ ...step, inputs: [source], maxDropped: 1 }],
 };
 const trips = EXAMPLE_SOURCES.find((s) => s.file === 'trips.parquet')!;
 
@@ -107,7 +111,7 @@ async function measure(file: string): Promise<DayNumbers> {
     }
     const { stored } = shapeOf(plan);
     const ctx: EmitContext = { table: (i) => (stored.has(i) ? tables.get(i) : undefined), columns: (i) => plan.nodes[i]!.schema!.map(([c]) => c) };
-    const i = plan.nodes.findIndex((n) => n.origin === step.inputs[0]);
+    const i = plan.nodes.findIndex((n) => n.origin === source);
     const read = emitRead(plan, i, ctx);
     const schema = plan.nodes[i]!.schema!;
     const f = (await db.queryAsync(emitColumnFacts(read, schema.map(([name, type]) => ({ name, numeric: NUMERIC.has(type) }))))).rows[0]!;
