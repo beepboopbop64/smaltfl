@@ -24,6 +24,8 @@ export interface GridLayout {
   /** Each card's top-left corner; members of a folded section share the section's card. */
   cards: Map<string, { x: number; y: number }>;
   frames: GridFrame[];
+  /** Stacked for a narrow width (a phone): each row of cards' top, and the y an edge into that row crosses on. */
+  rows?: { top: number; via: number }[];
   /** The bounds of everything drawn: cards can be placed left of or above the automatic layout's origin. */
   left: number;
   top: number;
@@ -51,8 +53,12 @@ export const groupKey = (id: string): string => `group:${id}`;
  * can be, before everything that reads it; a column left empty closes up. Positions the document's layout gives win over the
  * automatic ones, and frames then fit around their members; a folded section's card sits at its members' top-left
  * corner. An empty section sits where it was left, or after everything else.
+ *
+ * Given a `wrap` width (a phone's, in world units at a readable zoom) and no arrangement, the sections stack instead,
+ * one under the next in the order they start, each its cards in their order on as many columns as the width holds,
+ * so a phone shows the whole flow at a size it can read, top to bottom, instead of three cards and a long way right.
  */
-export function gridLayout(doc: FlowDocument, collapsed: ReadonlySet<string>): GridLayout {
+export function gridLayout(doc: FlowDocument, collapsed: ReadonlySet<string>, wrap?: number): GridLayout {
   const ids = [...doc.sources.map((s) => s.id), ...doc.steps.map((s) => s.id)];
   const known = new Set(ids);
   const inputs = new Map<string, string[]>(ids.map((id) => [id, (doc.steps.find((s) => s.id === id)?.inputs ?? []).filter((i) => known.has(i) && i !== id)]));
@@ -186,6 +192,7 @@ export function gridLayout(doc: FlowDocument, collapsed: ReadonlySet<string>): G
     frames.push({ id: g.id, name: g.name, color: g.color, members: [], collapsed: false, x: at ? at[0] : after, y: at ? at[1] : emptyY, w: cardW + 2 * pad, h: head + cardH + pad });
     if (!at) emptyY += head + cardH + pad + groupGapY;
   }
+  const stacked = wrap && !Object.keys(placed).length && right0(cards, frames) > wrap ? stackBlocks(cards, frames, wrap) : undefined;
   // Placed cards keep their place, a folded section's members too; their sections fit around them.
   for (const [id, p] of Object.entries(placed)) if (cards.has(id)) cards.set(id, { x: p[0], y: p[1] });
   for (const f of frames) {
@@ -205,16 +212,68 @@ export function gridLayout(doc: FlowDocument, collapsed: ReadonlySet<string>): G
   const top = Math.min(0, ...all.map((p) => p.y), ...frames.map((f) => f.y));
   const right = Math.max(0, ...all.map((p) => p.x + cardW), ...frames.map((f) => f.x + f.w));
   const bottom = Math.max(0, ...all.map((p) => p.y + cardH), ...frames.map((f) => f.y + f.h));
-  return { cards, frames, left, top, width: right - left, height: bottom - top };
+  return { cards, frames, ...(stacked ? { rows: stacked } : {}), left, top, width: right - left, height: bottom - top };
+}
+
+/** The room between two stacked sections, and between the rows of one: a lane for the edges that cross to them. */
+const BLOCK_GAP = GRID.groupGapY + 26;
+const ROW_GAP = GRID.gapY + 22;
+
+/** The right edge of what is drawn. */
+const right0 = (cards: Map<string, { x: number; y: number }>, frames: readonly GridFrame[]) => Math.max(0, ...[...cards.values()].map((p) => p.x + GRID.cardW), ...frames.map((f) => f.x + f.w));
+
+/**
+ * Stacks a laid-out flow for `maxW`: each section (or lone card) a block, in the order they start left to right, one
+ * under the next; inside a section its cards in their order, row by row on as many columns as `maxW` holds (two on a
+ * phone), a folded section one card. Moves the cards and frames; returns each row's top and the y an edge into it
+ * crosses on: the gap above its section for its first row, the gap above the row for the others.
+ */
+function stackBlocks(cards: Map<string, { x: number; y: number }>, frames: GridFrame[], maxW: number): { top: number; via: number }[] {
+  const { cardW, cardH, gapX, pad, head } = GRID;
+  const cols = Math.max(1, Math.floor((maxW - 2 * pad + gapX) / (cardW + gapX)));
+  const framed = new Set(frames.flatMap((f) => f.members));
+  const was = new Map([...cards].map(([id, p]) => [id, { ...p }]));
+  const order = (a: string, b: string) => was.get(a)!.x - was.get(b)!.x || was.get(a)!.y - was.get(b)!.y;
+  const blocks = [
+    ...frames.map((f) => ({ frame: f, x: f.x, y: f.y })),
+    ...[...cards.keys()].filter((id) => !framed.has(id)).map((id) => ({ frame: undefined, id, x: was.get(id)!.x, y: was.get(id)!.y })),
+  ].sort((a, b) => a.x - b.x || a.y - b.y);
+  const rows: { top: number; via: number }[] = [];
+  let y = 0;
+  for (const b of blocks) {
+    if (!b.frame) {
+      cards.set((b as { id: string }).id, { x: pad, y });
+      rows.push({ top: y, via: y - BLOCK_GAP / 2 });
+      y += cardH + BLOCK_GAP;
+      continue;
+    }
+    const f = b.frame;
+    const members = [...f.members].sort(order);
+    const n = f.collapsed || !members.length ? 1 : members.length;
+    const used = Math.min(cols, n);
+    const nrows = Math.ceil(n / cols);
+    const at = (k: number) => ({ x: pad + (k % cols) * (cardW + gapX), y: y + head + Math.floor(k / cols) * (cardH + ROW_GAP) });
+    for (let r = 0; r < nrows; r++) rows.push({ top: y + head + r * (cardH + ROW_GAP), via: r ? y + head + r * (cardH + ROW_GAP) - ROW_GAP / 2 : y - BLOCK_GAP / 2 });
+    members.forEach((m, k) => cards.set(m, at(f.collapsed ? 0 : k)));
+    Object.assign(f, { x: 0, y, w: used * (cardW + gapX) - gapX + 2 * pad, h: head + nrows * cardH + (nrows - 1) * ROW_GAP + pad });
+    y += f.h + BLOCK_GAP;
+  }
+  return rows;
+}
+
+/** The y an edge into a card crosses on in a stacked layout: in the gap above that card's row. */
+export function routeVia(l: GridLayout, to: { x: number; y: number }): number | undefined {
+  const row = (l.rows ?? []).filter((r) => r.top <= to.y + 0.5).at(-1);
+  return row?.via;
 }
 
 /**
  * Every card's place, written down: the layout an arrangement edit starts from, so that moving or folding one thing
  * leaves everything else where it is. A folded section's steps keep their arrangement, unfolding from its card.
  */
-export function pinLayout(doc: FlowDocument, collapsed: ReadonlySet<string>): Record<string, [number, number]> {
-  const now = gridLayout(doc, collapsed);
-  const open = gridLayout(doc, new Set());
+export function pinLayout(doc: FlowDocument, collapsed: ReadonlySet<string>, wrap?: number): Record<string, [number, number]> {
+  const now = gridLayout(doc, collapsed, wrap);
+  const open = gridLayout(doc, new Set(), wrap);
   const layout: Record<string, [number, number]> = { ...(doc.layout ?? {}) };
   for (const f of now.frames) {
     if (!f.collapsed || f.members.length === 0) continue;
@@ -231,13 +290,33 @@ export function pinLayout(doc: FlowDocument, collapsed: ReadonlySet<string>): Re
   return layout;
 }
 
-/** The edge from one card to another: out of the first's right side, into the second's left, as a cubic curve. */
-export function edgePath(from: { x: number; y: number }, to: { x: number; y: number }): { d: string; cx: number; cy: number; points: [number, number][] } {
+/**
+ * The edge from one card to another: out of the first's right side, into the second's left, as a cubic curve. Into a
+ * card below and to the left (the next band of a wrapped layout), it runs right, down to `via` (the gap above that
+ * band), left, and down into the card, its corners rounded.
+ */
+export function edgePath(from: { x: number; y: number }, to: { x: number; y: number }, via?: number): { d: string; cx: number; cy: number; points: [number, number][] } {
   const { cardW, cardH } = GRID;
   const x1 = from.x + cardW;
   const y1 = from.y + cardH / 2;
   const x2 = to.x;
   const y2 = to.y + cardH / 2;
+  if (x2 < x1 + 12 && to.y > from.y + cardH) {
+    const r = 8;
+    const xr = x1 + 16;
+    const xl = x2 - 20;
+    const yg = Math.max(y1 + 2 * r, Math.min(via ?? to.y - GRID.head - 14, y2 - 2 * r));
+    const pts: [number, number][] = [[x1, y1], [xr, y1], [xr, yg], [xl, yg], [xl, y2], [x2 - 5, y2]];
+    const points: [number, number][] = [];
+    for (let k = 1; k < pts.length; k++) for (let t = 0; t < 8; t++) points.push([pts[k - 1]![0] + ((pts[k]![0] - pts[k - 1]![0]) * t) / 8, pts[k - 1]![1] + ((pts[k]![1] - pts[k - 1]![1]) * t) / 8]);
+    points.push(pts.at(-1)!);
+    return {
+      d: `M ${x1} ${y1} H ${xr - r} Q ${xr} ${y1} ${xr} ${y1 + r} V ${yg - r} Q ${xr} ${yg} ${xr - r} ${yg} H ${xl + r} Q ${xl} ${yg} ${xl} ${yg + r} V ${y2 - r} Q ${xl} ${y2} ${xl + r} ${y2} H ${x2 - 5}`,
+      cx: x2 - 3,
+      cy: y2,
+      points,
+    };
+  }
   const bend = Math.max(36, Math.abs(x2 - x1) / 2);
   const c: [number, number][] = [[x1, y1], [x1 + bend, y1], [x2 - bend, y2], [x2 - 5, y2]];
   const at = (t: number, k: 0 | 1) => (1 - t) ** 3 * c[0]![k] + 3 * (1 - t) ** 2 * t * c[1]![k] + 3 * (1 - t) * t ** 2 * c[2]![k] + t ** 3 * c[3]![k];

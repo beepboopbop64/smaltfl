@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { FlowDocument } from '../src/core/document.js';
-import { edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout } from '../src/app/layout.js';
+import { edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout, routeVia } from '../src/app/layout.js';
 import { visualFlow } from './fixtures/taxi.js';
 
 const example = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
@@ -112,6 +112,49 @@ describe('the automatic placement of the example', () => {
       }
     });
   }
+
+  it('stacks the sections to a phone’s width, every card and section kept clear and every edge in sight (tabs #32)', () => {
+    const wide = gridLayout(example, new Set());
+    // A 390 px phone's canvas, read at 0.72: about 464 world units.
+    const wrap = (390 - 32 - 24) / 0.72;
+    const l = gridLayout(example, new Set(), wrap);
+    expect(wide.width).toBeGreaterThan(wrap);
+    expect(l.rows!.length).toBeGreaterThan(0);
+    // Narrower than the phone's width, and taller.
+    expect(l.width).toBeLessThanOrEqual(wrap);
+    expect(l.height).toBeGreaterThan(wide.height);
+    // The sections in the order they start, one under the next.
+    const ys = ['clean', 'places', 'enrich', 'demand', 'weather_group'].map((id) => l.frames.find((f) => f.id === id)!.y);
+    expect([...ys].sort((a, b) => a - b)).toEqual(ys);
+    // The same cards, in the same sections, each section around its cards.
+    expect([...l.cards.keys()].sort()).toEqual([...wide.cards.keys()].sort());
+    for (const f of l.frames) for (const m of f.members) {
+      const p = l.cards.get(m)!;
+      expect(p.x >= f.x && p.x + cardW <= f.x + f.w && p.y >= f.y && p.y + cardH <= f.y + f.h, `${m} in ${f.id}`).toBe(true);
+    }
+    const overlap = (a: { x: number; y: number; w: number; h: number }, b: typeof a) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const boxes = [...l.cards.entries()];
+    for (const [i, [a, p]] of boxes.entries()) for (const [b, q] of boxes.slice(i + 1)) expect(overlap({ ...p, w: cardW, h: cardH }, { ...q, w: cardW, h: cardH }), `${a} and ${b}`).toBe(false);
+    for (const [i, f] of l.frames.entries()) for (const g of l.frames.slice(i + 1)) expect(overlap(f, g), `${f.id} and ${g.id}`).toBe(false);
+    // An edge into the next band runs right, down the gap above that band, left, and in: never over a card.
+    let crossing = 0;
+    for (const st of example.steps) for (const input of st.inputs) {
+      const [p, q] = [l.cards.get(input)!, l.cards.get(st.id)!];
+      if (q.x < p.x + cardW) crossing++;
+      for (const [x, y] of edgePath(p, q, routeVia(l, q)).points) {
+        for (const [id, r] of boxes) if (id !== input && id !== st.id) expect(x > r.x + 1 && x < r.x + cardW - 1 && y > r.y + 1 && y < r.y + cardH - 1, `${input} → ${st.id} passes over ${id}`).toBe(false);
+      }
+    }
+    expect(crossing).toBeGreaterThan(0);
+    // An arrangement is the person's: it never wraps.
+    const pinned = { ...example, layout: pinLayout(example, new Set()) };
+    expect(gridLayout(pinned, new Set(), wrap).rows).toBeUndefined();
+    // A folded section stacks as one card.
+    const folded = gridLayout(example, new Set(['weather_group']), wrap);
+    const wf = folded.frames.find((f) => f.id === 'weather_group')!;
+    expect(new Set(wf.members.map((m) => JSON.stringify(folded.cards.get(m)))).size).toBe(1);
+    expect(wf.w).toBe(cardW + 2 * GRID.pad);
+  });
 
   it('puts each input just before the step that first reads it', () => {
     const l = gridLayout(example, new Set());

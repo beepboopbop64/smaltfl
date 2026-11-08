@@ -19,7 +19,7 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, toldLine, type EpisodeDay } from '../core/days.js';
-import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, ruleOrder, ruleUsual, shortWho, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
+import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, ruleOrder, ruleUsual, shortWho, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
@@ -38,7 +38,7 @@ import { buildBag } from '../core/bag.js';
 import { zip } from '../core/zip.js';
 import { parseCheckpoint, type JSONValue } from '../core/log.js';
 import { connect, type Engine } from './engine.js';
-import { besideSlot, edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout, type GridLayout } from './layout.js';
+import { besideSlot, edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout, routeVia, type GridLayout } from './layout.js';
 
 declare const __SMALTDB_VERSION__: string;
 const SMALTDB = typeof __SMALTDB_VERSION__ === 'string' ? __SMALTDB_VERSION__ : '0.9.0';
@@ -542,7 +542,8 @@ function summarize(c: Change): CardLine | null {
       // Checks, filters and SQL. A SQL step that reshapes its rows (other columns, another count of them) isn't
       // dropping rows, so its card says how many go in and out instead.
       if (c.op === 'sql' && !c.same && c.columnsIn !== c.columnsOut) return { text: `${fmtCompact(inn)} → ${fmtCompact(out)} rows`, tone: 'same' };
-      if (lost) return { text: `−${fmtInt(lost)} rows · ${pct(lost / Math.max(1, inn))}`, tone: 'drop', badge: `−${fmtCompact(lost)} rows` };
+      // The badge counts the rows, the line their share: one number each, never the same twice.
+      if (lost) return { text: `${pct(lost / Math.max(1, inn))} of rows ${c.op === 'expect' ? 'dropped' : 'left out'}`, tone: 'drop', badge: `−${fmtCompact(lost)} rows` };
       if (out > inn) return { text: `+${fmtInt(out - inn)} rows`, tone: 'add' };
       // A check that only warns keeps every row, and says how many it flags.
       if (c.op === 'expect' && c.flagged) return { text: `${plural(c.flagged, 'row')} flagged`, tone: 'drop', badge: `⚑ ${fmtCompact(c.flagged)}` };
@@ -591,7 +592,9 @@ function shortHead(story: Story): string {
   }
   if (story.hero === 'hours' && story.hours) return `Falls at ${clockText(story.hours.from * 60)}`;
   if (story.hero === 'gate' && story.gate) return `held · ${fmtInt(story.gate.dropped)} of ${fmtInt(story.gate.rows)}`;
-  return story.head.split(/\s+/).length <= 4 ? story.head : story.head.split(/\s+/).slice(0, 4).join(' ');
+  // The amount: its change ("−30% trips"), the number the card's line has room for.
+  if (story.hero === 'amount' && story.amount) return `${changeLabel(story.amount.value / Math.max(1, story.amount.expected) - 1)} trips`;
+  return cardWords(story.head, Math.floor((GRID.cardW - 24) / 7.2));
 }
 
 /**
@@ -656,7 +659,7 @@ function applyView(): void {
 
 function fitView(): void {
   const host = $('canvas');
-  const { left, top, width, height } = gridLayout(canvasDoc(viewDoc()), state.collapsed);
+  const { left, top, width, height } = gridLayout(canvasDoc(viewDoc()), state.collapsed, wrapWidth());
   const W = host.clientWidth || 360;
   const H = host.clientHeight || 420;
   view.k = Math.max(MIN_ZOOM, Math.min(1.2, (W - 32) / width, (H - 32) / height));
@@ -725,12 +728,31 @@ function tidy(): void {
   state.doc = { ...state.doc, layout: {} };
   saveArrangement();
   renderCanvas();
-  startView(gridLayout(canvasDoc(viewDoc()), state.collapsed));
+  startView(gridLayout(canvasDoc(viewDoc()), state.collapsed, wrapWidth()));
 }
 
-/** The beginning of the flow, at a size where its cards are easy to read: on a phone, two columns and a bit. */
+/** The zoom a wrapped flow is read at on a phone: its cards' names and lines legible. */
+const WRAP_ZOOM = 0.72;
+
+/** On a narrow canvas (a phone), the width the flow's sections stack to, in world units at WRAP_ZOOM; none on a
+ * wide one. */
+function wrapWidth(): number | undefined {
+  const w = document.getElementById('canvas')?.clientWidth ?? 0;
+  return w > 0 && w < 640 ? (w - 24) / WRAP_ZOOM : undefined;
+}
+
+/** The beginning of the flow, at a size where its cards are easy to read: on a phone, the flow wrapped to the width,
+ * its sections stacked from the top; on a wider screen, two columns and a bit. */
 function startView(layout: GridLayout): void {
   const host = $('canvas');
+  if (layout.rows?.length) {
+    view.k = Math.max(0.5, Math.min(1, (host.clientWidth - 24) / layout.width));
+    view.x = (host.clientWidth - layout.width * view.k) / 2 - layout.left * view.k;
+    view.y = 30 - layout.top * view.k;
+    view.ready = true;
+    applyView();
+    return;
+  }
   view.k = Math.max(0.55, Math.min(1, (host.clientHeight - 40) / layout.height, (host.clientWidth - 16) / (2.2 * (GRID.cardW + GRID.gapX))));
   view.x = 16 - layout.left * view.k;
   view.y = Math.max(16, (host.clientHeight - layout.height * view.k) / 2) - layout.top * view.k;
@@ -930,7 +952,7 @@ function moveTo(dx: number, dy: number): void {
   };
   for (const e of drawn.edges) {
     if (!moved.has(e.from) && !moved.has(e.to)) continue;
-    const { d, cx, cy } = edgePath(pos(e.from), pos(e.to));
+    const { d, cx, cy } = edgePath(pos(e.from), pos(e.to), drawn.layout ? routeVia(drawn.layout, pos(e.to)) : undefined);
     e.path.setAttribute('d', d);
     e.dot.setAttribute('cx', String(cx));
     e.dot.setAttribute('cy', String(cy));
@@ -954,7 +976,7 @@ function endMove(commit: boolean): void {
   if (m && before && commit) {
     const joins = m.card !== undefined && m.target !== undefined && m.target !== sectionOf(m.card);
     if (m.dx || m.dy || joins) {
-      const layout = pinLayout(canvasDoc(state.doc), state.collapsed);
+      const layout = pinLayout(canvasDoc(state.doc), state.collapsed, wrapWidth());
       const shift = (key: string) => {
         const p = layout[key];
         if (p) layout[key] = [p[0] + m.dx, p[1] + m.dy];
@@ -991,7 +1013,7 @@ function intoSection(doc: FlowDocument, id: string, target: string | null, befor
 
 /** Arrange, from the keyboard: an arrow key moves the focused card one grid step. */
 function nudge(key: string, dx: number, dy: number): void {
-  const layout = pinLayout(canvasDoc(state.doc), state.collapsed);
+  const layout = pinLayout(canvasDoc(state.doc), state.collapsed, wrapWidth());
   const folded = state.doc.groups?.find((g) => g.id === key);
   for (const id of folded ? folded.steps : [key]) {
     const p = layout[id];
@@ -1021,7 +1043,7 @@ function addSection(): void {
   const x = snap((host.clientWidth / 2 - view.x) / view.k - (cardW + 2 * pad) / 2);
   const y = snap((host.clientHeight / 2 - view.y) / view.k - (head + cardH + pad) / 2);
   const color = nextColor(groups);
-  const layout = { ...pinLayout(canvasDoc(state.doc), state.collapsed), [groupKey(id)]: [x, y] as [number, number] };
+  const layout = { ...pinLayout(canvasDoc(state.doc), state.collapsed, wrapWidth()), [groupKey(id)]: [x, y] as [number, number] };
   state.doc = { ...state.doc, groups: [...groups, { id, name, steps: [], color }], layout };
   saveArrangement();
   openSection(id, true);
@@ -1044,7 +1066,7 @@ function nextColor(groups: readonly GroupDef[]): GroupDef['color'] {
 }
 
 function removeSection(id: string): void {
-  const layout = pinLayout(canvasDoc(state.doc), state.collapsed);
+  const layout = pinLayout(canvasDoc(state.doc), state.collapsed, wrapWidth());
   delete layout[groupKey(id)];
   state.collapsed.delete(id);
   state.doc = { ...state.doc, groups: (state.doc.groups ?? []).filter((g) => g.id !== id), layout };
@@ -1054,8 +1076,8 @@ function removeSection(id: string): void {
 
 /** Move a step into a section from its sheet: it lands in the section's first free slot; a new section is drawn around it. */
 function placeInSection(id: string, target: string): void {
-  const before = gridLayout(canvasDoc(state.doc), state.collapsed);
-  const doc: FlowDocument = { ...state.doc, layout: pinLayout(canvasDoc(state.doc), state.collapsed) };
+  const before = gridLayout(canvasDoc(state.doc), state.collapsed, wrapWidth());
+  const doc: FlowDocument = { ...state.doc, layout: pinLayout(canvasDoc(state.doc), state.collapsed, wrapWidth()) };
   if (target === '+') {
     // A new section drawn around the step where it stands, named straight away.
     const fresh: GroupDef = { ...newSection(doc), steps: [], color: nextColor(doc.groups ?? []) };
@@ -1120,7 +1142,7 @@ function resetArrangement(): void {
     // Nothing kept to forget.
   }
   select(null);
-  startView(gridLayout(canvasDoc(viewDoc()), state.collapsed));
+  startView(gridLayout(canvasDoc(viewDoc()), state.collapsed, wrapWidth()));
   if (edited) void run();
 }
 
@@ -1134,7 +1156,7 @@ function renderCanvas(): void {
   const world = svg.querySelector('#world')!;
   const { cardW, cardH, head } = GRID;
   const doc = canvasDoc(viewDoc());
-  const layout = gridLayout(doc, state.collapsed);
+  const layout = gridLayout(doc, state.collapsed, wrapWidth());
   // Focus stays on the card or section it was on: the canvas redraws as counts arrive, under a keyboard user's feet.
   const active = document.activeElement;
   const focused = active && world.contains(active) ? { card: active.getAttribute('data-card'), head: active.getAttribute('data-head') } : null;
@@ -1186,7 +1208,7 @@ function renderCanvas(): void {
       const to = shown(st.id);
       if (from === to || seen.has(`${from}>${to}`)) continue;
       seen.add(`${from}>${to}`);
-      const { d, cx, cy } = edgePath(drawn.at.get(from)!, drawn.at.get(to)!);
+      const { d, cx, cy } = edgePath(drawn.at.get(from)!, drawn.at.get(to)!, routeVia(layout, drawn.at.get(to)!));
       // A profile box only looks: its edge is a light solid line (dashes mean absent, and nothing else).
       const tinted = !profileOf(st.id) && trail.has(input) && trail.has(st.id);
       const path = s('path', { class: `${profileOf(st.id) ? 'edge look' : 'edge'}${tinted ? ` trail${pastGate.has(st.id) ? ' unbuilt' : ''}` : ''}`, d });
@@ -1907,9 +1929,9 @@ function addFilterBox(stepId: string, picked: readonly Suggestion[]): void {
   const next = insertAfter(doc, stepId, box);
   // Arranged by hand: it sits beside the step rather than wherever the automatic layout would put it.
   if (Object.keys(doc.layout ?? {}).length) {
-    const before = gridLayout(canvasDoc(doc), state.collapsed);
+    const before = gridLayout(canvasDoc(doc), state.collapsed, wrapWidth());
     const slot = besideSlot(before, before.cards.get(stepId)!, id);
-    next.layout = { ...pinLayout(canvasDoc(doc), state.collapsed), [id]: [slot.x, slot.y] };
+    next.layout = { ...pinLayout(canvasDoc(doc), state.collapsed, wrapWidth()), [id]: [slot.x, slot.y] };
   }
   const issues = validateDocument(next);
   if (issues.length) {
@@ -4373,9 +4395,9 @@ function addProfile(of: string): void {
   for (let n = 2; taken.has(id.toLowerCase()); n++) id = `${base}_${n}`;
   const next: FlowDocument = { ...doc, profiles: [...profiles(), { id, of, description: `What ${of}'s rows hold: its news, each column's distribution, and the rows that look odd and why. It only looks: no data changes here.` }] };
   if (Object.keys(doc.layout ?? {}).length) {
-    const before = gridLayout(canvasDoc(doc), state.collapsed);
+    const before = gridLayout(canvasDoc(doc), state.collapsed, wrapWidth());
     const slot = besideSlot(before, before.cards.get(of)!, id);
-    next.layout = { ...pinLayout(canvasDoc(doc), state.collapsed), [id]: [slot.x, slot.y] };
+    next.layout = { ...pinLayout(canvasDoc(doc), state.collapsed, wrapWidth()), [id]: [slot.x, slot.y] };
   }
   const issues = validateDocument(next);
   if (issues.length) return setStatus(`The profile couldn't be added: ${issues[0]!.path}: ${issues[0]!.message}.`, true);
@@ -5694,6 +5716,8 @@ function renderLoads(): void {
     h('div', { class: 'loads-head' }, h('p', { class: 'eyebrow' }, `Daily loads · ${loads.episode}`), h('div', { class: 'loads-act' }, play, next)),
     episodes ?? '',
     h('div', { class: 'loads-row scroll', role: 'group', 'aria-label': `Daily loads, ${weekSpan(list)}: tap one to run the flow on it` }, ...chips),
+    // What the line under a day means, where one is drawn: a holiday (light: a day of its season).
+    list.some((k) => holidayOf(loads.list[k]!.day) || loads.list[k]!.note) ? h('p', { class: 'loads-key' }, h('i', { class: 'lk-hol' }), 'holiday') : '',
     h('div', { class: `loads-now${top ? ` sev-${top.severity}` : ''}` },
       h('p', { 'aria-live': 'polite' }, top && (top.severity === 'alert' || top.severity === 'warn') ? glyphEl(top.severity, 14) : '', ' ', loadSummary()),
       lens && top && visible(src!) ? h('button', { type: 'button', class: 'btn small', onclick: () => openTab(lens, 'news') }, 'The news ›') : null));

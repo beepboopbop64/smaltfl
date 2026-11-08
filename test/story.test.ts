@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
-import { CELL_KINDS, HEALTH_HEAD, STRIP_KEY, approx, compact, countLabel, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, shortWho, splitOf, splitSentence, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
+import { CELL_KINDS, HEALTH_HEAD, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, shortWho, splitOf, splitSentence, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
 import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
 const DAY = '2023-10-11'; // a Wednesday
@@ -221,6 +221,14 @@ describe('the words at a glance', () => {
     const g: Gate = { step: 'trips_valid', rows: 81_013, dropped: 6942, share: 6942 / 81_013, limit: 0.1, held: false, near: false, usual: null, rules: [] };
     expect(gateLabels(g).said).toBe('8.6%');
     expect(gateLabels(g).share.startsWith(gateLabels(g).said)).toBe(true);
+  });
+
+  it('cuts a head to a canvas card’s line without cutting a word or its number (tabs #32)', () => {
+    expect(cardWords('More Flex Fare trips: 5.3%', 21)).toBe('Flex Fare trips: 5.3%');
+    expect(cardWords('Stored and forwarded N: 97% (usually 98–99%)', 21)).toBe('forwarded N: 97%');
+    expect(cardWords('Busier than usual for days', 21)).toBe('Busier than usual');
+    expect(cardWords('Normal for MLK Day', 21)).toBe('Normal for MLK Day');
+    for (const h of ['More Flex Fare trips: 5.3%', 'Stored and forwarded N: 97%', 'Busier than usual for days']) expect(cardWords(h, 21).length).toBeLessThanOrEqual(21);
   });
 
   it('names who a vendor’s code is beside it, short', () => {

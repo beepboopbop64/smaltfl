@@ -201,6 +201,26 @@ export function ruleUsual(r: Pick<Gate['rules'][number], 'usual' | 'never' | 'ro
 export const ruleOrder = <R extends Pick<Gate['rules'][number], 'warns' | 'rows' | 'name'>>(rules: readonly R[]): R[] =>
   [...rules].sort((a, b) => Number(a.warns) - Number(b.warns) || b.rows - a.rows || a.name.localeCompare(b.name));
 
+/** Words a cut head never starts or ends on. */
+const SMALL = /^(and|or|of|the|a|an|for|to|in|on|at|with|than)$/i;
+
+/** A head cut to what a canvas card's line holds (`room` characters) without cutting a word or its number: a
+ * "(usually …)" first, then the words before a colon from the front ("Flex Fare trips: 5.3%"), else words from the end. */
+export function cardWords(head: string, room: number): string {
+  const text = head.replace(/\s*\([^)]*\)\s*$/, '');
+  if (text.length <= room) return text;
+  const at = text.indexOf(': ');
+  if (at > 0) {
+    const tail = text.slice(at);
+    const words = text.slice(0, at).split(/\s+/);
+    while (words.length > 1 && (words.join(' ').length + tail.length > room || SMALL.test(words[0]!))) words.shift();
+    if (words.join(' ').length + tail.length <= room) return words.join(' ') + tail;
+  }
+  const words = text.split(/\s+/);
+  while (words.length > 1 && (words.join(' ').length > room || SMALL.test(words.at(-1)!))) words.pop();
+  return words.join(' ');
+}
+
 /** A strip of days' key, where it is first shown: each day's usual range as a box, and what it had as a tick. */
 export const STRIP_KEY = ['usual', 'actual'] as const;
 
