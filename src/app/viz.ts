@@ -12,7 +12,7 @@
 
 import type { DrawCause, ReaderRows } from '../core/decision.js';
 
-export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack';
+export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack' | 'publish' | 'keep';
 
 export const esc = (s: unknown): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
@@ -33,6 +33,12 @@ export function glyph(kind: Mark, size = 16): string {
       return `<svg ${a}><rect class="g-wall" x="3" y="1.5" width="1.8" height="13" rx=".9"/><path class="g-wall" d="M4.8 2.2h8.4l-2.3 3.3 2.3 3.3H4.8z"/></svg>`;
     case 'closed':
       return `<svg ${a}><rect class="g-box" x="2" y="2" width="12" height="12" rx="2"/><path class="g-x" d="M5.2 5.2l5.6 5.6M10.8 5.2l-5.6 5.6"/></svg>`;
+    // The decision sheet's options (ADR 0009 §12): publish, an arrow up out of a tray; keep the day readers have, the
+    // hatched swatch another day's rows are drawn in (ADR 0008 §10).
+    case 'publish':
+      return `<svg ${a}><path class="g-pub" d="M2.5 10v3.5h11V10M8 11V2.6M4.8 5.8L8 2.6l3.2 3.2"/></svg>`;
+    case 'keep':
+      return `<svg ${a}><rect class="g-keep" x="2.2" y="2.2" width="11.6" height="11.6" rx="2"/></svg>`;
     case 'explained':
       return `<svg ${a}><path class="g-arrow" d="M4 2.5v6.5h8M9.2 6.2L12 9l-2.8 2.8"/></svg>`;
     case 'note':
@@ -1162,14 +1168,15 @@ export function stripBar({ v, low, high, ymax, sev }: { v: number; low: number |
  * 3 px. `ticks` draws the shared axis under the rows, on the sheet's last row only; `off` greys a row that can't be
  * chosen. Without a mark (a card whose head carries it), the words start at the left edge.
  */
-export function decisionRow(o: { mark: Mark | null; label: string; number: string; cause: DrawCause; rows: ReaderRows | null; usual?: ReaderRows | null; short?: readonly [number, number] | null; other?: boolean; scale: number; part?: string | null; ticks?: readonly (readonly [number, string])[]; off?: boolean; aria: string; w?: number }): string {
+export function decisionRow(o: { mark: Mark | null; label: string; number: string; cause: DrawCause; rows: ReaderRows | null; usual?: ReaderRows | null; short?: readonly [number, number] | null; other?: boolean; scale: number; part?: string | null; ticks?: readonly (readonly [number, string])[]; missing?: string | null; cut?: readonly [number, string] | null; off?: boolean; aria: string; w?: number }): string {
   const w = o.w ?? 300;
   const partH = o.cause === 'split' && o.part && !o.other ? 14 : 0;
   const top = 28 + partH;
   const drawH = o.cause === 'split' ? 16 : 34;
   const base = top + drawH;
   const ticks = o.ticks ?? [];
-  const h = base + (ticks.length ? 17 : 3);
+  const cut = o.cause === 'hours' && o.rows?.cause === 'hours' ? (o.cut ?? null) : null;
+  const h = base + (ticks.length || cut ? 17 : 3);
   const scale = Math.max(1, o.scale);
   const fill = o.other ? 'hatch-col' : 'ink-strong';
   let s = open(w, h, o.aria, `data-y0="0" data-cause="${o.cause}"${o.off ? ' data-off="true"' : ''}`).replace('class="viz"', `class="viz decide-row${o.off ? ' off' : ''}"`);
@@ -1195,6 +1202,12 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
     for (let i = 0; i < 24; i++) {
       const v = got[i] ?? 0;
       if (v > 0) s += `<path class="${fill}" d="${colPath(i * cw + 1.25, base, bw, Math.max(MIN_MARK, y(v)), 1.5)}" data-k="${i}"/>`;
+    }
+    // What the short hours lack, said in the wash that draws it ("~77k missing"), so it can't read as part of what
+    // goes out; it sits over the wash's middle, clear of the trickle under it.
+    if (usual && sh && o.missing) {
+      const peak = Math.max(...usual.slice(sh[0], sh[1] + 1));
+      s += `<text x="${f1(((sh[0] + sh[1] + 1) / 2) * cw)}" y="${f1(Math.max(top + 10, base - y(peak) / 2 + 4))}" text-anchor="middle" class="lbl-bad lbl-halo miss-l">${esc(o.missing)}</text>`;
     }
   } else if (o.rows.cause === 'split') {
     const gap = 3;
@@ -1226,6 +1239,12 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
     });
   }
   s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
+  // The hour the trips fell, marked on this row: a solid tick through the base (a limit-like mark, never dashed) and
+  // the hour under it.
+  if (cut) {
+    const x = (cut[0] / 24) * w;
+    s += `<line class="cut-t" x1="${f1(x)}" x2="${f1(x)}" y1="${top}" y2="${base + 4}"/><text x="${f1(x)}" y="${base + 14}" text-anchor="middle" class="tick at" data-cut="${cut[0]}">${esc(cut[1])}</text>`;
+  }
   // The shared axis: hours across 24 columns, a count from 0, or a strip's first and last day under their columns.
   const tx = (t: number) => (o.cause === 'hours' ? (t / 24) * w : o.cause === 'split' ? (t / scale) * w : o.rows?.cause === 'amount' ? (t + 0.5) * (w / Math.max(1, o.rows.days.length)) : 0);
   for (const [t, label] of ticks) {

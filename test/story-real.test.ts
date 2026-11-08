@@ -394,12 +394,19 @@ describe.skipIf(!has)('the story on the real history', () => {
       const draw = decisionDrawing(h, s, d, plus(d, -1), { day: rows(d), readers: rows(plus(d, -1)) });
       expect(draw.cause, d).toBe(s.hero === 'hours' ? 'hours' : s.split ? 'split' : 'amount');
       expect(draw.dont, d).not.toBeNull();
-      const t = sheetText({ day: d, waited: 3000, otherBuild: true, outputs: 3, rows: rows(d), reach: rows(d) - file!.dropped[file!.days.indexOf(d)]!, readers: { day: plus(d, -1), rows: rows(plus(d, -1)) }, later: plus(d, 4), part: draw.part, ticks: draw.ticks.map(([, x]) => x), unjudged: false, hash: 'a'.repeat(64), may: true, deciders: 'Owner', head: s.head });
-      expect(sheetWords(t), `${d}: ${JSON.stringify(t)}`).toBeLessThanOrEqual(45);
+      // Whatever is picked (decision.ts sheetShown): its drawing's words (the part, the trips missing, the cut), the
+      // trips past the checks under the trips that arrived, what publishing overrides where the checks held the day too,
+      // a stale day kept (readers three days back), the reasons for the option picked and the scope under Don't publish;
+      // and for someone who may not decide, what readers see until the owner does. With a later day published, Publish
+      // as is can't be picked.
+      for (const [later, readersAt, may] of [[null, -1, true], [null, -3, true], [plus(d, 4), -1, true], [null, -3, false]] as const) {
+        const t = sheetText({ day: d, waited: 3000, otherBuild: true, outputs: 3, rows: rows(d), reach: rows(d) - file!.dropped[file!.days.indexOf(d)]!, readers: { day: plus(d, readersAt), rows: rows(plus(d, readersAt)) }, later, checks: s.gate?.held ? s.gate : null, part: draw.part, missing: draw.cause === 'hours' ? s.hoursLabels?.missing ?? null : null, cut: draw.cut?.[1] ?? null, ticks: draw.ticks.map(([, x]) => x), unjudged: false, hash: 'a'.repeat(64), may, deciders: 'Owner', head: s.head });
+        expect(sheetWords(t), `${d}: ${JSON.stringify(t)}`).toBeLessThanOrEqual(45);
+      }
     }
     // Thu Sep 21: its hours, Wed 20 kept, on one scale; Mon Nov 14, 2022: Vendor 1's 2 trips beside 82,276.
     const thu = decisionDrawing(h, story('2023-09-21'), '2023-09-21', '2023-09-20', { day: 41_939, readers: rows('2023-09-20') });
-    expect(thu).toMatchObject({ cause: 'hours', short: [13, 23], ticks: [[0, '0h'], [13, '13h'], [24, '24h']] });
+    expect(thu).toMatchObject({ cause: 'hours', short: [13, 23], ticks: [], cut: [13, '13h'] });
     expect(rows('2023-09-20')).toBe(108_434);
     const nov = decisionDrawing(h, story('2022-11-14'), '2022-11-14', '2022-11-13', { day: rows('2022-11-14'), readers: rows('2022-11-13') });
     expect(nov).toMatchObject({ cause: 'split', part: 'Vendor 1 · 2', asis: { part: 2, rest: 82_276 } });

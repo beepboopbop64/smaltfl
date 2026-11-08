@@ -45,7 +45,7 @@ describe('what the screens say of it', () => {
     expect(stoppedLine({ refused: false, origin: 'trips_valid', shown: '2023-09-21', viewed: '2023-09-22' })).toEqual({ lead: 'Held at trips_valid', tail: 'outputs keep Thu 21' });
     expect(stoppedLine({ refused: true, origin: 'trips', shown: '2023-09-21', viewed: '2023-09-22' })).toEqual({ lead: 'File refused', tail: 'outputs keep Thu 21' });
     expect(stoppedLine({ refused: false, origin: 'trips_valid', shown: undefined, viewed: '2023-09-22' }).tail).toBe('nothing passed before');
-    expect(stoppedLine({ refused: false, origin: 'trips_valid', shown: '2023-09-22', viewed: '2023-09-22' }).tail).toBe('outputs keep its last run');
+    expect(stoppedLine({ refused: false, origin: 'trips_valid', shown: '2023-09-22', viewed: '2023-09-22' }).tail).toBe('outputs keep their last run');
     expect(stoppedLine({ refused: false, shown: '2023-09-21', viewed: '2023-09-22' }).lead).toBe('The run stopped');
   });
 
@@ -170,6 +170,8 @@ describe('a held day’s own rows, staged (ADR 0009 §12)', () => {
     expect(stagedBar('2023-09-21', null)).toBe('Staged Thu 21 · nothing published yet');
     // Published as is: its rows are what readers see, and no bar.
     expect(stagedBar('2023-09-21', '2023-09-21')).toBeNull();
+    // A later day passed since: the day is no longer staged for readers, and says what superseded it.
+    expect(stagedBar('2023-09-23', '2023-09-26')).toBe('Not published · superseded by Tue 26');
   });
 
   it('say how old the day readers see is once it is two days or more before the day held', () => {

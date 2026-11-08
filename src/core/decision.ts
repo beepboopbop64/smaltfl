@@ -53,6 +53,8 @@ export interface Drawing {
   part: string | null;
   /** The axis under the last row: [x in the drawing's units, label]. */
   ticks: readonly (readonly [number, string])[];
+  /** The hour the trips fell, marked on the Publish row: [hour, "13h"]. */
+  cut: readonly [number, string] | null;
 }
 
 /** A day's trips by hour, and by a coded value, from the history file: null for a day it doesn't have. */
@@ -78,7 +80,8 @@ export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'her
       cause: 'hours', scale, short: [hr.from, hr.to], part: null,
       asis: { cause: 'hours', hours: hr.got }, usual: { cause: 'hours', hours: hr.usual },
       dont: theirs ? { cause: 'hours', hours: theirs } : null,
-      ticks: [[0, '0h'], [hr.from, `${hr.from}h`], [24, '24h']],
+      // The cut marked where the day falls, on its own row; the hours themselves need no axis under the day kept.
+      ticks: [], cut: [hr.from, `${hr.from}h`],
     };
   }
   // A split: the part and the rest on one count bar, each part's missing trips absent; the day kept, split the same way.
@@ -92,7 +95,7 @@ export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'her
     return {
       cause: 'split', scale, short: null, part: `${sp.name} · ${fmtInt(sp.part.today)}`,
       asis: { cause: 'split', part: sp.part.today, rest: sp.rest.today }, usual: { cause: 'split', part: sp.part.usual, rest: sp.rest.usual },
-      dont, ticks: [[0, '0'], [scale, compact(scale)]],
+      dont, ticks: [[0, '0'], [scale, compact(scale)]], cut: null,
     };
   }
   // Anything else: the week to the day, each its trips; the day's own last, what it lacks below its range absent, or the
@@ -109,7 +112,7 @@ export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'her
     cause: 'amount', scale, short: null, part: null,
     asis: { cause: 'amount', days: [...prev, rows.day] }, usual: { cause: 'amount', days: [...prev, lacks] },
     dont: readers && rows.readers !== null ? { cause: 'amount', days: [...prev, rows.readers] } : null,
-    ticks: days.length > 1 ? [[0, dayShort(days[0]!)], [days.length - 1, dayShort(day)]] : [],
+    ticks: days.length > 1 ? [[0, dayShort(days[0]!)], [days.length - 1, dayShort(day)]] : [], cut: null,
   };
 }
 
@@ -135,21 +138,27 @@ export interface SheetIn {
   otherBuild: boolean;
   /** The outputs that wait. */
   outputs: number;
-  /** The day's trips (the held run's), as they arrived. */
+  /** The day's trips (the held run's), as they arrived: what its drawing shows, as the card counts them. */
   rows: number;
-  /** The day's trips that reach its outputs, past its checks: what readers would get (the drawing keeps the day's shape,
-   * as it arrived, on the sheet's one scale). Null where there are no checks to pass. */
+  /** The day's trips that reach its outputs, past its checks: said under the drawing ("37,935 after checks"). Null
+   * where there are no checks to pass. */
   reach: number | null;
-  /** What readers see now, its trips past its checks, or null when nothing is published. */
+  /** What readers see now, its trips as they arrived (what its hatched drawing shows), or null when nothing is
+   * published. */
   readers: { day: string; rows: number } | null;
   /** A later day readers see already: the day can no longer be shown (Q-51). */
   later: string | null;
-  /** The drawing's own words: the part's label and the axis. */
+  /** The checks held the day too: publishing as is overrides them, and the sheet says so with their share and limit. */
+  checks: Pick<Gate, 'share' | 'limit'> | null;
+  /** The drawing's own words: the part's label, the trips the short hours lack ("~77k missing"), the hour the trips
+   * fell ("13h", marked in the Publish row) and the axis under the last row. */
   part: string | null;
+  missing?: string | null;
+  cut?: string | null;
   ticks: readonly string[];
   /** A held source not judged (no history): its reason chip. */
   unjudged: boolean;
-  /** The held run's manifest hash. */
+  /** The held run's manifest hash: in the receipt, and the button's title. */
   hash: string;
   may: boolean;
   deciders: string;
@@ -159,72 +168,150 @@ export interface SheetIn {
 
 export interface SheetOption {
   option: DecideOption;
+  /** At most four words: "Publish as is", "Keep Wed 20" (the day readers keep, beside its hatched swatch). */
   label: string;
+  /** What its drawing shows, with its unit: "41,939 trips". */
   number: string;
+  /** Under it, on the row chosen (or every row before one is): "37,935 after checks", "3 days old". */
+  sub: string | null;
+  /** What choosing it overrides, on the row chosen (or every row before one is): "Overrides checks: 46% dropped
+   * (limit 10%)". */
+  warn: string | null;
   off: boolean;
   aria: string;
 }
 
-/** Every string the decision sheet shows (the accessible names apart). */
+/** Every string the decision sheet shows (the accessible names apart); which show at once depends on what is picked
+ * (`sheetShown`). */
 export interface SheetText {
   title: string;
+  /** For someone who may decide: how long the day has waited. */
   status: string | null;
-  scopes: readonly [string, string];
+  /** For someone who may not: what readers see until whoever decides does, and a way to ask them. */
+  waitsOn: string | null;
+  ask: string | null;
   options: readonly SheetOption[];
   part: string | null;
+  missing: string | null;
+  cut: string | null;
   ticks: readonly string[];
-  chips: readonly string[];
-  /** The button's labels: at rest first, then for each choice. */
-  go: readonly string[];
+  /** Above the reasons for the option picked: whether a reason is needed. */
+  why: Record<DecideOption, string>;
+  /** The reasons that fit each option, one tap each. */
+  chips: Record<DecideOption, readonly string[]>;
+  /** What a decision not to publish covers, shown under it once it is picked: the day alone, or the days after it
+   * too until one passes. Null without a day. */
+  scopes: readonly [string, string] | null;
+  /** The button: what is missing while it can't go (an option, a reason), else the result it names. */
+  go: { rest: string; reason: string; asis: string; dont: string; until: string };
   /** The first 8 hex of the manifest, in two groups of four. */
   hash: string;
-  /** In the button's place for someone who may not decide. */
-  denied: string | null;
+}
+
+/** What is picked on the sheet. */
+export interface SheetPick {
+  option: DecideOption | null;
+  scope: 'day' | 'untilPass';
+  reason: string | null;
 }
 
 /**
- * What a decision covers: this day, or each held day after it until a day publishes. Named by its effect: a day that
- * merely passes (24 hours) ends nothing; a day that publishes does.
+ * The button, naming the result: "Publish as is · 3 outputs", "Publish over the checks · 3 outputs" (when the checks
+ * held the day too), "Don’t publish Thu 21", "Don’t publish from Thu 21".
  */
-export const SCOPES = ['This day', 'Until a day publishes'] as const;
-
-/** The button, naming the result: "Publish as is · 3 outputs", "Don’t publish Thu 21", "Don’t publish from Thu 21". */
-export function goLabel(option: DecideOption | null, scope: 'day' | 'untilPass', outputs: number, day: string | null): string {
-  if (option === 'asis') return `Publish as is · ${outputs} output${outputs === 1 ? '' : 's'}`;
+export function goLabel(option: DecideOption | null, scope: 'day' | 'untilPass', outputs: number, day: string | null, checks = false): string {
+  if (option === 'asis') return `${checks ? 'Publish over the checks' : 'Publish as is'} · ${outputs} output${outputs === 1 ? '' : 's'}`;
   if (option === 'dont') return `Don’t publish ${scope === 'untilPass' && day ? 'from ' : ''}${day ? dayShort(day) : 'this run'}`;
-  return 'Decide';
+  return 'Pick an option';
 }
 
-/** The decision sheet's words (ADR 0009 §12): its title, how long the day has waited, the scopes, each option's label
- * and number, the reason chips, the button, and the hash of what goes out. */
+/** A share as the checks' bars say it, and their limit: "46% dropped (limit 10%)". */
+function checksSaid(c: Pick<Gate, 'share' | 'limit'>): string {
+  const l = gateLabels({ ...c, step: '', rows: 0, dropped: 0, held: true, near: false, usual: null, rules: [] });
+  return `${l.said} dropped${l.limit ? ` (${l.limit})` : ''}`;
+}
+
+/**
+ * The decision sheet's words (ADR 0009 §12): its title; how long the day has waited, or for someone who may not decide
+ * what readers see until whoever does decides, and Ask; each option's label (Keep names the day readers keep), what
+ * its drawing shows with its unit, and under it the trips past the checks, the age of a stale day, and what publishing
+ * overrides when the checks held the day too; the reasons that fit each option under "Why?"; the scope, for Don't
+ * publish; and the button, which says what is missing until it can go.
+ */
 export function sheetText(o: SheetIn): SheetText {
   const name = o.day ? dayMid(o.day) : 'This run';
-  const reach = o.reach ?? o.rows;
-  const asis = o.later ? `${dayShort(o.later)} is published` : fmtInt(reach);
-  const dont = o.readers ? `${dayShort(o.readers.day)} · ${fmtInt(o.readers.rows)}` : 'nothing shown';
-  const past = o.reach !== null && o.reach !== o.rows ? ` past its checks, of ${fmtInt(o.rows)} that arrived` : '';
+  const trips = (n: number) => `${fmtInt(n)} trip${n === 1 ? '' : 's'}`;
+  const past = o.reach !== null && o.reach !== o.rows ? `${fmtInt(o.reach)} after checks` : null;
+  const age = o.readers && o.day ? Math.round((Date.parse(`${o.day}T12:00:00Z`) - Date.parse(`${o.readers.day}T12:00:00Z`)) / 864e5) : 0;
+  const see = o.readers ? readersSee(o.readers.day, null) : 'nothing published yet';
+  const checks = o.checks ? `Overrides checks: ${checksSaid(o.checks)}` : null;
   return {
     title: `${o.day ? `${dayMid(o.day)} · w` : 'W'}hat readers get`,
-    status: o.otherBuild ? 'Other build’s decision' : waitedLabel(o.waited),
-    scopes: SCOPES,
+    status: o.may ? (o.otherBuild ? 'Other build’s decision' : waitedLabel(o.waited)) : null,
+    waitsOn: o.may ? null : `${see.replace(/^./, (c) => c.toUpperCase())} until ${o.deciders} decides`,
+    ask: o.may ? null : 'Ask ›',
     options: [
-      { option: 'asis', label: 'Publish as is', number: asis, off: !!o.later, aria: o.later ? `Publish as is: not possible, ${dayMid(o.later)} is what readers see now` : `Publish as is: readers get ${name} as it came, ${fmtInt(reach)} trips${past}${o.head ? `, ${o.head}` : ''}` },
-      { option: 'dont', label: 'Don’t publish', number: dont, off: false, aria: o.readers ? `Don’t publish: readers keep ${dayMid(o.readers.day)}, ${fmtInt(o.readers.rows)} trips, and this day is never published` : 'Don’t publish: readers get nothing, nothing is published yet' },
+      {
+        option: 'asis', label: 'Publish as is', number: o.later ? `${dayShort(o.later)} is published` : trips(o.rows), sub: o.later ? null : past, warn: o.later ? null : checks, off: !!o.later,
+        aria: o.later ? `Publish as is: not possible, ${dayMid(o.later)} is what readers see now` : `Publish as is: readers get ${name} as it came, ${trips(o.rows)}${past ? `, ${fmtInt(o.reach!)} of them past its checks` : ''}${o.head ? `, ${o.head}` : ''}${o.checks ? `; this overrides its checks, which held it: ${checksSaid(o.checks)}` : ''}`,
+      },
+      {
+        option: 'dont', label: o.readers ? `Keep ${dayShort(o.readers.day)}` : 'Don’t publish', number: o.readers ? trips(o.readers.rows) : 'nothing shown', sub: age >= 2 ? `${age} days old` : null, warn: null, off: false,
+        aria: o.readers ? `Don’t publish: readers keep ${dayMid(o.readers.day)}, ${trips(o.readers.rows)}${age >= 2 ? `, ${age} days old` : ''}, and this day is never published` : 'Don’t publish: readers get nothing, nothing is published yet',
+      },
     ],
     part: o.part,
+    missing: o.missing ?? null,
+    cut: o.cut ?? null,
     ticks: o.ticks,
-    chips: [...(o.unjudged ? ['No history'] : []), 'Real change', 'Source confirmed', 'Known outage'],
-    go: [goLabel(null, 'day', o.outputs, o.day), goLabel('asis', 'day', o.outputs, o.day), goLabel('dont', 'day', o.outputs, o.day), goLabel('dont', 'untilPass', o.outputs, o.day)],
+    why: { asis: 'Why? (needed)', dont: 'Why?' },
+    chips: { asis: [...(o.unjudged ? ['No history'] : []), 'Real change', 'Source confirmed'], dont: ['Known outage', 'Re-send expected'] },
+    scopes: o.day ? [`Just ${dayShort(o.day)}`, 'Until a later day passes'] : null,
+    go: { rest: goLabel(null, 'day', o.outputs, o.day), reason: 'Pick a reason', asis: goLabel('asis', 'day', o.outputs, o.day, !!o.checks), dont: goLabel('dont', 'day', o.outputs, o.day), until: goLabel('dont', 'untilPass', o.outputs, o.day) },
     hash: `${o.hash.slice(0, 4)} ${o.hash.slice(4, 8)}`,
-    denied: o.may ? null : `Only ${o.deciders} decides`,
   };
 }
 
-/** The most words the sheet shows at a glance, whichever label its button carries (its budget is 45). */
+/**
+ * The strings the sheet shows at once for what is picked: the title; the status, or for someone who may not decide
+ * what readers see until whoever decides does, and Ask; each option's label, number and drawing's words, and, on the
+ * option picked (on every option before one is), what is under its number; then, for someone who may decide, the
+ * reasons that fit the option picked under "Why?", the scope under Don't publish, and the button.
+ */
+export function sheetShown(t: SheetText, pick: SheetPick): string[] {
+  const out = [t.title, t.status ?? '', t.waitsOn ?? '', t.ask ?? ''];
+  for (const x of t.options) {
+    out.push(x.label, x.number);
+    if (!pick.option || pick.option === x.option) out.push(x.sub ?? '', x.warn ?? '');
+  }
+  out.push(t.part ?? '', t.missing ?? '', t.cut ?? '', ...t.ticks);
+  if (t.waitsOn) return out.filter(Boolean);
+  if (pick.option) out.push(t.why[pick.option], ...t.chips[pick.option]);
+  if (pick.option === 'dont' && t.scopes) out.push(...t.scopes);
+  out.push(!pick.option ? t.go.rest : pick.option === 'asis' ? (pick.reason ? t.go.asis : t.go.reason) : pick.scope === 'untilPass' ? t.go.until : t.go.dont);
+  return out.filter(Boolean);
+}
+
+/** The most words the sheet shows at once, whatever is picked (its budget is 45). */
 export function sheetWords(t: SheetText): number {
-  const fixed = [t.title, t.status ?? '', ...t.scopes, ...t.options.flatMap((x) => [x.label, x.number]), t.part ?? '', ...t.ticks, ...t.chips, t.hash];
-  const button = t.denied ? wordsIn(t.denied) : Math.max(...t.go.map(wordsIn));
-  return fixed.reduce((n, x) => n + wordsIn(x), 0) + button;
+  const picks: SheetPick[] = [{ option: null, scope: 'day', reason: null }];
+  for (const option of ['asis', 'dont'] as const) for (const scope of ['day', 'untilPass'] as const) for (const reason of [null, 'x']) picks.push({ option, scope, reason });
+  return Math.max(...picks.map((p) => sheetShown(t, p).reduce((n, x) => n + wordsIn(x), 0)));
+}
+
+/**
+ * The sheet once decided, collapsed to a receipt, and the same line on the canvas (ADR 0009 §12): what readers now see
+ * ("Published as is · readers now see Thu 21"; "Not published · readers keep Wed 20 until a day passes"), then the
+ * outputs released, who and when (or the standing decision it came under) and the record's entry; and whether the
+ * decision can still be changed (a day not published can be published later; one published as is can't be taken back).
+ */
+export function receiptLines(o: { state: PauseState; day: string | null; readers: string | null; released: number; who: string | null; at: string | null; seq: number | null; under: string | null; standing: boolean }): { head: string; sub: string; change: string | null } {
+  const by = o.under ? `Under ${o.under}’s decision` : o.who ? `${o.who}${o.at ? ` · ${o.at}` : ''}` : null;
+  const rec = o.seq !== null ? `record #${o.seq}` : null;
+  const keep = o.readers ? `readers keep ${dayShort(o.readers)}` : 'nothing published yet';
+  if (o.state === 'asis') return { head: `Published as is${o.day ? ` · readers now see ${dayShort(o.day)}` : ''}`, sub: [o.released ? `${o.released} output${o.released === 1 ? '' : 's'} released` : null, by, rec].filter(Boolean).join(' · '), change: null };
+  if (o.state === 'dont') return { head: `Not published · ${keep}${o.standing && !o.under ? ' until a day passes' : ''}`, sub: [by, rec].filter(Boolean).join(' · '), change: 'Change decision' };
+  return { head: 'Decided, not yet published', sub: [by, rec].filter(Boolean).join(' · '), change: null };
 }
 
 /**
@@ -278,9 +365,13 @@ export function pauseLines(o: { state: PauseState; names: readonly string[]; by?
     return { reach: reasons.length ? `Paused by ${reasons.join(', ')}` : 'Paused', see, names: o.names, verb: o.may ? 'Decide' : null, waits: o.may ? null : `${o.deciders} decides` };
   }
   if (o.state === 'asis') return { reach: `Published as is${by}`, see: null, names: o.names, verb: null, waits: null };
-  // A decision that stands says so, by its effect: the days after it are closed too, until one publishes.
-  return { reach: o.under ? `Not published · under ${o.under}’s decision` : o.standing ? 'Unpublished until a day publishes' : `Not published${by}`, see, names: o.names, verb: null, waits: null };
+  // A decision that stands says so, by its effect: the days after it are closed too, until one passes. Readers keep
+  // the day they had.
+  return { reach: o.under ? `Not published · under ${o.under}’s decision` : o.standing ? 'Not published until a day passes' : `Not published${by}`, see: see && keeps(see), names: o.names, verb: null, waits: null };
 }
+
+/** What readers see said of a day not published: they keep it ("readers keep Wed 20"). */
+const keeps = (see: string) => see.replace(/^readers see /, 'readers keep ');
 
 /** Every word a pause row shows at a glance. */
 export function pauseWords(l: PauseRow): number {
@@ -322,7 +413,7 @@ export function dayPausedLine(o: { state: PauseState; readers: string | null; ma
   const see = readersSee(o.readers, o.state === 'waiting' ? o.day : null);
   if (o.state === 'waiting') return { text: `Paused · ${see}`, verb: o.may ? 'Decide' : null };
   if (o.state === 'asis') return { text: 'Published as is', verb: null };
-  return { text: `${o.standing ? 'Unpublished until a day publishes' : 'Not published'} · ${see}`, verb: null };
+  return { text: `Not published${o.standing ? ' until a day passes' : ''} · ${keeps(see)}`, verb: null };
 }
 
 /**
@@ -366,7 +457,7 @@ export function runFigures(o: { day: string | null; run: number; ms: string; nod
 export function outputPausedLine(o: { state: PauseState; may: boolean; deciders: string; standing: boolean }): { text: string; verb: string | null } {
   if (o.state === 'waiting') return o.may ? { text: 'Waits for a decision', verb: 'Decide' } : { text: `Waits on ${o.deciders}`, verb: null };
   if (o.state === 'asis') return { text: 'Published as is', verb: null };
-  return { text: o.standing ? 'Unpublished until a day publishes' : 'Not published', verb: null };
+  return { text: o.standing ? 'Not published until a day passes' : 'Not published', verb: null };
 }
 
 /** Days said as runs of weekdays: "Fri–Sun", "Mon, Wed". */
@@ -414,10 +505,25 @@ export function ribbonOf(days: readonly { day: string; state: PauseState }[]): {
 
 const STATE_SAID: Record<PauseState, string> = { waiting: 'waiting', asis: 'published as is', dont: 'not published' };
 
-/** A paused day's card in the Runs view: its head, who decided how long after it was held and why, and where it is
- * in the record ("Run 41 · record #212 ✓"). */
-export function decidedLines(o: { day: string; state: PauseState; who: string | null; minutes: number | null; reason: string | null; run: number | null; seq: number | null; under: string | null }): { head: string; who: string | null; where: string | null } {
+/**
+ * A paused day's card in the Runs view: its head, who decided how long after it was held and why (a day closed under a
+ * standing decision, by that decision's rule), and where it is in the record: the run released and the release's entry
+ * ("Released run #13 · record #21 ✓"), the decision's entry for a day not published, the run for a day waiting. `run`
+ * is the run as the Runs view names it ("#13").
+ */
+export function decidedLines(o: { day: string; state: PauseState; who: string | null; minutes: number | null; reason: string | null; run: string | null; seq: number | null; release?: number | null; under: string | null }): { head: string; who: string | null; where: string | null } {
   const who = o.state === 'waiting' ? waitedLabel(o.minutes) : o.under ? `Under ${o.under}’s decision` : o.who ? [o.who, o.minutes !== null ? afterLabel(o.minutes) : null, o.reason].filter(Boolean).join(' · ') : null;
-  const where = [o.run !== null ? `Run ${o.run}` : null, o.seq !== null ? `record #${o.seq} ✓` : null].filter(Boolean).join(' · ') || null;
+  const rec = o.state === 'asis' && o.release != null ? o.release : o.seq;
+  const run = o.run === null ? null : o.state === 'asis' && o.release != null ? `Released run ${o.run}` : o.state === 'waiting' ? `Run ${o.run}` : null;
+  const where = [run, rec !== null && rec !== undefined ? `record #${rec} ✓` : null].filter(Boolean).join(' · ') || null;
   return { head: `${dayMid(o.day)} · ${STATE_SAID[o.state]}`, who, where };
+}
+
+/**
+ * The record's line for a day that passed after days were held (ADR 0009 §12): it published, so readers now see it,
+ * and a standing decision not to publish ends with it: "Mon Sep 25 passed: published; readers now see Mon 25 · ends
+ * #26". A day that passed with nothing held before it is a plain run.
+ */
+export function passedLine(day: string, ends: number | null): string {
+  return `${dayMid(day)} passed: published; readers now see ${dayShort(day)}${ends !== null ? ` · ends #${ends}` : ''}`;
 }

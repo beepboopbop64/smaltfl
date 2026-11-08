@@ -1069,6 +1069,51 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .paused-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; color: var(--ink); font-size: 14px; }
 .paused-line .g { flex: none; }
 .paused-line .btn { margin-left: auto; }
+/* The decision sheet (ADR 0009 §12): each option's mark (publish, or the hatched swatch of the day readers keep), what
+   is under its number on the row picked, the reasons under "Why?", and the receipt it collapses to once decided. */
+.g-pub { fill: none; stroke: var(--ink); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.g-keep { fill: url(#viz-hatch); stroke: var(--ink-2); stroke-width: 1.2; }
+.vf-option:disabled .g-pub, .viz.off .g-pub { stroke: var(--muted); }
+.viz .cut-t { stroke: var(--ink-2); stroke-width: 1.2; }
+.vf-opt-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px; margin-top: 4px; font-size: 12.5px; }
+.vf-opt-warn { display: inline-flex; align-items: center; gap: 4px; color: var(--bad); font-weight: 600; }
+.vf-opt-warn .g { flex: none; }
+.vf-opt-sub { margin-left: auto; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.vf-options[data-picked="asis"] .vf-option[data-option="dont"] .vf-opt-more, .vf-options[data-picked="dont"] .vf-option[data-option="asis"] .vf-opt-more { display: none; }
+.vf-why { display: grid; gap: 6px; }
+.vf-why-h { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.vf-go-row { justify-content: flex-end; }
+.vf-go:not(:disabled) { box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12); }
+.vf-option.still { cursor: default; border-color: var(--line); box-shadow: none; }
+.vf-options.done { margin-top: 2px; }
+.vf-receipt-box { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 10px; }
+.vf-rc-head { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 14px; color: var(--ink); }
+.vf-rc-head .g { flex: none; }
+.vf-rc-sub { margin: 0 0 0 22px; font-size: 13px; color: var(--ink-2); }
+.vf-rc-sub .vf-hash { font-size: 12px; white-space: nowrap; }
+.vf-rc-acts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-left: 22px; }
+.vf-rc-acts .linkish, .vf-waits-on .linkish { background: none; border: 0; padding: 0; min-height: 32px; color: var(--smalt); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.loads-receipt { border-top: 0; padding-top: 2px; margin-top: 4px; }
+.loads-receipt .vf-rc-head { font-size: 13px; }
+/* Read only, for someone who may not decide: what readers see until whoever decides does, and Ask; no reasons, no
+   scope, no button; the rows greyed. */
+.vf-waits-on { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; padding: 8px 10px; border-radius: 8px; background: var(--sunk); }
+.vf-waits-on p { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13.5px; color: var(--ink); }
+.vf-waits-on .g { flex: none; }
+.vf-waits-on .f-form { flex-basis: 100%; }
+.vf-detail.readonly .vf-option { background: var(--sunk); border-color: transparent; }
+/* A decided card's row: its ⋯ at the end, labelled, never alone in an empty row. */
+.vf-pause:has(> .vf-more) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; }
+.vf-pause > .vf-more { display: inline-flex; gap: 4px; padding: 0 10px; min-width: 0; }
+.vf-more-l { font-size: 13px; }
+.vf-acts.bare { border-top: 0; padding-top: 0; }
+/* The Runs view: re-runs that built nothing folded into one line under the run they repeat; a run's body a tap away. */
+.run-folds { list-style: none; }
+.run-fold { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: 10px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.run-fold[aria-expanded="true"] .g-chev { transform: rotate(90deg); }
+.runs.folded { margin-top: 8px; }
+.run-body > summary { font-size: 13px; color: var(--smalt); cursor: pointer; }
+.run-body[open] > summary { margin-bottom: 6px; }
 </style>
 
 <header class="bar">
@@ -1140,7 +1185,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
   </section>
 
   <section class="view" id="view-runs" aria-label="Runs" hidden>
-    <p class="lede">Every run records, by hash, the flow and the plan it ran, the files it read (as the engine saw their bytes), every dataset it stored, and the data's list it came from. Everything that happens to the flow goes into one record, signed by this browser, that an auditor can check without trusting it. Verify a run to check its hashes, recompute it, or decode its files again.</p>
+    <p class="lede">Every run and decision goes into one record, by hash, that an auditor can check without trusting this browser.</p>
     <div class="panel paused-days" id="paused-days" hidden></div>
     <div class="panel record" id="record"></div>
     <ul class="runs" id="runs-list"></ul>

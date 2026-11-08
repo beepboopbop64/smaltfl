@@ -137,7 +137,7 @@ published. Cached check counts must still hold. And older builds must refuse wha
    | ↻ **Re-run when corrected** | the day run again when the data's list republishes its file (ADR 0006's amber "republished"); released if it passes, held again if not | a run | 3 |
 
    - A decision covers **this day**, or the days **until a day publishes** (`untilPass` in the record): it stands for
-     each held day after it until a day publishes, and its receipt says so ("Unpublished until a day publishes"). Nov
+     each held day after it until a day publishes, and its receipt says so ("Not published until a day passes"). Nov
      14–20 takes one decision, not seven. Publish as is covers one day at a time (Q-50).
    - The *missing part* comes from the story's cause. An hours cause gives the hours from its fall; a split gives the
      part that vanished. A cause with no part to blame (an amount) has no missing part, so neither fill nor the complete
@@ -231,10 +231,11 @@ published. Cached check counts must still hold. And older builds must refuse wha
 12. **On screen.** ADR 0008's rules apply: shape first, and words budgeted.
     - **The day.** A paused day carries ‖ in the loads strip, the header and the tab title. A day published as is
       carries ⚑, and a day not published ✕. Output cards that wait say "‖ waits · shows Wed 20" (four words that fit a
-      card), and once decided "⚑ as is · Thu 21" or "✕ unpublished · Wed 20".
+      card), and once decided "⚑ as is · Thu 21" or "✕ still shows Wed 20" (not "unpublished · Wed 20", which read as
+      Wed 20 being the day not published).
     - **The first screen.** The day line under the strip carries the pause and the day readers see, "‖ Paused · readers
-      see Wed 20", with **Decide ›**, which opens the decision sheet; once decided, "⚑ Published as is" or "✕ Not
-      published · readers see Wed 20". A waiting output's News leads with the staged bar and "‖ Waits for a decision ·
+      see Wed 20", with **Decide ›**, which opens the decision sheet; once decided, the decision's receipt, as the sheet
+      collapses to it (below). A waiting output's News leads with the staged bar and "‖ Waits for a decision ·
       Decide ›", and what it says of its rows is "From its staged rows", never the day's own verdict.
     - **What each viewer may see.** The status line after a run is one day sentence for every viewer, of what their
       policy lets them see: the day's head where its story is theirs to read, else what became of the day ("Thu Sep
@@ -260,10 +261,13 @@ published. Cached check counts must still hold. And older builds must refuse wha
       rows of changes, and readers' day goes without its age there (the day line, the staged bar and the list carry it).
       A tap on the row lists the waiting outputs, the day's other outputs as up to date (the held run made the versions
       readers have: Thu Sep 21's zone_list, districts and weather_hourly), and then "What readers get ›" opens the
-      decision sheet read only: its rows greyed and "Only Owner decides" in place of the button. Once decided, the row
+      decision sheet read only: its rows greyed, whom it waits on at its top, and no button. Once decided, the row
       becomes the receipt, the day's mark before it ("⚑ Published as is · Owner · 09:40", "✕ Not published · under
-      Fri's decision", "✕ Unpublished until a day publishes"), with readers' day and the outputs, and the story's verbs
-      stay behind ⋯.
+      Fri's decision", "✕ Not published until a day passes"), with the day readers keep ("readers keep Wed 20") and the
+      outputs, and the story's verbs stay behind a labelled ⋯ ("More") at the end of the row, never alone in an empty
+      row. While a day waits, "OK this day" is not among them (it would read as approving the day, and publishes
+      nothing), and ⋯ holds only what the viewer may do (exporting the record is the owner's). A detail opened from a
+      paused card leads with Decide too, the story's own verb ("Tell the source", "Open an incident") beside it.
     - **The day after an episode** says what became of its days, the day on screen first once it published: "Mon 25
       published · Thu–Sat still wait" with **Decide** (on the canvas too) while one waits, else "Mon 25 published · Thu as
       is · Fri–Sun unpublished"; its chip names the episode's days from the hour its first fell ("after Thu 13:00–Sun"),
@@ -276,19 +280,50 @@ published. Cached check counts must still hold. And older builds must refuse wha
     - **The decision sheet** draws each option as what readers would get, all on one scale. The cause picks the
       drawing, as it picks the hero: 24 hour bars for a day that falls at an hour, the part bar for a split, a strip of
       days for an amount. Another day's rows are hatched (ADR 0008 §10), and absent ones dashed.
-      - Each option is one row: its mark, at most four words, the drawing and one number: the trips that reach the
-        outputs, past the checks (what readers would get, or keep), while the drawing keeps each day's shape as it
-        arrived.
+      - Each option is one row: its mark (publish, an arrow out of a tray; the day readers keep, the hatched swatch its
+        rows are drawn in), at most four words ("Publish as is", "Keep Wed 20"), the drawing and what it shows, with its
+        unit: the trips as they arrived ("41,939 trips"), as the card and the Runs view count them, so the number and
+        the drawing are one count. Under the day's own, the trips that reach the outputs, past the checks ("37,935 after
+        checks"); under a day kept that is stale, its age ("3 days old"). The drawing says what it lacks in its own wash
+        ("~77k missing") and marks the hour the day fell on its row ("13h"), so the wash can't read as what goes out.
+      - When the checks held the day too, the Publish row says what publishing overrides ("Overrides checks: 46% dropped
+        (limit 10%)") and the button names it ("Publish over the checks · 3 outputs").
       - Only the options the cause allows appear.
-      - A reason is one tap on a chip.
-      - The button names the result ("Publish as is · 3 outputs") beside the hash of what goes out.
-      - A receipt follows ("⚑ Published as is · Owner · 09:40"), and the sheet's head takes the day's new mark.
-      - At most 45 words at a glance, and the paused card within its 60, in every state, on all 28 days `wrong` holds
-        (src/core/decision.ts gives every word; test/story-real.test.ts counts them).
-    - **The record of decisions.** The Runs view opens on a ribbon of paused days with their marks. Tapping a day
-      opens its hold, decision and release, with the hashes and the record entry one tap further. A release's line
-      counts the outputs whose version it changed, as the button did; a day held again, or run again with nothing
-      waiting, is a routine line, marked with what became of its day.
+      - Picking an option shows the reasons that fit it under "Why?" ("Why? (needed)" for Publish as is: Real change,
+        Source confirmed; Known outage, Re-send expected for not publishing), one tap each; the scope only under Don't
+        publish ("Just Thu 21", "Until a later day passes"). What is under each number shows on the row picked.
+      - The button says what is missing while it can't go ("Pick an option", "Pick a reason"), then names the result in
+        the primary fill ("Publish as is · 3 outputs", "Don't publish from Thu 21"); the hash of what goes out is its
+        title and is in the receipt.
+      - Once decided, the sheet collapses to a receipt: the option's drawing, what readers now see ("Published as is ·
+        readers now see Thu 21"; "Not published · readers keep Wed 20 until a day passes"), the outputs released, who,
+        when and the record's entry, the manifest, and "Change decision ›" for a day not published (one published as is
+        can't be taken back). The canvas's day line shows the same receipt, and the sheet's head takes the day's mark.
+      - Someone who may not decide sees it read only: at its top what readers see until whoever decides does ("Readers
+        see Sat 12 until Owner decides") and "Ask ›", a note to send or copy; the rows greyed, no reasons, no scope, no
+        button.
+      - At most 45 words at once, whatever is picked (decision.ts sheetShown, sheetWords), and the paused card within its
+        60, in every state, on all 28 days `wrong` holds (src/core/decision.ts gives every word;
+        test/story-real.test.ts counts them).
+    - **The record of decisions.** The Runs view opens, after one sentence, on a ribbon of paused days with their marks.
+      Tapping a day opens its hold, decision and release, naming the run released and the release's entry ("Released
+      run #13 · record #21"), with the hashes and the record entry one tap further. A run is named by the record entry
+      that recorded it ("Run #13"), a number that keeps rising across visits where the engine's start again at 1. Of a
+      held day's runs only the one that stands for it carries what became of it ("published as is · decision #20");
+      one before it says "held, replaced by run #19", one after "same as run #19"; runs that built nothing and only
+      repeat another fold into one line ("Runs #20–#22 · same as run #19, nothing built"), a tap opens them, and each
+      run's files, manifest and checks are a tap away, listing only the files that changed since the run before. A
+      release's line counts the outputs whose version it changed, as the button did; the same decision applied again in
+      a new engine says so ("Applied decision #20 again in a new engine"); a day closed under a standing decision is
+      that decision's rule at work ("Sat Sep 23 not published, by #26's rule", its actor "rule #26 (Owner)"); and the
+      day that published after held days says what readers now see ("Mon Sep 25 passed: published; readers now see Mon
+      25 · ends #26"). These are words for the record's existing entries: no entry kind or field changes. A day held
+      again, or run again with nothing waiting, is a routine line, marked with what became of its day.
+    - **Status words say the state.** A day not published that a later day has passed since says so in its own views
+      ("Not published · superseded by Tue 26"), never "Staged … · readers see Tue 26"; the checks' sheet says the steps
+      after them were "built, not published" under a flow that holds, and which day the outputs keep ("Outputs keep Mon
+      18"); a source file matched to the data's list is "Sealed: this file matches the source's list", not "the bytes
+      published".
     - **ADR 0008 changes:**
       - §6's "Nothing to do · held" and "Outputs not published" become "waiting" until someone decides.
       - §10's "outputs keep the last day that passed" becomes the last day published.

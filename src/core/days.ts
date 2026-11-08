@@ -38,13 +38,13 @@ export function shownRun(runs: readonly (string | null | undefined)[], viewed: s
 export interface StoppedLine {
   /** "Held at trips_valid", "File refused", "The run stopped". */
   lead: string;
-  /** "outputs keep Thu 21", "outputs keep its last run", "nothing passed before". */
+  /** "outputs keep Thu 21", "outputs keep their last run", "nothing passed before". */
   tail: string;
 }
 
 export function stoppedLine(o: { refused: boolean; origin?: string | undefined; shown: string | null | undefined; viewed: string }): StoppedLine {
   const lead = o.refused ? 'File refused' : o.origin ? `Held at ${o.origin}` : 'The run stopped';
-  const tail = !o.shown ? 'nothing passed before' : o.shown === o.viewed ? 'outputs keep its last run' : `outputs keep ${dayShort(o.shown)}`;
+  const tail = !o.shown ? 'nothing passed before' : o.shown === o.viewed ? 'outputs keep their last run' : `outputs keep ${dayShort(o.shown)}`;
   return { lead, tail };
 }
 
@@ -71,10 +71,12 @@ export function readersSee(published: string | null | undefined, day: string | n
 /**
  * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Staged Thu 21 ·
  * readers see Wed 20", "… · readers see Mon 18 · 3 days old", or "… · nothing published yet". Null when the day is the
- * one published.
+ * one published. A day a later one has passed since is no longer staged for readers: "Not published · superseded by Tue
+ * 26" (a later day can't close it, ADR 0009 §5, but it can no longer be what readers see).
  */
 export function stagedBar(day: string, published: string | null | undefined): string | null {
   if (published === day) return null;
+  if (published && published > day) return `Not published · superseded by ${dayShort(published)}`;
   return `Staged ${dayShort(day)} · ${readersSee(published, day)}`;
 }
 

@@ -63,9 +63,9 @@ export function describe(c: FileCheck): { title: string; detail: string } {
   const where = c.commit ? ` at data commit ${c.commit.slice(0, 12)}` : '';
   switch (c.class) {
     case 'same':
-      return { title: `${name}: the bytes published`, detail: `Its ${fmtBytes(c.bytes)} hash to the sha256 the data's list gives${where}, as they did when this browser last read it.` };
+      return { title: `${name}: matches the source's list`, detail: `Its ${fmtBytes(c.bytes)} hash to the sha256 the data's list gives${where}, as they did when this browser last read it.` };
     case 'new':
-      return { title: `${name}: the bytes published`, detail: `Its ${fmtBytes(c.bytes)} hash to the sha256 the data's list gives${where}. This browser hasn't read it before.` };
+      return { title: `${name}: matches the source's list`, detail: `Its ${fmtBytes(c.bytes)} hash to the sha256 the data's list gives${where}. This browser hasn't read it before.` };
     case 'republished':
       return { title: `${name} was republished`, detail: `Its bytes match the data's list${where}, but not what this browser read before (${(c.was ?? '').slice(0, 16)}…, now ${(c.actual ?? '').slice(0, 16)}…): the data was rebuilt, or its source republished it. Worth knowing; nothing is wrong with the bytes.` };
     case 'corrupt':

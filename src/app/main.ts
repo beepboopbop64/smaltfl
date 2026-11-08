@@ -18,8 +18,8 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, QUANTILES, type His
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { calendarHead, heldLoadLine, dayMid, dayShort, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
-import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, goLabel, heldLine, outputPausedLine, pausedChecks, pauseLines, pauseReasons, ribbonOf, runFigures, sheetText, type SheetText, type Sight } from '../core/decision.js';
+import { calendarHead, heldLoadLine, dayMid, dayShort, lacked, noRowsBefore, reachLabel, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
+import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, receiptLines, ribbonOf, runFigures, sheetText, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, stagedKeys, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { CELL_KINDS, CELL_NAMES, HEALTH_HEAD, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
@@ -335,6 +335,12 @@ const latest = (): RunRecord | undefined => {
 };
 /** The day of the run on screen, where runs are by day. */
 const shownDay = (): string | undefined => dayOfRun(latest());
+/** The day the outputs keep while the day on screen is held: under a flow that holds, the day readers see (the held
+ * day's own run is on screen, staged); otherwise the run on screen's. */
+const keptDay = (): string | null | undefined => {
+  const own = onScreen();
+  return own && pauseOf(own) ? readersDay(own) : shownDay();
+};
 /** The day on screen: the load picked in the strip. */
 const viewedDay = (): string | undefined => (loads.list.length > 1 ? loads.list[loads.at]?.day : undefined);
 /** The run on screen when it is the viewed day's own (always, without daily loads), not another day's. */
@@ -740,9 +746,10 @@ function cardLine(id: string): CardLine {
   // paused, an output that waits says what readers see meanwhile, and after a decision what became of it (ADR 0009).
   const out = outputState(id);
   if (out === 'stale') return plain('not published');
-  // The day's mark, drawn, then words that fit the card (ADR 0008 §12): "‖ waits · shows Wed 20", "✕ unpublished · Wed 20".
+  // The day's mark, drawn, then words that fit the card (ADR 0008 §12): "‖ waits · shows Wed 20", "✕ still shows Thu 21"
+  // (the output wasn't updated from the day; readers keep the day it shows).
   if (out === 'waiting') return { text: `waits · ${showsDay(id) ? `shows ${dayShort(showsDay(id)!)}` : 'none shown'}`, tone: 'same', mark: 'waiting' };
-  if (out === 'dont') return { text: showsDay(id) ? `unpublished · ${dayShort(showsDay(id)!)}` : 'not published', tone: 'same', mark: 'dont' };
+  if (out === 'dont') return { text: showsDay(id) ? `still shows ${dayShort(showsDay(id)!)}` : 'not published', tone: 'same', mark: 'dont' };
   if (out === 'asis') return { text: dayOfRun(onScreen()) ? `as is · ${dayShort(dayOfRun(onScreen())!)}` : 'published as is', tone: 'same', mark: 'asis' };
   if (out === 'alert') return plain(`built ${lacked(storyFor(newsDay()!)!)?.short ?? 'from an alert'}`);
   if (notBuilt(id)) return plain('not built today');
@@ -3179,7 +3186,7 @@ function chipsOf(f: Finding): HTMLElement | null {
 }
 
 /** The detail sheet over the tab: a title, the visuals, at most one sentence, its verbs; it keeps the day and the card. */
-function openDetail(title: string, sev: Severity, body: (Node | null)[], f?: Finding | null, card?: string, primary?: Act | null): void {
+function openDetail(title: string, sev: Severity, body: (Node | null)[], f?: Finding | null, card?: string, primary?: Act | null, lead?: HTMLElement | null): void {
   document.querySelector('.vf-detail-wrap')?.remove();
   const close = () => {
     wrap.remove();
@@ -3190,10 +3197,12 @@ function openDetail(title: string, sev: Severity, body: (Node | null)[], f?: Fin
     h('div', { class: 'vf-grab', 'aria-hidden': 'true' }),
     h('div', { class: 'vf-dhead' }, h('h3', {}, sevMark(sev) ? glyphEl(sevMark(sev)!, 16) : '', title), h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: close }, '×')),
     ...body.filter((x): x is Node => !!x),
-    f && card ? actionsOf(f, card, primary !== undefined ? primary : (f.acts[0] ?? null)) : null);
+    f && card ? actionsOf(f, card, primary !== undefined ? primary : (f.acts[0] ?? null), lead ?? undefined, !!lead) : null);
   const wrap: HTMLElement = h('div', { class: 'vf-detail-wrap', onclick: (e: Event) => e.target === wrap && close() }, sheet);
   wrap.addEventListener('keydown', (e: Event) => (e as KeyboardEvent).key === 'Escape' && close());
-  ($('sheet') ?? document.body).append(wrap);
+  // Over the card's sheet when one is open; from the canvas (Decide, Change decision on its day line), over the page.
+  const host = document.getElementById('sheet');
+  (host && !host.hidden ? host : document.body).append(wrap);
   (sheet.querySelector('button.close') as HTMLElement | null)?.focus();
 }
 const block = (head: string, ...children: (Node | null)[]) => h('div', { class: 'vf-block' }, h('p', { class: 'vf-bh' }, head), ...children.filter((x): x is Node => !!x));
@@ -3236,7 +3245,20 @@ function causeDetail(story: Story, card: string): void {
   }
   // A population's own rows (the value and each field blank on it, all at one share) would say the split again.
   if (story.hero === 'finding' && story.cause && story.split?.via !== 'blanks') body.push(findingVisual(story.cause), oneLine(story.cause.detail));
-  openDetail(story.head, story.severity, body, anchorOf(story), card, story.primary);
+  openDetail(story.head, story.severity, body, anchorOf(story), card, story.primary, pausedLead(story));
+}
+
+/**
+ * On a day paused, a detail's main action is the card's: Decide (or, for someone who may not, who does), the story's
+ * own verbs secondary (ADR 0009 §12). Null on any other day.
+ */
+function pausedLead(story: Story): HTMLElement | null {
+  const own = !state.failed && story.day === viewedDay() ? onScreen() : undefined;
+  if (!own || pauseOf(own)?.state !== 'waiting') return null;
+  const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
+  return may
+    ? h('button', { type: 'button', class: 'vf-primary vf-decide', 'aria-label': `Decide what readers get for ${dayMid(story.day)}`, onclick: () => decisionSheet(own, story) }, 'Decide')
+    : h('span', { class: 'vf-waits' }, `${deciders()} decides`);
 }
 
 /** An episode's shortfall said with its bound, never the bound alone (ADR 0008 §6): "~187k fewer (≥130k)". */
@@ -3420,7 +3442,8 @@ function lineageVisual(g: Gate): Element | null {
   let run = 0;
   for (const x of order) {
     if (isOutput(x)) {
-      if (run) chain.push({ kind: 'steps', label: `${run} step${run === 1 ? '' : 's'} not built` });
+      // Under a flow that holds, the steps were built and staged (ADR 0009 §1); without one, the gate stopped them.
+      if (run) chain.push({ kind: 'steps', label: `${run} step${run === 1 ? '' : 's'} ${state.doc.publish ? 'built, not published' : 'not built'}` });
       run = 0;
       chain.push({ kind: 'output', label: x });
     } else run++;
@@ -3435,7 +3458,7 @@ function lineageVisual(g: Gate): Element | null {
 function gateBlocks(g: Gate, day: string, countMax?: number, findings: readonly Finding[] = []): (Node | null)[] {
   const wd = WEEKDAY_NAMES[dateOf(day).getUTCDay()]!;
   // What the outputs keep: said only of the day on screen, whose held run left them so.
-  const keep = day === viewedDay() ? stoppedWords({ refused: false, origin: g.step, shown: shownDay(), viewed: day }).tail : null;
+  const keep = day === viewedDay() ? stoppedWords({ refused: false, origin: g.step, shown: keptDay(), viewed: day }).tail : null;
   // Said from the figures: "most rows were missing" only when under half the rows a day like it has arrived.
   const trips = rangesOf({ of: 'trips' })?.at(day);
   const arrived = trips ? g.rows / Math.max(1, trips.expected) : null;
@@ -3458,7 +3481,7 @@ function gateSheet(story: Story, card: string): void {
   // that passed as it usually does (Sat Sep 17, 2022: 4% dropped).
   const worst = checksWorst(g, story.findings);
   const sev: Severity = worst === 'alert' || worst === 'warn' ? worst : g.near ? 'warn' : 'ok';
-  openDetail(gateHead(g), sev, gateBlocks(g, story.day, gateScale(story), story.findings), anchor, card, g.held ? 'notify' : story.primary);
+  openDetail(gateHead(g), sev, gateBlocks(g, story.day, gateScale(story), story.findings), anchor, card, g.held ? 'notify' : story.primary, pausedLead(story));
 }
 
 /** What a tap on the checks' card opens: what the card above doesn't show. The rows dropped day by day, each day
@@ -3469,7 +3492,7 @@ function checksDetail(g: Gate, story: Story, card: string, sev: Severity): (Node
   // Today's tick takes the card's own severity only when more rows were dropped than a day like it drops: fewer (the
   // kept rows went missing, Fri Sep 22, 2023) is drawn plain under its band.
   const days = stripOf({ of: 'droppedRows' }, day, 28, g.usual && g.dropped > g.usual.high ? sev : undefined);
-  const keep = g.held && day === viewedDay() ? stoppedWords({ refused: false, origin: g.step, shown: shownDay(), viewed: day }).tail : null;
+  const keep = g.held && day === viewedDay() ? stoppedWords({ refused: false, origin: g.step, shown: keptDay(), viewed: day }).tail : null;
   return [
     days.length ? block('Rows dropped, day by day', svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, unit: ' rows/day', key: STRIP_KEY, aria: `Rows the checks dropped day by day for four weeks to ${dayLabel(day)}, each against its own usual range: today ${fmtInt(g.dropped)}${g.usual ? `, usual ${fmtInt(g.usual.low)} to ${fmtInt(g.usual.high)}` : ''}.` }))) : null,
     g.held ? block('What it held back', lineageVisual(g), keep ? h('p', { class: 'vf-sub' }, keep.replace(/^./, (c) => c.toUpperCase())) : null) : null,
@@ -3554,19 +3577,24 @@ function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): v
   openDetail(of === 'dropped' ? 'How the rows dropped are judged' : 'How it’s judged', 'ok', body);
 }
 
-/** One verb, and the others behind ⋯. */
-function actionsOf(f: Finding, card: string, primary: Act | null, lead?: HTMLElement | null): HTMLElement {
-  // A day paused leads with Decide (ADR 0009 §12), every verb of the finding behind ⋯.
+/**
+ * One verb, and the others behind ⋯. A day paused leads with Decide (ADR 0009 §12); with `paused` (the day waits), the
+ * finding's own main verb follows as a secondary one (a detail's "Tell the source"), and "OK this day" is left out: it
+ * would read as approving the day, and it publishes nothing. The ⋯ holds only what the viewer may do.
+ */
+function actionsOf(f: Finding, card: string, primary: Act | null, lead?: HTMLElement | null, paused = false): HTMLElement {
   const main = lead ?? (primary ? actButton(primary, f, card) : null);
   if (!lead) {
     main?.classList.add('vf-primary');
     main?.classList.remove('small', 'quiet');
   }
-  const others = [...new Set([...f.acts, 'export' as Act])].filter((a) => lead || a !== primary);
+  const second = lead && paused && primary && primary !== 'expected' ? actButton(primary, f, card) : null;
+  second?.classList.add('quiet');
+  const others = [...new Set([...f.acts, 'export' as Act])].filter((a) => (!lead || (paused && second) ? a !== primary : true) && !(paused && a === 'expected'));
   const menu = h('div', { class: 'vf-menu', hidden: true }, ...others.map((a) => actButton(a, f, card)).filter((x): x is HTMLElement => !!x));
   const more = menu.childElementCount ? h('button', { type: 'button', class: 'vf-more', 'aria-label': `More actions: ${Array.from(menu.children).map((b) => b.textContent).join(', ')}`, title: Array.from(menu.children).map((b) => b.textContent).join(' · '), 'aria-expanded': 'false', onclick: (e: Event) => { menu.hidden = !menu.hidden; (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!menu.hidden)); } }, glyphEl('more', 16)) : null;
   const done = findingLog(f);
-  return h('div', { class: 'vf-acts' }, main, more, menu, done.length ? h('ul', { class: 'f-log' }, ...done.map((e) => h('li', {}, logText(e)))) : null);
+  return h('div', { class: 'vf-acts' }, main, second, more, menu, done.length ? h('ul', { class: 'f-log' }, ...done.map((e) => h('li', {}, logText(e)))) : null);
 }
 
 /**
@@ -3659,7 +3687,7 @@ function causeCard(story: Story, card: string): HTMLElement {
     // A day paused says so under its visual, its one verb with it, before the health row and the checks, so deciding is
     // on the first screen (ADR 0009 §12): Decide, every verb of the story behind ⋯, kept there once decided.
     paused ? paused.reach : null,
-    paused ? (anchor ? actionsOf(anchor, card, null, paused.verb) : paused.verb ? h('div', { class: 'vf-acts' }, paused.verb) : null) : null,
+    paused ? pausedActs(paused, anchor ?? undefined, card, own ? pauseOf(own)?.state === 'waiting' : false) : null,
     // The five health cells, under the day's visuals so they stay in the first screen on a day with something wrong; on
     // a paused card without their head, the pause row and the checks named on either side of them.
     healthRow(story, card, !!paused),
@@ -3771,6 +3799,24 @@ function pauseRow(r: RunRecord, story: Story | null): { reach: HTMLElement; verb
   return { reach, verb };
 }
 
+/**
+ * The verbs under a paused card's row: Decide (or who decides) and the story's verbs behind ⋯, "OK this day" left out
+ * while the day waits. Once decided there is no verb: the ⋯ sits at the end of the receipt row, labelled, never alone
+ * in an empty row, its menu under the row.
+ */
+function pausedActs(paused: { reach: HTMLElement; verb: HTMLElement | null }, anchor: Finding | undefined, card: string, waiting: boolean): HTMLElement | null {
+  if (!anchor) return paused.verb ? h('div', { class: 'vf-acts' }, paused.verb) : null;
+  const acts = actionsOf(anchor, card, null, paused.verb, waiting);
+  if (paused.verb) return acts;
+  const more = acts.querySelector<HTMLElement>('.vf-more');
+  if (more) {
+    more.append(h('span', { class: 'vf-more-l' }, 'More'));
+    paused.reach.append(more);
+  }
+  acts.classList.add('bare');
+  return acts.querySelector('.vf-menu, .f-log') ? acts : null;
+}
+
 /** Steps in the flow's own order (zone_hour, borough_hour, weather_effect), as the canvas lays them out. */
 function inFlowOrder(ids: readonly string[]): string[] {
   const order = state.doc.steps.map((x) => x.id);
@@ -3826,7 +3872,10 @@ function waitingList(r: RunRecord): HTMLElement {
  */
 function readersSheet(r: RunRecord): void {
   const day = dayOfRun(r);
-  openDetail(`${day ? `${dayMid(day)} · w` : 'W'}hat readers get`, 'ok', [oneLine(day ? stagedBar(day, readersDay(r)) : null), waitingList(r), h('p', { class: 'vf-waiting-on' }, `Only ${deciders()} decides`)]);
+  // Whom it waits on, at the top, with Ask, as the decision sheet read only says it.
+  const waits: HTMLElement = h('div', { class: 'vf-waits-on' }, h('p', {}, glyphEl('held', 14), h('b', {}, `${readersSee(readersDay(r), null).replace(/^./, (c) => c.toUpperCase())} until ${deciders()} decides`)), h('button', { type: 'button', class: 'linkish vf-ask', 'aria-label': `Ask ${deciders()} to decide: a note to send or copy`, onclick: () => askPanel(r, waits) }, 'Ask ›'));
+  openDetail(`${day ? `${dayMid(day)} · w` : 'W'}hat readers get`, 'ok', [waits, oneLine(day ? stagedBar(day, readersDay(r)) : null), waitingList(r)]);
+  document.querySelector('.vf-detail')?.classList.add('readonly');
   document.querySelector('.vf-detail .vf-dhead h3')?.prepend(glyphEl('held', 16));
 }
 
@@ -3847,13 +3896,54 @@ const standsOn = (d: Decided | null | undefined): boolean => !!d && d.about.opti
 /** Re-draw the sheet behind a detail once the detail closes, when what it shows changed meanwhile. */
 let sheetStale = false;
 
+/** The checks that held a run too, with their share and limit: what publishing it as is overrides. From the day's story
+ * where the viewer reads it, else from the run's own counts and the flow's limit. */
+function heldChecks(r: RunRecord, story: Story | null): { share: number; limit: number | null } | null {
+  if (!r.result.holds.some((x) => x.by === 'checks')) return null;
+  if (story?.gate?.held) return story.gate;
+  const src = loadSource();
+  const check = src ? state.doc.steps.find((x) => x.kind === 'expectations' && x.inputs.includes(src)) : undefined;
+  const e = check ? r.result.manifest.nodes.find((n) => n.origin === check.id)?.expectations : undefined;
+  const limit = check && 'maxDropped' in check && typeof check.maxDropped === 'number' ? check.maxDropped : null;
+  return e && e.rows ? { share: e.dropped / e.rows, limit } : null;
+}
+
+/** A note asking whoever decides to decide a held day, to send or copy (no server here to send it through). */
+function askPanel(r: RunRecord, el: HTMLElement): void {
+  const day = dayOfRun(r);
+  const who = deciders();
+  const subject = `Please decide ${day ? dayMid(day) : 'a held run'} in ${state.doc.name}`;
+  const body = `${day ? dayMid(day) : 'A run'} is paused, not published: ${readersSee(readersDay(r), null)} until ${who} decides what readers get. Open ${state.doc.name} in smaltfl to decide it.`;
+  const share = async () => {
+    try {
+      const nav = navigator as Navigator & { share?: (d: { title: string; text: string }) => Promise<void> };
+      const shared = typeof nav.share === 'function';
+      if (shared) await nav.share!({ title: subject, text: body });
+      else await nav.clipboard.writeText(`${subject}\n\n${body}`);
+      setStatus(`A note asking ${who} to decide, ${shared ? 'shared' : 'copied'}.`);
+    } catch {
+      return;
+    }
+  };
+  el.querySelector('.f-form')?.remove();
+  const panel = h('div', { class: 'f-form tell' },
+    h('pre', { class: 'code' }, `${subject}\n\n${body}`),
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'btn small', onclick: () => void share() }, 'share' in navigator ? 'Send it…' : 'Copy it'),
+      h('a', { class: 'btn small quiet', href: `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}` }, 'Email it'),
+      h('button', { type: 'button', class: 'btn small quiet', onclick: () => panel.remove() }, 'Cancel')));
+  el.append(panel);
+}
+
 /**
  * The decision sheet (ADR 0009 §12): each option a row drawn as what readers would get, all on one scale, the cause
- * picking the drawing as it picks the hero (core/decision.ts decisionDrawing, viz.ts decisionRow): its mark, at most four
- * words and one number over the rows, the axis once under the last. Then the scope, a reason a tap away, and a button
- * that names the result beside the first 8 hex of what goes out. Someone who may not decide sees the rows greyed, and
- * who decides. A receipt takes the button's place after the decision. Its words are core/decision.ts sheetText's, 45
- * at most at a glance.
+ * picking the drawing as it picks the hero (core/decision.ts decisionDrawing, viz.ts decisionRow): its mark (publish, or
+ * the hatched swatch of the day readers keep), at most four words and what the drawing shows with its unit, the trips
+ * past the checks under it, and what publishing overrides when the checks held the day too. Picking an option shows the
+ * reasons that fit it under "Why?", the scope under Don't publish only, and a button that says what is missing until it
+ * can go, then the result it names. Someone who may not decide sees the rows read only, what readers see until whoever
+ * decides does, and Ask. Once decided the sheet collapses to a receipt. Its words are core/decision.ts sheetText's, 45
+ * at most at once.
  */
 function decisionSheet(r: RunRecord, story: Story | null): void {
   const day = dayOfRun(r) ?? null;
@@ -3862,70 +3952,112 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
   const can = { asis: checkDecision(policies(), state.viewer, 'asis'), dont: checkDecision(policies(), state.viewer, 'dont') };
   const anyone = can.asis.allowed || can.dont.allowed;
   const n = r.result.waiting.length;
-  let option: DecideOption | null = null;
-  let scope: 'day' | 'untilPass' = 'day';
-  let reason: string | null = null;
+  const pick: SheetPick = { option: null, scope: 'day', reason: null };
   const pause = pauseOf(r)?.pause ?? null;
   const opened = pause ? ledger?.entries[pause.opened]?.at : undefined;
   const rows = tripsOf(r) ?? 0;
-  // The drawing keeps each day's shape as its trips arrived; the numbers are the trips that reach the outputs, past
-  // the checks: what readers would get, or keep.
+  // Each row's number is what its drawing shows, the trips as they arrived (as the card and the Runs view count them);
+  // the trips that reach the outputs, past the checks, are said under the day's own.
   const theirs = shown ? state.names.get(r.result.waiting[0] ?? Object.keys(r.result.manifest.outputs)[0] ?? '') : undefined;
   const arrived = theirs ? (tripsOf(theirs) ?? null) : null;
-  const keptTheirs = theirs ? (tripsKept(theirs) ?? null) : null;
-  const readers = shown && keptTheirs !== null ? { day: shown, rows: keptTheirs } : null;
+  const readers = shown && arrived !== null ? { day: shown, rows: arrived } : null;
   const draw = decisionDrawing(history, story, day ?? '', readers?.day ?? null, { day: rows, readers: arrived });
   const t: SheetText = sheetText({
-    day, waited: opened ? (Date.now() - Date.parse(opened)) / 60000 : null, otherBuild: !!pause?.otherBuild, outputs: n, rows, reach: tripsKept(r) ?? null, readers, later,
-    part: draw.part, ticks: draw.ticks.map(([, x]) => x), unjudged: r.result.holds.some((x) => x.by === 'unjudged'), hash: r.result.hash, may: anyone, deciders: deciders(), head: story?.head ?? null,
+    // How long it has waited, only while it waits (a day not published, opened to change its decision, isn't waiting).
+    day, waited: opened && pauseOf(r)?.state === 'waiting' ? (Date.now() - Date.parse(opened)) / 60000 : null, otherBuild: !!pause?.otherBuild, outputs: n, rows, reach: tripsKept(r) ?? null, readers, later, checks: heldChecks(r, story),
+    part: draw.part, missing: draw.cause === 'hours' ? (story?.hoursLabels?.missing ?? null) : null, cut: draw.cut?.[1] ?? null, ticks: draw.ticks.map(([, x]) => x),
+    unjudged: r.result.holds.some((x) => x.by === 'unjudged'), hash: r.result.hash, may: anyone, deciders: deciders(), head: story?.head ?? null,
   });
-  const optionRow = (o: SheetText['options'][number], last: boolean) => {
+  const rowOf = (o: SheetText['options'][number], last: boolean, still = false) => {
     const off = o.off || !can[o.option].allowed;
     const asis = o.option === 'asis';
-    return h('button', { type: 'button', role: 'radio', class: 'vf-option drawn', 'data-option': o.option, 'aria-checked': 'false', 'aria-label': o.aria, disabled: off, onclick: () => ((option = o.option), sync()) },
-      svgNode(decisionRow({ mark: asis ? 'flag' : 'closed', label: o.label, number: o.number, cause: draw.cause, rows: asis ? draw.asis : draw.dont, usual: asis ? draw.usual : null, short: draw.short, other: !asis, scale: draw.scale, part: asis ? draw.part : null, ticks: last ? draw.ticks : [], off, aria: o.aria })));
+    const svg = svgNode(decisionRow({ mark: asis ? 'publish' : readers ? 'keep' : 'closed', label: o.label, number: o.number, cause: draw.cause, rows: asis ? draw.asis : draw.dont, usual: asis ? draw.usual : null, short: draw.short, other: !asis, scale: draw.scale, part: asis ? draw.part : null, ticks: last ? draw.ticks : [], missing: asis ? t.missing : null, cut: asis ? draw.cut : null, off: off && !still, aria: o.aria }));
+    const more = o.sub || o.warn ? h('span', { class: 'vf-opt-more' }, o.warn ? h('span', { class: 'vf-opt-warn' }, glyphEl('alert', 13), o.warn) : '', o.sub ? h('span', { class: 'vf-opt-sub' }, o.sub) : '') : null;
+    if (still) return h('div', { class: 'vf-option drawn still', 'data-option': o.option }, svg);
+    return h('button', { type: 'button', role: 'radio', class: 'vf-option drawn', 'data-option': o.option, 'aria-checked': 'false', 'aria-label': o.aria, disabled: off, onclick: () => choose(o.option) }, svg, more);
   };
-  const rowsEl = h('div', { class: 'vf-options', role: 'radiogroup', 'aria-label': 'What readers get' }, ...t.options.map((o, i) => optionRow(o, i === t.options.length - 1)));
-  const seg = (sc: 'day' | 'untilPass', label: string) => h('button', { type: 'button', role: 'radio', class: 'vf-seg-b', 'data-scope': sc, 'aria-checked': String(scope === sc), onclick: () => ((scope = sc), sync()) }, label);
-  const scopes = h('div', { class: 'vf-seg', role: 'radiogroup', 'aria-label': 'For' }, seg('day', t.scopes[0]), seg('untilPass', t.scopes[1]));
-  const chips = h('div', { class: 'vf-reasons', role: 'radiogroup', 'aria-label': 'Why' }, ...t.chips.map((x) =>
-    h('button', { type: 'button', role: 'radio', class: 'vf-reason', 'aria-checked': 'false', onclick: () => ((reason = reason === x ? null : x), sync()) }, x)));
-  const go = h('button', { type: 'button', class: 'vf-primary vf-go', disabled: true, onclick: () => void submit() }, t.go[0]!);
-  const hash = h('code', { class: 'vf-hash', title: `Manifest ${r.result.hash}`, 'aria-label': `What goes out: manifest ${r.result.hash.slice(0, 8)}` }, t.hash);
-  const foot = h('div', { class: 'vf-go-row' }, t.denied ? h('p', { class: 'vf-waiting-on' }, t.denied) : go, hash);
+  const rowsEl = h('div', { class: `vf-options${anyone ? '' : ' ro'}`, role: 'radiogroup', 'aria-label': 'What readers get', ...(anyone ? {} : { 'aria-readonly': 'true' }) }, ...t.options.map((o, i) => rowOf(o, i === t.options.length - 1)));
+  const seg = (sc: 'day' | 'untilPass', label: string) => h('button', { type: 'button', role: 'radio', class: 'vf-seg-b', 'data-scope': sc, 'aria-checked': 'false', onclick: () => ((pick.scope = sc), sync()) }, label);
+  const scopes = t.scopes ? h('div', { class: 'vf-seg', role: 'radiogroup', 'aria-label': 'For', hidden: true }, seg('day', t.scopes[0]), seg('untilPass', t.scopes[1])) : null;
+  const why = h('div', { class: 'vf-why', hidden: true });
+  const go = h('button', { type: 'button', class: 'vf-primary vf-go', disabled: true, title: `What goes out: manifest ${t.hash}`, onclick: () => void submit() }, t.go.rest);
+  const foot = anyone ? h('div', { class: 'vf-go-row' }, go) : null;
+  const choose = (option: DecideOption) => {
+    pick.option = option;
+    if (option === 'asis') pick.scope = 'day';
+    if (pick.reason && !t.chips[option].includes(pick.reason)) pick.reason = null;
+    sync();
+  };
   const sync = () => {
-    if (option === 'asis') scope = 'day';
-    for (const b of Array.from(rowsEl.querySelectorAll<HTMLElement>('.vf-option'))) b.setAttribute('aria-checked', String(b.dataset.option === option));
-    for (const b of Array.from(scopes.querySelectorAll<HTMLButtonElement>('.vf-seg-b'))) {
-      b.setAttribute('aria-checked', String(b.dataset.scope === scope));
-      b.disabled = !anyone || (b.dataset.scope === 'untilPass' && (option === 'asis' || !day));
+    rowsEl.dataset.picked = pick.option ?? '';
+    for (const b of Array.from(rowsEl.querySelectorAll<HTMLElement>('.vf-option'))) b.setAttribute('aria-checked', String(b.dataset.option === pick.option));
+    // The reasons that fit the option picked, under "Why?": needed to publish as is, a choice not to publish.
+    if (pick.option) {
+      const o = pick.option;
+      why.replaceChildren(h('p', { class: 'vf-why-h', id: 'vf-why-h' }, t.why[o]), h('div', { class: 'vf-reasons', role: 'radiogroup', 'aria-labelledby': 'vf-why-h' }, ...t.chips[o].map((x) =>
+        h('button', { type: 'button', role: 'radio', class: 'vf-reason', 'aria-checked': String(x === pick.reason), onclick: () => ((pick.reason = pick.reason === x ? null : x), sync()) }, x))));
     }
-    for (const b of Array.from(chips.querySelectorAll<HTMLButtonElement>('.vf-reason'))) {
-      b.setAttribute('aria-checked', String(b.textContent === reason));
-      b.disabled = !anyone;
+    why.hidden = !pick.option;
+    if (scopes) {
+      scopes.hidden = pick.option !== 'dont';
+      for (const b of Array.from(scopes.querySelectorAll<HTMLButtonElement>('.vf-seg-b'))) b.setAttribute('aria-checked', String(b.dataset.scope === pick.scope));
     }
-    go.disabled = !option || (option === 'asis' && !reason);
-    go.textContent = goLabel(option, scope, n, day);
+    go.disabled = !pick.option || (pick.option === 'asis' && !pick.reason);
+    go.textContent = !pick.option ? t.go.rest : pick.option === 'asis' ? (pick.reason ? t.go.asis : t.go.reason) : pick.scope === 'untilPass' && t.scopes ? t.go.until : t.go.dont;
   };
-  const status = oneLine(t.status);
-  const headMark = glyphEl('held', 16);
+  const status = anyone ? oneLine(t.status) : null;
+  const ask = !anyone ? h('div', { class: 'vf-waits-on' }, h('p', {}, glyphEl('held', 14), h('b', {}, t.waitsOn ?? '')), h('button', { type: 'button', class: 'linkish vf-ask', 'aria-label': `Ask ${deciders()} to decide: a note to send or copy`, onclick: () => askPanel(r, ask!) }, t.ask ?? '')) : null;
+  // The day's mark as it stands: ‖ while it waits, ✕ when a decision not to publish is being changed.
+  const headMark = glyphEl(PAUSE_MARK[pauseOf(r)?.state ?? 'waiting'], 16);
   const submit = async () => {
-    if (!option) return;
+    if (!pick.option) return;
     go.disabled = true;
-    const entry = await decide(r, option, scope, reason);
+    const option = pick.option;
+    const entry = await decide(r, option, pick.scope, pick.reason);
     if (!entry) return sync();
     const now = pauseOf(r);
     const st = now?.state ?? 'waiting';
-    const l = pauseLines({ state: st, names: r.result.waiting, who: personName(entry.by.as), at: clock(entry.at), under: null, may: true, deciders: deciders(), standing: option === 'dont' && scope === 'untilPass' && !!day });
-    foot.replaceChildren(h('p', { class: 'vf-receipt' }, glyphEl(PAUSE_MARK[st], 16), st === 'waiting' ? 'Decided, not yet published' : l.reach), h('button', { type: 'button', class: 'linkish', onclick: () => ((ribbonPick = day), (location.hash = '#runs')) }, `Record #${entry.seq} ✓`));
-    // The sheet's top agrees with its receipt: the day's mark now, and no "Waiting" over a day decided.
+    // The sheet collapses to a receipt: what readers now see, drawn as the option picked was, then what was released,
+    // who and when, the record's entry, and Change decision for a day not published.
+    const l = receiptLines({ state: st, day, readers: st === 'asis' ? day : readersDay(r), released: st === 'asis' ? n : 0, who: personName(entry.by.as), at: clock(entry.at), seq: entry.seq, under: null, standing: option === 'dont' && pick.scope === 'untilPass' && !!day });
+    const kept = t.options.find((o) => o.option === option);
+    const sheetEl = document.querySelector('.vf-detail');
+    for (const el of [status, rowsEl, why, scopes, foot]) el?.remove();
+    sheetEl?.append(
+      kept ? h('div', { class: 'vf-options done' }, rowOf(kept, true, true)) : '',
+      receiptBox(l, st, entry.seq, `${r.result.hash.slice(0, 4)} ${r.result.hash.slice(4, 8)}`, l.change && anyone ? () => decisionSheet(r, story) : null, day));
     headMark.replaceWith(glyphEl(PAUSE_MARK[st], 16));
-    if (st !== 'waiting') status?.remove();
-    for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('.vf-detail .vf-option, .vf-detail .vf-seg-b, .vf-detail .vf-reason'))) b.disabled = true;
   };
-  openDetail(t.title, 'ok', [status, scopes, rowsEl, chips, foot]);
+  openDetail(t.title, 'ok', [status, ask, rowsEl, why, scopes, foot]);
+  document.querySelector('.vf-detail')?.classList.toggle('readonly', !anyone);
   document.querySelector('.vf-detail .vf-dhead h3')?.prepend(headMark);
   sync();
+}
+
+/** A held run's receipt once decided, on the canvas: as the decision sheet collapses to it. */
+function receiptOf(r: RunRecord, may: boolean): HTMLElement | null {
+  const now = pauseOf(r);
+  if (!now || now.state === 'waiting') return null;
+  const d = now.pause?.decision ?? null;
+  const under = d?.about.under !== undefined ? ledger?.entries[d.about.under] : undefined;
+  const underDay = (under?.about as { day?: string } | undefined)?.day;
+  const day = dayOfRun(r) ?? null;
+  const l = receiptLines({ state: now.state, day, readers: now.state === 'asis' ? day : readersDay(r), released: now.state === 'asis' ? (now.pause?.waiting ?? r.result.waiting).length : 0, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, seq: d?.seq ?? null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, standing: standsOn(d) });
+  const box = receiptBox(l, now.state, d?.seq ?? null, null, l.change && may ? () => decisionSheet(r, day ? storyFor(day) : null) : null, day);
+  box.classList.add('loads-receipt');
+  return box;
+}
+
+/** A decision's receipt (ADR 0009 §12), in the sheet and on the canvas: the day's mark and what readers now see, then
+ * what was released, who and when and the record's entry (a tap to it in the Runs view), and Change decision where a
+ * decision can still change. */
+function receiptBox(l: { head: string; sub: string; change: string | null }, st: PauseState, seq: number | null, hash: string | null, change: (() => void) | null, day: string | null): HTMLElement {
+  return h('div', { class: `vf-receipt-box ${st}` },
+    h('p', { class: 'vf-rc-head' }, glyphEl(PAUSE_MARK[st], 16), h('b', {}, l.head)),
+    h('p', { class: 'vf-rc-sub' }, seq !== null ? l.sub.replace(/ · record #\d+$/, '') : l.sub, hash ? h('code', { class: 'vf-hash', title: 'The manifest of what went out' }, ` · manifest ${hash}`) : ''),
+    h('div', { class: 'vf-rc-acts' },
+      seq !== null ? h('button', { type: 'button', class: 'linkish', onclick: () => ((ribbonPick = day), document.querySelector('.vf-detail-wrap')?.remove(), (location.hash = '#runs')) }, `Record #${seq} ✓`) : '',
+      l.change && change ? h('button', { type: 'button', class: 'linkish vf-change', onclick: change }, `${l.change} ›`) : ''));
 }
 
 /**
@@ -3935,7 +4067,7 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
 function outputsDetail(story: Story, outs: string[]): void {
   const held = !!story.gate?.held;
   const l = lacked(story);
-  const keep = held && story.day === viewedDay() ? stoppedWords({ refused: false, origin: story.gate!.step, shown: shownDay(), viewed: story.day }).tail : null;
+  const keep = held && story.day === viewedDay() ? stoppedWords({ refused: false, origin: story.gate!.step, shown: keptDay(), viewed: story.day }).tail : null;
   const list = h('ul', { class: 'vf-outlist' }, ...outs.map((o) => {
     const n = held ? undefined : nodeOf(o);
     return h('li', {}, h('button', { type: 'button', onclick: () => (document.querySelector('.vf-detail-wrap')?.remove(), select(o)) },
@@ -4805,7 +4937,8 @@ function actButton(a: Act, f: Finding, card: string): HTMLElement | null {
   if (a === 'incident' && open) return h('button', { type: 'button', class: 'btn small', ...actAttrs('resolved', 'Resolve the incident', f), onclick: () => void ask(f, card, 'resolved') }, 'Resolve the incident');
   // Fetching a refused file again, and exporting, are done, not noted.
   if (a === 'refetch') return h('button', { type: 'button', class: 'btn small', ...actAttrs(a, ACT_LABEL[a], f), disabled: state.running, onclick: () => void refetch() }, ACT_LABEL[a]);
-  if (a === 'export') return ledger ? h('button', { type: 'button', class: 'btn small quiet', ...actAttrs(a, ACT_LABEL[a], f), onclick: () => void exportAudit() }, ACT_LABEL[a]) : null;
+  // The audit bag carries the whole record, every source's manifest among it: the owner's to export.
+  if (a === 'export') return ledger && isOwner() ? h('button', { type: 'button', class: 'btn small quiet', ...actAttrs(a, ACT_LABEL[a], f), onclick: () => void exportAudit() }, ACT_LABEL[a]) : null;
   // Told the source already in this episode: the verb stays, behind ⋯, said as again.
   const again = a === 'notify' && !done.some((e) => e.act === a) && toldBefore(day);
   if (done.some((e) => e.act === a)) return null;
@@ -6406,7 +6539,9 @@ function renderLoads(): void {
       : '',
     h('div', { class: `loads-now${top ? ` sev-${top.severity}` : ''}` },
       h('p', { 'aria-live': 'polite' }, top && (top.severity === 'alert' || top.severity === 'warn') ? glyphEl(top.severity, 14) : '', ' ', loadSummary()),
-      pl && held ? h('p', { class: `loads-pause ${held.state}` }, glyphEl(PAUSE_MARK[held.state], 14), h('b', {}, pl.text)) : null,
+      // Once decided, the decision's receipt, as the sheet collapses to it: what readers now see, who, when, the record.
+      pl && held && held.state === 'waiting' ? h('p', { class: `loads-pause ${held.state}` }, glyphEl(PAUSE_MARK[held.state], 14), h('b', {}, pl.text)) : null,
+      own && held && held.state !== 'waiting' ? receiptOf(own, may) : null,
       after ? h('p', { class: `loads-pause after${waitingDay ? ' waiting' : ''}` }, waitingDay ? glyphEl('held', 14) : '', h('b', {}, after.text)) : null,
       h('div', { class: 'loads-acts' },
         pl?.verb && own ? h('button', { type: 'button', class: 'btn small primary vf-decide-day', 'aria-label': `Decide what readers get for ${dayMid(now!.day)}`, onclick: () => decisionSheet(own, storyFor(now!.day)) }, `${pl.verb} ›`) : null,
@@ -6892,14 +7027,17 @@ function decidedCard(day: string): HTMLElement {
   const opened = p ? ledger?.entries[p.opened] : undefined;
   const underDay = d?.about.under !== undefined ? (ledger?.entries[d.about.under]?.about as { day?: string } | undefined)?.day : undefined;
   const minutes = opened ? ((d ? Date.parse(d.at) : Date.now()) - Date.parse(opened.at)) / 60000 : null;
-  const l = decidedLines({ day, state: st, who: d ? personName(d.by) : null, minutes, reason: d?.reason ?? null, run: run?.result.run ?? p?.run ?? null, seq: d?.seq ?? null, under: underDay ? dayShort(underDay).split(' ')[0]! : null });
-  // The day's own rows, small, as the decision sheet draws them.
+  const decide = d ? ledger?.entries[d.seq] : undefined;
+  // The release that applies the decision in this engine: the latest (after a reload the same decision is applied again).
+  const released = d ? [...(ledger?.entries ?? [])].reverse().find((e) => e.kind === 'release' && (e.about as { decision?: number }).decision === d.seq && (e.about as { outcome?: string }).outcome === 'applied') : undefined;
+  const ra = released?.about as { manifest?: string; run?: unknown } | undefined;
+  const l = decidedLines({ day, state: st, who: d ? personName(d.by) : null, minutes, reason: d?.reason ?? null, run: ra ? runNameOf(ra.manifest, ra.run) : run ? runName(run) : p ? runNameOf(p.manifest, p.run) : null, seq: d?.seq ?? null, release: released?.seq ?? null, under: underDay ? dayShort(underDay).split(' ')[0]! : null });
+  // The day's own rows, small, as the decision sheet draws them, with the trips past its checks.
   const k = history ? history.file.days.indexOf(day) : -1;
   const rows = tripsOf(run) ?? (k >= 0 ? history!.file.rows[k]! : null);
+  const kept = run ? tripsKept(run) : undefined;
   const story = history && historyOpen() && k >= 0 ? storyFor(day) : null;
   const draw = rows !== null ? decisionDrawing(history, story, day, null, { day: rows, readers: null }) : null;
-  const decide = d ? ledger?.entries[d.seq] : undefined;
-  const released = d ? ledger?.entries.find((e) => e.kind === 'release' && (e.about as { decision?: number }).decision === d.seq && (e.about as { outcome?: string }).outcome === 'applied') : undefined;
   const at = loads.list.findIndex((x) => x.day === day);
   const hashes = h('div', { class: 'rb-hashes', hidden: true },
     p ? h('p', { class: 'rec-root' }, 'Manifest: ', hash4(p.manifest, 'manifest hash')) : '',
@@ -6907,7 +7045,7 @@ function decidedCard(day: string): HTMLElement {
     released ? h('p', { class: 'rec-root' }, `Release #${released.seq}: `, hash4(entryLeaf(released), 'release’s record leaf')) : '');
   return h('div', { class: 'rb-card' },
     h('h3', { class: 'rb-head' }, glyphEl(PAUSE_MARK[st], 16), l.head),
-    draw ? svgNode(decisionRow({ mark: null, label: `${fmtInt(rows!)} trips`, number: '', cause: draw.cause, rows: draw.asis, usual: draw.usual, short: draw.short, scale: draw.scale, part: draw.part, ticks: draw.ticks, aria: `${dayMid(day)}: ${fmtInt(rows!)} trips${story ? `, ${story.head}` : ''}` })) : '',
+    draw ? svgNode(decisionRow({ mark: null, label: `${fmtInt(rows!)} trips`, number: kept !== undefined && kept !== rows ? `${fmtInt(kept)} after checks` : '', cause: draw.cause, rows: draw.asis, usual: draw.usual, short: draw.short, scale: draw.scale, part: draw.part, ticks: draw.ticks, cut: draw.cut, missing: draw.cause === 'hours' ? (story?.hoursLabels?.missing ?? null) : null, aria: `${dayMid(day)}: ${fmtInt(rows!)} trips${kept !== undefined && kept !== rows ? `, ${fmtInt(kept)} past its checks` : ''}${story ? `, ${story.head}` : ''}` })) : '',
     l.who ? h('p', { class: 'rb-who' }, l.who) : '',
     l.where ? h('button', { type: 'button', class: 'linkish rb-where', 'aria-expanded': 'false', onclick: (e: Event) => { hashes.hidden = !hashes.hidden; (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!hashes.hidden)); } }, l.where) : '',
     hashes,
@@ -6922,41 +7060,116 @@ function renderRuns(): void {
     list.replaceChildren(h('li', { class: 'panel' }, h('p', { class: 'foot' }, state.failed ? state.failed.message : 'The first run starts as soon as the data is loaded.')));
     return;
   }
-  list.replaceChildren(
-    ...state.runs.map((r) => {
-      const m = r.result.manifest;
-      // Anyone but the owner sees the run as far as they can see the flow: no steps closed to them, no full record.
-      const owner = isOwner();
-      const nodes = m.nodes.filter((n) => owner || visible(n.origin));
-      const count = (status: string) => nodes.filter((n) => n.status === status).length;
-      const li = h('li', { class: 'panel' });
-      li.append(
-        h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Run ${r.result.run}`), r.load !== undefined && loads.list[r.load] ? h('span', { class: 'pill load-pill' }, dayLabel(loads.list[r.load]!.day)) : null, pauseOf(r) ? h('span', { class: 'pill held-pill' }, glyphEl(PAUSE_MARK[pauseOf(r)!.state], 13), PAUSE_PILL[pauseOf(r)!.state]) : null, h('span', { class: 'pill' }, `${count('built')} built`), h('span', { class: 'pill' }, `${count('reused')} reused`), h('span', { class: 'pill' }, `${count('folded')} folded`), h('span', { class: 'foot num' }, `${fmtMs(r.ms)} · ${r.at.toLocaleTimeString()}`)),
-        h('p', { class: 'rec-root' }, 'Manifest: ', hash4(r.result.hash, 'manifest hash')),
-        runFiles(r) ?? '',
-        h('div', { class: 'row' },
-          h('button', { class: 'btn', type: 'button', onclick: () => void verify(r, 'rerun') }, 'Verify'),
-          h('button', { class: 'btn quiet', type: 'button', onclick: () => void verify(r, 'rederive') }, 'Re-derive from the files'),
-          owner ? h('button', { class: 'btn quiet', type: 'button', onclick: () => void sign(r) }, r.signed ? 'Signed' : 'Sign') : null),
+  const owner = isOwner();
+  const card = (r: RunRecord, i: number) => {
+    const m = r.result.manifest;
+    // Anyone but the owner sees the run as far as they can see the flow: no steps closed to them, no full record.
+    const nodes = m.nodes.filter((n) => owner || visible(n.origin));
+    const count = (status: string) => nodes.filter((n) => n.status === status).length;
+    const badge = runBadge(r);
+    const li = h('li', { class: 'panel run-card' });
+    // The run before it in time (further down the list), to say only the files that changed since.
+    const before = state.runs[i + 1];
+    const body = h('details', { class: 'run-body', ...(i === 0 ? { open: true } : {}) }, h('summary', {}, 'Its manifest, files and checks'),
+      h('p', { class: 'rec-root' }, 'Manifest: ', hash4(r.result.hash, 'manifest hash')),
+      runFiles(r, i === 0 ? undefined : before) ?? '',
+      h('div', { class: 'row' },
+        h('button', { class: 'btn', type: 'button', onclick: () => void verify(r, 'rerun') }, 'Verify'),
+        h('button', { class: 'btn quiet', type: 'button', onclick: () => void verify(r, 'rederive') }, 'Re-derive from the files'),
+        owner ? h('button', { class: 'btn quiet', type: 'button', onclick: () => void sign(r) }, r.signed ? 'Signed' : 'Sign') : null));
+    li.append(
+      h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Run ${runName(r)}`), r.load !== undefined && loads.list[r.load] ? h('span', { class: 'pill load-pill' }, dayLabel(loads.list[r.load]!.day)) : null, badge ? h('span', { class: `pill${badge.mark ? ' held-pill' : ''}` }, badge.mark ? glyphEl(badge.mark, 13) : '', badge.text) : null, h('span', { class: 'pill' }, `${count('built')} built`), h('span', { class: 'pill' }, `${count('reused')} reused`), h('span', { class: 'pill' }, `${count('folded')} folded`), h('span', { class: 'foot num' }, `${fmtMs(r.ms)} · ${r.at.toLocaleTimeString()}`)),
+      body,
+    );
+    if (r.verified) {
+      const checks = r.verified.checks.filter((c) => owner || visible(c.origin));
+      const failed = checks.filter((c) => !c.ok);
+      body.append(
+        levelPills(r),
+        h('div', { class: 'row' }, h('span', { class: `pill ${r.verified.ok ? 'ok' : 'bad'}` }, r.verified.ok ? 'verified' : 'verification failed'), h('span', { class: 'foot' }, `${checks.length} checks: ${LEVEL_SAYS[r.verified.level]}`)),
+        h('ul', { class: 'checks' }, ...(failed.length ? failed : checks).slice(0, 12).map((c) => h('li', {}, h('span', { class: c.ok ? 'ok' : 'bad' }, c.ok ? 'ok' : 'failed'), h('span', {}, `${c.origin} · ${c.check}${c.note ? ` · ${c.note}` : ''}`)))),
       );
-      if (r.verified) {
-        const checks = r.verified.checks.filter((c) => owner || visible(c.origin));
-        const failed = checks.filter((c) => !c.ok);
-        li.append(
-          levelPills(r),
-          h('div', { class: 'row' }, h('span', { class: `pill ${r.verified.ok ? 'ok' : 'bad'}` }, r.verified.ok ? 'verified' : 'verification failed'), h('span', { class: 'foot' }, `${checks.length} checks: ${LEVEL_SAYS[r.verified.level]}`)),
-          h('ul', { class: 'checks' }, ...(failed.length ? failed : checks).slice(0, 12).map((c) => h('li', {}, h('span', { class: c.ok ? 'ok' : 'bad' }, c.ok ? 'ok' : 'failed'), h('span', {}, `${c.origin} · ${c.check}${c.note ? ` · ${c.note}` : ''}`)))),
-        );
-      }
-      if (r.signed && owner) li.append(h('div', { class: 'row' }, h('span', { class: `pill ${r.signatureOk ? 'ok' : 'bad'}` }, r.signatureOk ? 'signature valid' : 'signature invalid'), h('span', { class: 'hash' }, `${r.signed.signer.name} · ${short(r.signed.signer.fingerprint)}`)));
-      if (owner) li.append(h('details', {}, h('summary', {}, 'The manifest'), h('pre', { class: 'code' }, JSON.stringify(JSON.parse(canonicalJSON(m)), null, 2))));
-      return li;
-    }),
-  );
+    }
+    if (r.signed && owner) body.append(h('div', { class: 'row' }, h('span', { class: `pill ${r.signatureOk ? 'ok' : 'bad'}` }, r.signatureOk ? 'signature valid' : 'signature invalid'), h('span', { class: 'hash' }, `${r.signed.signer.name} · ${short(r.signed.signer.fingerprint)}`)));
+    if (owner) body.append(h('details', {}, h('summary', {}, 'The manifest'), h('pre', { class: 'code' }, JSON.stringify(JSON.parse(canonicalJSON(m)), null, 2))));
+    return li;
+  };
+  // Runs that built nothing and only repeat another of the same inputs fold into one line, one after another with the
+  // same relation ("Runs #20–#22 · same as run #19, nothing built", "Runs #14–#18 · held, replaced by run #19"); a tap
+  // opens them. The run that stands for a held day, and the newest run, are never folded.
+  const quiet = (x: RunRecord) => x.result.manifest.nodes.filter((n) => owner || visible(n.origin)).every((n) => n.status !== 'built');
+  const rel = (x: RunRecord, i: number): string | null => {
+    if (i === 0 || !quiet(x)) return null;
+    const b = runBadge(x);
+    if (b) return b.mark ? null : b.text;
+    const older = state.runs.slice(i + 1).find((y) => y.inputs === x.inputs);
+    return older ? `same as run ${runName(older)}` : null;
+  };
+  const items: HTMLElement[] = [];
+  for (let i = 0; i < state.runs.length; ) {
+    const said = rel(state.runs[i]!, i);
+    let j = i + 1;
+    while (said && j < state.runs.length && rel(state.runs[j]!, j) === said) j++;
+    if (!said) {
+      items.push(card(state.runs[i]!, i));
+      i++;
+      continue;
+    }
+    const box = h('ul', { class: 'runs folded', hidden: true }, ...state.runs.slice(i, j).map((x, k) => card(x, i + k)));
+    const names = j - i === 1 ? `Run ${runName(state.runs[i]!)}` : `Runs ${runName(state.runs[j - 1]!)}–${runName(state.runs[i]!)}`;
+    const btn = h('button', { type: 'button', class: 'run-fold', 'aria-expanded': 'false', onclick: () => { box.hidden = !box.hidden; btn.setAttribute('aria-expanded', String(!box.hidden)); } },
+      h('span', {}, `${names} · ${said}${said.startsWith('same') ? ', nothing built' : ''}`), glyphEl('chev', 13));
+    items.push(h('li', { class: 'run-folds' }, btn, box));
+    i = j;
+  }
+  list.replaceChildren(...items);
 }
 
 /** A held run in the run list (ADR 0009 §12): staged while it waits, then what became of it. */
 const PAUSE_PILL: Record<PauseState, string> = { waiting: 'staged', asis: 'published as is', dont: 'not published' };
+
+/** The record's run entries by manifest, read again as the record grows. */
+const runSeqCache = { size: -1, byManifest: new Map<string, number>() };
+function runSeqOf(manifest: string | undefined): number | undefined {
+  const entries = ledger?.entries ?? [];
+  if (runSeqCache.size !== entries.length) {
+    runSeqCache.byManifest = new Map();
+    for (const e of entries) {
+      const m = (e.about as { manifest?: unknown } | null)?.manifest;
+      if (e.kind === 'run' && typeof m === 'string' && !runSeqCache.byManifest.has(m)) runSeqCache.byManifest.set(m, e.seq);
+    }
+    runSeqCache.size = entries.length;
+  }
+  return manifest ? runSeqCache.byManifest.get(manifest) : undefined;
+}
+
+/**
+ * A run as the screens name it (ADR 0009 §12): by the record's entry that recorded it ("#13"), a number that keeps
+ * rising across visits, where the engine's own run numbers start again at 1 after a reload; the engine's number while
+ * the record has no entry for it.
+ */
+const runNameOf = (manifest: string | undefined, run: unknown): string => {
+  const seq = runSeqOf(manifest);
+  return seq !== undefined ? `#${seq}` : String(run ?? '?');
+};
+const runName = (r: RunRecord): string => runNameOf(r.result.hash, r.result.run);
+
+/**
+ * What a held run is among the runs of its day (ADR 0009 §12): the one that stands for the day carries what became of
+ * it (the run released, "published as is · decision #20"; the run a decision not to publish names; else the newest,
+ * staged); a run before it was held and replaced by it, one after it made the same versions again. One pause, one run
+ * that counts.
+ */
+function runBadge(r: RunRecord): { mark: VizMark | null; text: string } | null {
+  const now = pauseOf(r);
+  if (!now) return null;
+  const same = state.runs.filter((x) => x.inputs === r.inputs && x.result.holds.length);
+  const d = now.pause?.decision ?? null;
+  const stands = (now.state === 'asis' ? same.find((x) => x.release?.outcome === 'applied') : now.state === 'dont' ? same.find((x) => x.result.hash === d?.about.manifest) : undefined) ?? same[0]!;
+  if (stands === r) return { mark: PAUSE_MARK[now.state], text: `${PAUSE_PILL[now.state]}${d && now.state !== 'waiting' ? ` · decision #${d.seq}` : ''}` };
+  // The run list is newest first: a run further down ran before.
+  return { mark: null, text: state.runs.indexOf(r) > state.runs.indexOf(stands) ? `held, replaced by run ${runName(stands)}` : `same as run ${runName(stands)}` };
+}
 
 const LEVEL_SAYS: Record<VerifyLevel, string> = {
   stored: 'the hashes, keys, links and counts as stored',
@@ -6974,13 +7187,18 @@ function levelPills(r: RunRecord): HTMLElement {
     pill(3, 'Re-derived', 'Its source files decoded again to the same snapshots, then recomputed'));
 }
 
-/** The files a run read, as the engine saw their bytes, and the data's list they came from. */
-function runFiles(r: RunRecord): HTMLElement | null {
+/** The files a run read, as the engine saw their bytes, and the data's list they came from; given the run before it,
+ * only the files that changed since, the rest named in one line. */
+function runFiles(r: RunRecord, before?: RunRecord): HTMLElement | null {
   const m = r.result.manifest;
-  const files = m.nodes.filter((n) => n.file);
-  if (!files.length && !m.data) return null;
+  const all = m.nodes.filter((n) => n.file);
+  if (!all.length && !m.data) return null;
+  const had = new Set((before?.result.manifest.nodes ?? []).filter((n) => n.file).map((n) => `${n.origin}:${n.file!.sha256}`));
+  const files = before ? all.filter((n) => !had.has(`${n.origin}:${n.file!.sha256}`)) : all;
+  const same = before ? all.filter((n) => had.has(`${n.origin}:${n.file!.sha256}`)).map((n) => n.origin) : [];
   return h('div', { class: 'part' },
     h('p', { class: 'eyebrow' }, 'Read, by hash'),
+    same.length ? h('p', { class: 'foot' }, `${same.join(', ')}: the same bytes as run ${runName(before!)}`) : null,
     h('ul', { class: 'chain' }, ...files.map((n) => h('li', {},
       h('p', { class: 'c-what' }, `${n.origin}: ${n.file!.location.replace(PINNED_PREFIX_APP, '')}, ${fmtInt(n.file!.bytes)} bytes`),
       h('p', { class: 'c-line' }, 'sha256 ', hash4(n.file!.sha256, `${n.origin} file hash`)),
@@ -7413,7 +7631,7 @@ async function integrityTab(card: string, id: string, who: string): Promise<HTML
   box.append(h('div', { class: `verdict ${seal === 'bad' ? 'alert' : seal === 'amber' ? 'warn' : seal === 'ok' || levelOf(r) > 0 ? 'ok' : 'note'}` },
     h('p', { class: 'v-day' }, `Run ${r.result.run}${r.load !== undefined && loads.list[r.load] ? ` · ${dayLabel(loads.list[r.load]!.day)}` : ''}`),
     h('h3', { class: 'v-head' }, seal === 'bad' ? 'The chain is broken'
-      : sourceIds().has(id) ? (seal === 'ok' ? 'Sealed: matches the source’s list' : seal === 'amber' ? 'Read, with a note' : 'Recorded, not yet matched to the list')
+      : sourceIds().has(id) ? (seal === 'ok' ? 'Sealed: this file matches the source’s list' : seal === 'amber' ? 'Read, with a note' : 'Recorded, not yet matched to the list')
       : ['Recorded, not yet verified', 'Intact: every hash, key and link checks', 'Recomputed: the same datasets from the snapshots', 'Sealed: re-derived from the files’ bytes'][levelOf(r)]!),
     h('p', { class: 'v-line' }, sourceIds().has(id)
       ? (seal === 'ok' ? 'Its bytes, hashed by the engine, are the ones the data’s list publishes.' : state.engine?.mode === 'page' ? 'The engine runs in this page: an audit outside the browser vouches for its hashes.' : 'The file the run read, against the data’s list.')
@@ -7483,14 +7701,40 @@ async function saveFile(name: string, bytes: Uint8Array<ArrayBuffer> | string, t
 interface RecordContext {
   again: Set<number>;
   waiting: Map<string, string[]>;
+  /** A day that passed once days before it were held: its run entry, and the standing decision it ends, if any. */
+  passed: Map<number, number | null>;
+  /** A release of a decision already applied once (the same decision applied again in a new engine). */
+  reapplied: Set<number>;
+  /** A run that published a day already run here, the same inputs: a routine line. */
+  rerun: Set<number>;
 }
 function recordContext(entries: readonly { seq: number; kind: string; about: unknown }[]): RecordContext {
   const seen = new Set<string>();
-  const ctx: RecordContext = { again: new Set(), waiting: new Map() };
+  const ok = new Set<string>();
+  const applied = new Set<number>();
+  const ctx: RecordContext = { again: new Set(), waiting: new Map(), passed: new Map(), reapplied: new Set(), rerun: new Set() };
+  // Held days since the last day that published, and the standing decision among them.
+  let held = false;
+  let standing: number | null = null;
   for (const e of entries) {
-    const a = e.about as { outcome?: string; inputs?: unknown; manifest?: unknown; waiting?: unknown } | null;
-    if (e.kind !== 'run' || a?.outcome !== 'held') continue;
-    const key = a.inputs && typeof a.inputs === 'object' ? inputsKey(a.inputs as Inputs) : null;
+    const a = e.about as { outcome?: string; inputs?: unknown; manifest?: unknown; waiting?: unknown; scope?: unknown; option?: unknown; decision?: unknown; under?: unknown } | null;
+    if (e.kind === 'decide' && a?.option === 'dont' && a.scope === 'untilPass') standing = e.seq;
+    if (e.kind === 'release' && a?.outcome === 'applied' && typeof a.decision === 'number') {
+      if (applied.has(a.decision)) ctx.reapplied.add(e.seq);
+      applied.add(a.decision);
+    }
+    if (e.kind !== 'run') continue;
+    const key = a?.inputs && typeof a.inputs === 'object' ? inputsKey(a.inputs as Inputs) : null;
+    if (a?.outcome === 'ok') {
+      if (key && ok.has(key)) ctx.rerun.add(e.seq);
+      else if (held) ctx.passed.set(e.seq, standing);
+      if (key) ok.add(key);
+      held = false;
+      standing = null;
+      continue;
+    }
+    if (a?.outcome !== 'held') continue;
+    if (Array.isArray(a.waiting) && a.waiting.length) held = true;
     if (key && seen.has(key)) ctx.again.add(e.seq);
     else if (key) seen.add(key);
     if (typeof a.manifest === 'string') ctx.waiting.set(a.manifest, Array.isArray(a.waiting) ? (a.waiting as string[]) : []);
@@ -7504,31 +7748,43 @@ function heldNow(a: Record<string, unknown>): PauseState | null {
   return pauseState(null, p);
 }
 
+/** A run a record entry names, as the screens name runs: by the entry that recorded it ("run #13"). */
+const runSaid = (a: Record<string, unknown>) => `run ${runNameOf(typeof a.manifest === 'string' ? a.manifest : undefined, a.run)}`;
+
 const KIND_WORD: Record<string, (e: { seq: number; about: Record<string, unknown>; by: { as: string }; reason: string | null }, ctx: RecordContext) => string> = {
+  // A run is named by its own entry (the line's number), as the Runs view names it.
   run: ({ seq, about: a }, ctx) => {
-    if (a.outcome === 'ok') return `Ran the flow${a.load ? ` on ${dayLabel(String(a.load))}` : ''}: run ${String(a.run)}, manifest ${String(a.manifest).slice(0, 12)}…, ${Array.isArray(a.files) ? `${a.files.length} file${a.files.length === 1 ? '' : 's'} read by their hashes` : ''}`;
+    const files = Array.isArray(a.files) ? `${a.files.length} file${a.files.length === 1 ? '' : 's'} read by their hashes` : '';
+    // A day that published once days before it were held: readers now see it, and a standing decision ends with it.
+    if (a.outcome === 'ok' && ctx.passed.has(seq) && typeof (a.day ?? a.load) === 'string') return `${passedLine(String(a.day ?? a.load), ctx.passed.get(seq)!)} · ${files}`;
+    if (a.outcome === 'ok') return `${ctx.rerun.has(seq) ? 'Ran again' : 'Ran the flow'}${a.load ? ` on ${dayLabel(String(a.load))}` : ''}: manifest ${String(a.manifest).slice(0, 12)}…, ${files}`;
     if (a.outcome !== 'held') return `A run${a.load ? ` on ${dayLabel(String(a.load))}` : ''} stopped: ${String(a.error ?? '')}`;
     const day = a.day ?? a.load ? dayMid(String(a.day ?? a.load)) : null;
     const waiting = Array.isArray(a.waiting) ? a.waiting.length : 0;
     // A day held once more, or run again with nothing left waiting, says so: one pause, however many runs.
-    if (!waiting) return `Ran ${day ?? 'the flow'} again: run ${String(a.run)}, nothing waiting${heldNow(a) === 'asis' ? ', published as is' : heldNow(a) === 'dont' ? ', not published' : ''}`;
-    if (ctx.again.has(seq)) return `Held ${day ?? 'the flow'} again: run ${String(a.run)}, ${plural(waiting, 'output')} waiting`;
-    return `Held the flow${day ? ` on ${day}` : ''}: run ${String(a.run)}, ${plural(waiting, 'output')} waiting`;
+    if (!waiting) return `Ran ${day ?? 'the flow'} again: nothing waiting${heldNow(a) === 'asis' ? ', published as is' : heldNow(a) === 'dont' ? ', not published' : ''}`;
+    if (ctx.again.has(seq)) return `Held ${day ?? 'the flow'} again: ${plural(waiting, 'output')} waiting`;
+    return `Held ${day ?? 'the flow'}: ${plural(waiting, 'output')} waiting`;
   },
-  decide: ({ about: a, reason }) => `Decided ${a.day ? dayMid(String(a.day)) : `run ${String(a.run)}`}: ${a.option === 'asis' ? 'publish as is' : `don’t publish${a.scope === 'untilPass' ? ', until a day publishes' : ''}`}${typeof a.under === 'number' ? `, under #${a.under}` : ''}${reason ? ` (${reason})` : ''}`,
-  release: ({ about: a }, ctx) => {
-    if (a.outcome !== 'applied') return `A release of run ${String(a.run)} was refused: ${String(a.why ?? '')}`;
+  // A day closed under a standing decision is the decision's rule at work, not a person deciding again.
+  decide: ({ about: a, reason }) => (typeof a.under === 'number'
+    ? `${a.day ? dayMid(String(a.day)) : runSaid(a)} not published, by #${a.under}’s rule`
+    : `Decided ${a.day ? dayMid(String(a.day)) : runSaid(a)}: ${a.option === 'asis' ? 'publish as is' : `don’t publish${a.scope === 'untilPass' ? ', until a later day passes' : ''}`}${reason ? ` (${reason})` : ''}`),
+  release: ({ seq, about: a }, ctx) => {
+    if (a.outcome !== 'applied') return `A release of ${runSaid(a)} was refused: ${String(a.why ?? '')}`;
     // The outputs whose version it changed: those its run held back, as the cause card and the button counted them.
     const named = Object.keys((a.outputs as Record<string, string> | null) ?? {});
     const waited = typeof a.manifest === 'string' ? ctx.waiting.get(a.manifest) : undefined;
     const changed = waited ? named.filter((n) => waited.includes(n)) : named;
-    return `Released ${plural(changed.length, 'output')} of run ${String(a.run)}, by decision #${String(a.decision)}`;
+    // The same decision applied again after a reload (the engine started anew, and ran the day again): one decision.
+    if (ctx.reapplied.has(seq)) return `Applied decision #${String(a.decision)} again in a new engine: ${plural(changed.length, 'output')} of ${runSaid(a)}`;
+    return `Released ${plural(changed.length, 'output')} of ${runSaid(a)}, by decision #${String(a.decision)}`;
   },
   flow: ({ about: a }) => (a.before ? `The flow changed: ${String(a.before).slice(0, 12)}… to ${String(a.after).slice(0, 12)}…` : `The flow as it first ran here: ${String(a.after).slice(0, 12)}…`),
   file: ({ about: a }) => describeFile(a as unknown as FileCheck).title,
   act: ({ about: a, by }) => `${personName(by.as)} ${ACT_DONE[a.act as LogAct] ?? String(a.act)}: ${String(a.title)}`,
-  verify: ({ about: a }) => (a.ok ? `Run ${String(a.run)} ${LEVEL_DONE[a.level as VerifyLevel] ?? 'verified'}` : `Run ${String(a.run)} failed verification: ${(a.failed as string[]).slice(0, 3).join(', ')}`),
-  sign: ({ about: a }) => `Signed run ${String(a.run)}'s manifest`,
+  verify: ({ about: a }) => (a.ok ? `Run ${runSaid(a).slice(4)} ${LEVEL_DONE[a.level as VerifyLevel] ?? 'verified'}` : `Run ${runSaid(a).slice(4)} failed verification: ${(a.failed as string[]).slice(0, 3).join(', ')}`),
+  sign: ({ about: a }) => `Signed ${runSaid(a)}'s manifest`,
   edit: ({ about: a }) => {
     const e = a.edit as { action?: string; objectType?: string; outcome?: string } | null;
     return `${e?.action ?? 'An action'} on a ${e?.objectType ?? 'object'}: ${e?.outcome ?? ''}`;
@@ -7569,13 +7825,16 @@ function renderRecord(): void {
   const recent = [...ledger.entries].reverse();
   const ctx = recordContext(ledger.entries);
   // Routine: files first read, signatures, and a day held again or run again with nothing waiting (one pause, one line).
-  const isRoutine = (e: (typeof recent)[number]) => ROUTINE.has(e.kind) || (e.kind === 'run' && (e.about as { outcome?: string }).outcome === 'held' && (ctx.again.has(e.seq) || !((e.about as { waiting?: unknown[] }).waiting?.length)));
+  const isRoutine = (e: (typeof recent)[number]) => ROUTINE.has(e.kind) || ctx.rerun.has(e.seq) || (e.kind === 'run' && (e.about as { outcome?: string }).outcome === 'held' && (ctx.again.has(e.seq) || !((e.about as { waiting?: unknown[] }).waiting?.length)));
   const shown = recent.filter((e) => !isRoutine(e)).slice(0, 15);
   const routine = recent.filter(isRoutine).length;
   const line = (e: (typeof recent)[number]) => {
     const say = KIND_WORD[e.kind];
     const mark = recordMark(e);
-    return h('li', {}, h('span', { class: 'seq' }, `#${e.seq}`), h('span', { class: mark ? 'rec-marked' : '' }, mark ? glyphEl(mark, 14) : '', say ? say(e as never, ctx) : e.kind), h('span', { class: 'when' }, `${new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${personName(e.by.as)}`));
+    // A day closed under a standing decision is credited to that decision's rule, set by whoever made it.
+    const under = e.kind === 'decide' ? (e.about as { under?: unknown }).under : undefined;
+    const who = typeof under === 'number' ? `rule #${under} (${personName(e.by.as)})` : personName(e.by.as);
+    return h('li', {}, h('span', { class: 'seq' }, `#${e.seq}`), h('span', { class: mark ? 'rec-marked' : '' }, mark ? glyphEl(mark, 14) : '', say ? say(e as never, ctx) : e.kind), h('span', { class: 'when' }, `${new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${who}`));
   };
   const pick = h('input', { type: 'file', accept: '.json,application/json', hidden: true }) as HTMLInputElement;
   pick.addEventListener('change', () => void checkAgainst(pick.files?.[0]));

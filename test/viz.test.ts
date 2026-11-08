@@ -433,6 +433,24 @@ describe('a held day’s options, drawn as what readers get (ADR 0009 §12)', ()
     for (const [hr, ht] of heights(asis, 'ink-strong')) if (hr >= 13) expect(ht).toBeGreaterThanOrEqual(3 - 1e-9);
   });
 
+  it('marks each option as what it does, labels what the short hours lack in their wash, and marks the hour they fell on the day’s own row', () => {
+    const row = decisionRow({ mark: 'publish', label: 'Publish as is', number: '41,939 trips', cause: 'hours', rows: { cause: 'hours', hours: thu }, usual: { cause: 'hours', hours: usualThu }, short: [13, 23], scale, missing: '~77k missing', cut: [13, '13h'], aria: 'Publish as is: 41,939 trips' });
+    const keep = decisionRow({ mark: 'keep', label: 'Keep Wed 20', number: '108,434 trips', cause: 'hours', rows: { cause: 'hours', hours: wed }, other: true, scale, cut: [13, '13h'], missing: '~77k missing', aria: 'Don’t publish: readers keep Wed Sep 20' });
+    // Publish, an arrow out of a tray; Keep, the hatched swatch another day's rows are drawn in.
+    expect(row).toContain('g-publish');
+    expect(keep).toContain('g-keep');
+    expect(glyph('keep')).toContain('class="g-keep"');
+    // The wash says what it is, over the short hours' middle; another day's rows have no wash to label.
+    const miss = /<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" class="lbl-bad lbl-halo miss-l">~77k missing<\/text>/.exec(row)!;
+    expect(Number(miss[1])).toBeCloseTo(((13 + 24) / 2) * (300 / 24), 0);
+    expect(keep).not.toContain('missing');
+    // The cut: a solid tick at 13h (never dashed) and the hour under it, on this row; the rows kept draw no cut.
+    expect(row).toMatch(/<line class="cut-t" x1="162.5" x2="162.5"/);
+    expect(row).toMatch(/class="tick at" data-cut="13">13h<\/text>/);
+    expect(row).not.toMatch(/cut-t[^>]*dash/);
+    expect(decisionRow({ mark: 'keep', label: 'Keep Wed 20', number: '1', cause: 'hours', rows: { cause: 'hours', hours: wed }, other: true, scale, aria: 'x' })).not.toContain('cut-t');
+  });
+
   it('prints the shared axis once, under the row that carries it, hidden from screen readers', () => {
     expect(asis).not.toContain('class="tick"');
     for (const t of ['0h', '13h', '24h']) expect(dont).toMatch(new RegExp(`class="tick" aria-hidden="true">${t}</text>`));
