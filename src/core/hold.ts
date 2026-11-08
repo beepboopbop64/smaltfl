@@ -15,12 +15,12 @@
  */
 import { canonicalJSON } from './canonical.js';
 import type { PauseState } from './days.js';
-import { sourceOf, type FlowDocument, type HoldKind } from './document.js';
+import { isGeneralWatch, sourceOf, type FlowDocument, type HoldKind, type WatchDef } from './document.js';
 import type { HistoryRanges } from './history.js';
 import type { JSONValue, LogEntry } from './log.js';
 import type { ExpectationResult, RunManifest } from './manifest.js';
-import { flowNames, newsOf } from './news.js';
-import { watchesOf, type ExpectNode, type FlowPlan } from './plan.js';
+import { flowNames, judgeOf, newsOf } from './news.js';
+import { watchesOf, type ExpectNode, type FlowPlan, type WatchPlan } from './plan.js';
 import { DECIDE_OPTIONS, type DecideOption } from './policy.js';
 import { storyOf, type Story } from './story.js';
 
@@ -83,32 +83,56 @@ export function countedChecks(doc: Pick<FlowDocument, 'steps'>, h: HistoryRanges
     && h.sameChecks(step.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })));
 }
 
+/** What a flow's own verdict reads of its document: its steps, its ontology, its watch and its calendar. */
+export type FlowFor = Pick<FlowDocument, 'steps' | 'ontology' | 'publish' | 'calendar'>;
+
 /**
- * The flow's story of a day (ADR 0009 §3): told with raw names, no hidden columns, no findings marked as expected, no
- * episode, and no gate (the checks hold from the run's own counts). `h` must learn from every day of the history:
- * leaving incident days out is one browser's choice, not the flow's.
+ * The flow's story of a day (ADR 0009 §3, ADR 0010): told with raw names and the ontology's noun and parts, no hidden
+ * columns, no findings marked as expected, no episode, and no gate (the checks hold from the run's own counts); judged
+ * as the document says (`judgeOf`: the watch's form and settings, the marks on the source). `h` must learn from every day
+ * of the history, leaving incident days out being one browser's choice, not the flow's, and must have the flow's
+ * calendar for the source.
  */
-export function flowStory(h: HistoryRanges, day: string, doc: Pick<FlowDocument, 'steps' | 'ontology'>, source: string): Story {
+export function flowStory(h: HistoryRanges, day: string, doc: FlowFor, source: string): Story {
   if (h.skipped > 0) throw new Error("the flow's verdict learns from every day of the history: these ranges leave days out");
+  const judge = judgeOf(doc, source);
+  if (h.calendar.base !== judge.calendar.base) throw new Error(`the flow judges ${source} by the ${judge.calendar.base} calendar: these ranges were made with ${h.calendar.base}`);
   const names = flowNames(doc, source);
-  return storyOf(h, day, newsOf(h, day, names, { checks: countedChecks(doc, h, source) }), { names, episode: false });
+  return storyOf(h, day, newsOf(h, day, names, { checks: countedChecks(doc, h, source), judge }), { names, episode: false, judge });
+}
+
+/** The calendar a flow judges a watched source by (ADR 0010 §2): what its history's ranges must be made with. */
+export const calendarFor = (doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calendar'>, source: string) => judgeOf(doc, source).calendar;
+
+/**
+ * The donor rule a watch fills a paused day by when it names none (ADR 0010 §3, C1): the same weekday for the weekly
+ * pattern, the nearest good day for any other. A watch given as a file name has the weekly pattern.
+ */
+export function donorDefault(watch: string | WatchDef | Pick<WatchPlan, 'pattern' | 'donor'>): 'weekday' | 'nearest' {
+  if (!isGeneralWatch(watch)) return 'weekday';
+  const w = watch as Partial<Pick<WatchDef, 'pattern' | 'donor'>>;
+  return w.donor ?? ((w.pattern ?? 'weekly') === 'weekly' ? 'weekday' : 'nearest');
 }
 
 /**
  * The claim a page passes to a run for a watched source's day, from the history file it checked against the data's
  * list (ADR 0006 §2) and pinned in the engine. Null for a day the history doesn't have: the run holds it as not judged.
  */
-export function dayClaim(h: HistoryRanges, doc: Pick<FlowDocument, 'steps' | 'ontology'>, file: HistoryRef, day: string, source: string, build: string): StoryClaim | null {
+export function dayClaim(h: HistoryRanges, doc: FlowFor, file: HistoryRef, day: string, source: string, build: string): StoryClaim | null {
   const k = h.file.days.indexOf(day);
   if (k < 0) return null;
   const s = flowStory(h, day, doc, source);
-  return { by: 'story', source, day, state: s.state, below: !!s.amount && s.amount.value < s.amount.low, head: s.head, build, history: { path: file.path, sha256: file.sha256, bytes: file.bytes }, rows: h.file.rows[k]! };
+  // Below its range; or, with no range, under the floor that needs none (ADR 0010 §1), which `short` holds too (Q-53).
+  const below = s.amount ? s.amount.value < s.amount.low : s.state === 'wrong' && s.hero === 'amount' && s.cause?.kind === 'volume';
+  return { by: 'story', source, day, state: s.state, below, head: s.head, build, history: { path: file.path, sha256: file.sha256, bytes: file.bytes }, rows: h.file.rows[k]! };
 }
 
 /** Whether a claim holds under the flow's hold kinds: `wrong` on any day the story says something wrong, `short` only
- * when its rows are below their range too. A refused file, never told to a run, holds under either. */
+ * when its rows are below their range too; a day not judged yet (`unlearned`) only when `hold` lists it, since such a
+ * day is published, marked (ADR 0010 §1, the owner, Q-53). A refused file, never told to a run, holds under either. */
 export function claimHolds(hold: readonly HoldKind[], c: Pick<StoryClaim, 'state' | 'below'>): boolean {
   if (c.state === 'refused') return hold.includes('wrong') || hold.includes('short');
+  if (c.state === 'unlearned') return hold.includes('unlearned');
   return c.state === 'wrong' && (hold.includes('wrong') || (hold.includes('short') && c.below));
 }
 
@@ -121,7 +145,7 @@ export interface ClaimFacts {
   pinned(path: string): { sha256: string; bytes: number } | undefined;
 }
 
-const STATES: readonly string[] = ['calm', 'notes', 'unusual', 'wrong', 'refused', 'recovery'];
+const STATES: readonly string[] = ['calm', 'notes', 'unusual', 'wrong', 'refused', 'recovery', 'unlearned'];
 const HEX64 = /^[0-9a-f]{64}$/;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const fmt = (n: number | undefined) => (n === undefined ? 'none' : n.toLocaleString('en-US'));

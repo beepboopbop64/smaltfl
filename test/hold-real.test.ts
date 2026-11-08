@@ -41,6 +41,23 @@ describe.skipIf(!has)('the flow’s verdict on the real history (ADR 0009 §3)',
     expect(short.filter((d) => d.startsWith('2023'))).toEqual(['2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24']);
   }, 120_000);
 
+  it('says the 21 days with nothing to compare against are not judged yet, holds none of them, and finds none under the floor (ADR 0010 §1, Q-53)', () => {
+    const claims = file!.days.filter((d) => d >= '2022-01-01' && d <= '2024-01-31').map((d) => dayClaim(h!, doc, ref, d, 'trips', 'dev')!);
+    const unlearned = claims.filter((c) => c.state === 'unlearned');
+    // Every holiday and holiday window of 2022 before the history had a last year to judge it by, and Columbus Day 2022,
+    // whose last year the history holds too little of.
+    expect(unlearned.map((c) => c.day)).toEqual([
+      '2022-01-01', '2022-01-02', '2022-01-03', '2022-01-17', '2022-02-21', '2022-05-28', '2022-05-29', '2022-05-30', '2022-06-19', '2022-06-20',
+      '2022-07-01', '2022-07-02', '2022-07-03', '2022-07-04', '2022-07-05', '2022-07-06', '2022-07-07', '2022-09-03', '2022-09-04', '2022-09-05', '2022-10-10',
+    ]);
+    expect(unlearned.every((c) => c.head === 'Not judged yet' && !c.below)).toBe(true);
+    expect(unlearned.filter((c) => claimHolds(['checks', 'wrong'], c) || claimHolds(['checks', 'short'], c))).toEqual([]);
+    // A flow that lists them holds them.
+    expect(unlearned.filter((c) => claimHolds(['checks', 'unlearned', 'wrong'], c))).toHaveLength(21);
+    // No day of the span falls under the floor that needs no range.
+    expect(claims.filter((c) => /^Almost no /.test(c.head))).toEqual([]);
+  }, 120_000);
+
   it('tells the owner’s examples by their cause', () => {
     expect(dayClaim(h!, doc, ref, '2023-09-21', 'trips', 'dev')).toMatchObject({ state: 'wrong', below: true, head: 'Trips fall to trickle from 13:00', rows: 41_939 });
     expect(dayClaim(h!, doc, ref, '2022-11-15', 'trips', 'dev')).toMatchObject({ state: 'wrong', below: true, head: 'Vendor 1 sent almost nothing' });

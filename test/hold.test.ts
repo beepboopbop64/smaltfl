@@ -4,13 +4,16 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { NONE } from '../src/core/calendar.js';
 import { sourceOf, type FlowDocument, type PublishDef, type StepDef } from '../src/core/document.js';
 import { HistoryRanges } from '../src/core/history.js';
 import {
+  calendarFor,
   claimHolds,
   countedChecks,
   dayClaim,
   decisionFor,
+  donorDefault,
   flowStory,
   heldOutputs,
   holdsOf,
@@ -253,6 +256,43 @@ describe('the flow’s verdict on a day (ADR 0009 §3)', () => {
     const file = historyWith({});
     expect(dayClaim(new HistoryRanges(file), doc, HISTORY, '2024-02-01', 'trips', 'dev')).toBeNull();
     expect(() => flowStory(new HistoryRanges(file, { skip: new Set(['2023-09-21']) }), DAY, doc, 'trips')).toThrow("the flow's verdict learns from every day of the history");
+  });
+
+  it('judges as the document says (ADR 0010): days not judged yet are published, marked; a bad value is something wrong', () => {
+    const FIRST_THANKSGIVING = '2021-11-25';
+    const unlearned = dayClaim(new HistoryRanges(historyWith({})), doc, HISTORY, FIRST_THANKSGIVING, 'trips', 'dev')!;
+    expect(unlearned).toMatchObject({ state: 'unlearned', below: false, head: 'Not judged yet' });
+    expect([claimHolds(['checks', 'wrong'], unlearned), claimHolds(['short'], unlearned), claimHolds(['checks', 'unlearned', 'wrong'], unlearned)]).toEqual([false, false, true]);
+    // The floor that needs no range holds under short as well as wrong (Q-53).
+    const floor = dayClaim(new HistoryRanges(historyWith({ [FIRST_THANKSGIVING]: { blank: true } })), doc, HISTORY, FIRST_THANKSGIVING, 'trips', 'dev')!;
+    expect(floor).toMatchObject({ state: 'wrong', below: true });
+    expect(floor.head).toMatch(/^Almost no trips: /);
+    expect(claimHolds(['short'], floor)).toBe(true);
+    // A watched source whose ontology marks a rare value bad (vendor 6, a fifth of a percent of the trips): its rise to
+    // 0.65% is something wrong, where unmarked it is too few points to tell (ADR 0010 §4).
+    const marked = { ...doc, ontology: { ...doc.ontology, properties: [{ column: 'VendorID', title: 'Vendor', description: 'Who', values: { '1': 'One', '2': 'Two', '6': 'Six' }, bad: ['6'] }] }, publish: { hold: ['checks', 'wrong'] as PublishDef['hold'], watch: { trips: 'history.json' }, period: 'day' } };
+    const file = historyWith({});
+    const vh = file.values.VendorID!;
+    [vh.first[2], vh.last[2]] = [0, file.days.length - 1];
+    vh.counts = vh.counts!.map((c, k) => [c[0]!, c[1]!, Math.round(file.rows[k]! * (file.days[k] === DAY ? 0.0065 : 0.002 * (1 + 0.04 * Math.sin(k * 1.7))))]);
+    const rise = (d: typeof doc) => dayClaim(new HistoryRanges(file), d, HISTORY, DAY, 'trips', 'dev')!;
+    expect(rise(doc).state).toBe('calm');
+    expect(rise(marked)).toMatchObject({ state: 'wrong', below: false });
+    expect(claimHolds(['checks', 'wrong'], rise(marked))).toBe(true);
+    // A general watch is judged by its own calendar, none unless chosen (Q-58): the ranges must be made with it.
+    const general = { ...doc, publish: { hold: ['checks', 'wrong'] as PublishDef['hold'], watch: { trips: { history: 'history.json' } }, period: 'day' } };
+    expect(calendarFor(general, 'trips')).toBe(NONE);
+    expect(calendarFor(doc, 'trips').base).toBe('us-nyc/1');
+    expect(() => flowStory(new HistoryRanges(historyWith({})), DAY, general, 'trips')).toThrow('the flow judges trips by the none calendar: these ranges were made with us-nyc/1');
+    expect(dayClaim(new HistoryRanges(historyWith({}), { calendar: NONE }), general, HISTORY, FIRST_THANKSGIVING, 'trips', 'dev')!.state).not.toBe('unlearned');
+  });
+
+  it('fills a paused day from the same weekday for the weekly pattern, and the nearest good day otherwise (ADR 0010 §3)', () => {
+    expect(donorDefault('history.json')).toBe('weekday');
+    expect(donorDefault({ history: 'h.json' })).toBe('weekday');
+    expect(donorDefault({ history: 'h.json', donor: 'nearest' })).toBe('nearest');
+    expect(donorDefault({ pattern: 'none' as never, donor: undefined as never })).toBe('nearest');
+    expect(donorDefault({ pattern: 'weekly', donor: 'nearest' })).toBe('nearest');
   });
 
   it('counts the checks only when they are the ones the history counted, reading the source alone', () => {

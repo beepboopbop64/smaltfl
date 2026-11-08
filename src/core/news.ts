@@ -401,20 +401,25 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       const w = shareWords(j.value, j.range.low, j.range.high);
       const place = j.ranges.place(j.range, j.value);
       // A value marked bad (ADR 0010 §4): something wrong above its range at twice its usual rows past its floor, however
-      // few points it moved; good news below it; never marked as expected, never folded (story.ts).
-      if (key !== 'null' && badCodes?.has(String(parse(key)))) {
-        if (place === 'within') return;
+      // few points it moved; good news below it; else told as any value is. Never marked as expected, never folded
+      // (story.ts).
+      const bad = key !== 'null' && !!badCodes?.has(String(parse(key)));
+      if (bad && place !== 'within') {
         const usualRows = j.range.expected * (trips?.range.expected ?? rows);
         const today = j.value * rows;
         const base = { key: `share:${column}=${key}`, kind: 'share' as const, score: cap(j.d), columns: [column], values: [key], metric: { of: 'value' as const, column, value: key }, value: j.value, range: j.range, rows: Math.round(Math.abs(today - usualRows)), look: 'columns' as const, bad: true };
         if (place === 'above' && today >= 2 * usualRows && today - usualRows >= M.rows) {
           const times = usualRows > 0 ? today / usualRows : Infinity;
           out.push({ ...base, severity: 'alert', title: `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: `${fmtInt(today)} ${noun(today)} with it today${Number.isFinite(times) ? `, ${times.toFixed(1).replace(/\.0$/, '')}× its usual ${fmtInt(usualRows)}` : ''}: a value marked bad.`, acts: ['incident', 'notify'] });
-        } else if (place === 'below') {
-          out.push({ ...base, severity: 'note', title: `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: `Fewer than usual of a value marked bad: ${fmtInt(today)} ${noun(today)}, about ${fmtInt(usualRows)} usually.`, acts: ['notify'] });
+          return;
         }
-        return;
+        if (place === 'below') {
+          out.push({ ...base, severity: 'note', title: `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: `Fewer than usual of a value marked bad: ${fmtInt(today)} ${noun(today)}, about ${fmtInt(usualRows)} usually.`, acts: ['notify'] });
+          return;
+        }
       }
+      // A bad value's finding never offers to mark it as expected (C9).
+      const marked = (f: Finding): Finding => (bad ? { ...f, bad: true, acts: f.acts.filter((a) => a !== 'expected') } : f);
       // The relative rule (ADR 0010 §4, the general form): a value at three times its usual rows or more, or a third or
       // less, outside its range and past its floor, is at least unusual, where the point gates miss 0.5% → 0.9%.
       const ratio = j.value / Math.max(1e-9, j.range.expected);
@@ -424,9 +429,9 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       if (!relative && Math.abs(delta) < MATERIAL.shareRelative * Math.min(j.range.expected, 1 - j.range.expected)) return;
       const atLeast = (sv: Severity): Severity => (relative && RANK[sv] > RANK.warn ? 'warn' : sv);
       if (j.value === 0) {
-        out.push(quiet({ key: `gone:${column}=${key}`, kind: 'gone', severity: atLeast(j.range.expected >= 0.2 ? 'alert' : 'warn'), score: cap(j.d), title: `${sentence(names.column(column))} ${said}: none`, detail: `Usually on ${w.range} of ${noun()}; none today.`, look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(-delta * rows), acts: ['incident', 'notify', 'expected'] }, j));
+        out.push(marked(quiet({ key: `gone:${column}=${key}`, kind: 'gone', severity: atLeast(j.range.expected >= 0.2 ? 'alert' : 'warn'), score: cap(j.d), title: `${sentence(names.column(column))} ${said}: none`, detail: `Usually on ${w.range} of ${noun()}; none today.`, look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(-delta * rows), acts: ['incident', 'notify', 'expected'] }, j)));
       } else {
-        out.push(quiet({ key: `share:${column}=${key}`, kind: key === 'null' ? 'missing' : 'share', severity: atLeast(shareSeverity(delta, j)), score: cap(j.d), title: key === 'null' ? `${sentence(names.column(column))} blank: ${w.value} (usually ${w.range})` : `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: atShare(j.value, j.range.expected, rows, key === 'null' ? 'blank' : 'with it', noun()), look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j));
+        out.push(marked(quiet({ key: `share:${column}=${key}`, kind: key === 'null' ? 'missing' : 'share', severity: atLeast(shareSeverity(delta, j)), score: cap(j.d), title: key === 'null' ? `${sentence(names.column(column))} blank: ${w.value} (usually ${w.range})` : `${sentence(names.column(column))} ${said}: ${w.value} (usually ${w.range})`, detail: atShare(j.value, j.range.expected, rows, key === 'null' ? 'blank' : 'with it', noun()), look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: j.value, range: j.range, rows: Math.round(Math.abs(delta) * rows), acts: ['expected', 'rule', 'notify'] }, j)));
       }
     });
   }

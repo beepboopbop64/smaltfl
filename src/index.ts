@@ -36,8 +36,8 @@ export type {
   StepKind,
   WatchDef,
 } from './core/document.js';
-export { PLAN_FORMATS, PlanError, flowHash, translate, validatePlan } from './core/plan.js';
-export type { Column, ColumnType, FlowPlan, PlanFormat, PlanNode, PlanOutput, PlanPublish } from './core/plan.js';
+export { PLAN_FORMATS, PlanError, flowHash, isPublish2, planPeriod, translate, validatePlan, watchesOf } from './core/plan.js';
+export type { Column, ColumnType, FlowPlan, PlanFormat, PlanNode, PlanOutput, PlanPublish, PlanPublish2, PlannedWatch, WatchPlan } from './core/plan.js';
 export { shapeOf } from './core/optimize.js';
 export type { RunShape } from './core/optimize.js';
 export { emitSelect, nodeSelect } from './core/emit.js';
@@ -50,7 +50,8 @@ export type { Backtest, DailySeries, Guess, NoRange, NormalOptions, NormalRange,
 export { HISTORY_FORMAT, HistoryRanges, metricKey, seriesOf } from './core/history.js';
 export type { DayError, HistoryFile, Metric, ValueHistory } from './core/history.js';
 export { isPlaceholder, MATERIAL, newsOf, PLACEHOLDERS, schemaChanges, tableNewsOf } from './core/news.js';
-export type { Act, Finding, Look, Names, Severity, TableFacts } from './core/news.js';
+export { coverageOf, flowNames, judgeOf, LEGACY_JUDGE, materialFor, notJudgedChip, nounFor } from './core/news.js';
+export type { Act, Coverage, Finding, JudgeSettings, Look, Names, Severity, TableFacts } from './core/news.js';
 export { nodeKey } from './core/keys.js';
 export type { KeyEnv } from './core/keys.js';
 export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, planKind, signManifest, verifyManifest } from './core/manifest.js';
@@ -61,11 +62,11 @@ export type { ActRequest, ActionType, Edit, LinkType, Noun, ObjectType, Ontology
 export { counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, VERDICT_MARKS } from './core/ontology.js';
 // What holds a run, what waits, and what the record decided (ADR 0009): one group a line, so that changes to one part
 // don't touch the others' lines.
-export { claimHolds, dayClaim, flowStory } from './core/hold.js';
+export { calendarFor, claimHolds, dayClaim, donorDefault, flowStory } from './core/hold.js';
 export { countedChecks, holdsOf, judgeClaim, judgeClaims, tripped } from './core/hold.js';
 export { heldOutputs, reachOf, stagedKeys, waitingOf } from './core/hold.js';
 export { decisionFor, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, standingFor } from './core/hold.js';
-export type { ClaimAt, ClaimFacts, HistoryRef, Hold, Judged, StoryClaim } from './core/hold.js';
+export type { ClaimAt, ClaimFacts, FlowFor, HistoryRef, Hold, Judged, StoryClaim } from './core/hold.js';
 export type { DecideAbout, Decided, HeldAbout, Inputs, Pause, ReleaseAbout } from './core/hold.js';
 export { PLUGIN_NAME } from './core/protocol.js';
 export type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunOptions, RunResult, VerifyCheck, VerifyLevel, VerifyOptions, VerifyResult } from './core/protocol.js';
