@@ -820,6 +820,9 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
    filled dot, which reads as a badge to clear. */
 .g-note { fill: none; stroke: var(--muted); stroke-width: 1.6; }
 .g-unlearned { fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-dasharray: 2.4 2.1; }
+/* A health cell's ◌ with its count inside it (ADR 0010 §1): the numbers of the cell that had no range that day. */
+.vf-ring-n { position: relative; display: inline-flex; flex: none; width: 20px; height: 20px; }
+.vf-ring-n > span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 650; color: var(--ink-2); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .g-ring { fill: none; stroke: currentColor; stroke-width: 1.4; } .g-i { fill: currentColor; }
 .g-chev { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .g-seal { fill: var(--ok); } .g-sealmark { fill: none; stroke: var(--surface); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

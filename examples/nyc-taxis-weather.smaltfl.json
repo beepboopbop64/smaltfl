@@ -1133,7 +1133,7 @@
     {
       "id": "trips_profile",
       "of": "trips",
-      "description": "What each load of trips holds, and whether it is a normal day: its news against the history (the amount, the hours, the values and combinations, what the checks drop), each column's distribution, the rows an isolation forest finds odd, and checks worth adding. It only looks: no data changes here."
+      "description": "What each load of trips holds, and whether it is a normal day: its news against the history (the amount, the hours, the values and combinations, what the checks drop), each column's distribution, the rows an isolation forest finds odd, and checks worth adding. It only looks: no data changes here. A day with nothing to compare against (a holiday the history has no last year of) is not judged yet: it is published, marked ◌."
     },
     {
       "id": "zones_profile",

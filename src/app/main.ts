@@ -239,10 +239,12 @@ function setStatus(text: string, bad = false, run?: { n: number; state: 'done' |
   el.textContent = text;
   // The day's mark before its line, a shape hidden from screen readers and from the line's text, which says the day as
   // before (ADR 0009 §12).
-  if (run?.mark) el.prepend(glyphEl(PAUSE_MARK[run.mark], 14));
   // A line about a run on a day takes that day's severity, held or published alike: one rule for every alert day.
   const day = run && loads.list.length > 1 ? loads.list[loads.at]?.day : undefined;
   const sev = day ? verdictOf(day)?.severity : undefined;
+  if (run?.mark) el.prepend(glyphEl(PAUSE_MARK[run.mark], 14));
+  // A day not judged yet, published, marked: ◌ before its line (ADR 0010 §12).
+  else if (run && day && verdictOf(day)?.kind === 'unlearned') el.prepend(glyphEl('unlearned', 14));
   el.classList.toggle('bad', bad || sev === 'alert');
   el.classList.toggle('warn', !bad && sev === 'warn');
   // For tests and tools: which run the line is about, and how it ended, whatever its words.
@@ -454,9 +456,12 @@ function noteShown(r: RunRecord, names: readonly string[]): void {
  */
 let baseTitle = '';
 function syncTitle(): void {
-  baseTitle ||= document.title.replace(/^‖ /, '');
+  baseTitle ||= document.title.replace(/^[‖◌] /, '');
   const waits = pauseOf(latest())?.state === 'waiting' || pausedDays().some((d) => d.state === 'waiting');
-  document.title = `${waits ? '‖ ' : ''}${baseTitle}`;
+  // With nothing waiting, a day on screen not judged yet puts ◌ before it (ADR 0010 §12).
+  const viewed = loads.list[loads.at]?.day;
+  const unlearned = !waits && !!viewed && verdictOf(viewed)?.kind === 'unlearned';
+  document.title = `${waits ? '‖ ' : unlearned ? '◌ ' : ''}${baseTitle}`;
 }
 const nodeOf = (id: string): ManifestNode | undefined => latest()?.result.manifest.nodes.find((n) => n.origin === id);
 
@@ -828,7 +833,7 @@ function shortHead(story: Story): string {
   if (story.hero === 'hours' && story.hours) return `Falls at ${clockText(story.hours.from * 60)}`;
   if (story.hero === 'gate' && story.gate) return heldCardLine(story.gate).text;
   // The amount: its change ("−30% trips"), the number the card's line has room for.
-  if (story.hero === 'amount' && story.amount) return `${changeLabel(story.amount.value / Math.max(1, story.amount.expected) - 1)} trips`;
+  if (story.hero === 'amount' && story.amount) return `${changeLabel(story.amount.value / Math.max(1, story.amount.expected) - 1)} ${NEWS_NAMES.noun()}`;
   return cardWords(story.head, Math.floor((GRID.cardW - 24) / 7.2));
 }
 
@@ -2881,6 +2886,10 @@ const NEWS_NAMES = {
 
 /** What a source's or step's rows are called, one and many (ADR 0010 §8, ontology.ts `nounOf`). */
 const rowNoun = (id: string): Noun => ontologyNoun(state.doc.ontology, id, readersOf(id));
+/** A count with the watched source's noun: "41,939 trips". */
+const rowsSaid = (n: number) => `${fmtInt(n)} ${NEWS_NAMES.noun(n)}`;
+/** The watched source's noun as a title begins: "Trips". */
+const RowsWord = () => NEWS_NAMES.noun().replace(/^./, (c) => c.toUpperCase());
 
 const storyCache = new Map<string, Story>();
 
@@ -2988,9 +2997,7 @@ function downstreamOf(id: string): string[] {
 
 /** What its rows are called: the ontology's object for it or for what reads it ("zones"), or rows. */
 function nounOf(id: string): string {
-  const types = state.doc.ontology?.objectTypes ?? [];
-  const t = types.find((x) => x.dataset === id) ?? (state.doc.sources.some((x) => x.id === id) ? types.find((x) => readersOf(id).includes(x.dataset)) : undefined);
-  return t ? `${t.name.toLowerCase()}s` : 'rows';
+  return rowNoun(id).many;
 }
 
 /** A table's own news, from its rows on the day's run, kept under its content's key and the viewer. */
@@ -3162,7 +3169,7 @@ function amountVisual(story: Story): Element | null {
   // Beside a head about the hours from a fall, it says its window ("whole day −65%").
   const said = story.labels.amount.map((l) => /^(?:(.+) )?([+−]\d+%)$/.exec(l)).find((m) => !!m);
   const change = said?.[2];
-  return svgNode(amountLine({ value: a.value, low: a.low, high: a.high, valueLabel: fmtInt(a.value), unit: NEWS_NAMES.noun(a.value), bandLabel: `usual ${compact(a.low)}–${compact(a.high)}`, changeLabel: change, changeWindow: said?.[1], sev, aria: `${fmtInt(a.value)} trips on ${dayLabel(story.day)}${change ? `, ${said?.[1] ? `${said[1]} ` : ''}${change} against a usual ${wd}` : ''}, where a usual ${wd} has ${fmtInt(a.low)} to ${fmtInt(a.high)}.` }));
+  return svgNode(amountLine({ value: a.value, low: a.low, high: a.high, valueLabel: fmtInt(a.value), unit: NEWS_NAMES.noun(a.value), bandLabel: `usual ${compact(a.low)}–${compact(a.high)}`, changeLabel: change, changeWindow: said?.[1], sev, aria: `${rowsSaid(a.value)} on ${dayLabel(story.day)}${change ? `, ${said?.[1] ? `${said[1]} ` : ''}${change} against a usual ${wd}` : ''}, where a usual ${wd} has ${fmtInt(a.low)} to ${fmtInt(a.high)}.` }));
 }
 
 /** The hero of a story's cause card: the one visual its cause calls for. */
@@ -3178,12 +3185,12 @@ function heroOf(story: Story): Element | null {
     const fall = Math.round((1 - had / Math.max(1, want)) * 100);
     return svgNode(hourBars({
       got: hr.got, usual: hr.usual, cut: hr.from, to: hr.to, cutLabel: l.cut, floorLabel: l.floor, missingLabel: l.missing, ghostLabel: l.ghost, beforeLabel: l.before,
-      aria: `Trips by hour, ${dayLabel(day)}, against a usual ${wd}: from ${clockText(hr.from * 60)} ${had ? `they fall ${fall}% but don't stop, ${fmtInt(had)} trips where about ${fmtInt(want)} is usual, ${l.floor.replace('/h', ' an hour')}` : `no trips came, where about ${fmtInt(want)} is usual`}${l.before ? `; before ${clockText(hr.from * 60)}, ${l.before}` : ''}.`,
+      aria: `${RowsWord()} by hour, ${dayLabel(day)}, against a usual ${wd}: from ${clockText(hr.from * 60)} ${had ? `they fall ${fall}% but don't stop, ${rowsSaid(had)} where about ${fmtInt(want)} is usual, ${l.floor.replace('/h', ' an hour')}` : `no ${NEWS_NAMES.noun()} came, where about ${fmtInt(want)} is usual`}${l.before ? `; before ${clockText(hr.from * 60)}, ${l.before}` : ''}.`,
     }));
   }
   if ((story.hero === 'amount' || story.hero === 'finding') && story.cause?.kind === 'volume') {
     const days = stripOf({ of: 'trips' }, day, 28, story.severity);
-    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, key: STRIP_KEY, ...(story.labels.key[2] ? { more: { same: story.labels.key[2] } } : {}), aria: `Trips day by day for four weeks to ${dayLabel(day)}, each against its own usual range; ${sameDays(day)} a step darker.` })) : null;
+    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, key: STRIP_KEY, ...(story.labels.key[2] ? { more: { same: story.labels.key[2] } } : {}), aria: `${RowsWord()} day by day for four weeks to ${dayLabel(day)}, each against its own usual range; ${sameDays(day)} a step darker.` })) : null;
   }
   if (story.hero === 'gate' && story.gate) return gateVisual(story.gate, true, gateScale(story));
   // A population seen through its blanks: its share on its own row, zoomed to where it and its range are.
@@ -3191,7 +3198,7 @@ function heroOf(story: Story): Element | null {
   if (story.hero === 'finding' && pop && story.split) {
     const w = shareWords(pop.share, pop.range.low, pop.range.high);
     const sev = story.severity === 'alert' || story.severity === 'warn' ? story.severity : null;
-    return svgNode(dumbbellRows({ rows: [{ label: story.split.name, today: pop.share, low: pop.range.low, high: pop.range.high, todayLabel: w.value, usualLabel: `usually ${w.range}`, sev }], aria: `${story.split.name} trips: ${w.value} of the day's trips, where ${w.range} is usual.` }));
+    return svgNode(dumbbellRows({ rows: [{ label: story.split.name, today: pop.share, low: pop.range.low, high: pop.range.high, todayLabel: w.value, usualLabel: `usually ${w.range}`, sev }], aria: `${story.split.name} ${NEWS_NAMES.noun()}: ${w.value} of the day's ${NEWS_NAMES.noun()}, where ${w.range} is usual.` }));
   }
   if (story.hero === 'finding' && story.cause) return findingVisual(story.cause);
   if (story.hero === 'calm') {
@@ -3216,6 +3223,8 @@ function heroOf(story: Story): Element | null {
     // A load before this day that this visit didn't run is drawn not run wherever it falls in the week (Tue 19 and Wed
     // 20 reached straight from Thu 21), as the canvas's strip draws it, never with the history's count as if run.
     const days = stripOf({ of: 'trips' }, day, 7).map((d) => {
+      // The day not judged yet: its count and no band, under ◌ (ADR 0010 §12).
+      if (d.day === day && story.state === 'unlearned') return { ...d, low: null, high: null, sev: null, unlearned: true };
       if (d.day < day && unrun(d.day)) return { ...d, notRun: true, sev: null };
       if (rec && d.day >= rec.from && d.day <= rec.to) return { ...d, sev: 'alert' as const, marks: fate(d.day) };
       const marks = heldBefore(d.day);
@@ -3223,7 +3232,7 @@ function heroOf(story: Story): Element | null {
     });
     // Its key names each mark it draws that its line doesn't (the line under it keys ‖ ⚑ ✕): the episode's "wrong".
     const keyMarks: Partial<Record<VizMark, string>> = { alert: 'wrong', ...(state.doc.publish ? {} : { held: 'held' }) };
-    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, key: STRIP_KEY, ...(rec ? { more: { marks: keyMarks } } : {}), aria: `Trips the seven days to ${dayLabel(day)}, each against its own usual range${rec ? `; ${rec.held.length ? `${rec.held.length} held at the checks` : ''}${rec.held.length && rec.published.length ? ', ' : ''}${rec.published.length ? `${rec.published.length} published with something wrong` : ''}` : ''}.` })) : null;
+    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, key: STRIP_KEY, ...(rec ? { more: { marks: keyMarks } } : {}), aria: `${RowsWord()} the seven days to ${dayLabel(day)}, each against its own usual range${rec ? `; ${rec.held.length ? `${rec.held.length} held at the checks` : ''}${rec.held.length && rec.published.length ? ', ' : ''}${rec.published.length ? `${rec.published.length} published with something wrong` : ''}` : ''}.` })) : null;
   }
   return null;
 }
@@ -3262,9 +3271,9 @@ function findingVisual(f: Finding): Element | null {
   const sev = f.severity === 'alert' || f.severity === 'warn' ? f.severity : null;
   if (f.kind === 'volume') {
     const days = stripOf({ of: 'trips' }, day, 28, f.severity);
-    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), aria: `Trips day by day: ${f.title}` })) : null;
+    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), aria: `${RowsWord()} day by day: ${f.title}` })) : null;
   }
-  if (f.kind === 'hours' && f.hours) return svgNode(hourBars({ got: f.hours.got, usual: f.hours.usual, cut: f.hours.from, cutLabel: clockText(f.hours.from * 60), aria: `Trips by hour: ${f.title}` }));
+  if (f.kind === 'hours' && f.hours) return svgNode(hourBars({ got: f.hours.got, usual: f.hours.usual, cut: f.hours.from, cutLabel: clockText(f.hours.from * 60), aria: `${RowsWord()} by hour: ${f.title}` }));
   if ((f.kind === 'share' || f.kind === 'gone' || f.kind === 'missing') && (f.members?.length || f.range)) {
     const rows: Dumbbell[] = (f.members ?? [{ column: f.columns?.[0] ?? '', value: f.values?.[0] ?? 'null', label: '', share: f.value ?? 0, range: f.range!, rows: f.rows ?? 0 }]).map((m) => {
       const w = shareWords(m.share, m.range.low, m.range.high);
@@ -3360,12 +3369,12 @@ function causeDetail(story: Story, card: string): void {
     const comp = partOff ? compositionOf(sp.column, day, sp.value, [partLabel(sp), sp.name], [approx(sp.part.usual), fmtInt(sp.part.today)]) : null;
     if (comp) body.push(block(`${NEWS_NAMES.column(sp.column)}, usual and today`, comp));
     body.push(oneLine(splitSentence(story)));
-    if (sp.blank.length) body.push(h('div', { class: 'vf-chips' }, h('span', { class: 'vf-chip' }, `${sp.blank.length} fields blank on these trips`)));
+    if (sp.blank.length) body.push(h('div', { class: 'vf-chips' }, h('span', { class: 'vf-chip' }, `${sp.blank.length} fields blank on these ${NEWS_NAMES.noun()}`)));
   }
   if (!byHours && (story.hours || story.episode)) body.push(hoursDetail(story));
   if (story.hero === 'amount' || story.hero === 'calm') {
     const days = stripOf({ of: 'trips' }, day, 56, story.severity);
-    if (days.length) body.push(block('Trips, eight weeks', svgNode(dayStrip({ days, h: 90, labels: stripLabels(days), key: STRIP_KEY, more: { same: sameDays(day) }, unit: '/day', aria: `Trips day by day for eight weeks to ${dayLabel(day)}.` }))));
+    if (days.length) body.push(block(`${RowsWord()}, eight weeks`, svgNode(dayStrip({ days, h: 90, labels: stripLabels(days), key: STRIP_KEY, more: { same: sameDays(day) }, unit: '/day', aria: `${RowsWord()} day by day for eight weeks to ${dayLabel(day)}.` }))));
     // The weather the card notes, under the same days, drawn and not said: context beside the trips, never a reason.
     const wx = story.labels.context && days.length ? weatherBars(story, days.map((d) => d.day), stripLabels(days)) : null;
     if (wx) body.push(wx);
@@ -3448,7 +3457,7 @@ function episodeSheet(story: Story): void {
   const totalSaid = total.estimate >= 1 ? shortSaid(total.estimate, total.bound, 'short so far') : null;
   const svg = svgNode(episodeDays({
     days, total: totalSaid, key: STRIP_KEY,
-    aria: `Trips each day, ${dayMid(first)} to ${dayMid(last)}, against a usual day: ${days.map((d) => `${d.label} ${d.notRun ? 'not run' : `${fmtInt(d.trips)} (usual ~${compact(d.usual)})`}${d.fate && d.fate !== 'notrun' ? `, ${said[d.fate]}` : ''}`).join('; ')}${totalSaid ? `; about ${fmtInt(total.estimate)} trips short so far, at least ${fmtInt(total.bound)}` : ''}.`,
+    aria: `${RowsWord()} each day, ${dayMid(first)} to ${dayMid(last)}, against a usual day: ${days.map((d) => `${d.label} ${d.notRun ? 'not run' : `${fmtInt(d.trips)} (usual ~${compact(d.usual)})`}${d.fate && d.fate !== 'notrun' ? `, ${said[d.fate]}` : ''}`).join('; ')}${totalSaid ? `; about ${rowsSaid(total.estimate)} short so far, at least ${fmtInt(total.bound)}` : ''}.`,
   }));
   const list = state.doc.publish ? h('ul', { class: 'vf-daylist' }, ...days.map((d) => h('li', {},
     h('span', { class: 'dl-marks', 'aria-hidden': 'true' }, ...d.marks.map((m) => glyphEl(m, 14))),
@@ -3523,7 +3532,7 @@ function hoursDetail(story: Story): HTMLElement | null {
     days, cut, cutLabel: clockText(hrs.from * 60), floorLabel, at: span.indexOf(story.day),
     floorAt: blank.length ? ((span.indexOf(blank[0]!) + span.indexOf(blank.at(-1)!) + 1) * 24) / 2 : undefined,
     bracket: { from: cut, to: (lastBad + 1) * 24, label: shortLabel },
-    aria: `Trips by hour, ${dayLabel(span[0]!)} to ${dayLabel(span.at(-1)!)}: a fall at ${clockText(hrs.from * 60)} ${ddd(cutDay)}, about ${fmtInt(est)} fewer than usual through ${ddd(last)}, at least ${fmtInt(sig(short))} against the low end of usual${floorLabel ? `, ${floorLabel.replace('/h', ' an hour')}` : ''}.`,
+    aria: `${RowsWord()} by hour, ${dayLabel(span[0]!)} to ${dayLabel(span.at(-1)!)}: a fall at ${clockText(hrs.from * 60)} ${ddd(cutDay)}, about ${fmtInt(est)} fewer than usual through ${ddd(last)}, at least ${fmtInt(sig(short))} against the low end of usual${floorLabel ? `, ${floorLabel.replace('/h', ' an hour')}` : ''}.`,
   }));
   const readout = h('p', { class: 'vf-readout', 'aria-live': 'polite' });
   // First the viewed day as its head says it: the fall over its hours on the day it began (Thu from 13:00: 3,679 trips
@@ -3533,20 +3542,20 @@ function hoursDetail(story: Story): HTMLElement | null {
   const want = hrs.usual.slice(hrs.from, hrs.to + 1).reduce((a, b) => a + b, 0);
   const amt = story.amount;
   readout.textContent = story.day === cutDay || !amt
-    ? `${ddd(cutDay)} ${hrs.to === 23 ? `from ${clockText(hrs.from * 60)}` : `${clockText(hrs.from * 60)}–${clockText((hrs.to + 1) * 60)}`}: ${fmtInt(had)} trips · usual ~${compact(want)} (−${Math.round((1 - had / Math.max(1, want)) * 100)}%)`
-    : `${ddd(story.day)}: ${fmtInt(amt.value)} trips · usual ~${compact(amt.expected)} (${changeLabel(amt.value / Math.max(1, amt.expected) - 1)})`;
+    ? `${ddd(cutDay)} ${hrs.to === 23 ? `from ${clockText(hrs.from * 60)}` : `${clockText(hrs.from * 60)}–${clockText((hrs.to + 1) * 60)}`}: ${rowsSaid(had)} · usual ~${compact(want)} (−${Math.round((1 - had / Math.max(1, want)) * 100)}%)`
+    : `${ddd(story.day)}: ${rowsSaid(amt.value)} · usual ~${compact(amt.expected)} (${changeLabel(amt.value / Math.max(1, amt.expected) - 1)})`;
   const at = (i: number) => {
     const d = days[Math.floor(i / 24)];
     if (!d) return;
     const hr = i % 24;
-    readout.textContent = `${d.label} ${clockText(hr * 60)} · ${fmtInt(d.got[hr]!)} trips · usual ~${compact(d.usual[hr]!)}`;
+    readout.textContent = `${d.label} ${clockText(hr * 60)} · ${rowsSaid(d.got[hr]!)} · usual ~${compact(d.usual[hr]!)}`;
   };
   svg.addEventListener('click', (e) => {
     const box = (svg as SVGSVGElement).getBoundingClientRect();
     const i = Math.floor(((e as MouseEvent).clientX - box.left) / Math.max(1, box.width) * days.length * 24);
     at(Math.max(0, Math.min(days.length * 24 - 1, i)));
   });
-  const title = days.length > 1 ? `${days[0]!.label} to ${days.at(-1)!.label}, trips by hour` : `${days[0]!.label}, trips by hour`;
+  const title = days.length > 1 ? `${days[0]!.label} to ${days.at(-1)!.label}, ${NEWS_NAMES.noun()} by hour` : `${days[0]!.label}, ${NEWS_NAMES.noun()} by hour`;
   return block(title, svg, readout);
 }
 
@@ -3672,10 +3681,12 @@ function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): v
   // The metric in view: the day's trips, or the rows its checks dropped (the checks' card), each with today's value.
   const r = day ? rangesOf(of === 'dropped' ? { of: 'droppedRows' } : { of: 'trips' })?.at(day) : null;
   const value = of === 'dropped' ? (story?.gate?.dropped ?? null) : (story?.amount?.value ?? null);
-  const what = of === 'dropped' ? 'rows dropped' : 'trips';
+  const what = of === 'dropped' ? 'rows dropped' : NEWS_NAMES.noun();
   const body: (Node | null)[] = [];
   const band = r ? `usual ${compact(r.low)}–${compact(r.high)}` : '';
   const wd = day ? WEEKDAY_NAMES[dateOf(day).getUTCDay()]! : '';
+  // A day not judged yet (ADR 0010 §1): why it has no range, in one sentence, and that it is published, marked.
+  if (!r && day && of === 'trips' && story?.state === 'unlearned') body.push(oneLine(`Not judged yet: ${(rangesOf({ of: 'trips' })?.explain(day)?.why ?? 'too few days') === 'no last year' ? 'the history has no day like it a year before' : 'there are too few days like it before it'}, so its ${NEWS_NAMES.noun()} have no usual range. It is published, marked ◌; a day with under a tenth of its recent ${NEWS_NAMES.noun()} still pauses.`));
   if (r && day) {
     const weeks = r.guesses.find((g) => g.by === 'weeks');
     const year = r.guesses.find((g) => g.by === 'year');
@@ -3691,7 +3702,7 @@ function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): v
       year: year?.from.map((x) => x.value) ?? [], yearLabel,
       today: { v: value, low: r.low, high: r.high, sev: outside ? sev : null },
       bandLabel: band,
-      aria: `${what === 'trips' ? 'Trips' : 'Rows dropped'}: ${weeks ? `the ${weeks.from.length} ${wd}s before (${weeks.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}${weeks && year ? ' and ' : ''}${year ? `the day last year (${year.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}: today's range from them, ${fmtInt(r.low)} to ${fmtInt(r.high)}${value !== null ? `; today ${fmtInt(value)}` : ''}.`,
+      aria: `${of === 'dropped' ? 'Rows dropped' : RowsWord()}: ${weeks ? `the ${weeks.from.length} ${wd}s before (${weeks.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}${weeks && year ? ' and ' : ''}${year ? `the day last year (${year.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}: today's range from them, ${fmtInt(r.low)} to ${fmtInt(r.high)}${value !== null ? `; today ${fmtInt(value)}` : ''}.`,
     })));
   }
   // Two sentences, as the picture has it, from what this day's range was learned from (days.judgedWords); the rules for
@@ -3705,7 +3716,7 @@ function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): v
     oneLine(said?.[0] ?? 'A day is judged against the same weekday in the weeks before and the day last year, weighted by how well each guesses.'),
     oneLine(said?.[1] ?? 'The band is that guess give or take its typical misses.'),
     h('details', { class: 'fold vf-more-method' }, h('summary', {}, 'More on the method'),
-      h('p', { class: 'vf-sub' }, 'A share or a level is told only a typical miss past its band’s edge. Shares are over all trips, blanks included; quantiles come from a 2,000-row sample; hours count trips before the checks.')));
+      h('p', { class: 'vf-sub' }, `A share or a level is told only a typical miss past its band’s edge. Shares are over all ${NEWS_NAMES.noun()}, blanks included; quantiles come from a 2,000-row sample; hours count ${NEWS_NAMES.noun()} before the checks.`)));
   openDetail(of === 'dropped' ? 'How the rows dropped are judged' : 'How it’s judged', 'ok', body);
 }
 
@@ -3723,7 +3734,8 @@ function actionsOf(f: Finding, card: string, primary: Act | null, lead?: HTMLEle
   }
   const second = lead && paused && primary && primary !== 'expected' ? actButton(primary, f, card) : null;
   second?.classList.add('quiet');
-  const others = [...new Set([...f.acts, 'export' as Act])].filter((a) => (!lead || (paused && second) ? a !== primary : true) && !(paused && a === 'expected'));
+  // A value marked bad is never marked as expected, not even behind ⋯ (ADR 0010 §4, C9).
+  const others = [...new Set([...f.acts, 'export' as Act])].filter((a) => (!lead || (paused && second) ? a !== primary : true) && !(paused && a === 'expected') && !(f.bad && a === 'expected'));
   const menu = h('div', { class: 'vf-menu', hidden: true }, ...others.map((a) => actButton(a, f, card)).filter((x): x is HTMLElement => !!x));
   const more = menu.childElementCount ? h('button', { type: 'button', class: 'vf-more', 'aria-label': `More actions: ${Array.from(menu.children).map((b) => b.textContent).join(', ')}`, title: Array.from(menu.children).map((b) => b.textContent).join(' · '), 'aria-expanded': 'false', onclick: (e: Event) => { menu.hidden = !menu.hidden; (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!menu.hidden)); } }, glyphEl('more', 16)) : null;
   const done = findingLog(f);
@@ -3802,7 +3814,8 @@ function compactRow(f: Told, card: string): HTMLElement {
 function causeCard(story: Story, card: string): HTMLElement {
   const anchor = anchorOf(story);
   const m = sevMark(story.severity);
-  const calm = story.state === 'calm' || story.state === 'notes' || story.state === 'recovery';
+  // A day not judged yet is told as a calm one is, its head under ◌ (ADR 0010 §12): nothing to act on, nothing normal.
+  const calm = story.state === 'calm' || story.state === 'notes' || story.state === 'recovery' || story.state === 'unlearned';
   const src = loadSource();
   const outs = src ? downstreamOf(src).filter((x) => isOutput(x) && visible(x)) : [];
   const g = story.gate;
@@ -3833,9 +3846,9 @@ function causeCard(story: Story, card: string): HTMLElement {
     return [story.head.slice(0, at), btn, story.head.slice(at + term.name.length)];
   })() : [story.head];
   return h('section', { class: `vf-card ${story.state}${paused ? ' paused' : ''}`, ...(anchor ? { id: `finding-${anchor.key}` } : {}) },
-    h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head', role: 'status', 'aria-live': 'polite' }, m && !calm ? glyphEl(m, 18) : '', ...head)),
+    h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head', role: 'status', 'aria-live': 'polite' }, story.state === 'unlearned' ? glyphEl('unlearned', 18) : m && !calm ? glyphEl(m, 18) : '', ...head)),
     gloss,
-    story.chip ? h('button', { type: 'button', class: 'vf-chip-btn', 'aria-label': `${story.chip}${ep ? `: ${ep.trend.map((d) => `${WEEKDAY_NAMES[dateOf(d.day).getUTCDay()]!.slice(0, 3)} ${Math.round((d.trips / Math.max(1, d.expected)) * 100)}% of a usual day`).join(', ')}${ep.short ? `; about ${fmtInt(ep.short.estimate)} trips short so far` : ''}` : ''}. Open the episode’s days.`, onclick: () => episodeSheet(story) },
+    story.chip ? h('button', { type: 'button', class: 'vf-chip-btn', 'aria-label': `${story.chip}${ep ? `: ${ep.trend.map((d) => `${WEEKDAY_NAMES[dateOf(d.day).getUTCDay()]!.slice(0, 3)} ${Math.round((d.trips / Math.max(1, d.expected)) * 100)}% of a usual day`).join(', ')}${ep.short ? `; about ${rowsSaid(ep.short.estimate)} short so far` : ''}` : ''}. Open the episode’s days.`, onclick: () => episodeSheet(story) },
       days ? svgNode(episodeIcon({ n: days, at: ep ? days - 1 : null })) : '', story.chip, glyphEl('chev', 13)) : null,
     told ? h('p', { class: 'vf-told' }, glyphEl('ack', 14), told) : null,
     after,
@@ -4284,10 +4297,11 @@ function healthRow(story: Story, card: string, paused = false): HTMLElement {
   return h('div', { class: 'vf-healthwrap' },
     // On a paused card the row goes without its head: the pause row and the checks are named on either side of it.
     paused ? null : h('p', { class: 'vf-health-h', 'aria-hidden': 'true' }, story.labels.health),
-    h('nav', { class: 'vf-health', 'aria-label': `${HEALTH_HEAD}: five measures of the day’s trips` }, ...story.health.map((c) => {
-      const m: VizMark | null = c.explained ? 'explained' : c.severity === 'alert' ? 'alert' : c.severity === 'warn' ? 'warn' : c.severity === 'note' ? 'note' : c.cell === 'file' && sealed ? 'seal' : null;
-      const said = c.explained ? `${c.follows} grouped under the day’s cause${c.sameDay ? `, ${c.sameDay} more came the same day` : ''}` : c.severity === 'alert' ? 'something’s wrong' : c.severity === 'warn' ? 'unusual' : c.severity === 'note' ? 'a note' : c.cell === 'file' && sealed ? 'matches the source’s list' : 'normal';
-      return h('button', { type: 'button', class: `vf-cell ${c.explained ? 'explained' : c.severity ?? 'ok'}${m === 'seal' ? ' sealed' : ''}`, 'aria-label': `${CELL_NAMES[c.cell]}: ${said}. Open.`, onclick: () => healthDetail(story, c.cell, card) }, m ? glyphEl(m, 14) : '', h('span', { 'aria-hidden': 'true' }, CELL_NAMES[c.cell]));
+    h('nav', { class: 'vf-health', 'aria-label': `${HEALTH_HEAD}: five measures of the day’s ${NEWS_NAMES.noun()}` }, ...story.health.map((c) => {
+      const m: VizMark | null = c.explained ? 'explained' : c.severity === 'alert' ? 'alert' : c.severity === 'warn' ? 'warn' : c.severity === 'note' ? 'note' : c.cell === 'file' && sealed ? 'seal' : c.unjudged ? 'unlearned' : null;
+      const said = c.explained ? `${c.follows} grouped under the day’s cause${c.sameDay ? `, ${c.sameDay} more came the same day` : ''}` : c.severity === 'alert' ? 'something’s wrong' : c.severity === 'warn' ? 'unusual' : c.severity === 'note' ? 'a note' : c.cell === 'file' && sealed ? 'matches the source’s list' : m === 'unlearned' ? `${c.unjudged} not judged` : 'normal';
+      // A cell whose numbers had no range carries ◌ with their count (ADR 0010 §1), never a blank that reads as normal.
+      return h('button', { type: 'button', class: `vf-cell ${c.explained ? 'explained' : c.severity ?? (m === 'unlearned' ? 'unlearned' : 'ok')}${m === 'seal' ? ' sealed' : ''}`, 'aria-label': `${CELL_NAMES[c.cell]}: ${said}. Open.`, onclick: () => healthDetail(story, c.cell, card) }, m === 'unlearned' && c.cell !== 'amount' ? h('span', { class: 'vf-ring-n', 'aria-hidden': 'true' }, glyphEl('unlearned', 20), h('span', {}, c.unjudged > 99 ? '99+' : String(c.unjudged))) : m ? glyphEl(m, 14) : '', h('span', { 'aria-hidden': 'true' }, CELL_NAMES[c.cell]));
     })));
 }
 
@@ -4298,14 +4312,14 @@ function fileMatched(day: string): boolean {
   return !!c && fileSeverity(c.class) === 'ok';
 }
 
-/** What a health cell measures, in a line under its title. */
-const CELL_WHAT: Record<Cell, string> = {
+/** What a health cell measures, in a line under its title, with the watched source's noun. */
+const cellWhat = (cell: Cell): string => ({
   file: 'The day’s file, against the data’s published list',
-  amount: 'The day’s trips, against a day like it',
-  hours: 'Trips each hour, against a usual day',
-  values: 'Each coded value’s share of the trips',
+  amount: `The day’s ${NEWS_NAMES.noun()}, against a day like it`,
+  hours: `${RowsWord()} each hour, against a usual day`,
+  values: `Each coded value’s share of the ${NEWS_NAMES.noun()}`,
   shape: 'Each measure’s spread, and the times of day',
-};
+})[cell];
 
 /** A health cell, opened: what it measures, drawn, and each finding of its kinds a tap from its own detail. */
 function healthDetail(story: Story, cell: Cell, card: string): void {
@@ -4315,17 +4329,17 @@ function healthDetail(story: Story, cell: Cell, card: string): void {
   const kinds = CELL_KINDS[cell];
   const rank = (f: Told) => (f.tier === 'cause' || f.tier === 'standalone' ? 0 : 1);
   const mine = story.findings.filter((f) => kinds.includes(f.kind) && f.was !== 'ok').sort((a, b) => rank(a) - rank(b) || SEV_RANK[a.was] - SEV_RANK[b.was] || b.score - a.score);
-  const body: (Node | null)[] = [h('p', { class: 'vf-sub' }, CELL_WHAT[cell])];
+  const body: (Node | null)[] = [h('p', { class: 'vf-sub' }, cellWhat(cell))];
   if (cell === 'file') {
     const load = loads.list.find((l) => l.day === day);
     const checked = !!(load && integrity.checks.get(load.file));
     body.push(svgNode(chain({ nodes: ['list', 'file', 'load'], broken: 99, aria: checked ? 'The day’s file hashes to what the data’s list publishes, and the load was read from it.' : 'The day’s file was read; no list was there to check it against.' })));
-    if (k >= 0) body.push(oneLine(`${fmtInt(history!.file.rows[k]!)} trips in the day’s file${checked ? ', which matches the source’s list' : ''}.`));
+    if (k >= 0) body.push(oneLine(`${rowsSaid(history!.file.rows[k]!)} in the day’s file${checked ? ', which matches the source’s list' : ''}.`));
   }
   if (cell === 'amount') {
     body.push(amountVisual(story));
     const days = stripOf({ of: 'trips' }, day, 28, story.severity);
-    if (days.length) body.push(svgNode(dayStrip({ days, labels: stripLabels(days), key: STRIP_KEY, more: { same: sameDays(day) }, unit: '/day', aria: `Trips day by day for four weeks to ${dayLabel(day)}, each against its own usual range.` })));
+    if (days.length) body.push(svgNode(dayStrip({ days, labels: stripLabels(days), key: STRIP_KEY, more: { same: sameDays(day) }, unit: '/day', aria: `${RowsWord()} day by day for four weeks to ${dayLabel(day)}, each against its own usual range.` })));
   }
   if (cell === 'hours' && history && k >= 0) {
     const r = rangesOf({ of: 'trips' })?.at(day);
@@ -4335,12 +4349,17 @@ function healthDetail(story: Story, cell: Cell, card: string): void {
       const sum = raw.reduce((a, b) => a + b, 0) || 1;
       const usual = story.hours?.usual ?? raw.map((x) => (x / sum) * r.expected);
       const wd = WEEKDAY_NAMES[dateOf(day).getUTCDay()]!;
-      body.push(svgNode(hourBars({ got, usual, ...(story.hours ? { cut: story.hours.from, to: story.hours.to, cutLabel: clockText(story.hours.from * 60) } : {}), ghostLabel: `usual ${wd}`, aria: `Trips by hour on ${dayLabel(day)}, against a usual ${wd}${story.hours ? `: short from ${clockText(story.hours.from * 60)}` : ''}.` })));
+      body.push(svgNode(hourBars({ got, usual, ...(story.hours ? { cut: story.hours.from, to: story.hours.to, cutLabel: clockText(story.hours.from * 60) } : {}), ghostLabel: `usual ${wd}`, aria: `${RowsWord()} by hour on ${dayLabel(day)}, against a usual ${wd}${story.hours ? `: short from ${clockText(story.hours.from * 60)}` : ''}.` })));
     }
   }
   if (mine.length) body.push(h('div', { class: 'vf-list' }, ...shownRows(mine, card, 6, true)));
   // Nothing found: said in words only where no visual above says it.
-  else body.push(oneLine(cell === 'file' || cell === 'amount' ? null : { hours: 'Trips every hour.', values: 'Values as usual.', shape: 'Spreads and times as usual.' }[cell]));
+  else {
+    // Numbers that had no usual range that day are said so, never as usual (ADR 0010 §1).
+    const unjudged = story.health.find((c) => c.cell === cell)?.unjudged ?? 0;
+    const none = cell === 'values' ? `${unjudged} ${unjudged === 1 ? 'value' : 'values'} had no usual range today: not judged; the others as usual.` : cell === 'shape' ? `${unjudged} ${unjudged === 1 ? 'spread' : 'spreads'} had no usual range today: not judged; the others as usual.` : null;
+    body.push(oneLine(unjudged && none ? none : cell === 'file' || cell === 'amount' ? null : { hours: `${RowsWord()} every hour.`, values: 'Values as usual.', shape: 'Spreads and times as usual.' }[cell]));
+  }
   const sev: Severity = c.explained ? 'ok' : c.severity ?? 'ok';
   openDetail(CELL_NAMES[cell], sev, body);
 }
@@ -4553,9 +4572,9 @@ function healthStrip(card: string, day: string, findings: Finding[]): HTMLElemen
   const k = history!.file.days.indexOf(day);
   const worst = (kinds: Finding['kind'][]) => findings.filter((f) => kinds.includes(f.kind) && f.severity !== 'ok').sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity])[0];
   const rows: [string, Finding | undefined, string][] = [
-    ['Arrived', findings.find((f) => f.kind === 'integrity'), k >= 0 ? `${fmtInt(history!.file.rows[k]!)} trips in the day’s file${integrity.checks.get(loads.list[loads.at]?.file ?? '') ? ', which matches the source’s list' : ''}` : 'no file'],
+    ['Arrived', findings.find((f) => f.kind === 'integrity'), k >= 0 ? `${rowsSaid(history!.file.rows[k]!)} in the day’s file${integrity.checks.get(loads.list[loads.at]?.file ?? '') ? ', which matches the source’s list' : ''}` : 'no file'],
     ['Amount', worst(['volume']), 'a normal amount for the day'],
-    ['Complete', worst(['hours']), 'trips every hour'],
+    ['Complete', worst(['hours']), `${NEWS_NAMES.noun()} every hour`],
     ['Values', worst(['gone', 'share', 'new', 'pair', 'missing']), 'values as usual'],
     ['Shape', worst(['shape', 'schema']), 'as usual'],
   ];
@@ -4814,7 +4833,7 @@ const historyFocus = new Map<string, string>();
 function metricName(m: Metric): string {
   const col = (c: string) => NEWS_NAMES.column(c);
   switch (m.of) {
-    case 'trips': return 'Trips';
+    case 'trips': return RowsWord();
     case 'dropped': return 'Dropped';
     case 'droppedRows': return 'Rows dropped';
     case 'rule': case 'ruleRows': return RULE_TITLE(m.name);
@@ -4822,14 +4841,14 @@ function metricName(m: Metric): string {
     case 'median': return `${col(m.column)} median`;
     case 'quantile': return `${col(m.column)} p${Math.round((QUANTILES[m.q] ?? 0) * 100)}`;
     case 'value': return `${col(m.column)} ${NEWS_NAMES.label(m.column, JSON.parse(m.value) as unknown)} share`;
-    case 'count': return `${col(m.column)} ${NEWS_NAMES.label(m.column, JSON.parse(m.value) as unknown)} trips`;
+    case 'count': return `${col(m.column)} ${NEWS_NAMES.label(m.column, JSON.parse(m.value) as unknown)} ${NEWS_NAMES.noun()}`;
   }
 }
 
 function tripChoices(): { key: string; label: string; m: Metric }[] {
   const file = history!.file;
   const col = (c: string) => NEWS_NAMES.column(c);
-  const out: { key: string; label: string; m: Metric }[] = [{ key: 'trips', label: 'Trips', m: { of: 'trips' } }];
+  const out: { key: string; label: string; m: Metric }[] = [{ key: 'trips', label: RowsWord(), m: { of: 'trips' } }];
   const day = newsDay();
   for (const f of day ? dayNews(day) : []) if (f.metric && f.metric.of !== 'trips' && f.metric.of !== 'dropped' && f.metric.of !== 'rule') out.push({ key: metricKey(f.metric), label: `In the news: ${f.title}`, m: f.metric });
   file.columns.forEach((c, k) => {
@@ -4840,7 +4859,7 @@ function tripChoices(): { key: string; label: string; m: Metric }[] {
     if (!vh.counts) continue;
     vh.values.slice(0, 6).forEach((v) => {
       if (vh.rows[vh.values.indexOf(v)]! < 0.001 * file.rows.reduce((a, b) => a + b, 0)) return;
-      out.push({ key: metricKey({ of: 'value', column: c, value: v }), label: `${col(c)} ${NEWS_NAMES.value(c, JSON.parse(v) as unknown)}: share of trips`, m: { of: 'value', column: c, value: v } });
+      out.push({ key: metricKey({ of: 'value', column: c, value: v }), label: `${col(c)} ${NEWS_NAMES.value(c, JSON.parse(v) as unknown)}: share of ${NEWS_NAMES.noun()}`, m: { of: 'value', column: c, value: v } });
     });
   }
   return out.filter((x, i) => out.findIndex((y) => y.key === x.key) === i);
@@ -5673,7 +5692,7 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
         // In plain words: what it left out (in neutral ink: a step that keeps some rows does so by design), what it
         // renamed, what it adds and what it doesn't keep.
         const r = renamesOf(c.added, c.removed);
-        headline(out < inn ? `Left out ${fmtInt(inn - out)} of ${plural(inn, nounOf(id) === 'rows' ? 'row' : nounOf(id).replace(/s$/, ''))}` : `${plural(inn, 'row')} in, ${fmtInt(out)} out`);
+        headline(out < inn ? `Left out ${fmtInt(inn - out)} of ${plural(inn, rowNoun(id).one)}` : `${plural(inn, 'row')} in, ${fmtInt(out)} out`);
         if (r.renamed.length) say(`Renamed ${r.renamed.map(([a, b]) => `${a} → ${b}`).join(', ')}.`);
         if (r.added.length) say(`New columns: ${list(r.added)}.`);
         if (r.removed.length) say(`Columns it doesn’t keep: ${list(r.removed)}.`);
@@ -6705,7 +6724,7 @@ function verdictOf(day: string): Finding | undefined {
   }
   // The day as its story tells it: one head, one severity, for the strip, the history and the header alike.
   const story = history && historyOpen() && history.file.days.includes(day) ? storyFor(day) : null;
-  return story ? { key: `story:${day}`, kind: story.cause?.kind ?? 'calm', severity: story.severity, score: 100, title: story.head, detail: story.chip ?? '', look: 'news', acts: [] } : undefined;
+  return story ? { key: `story:${day}`, kind: story.state === 'unlearned' ? 'unlearned' : story.cause?.kind ?? 'calm', severity: story.severity, score: 100, title: story.head, detail: story.chip ?? '', look: 'news', acts: [] } : undefined;
 }
 // A day with notes says its head when the head isn't a calm one ("Busier than usual for days", Sep 14, 2022), as its
 // News does: never "a normal day" beside a count outside its range.
@@ -6725,7 +6744,7 @@ function loadSummary(): string {
   void list;
   void st;
   const src = loadSource();
-  return top ? `${dayLabel(l.day).replace(/, \d{4}$/, '')}: ${top.title}` : !src || visible(src) ? `${dayLabel(l.day)}: ${fmtInt(l.rows)} trips` : dayLabel(l.day);
+  return top ? `${dayLabel(l.day).replace(/, \d{4}$/, '')}: ${top.title}` : !src || visible(src) ? `${dayLabel(l.day)}: ${rowsSaid(l.rows)}` : dayLabel(l.day);
 }
 
 function renderLoads(): void {
@@ -6776,12 +6795,12 @@ function renderLoads(): void {
     const pm = later ? null : dayPause(l.day);
     const held = !later && !absent && !state.doc.publish && !!(history && historyOpen() && storyFor(l.day)?.gate?.held);
     const range = tripsRanges?.at(l.day);
-    const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : absent ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: not run` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}${counted ? `: ${fmtInt(l.rows)} trips` : ''}${top ? `, ${VERDICT_WORD[top.severity]}${saysHead(top) ? `: ${top.title}` : ''}` : ''}${held ? ', held' : ''}${pm ? PAUSE_SAID[pm] : ''}${r ? '' : ', not run yet'}`;
+    const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : absent ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: not run` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}${counted ? `: ${rowsSaid(l.rows)}` : ''}${top ? (top.kind === 'unlearned' ? `, not judged yet${top.detail ? `: ${top.detail}` : ''}` : `, ${VERDICT_WORD[top.severity]}${saysHead(top) ? `: ${top.title}` : ''}`) : ''}${held ? ', held' : ''}${pm ? PAUSE_SAID[pm] : ''}${r ? '' : ', not run yet'}`;
     return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', later ? 'later' : '', absent ? 'notrun' : '', holidayOf(l.day) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
       svgNode(stripBar({ v: later || absent || !counted ? 0 : l.rows, low: range?.low ?? null, high: range?.high ?? null, ymax, sev: sev === 'alert' || sev === 'warn' ? sev : null })),
-      h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 14) : '', held ? glyphEl('held', 14) : pm ? glyphEl(PAUSE_MARK[pm], 14) : ''));
+      h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 14) : top?.kind === 'unlearned' ? glyphEl('unlearned', 14) : '', held ? glyphEl('held', 14) : pm ? glyphEl(PAUSE_MARK[pm], 14) : ''));
   });
   const at = list.indexOf(loads.at);
   const last = at >= list.length - 1;
@@ -6924,7 +6943,7 @@ async function runLoad(k: number): Promise<void> {
   let bytes = loads.bytes.get(k);
   try {
     if (!bytes) {
-      setStatus(`Fetching ${dayLabel(l.day)}: ${fmtInt(l.rows)} trips, checked against the data's list…`);
+      setStatus(`Fetching ${dayLabel(l.day)}: ${rowsSaid(l.rows)}, checked against the data's list…`);
       bytes = await checked(l.file, { sha256: l.sha256, bytes: l.bytes ?? -1, from: l.file });
       loads.bytes.set(k, bytes);
       for (const old of [...loads.bytes.keys()].slice(0, Math.max(0, loads.bytes.size - 3))) loads.bytes.delete(old);
