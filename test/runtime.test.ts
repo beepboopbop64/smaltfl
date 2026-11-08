@@ -129,7 +129,7 @@ describe('only what changed is rebuilt', () => {
   it('rebuilds for a new parameter value, and goes back to the stored versions for the old one', async () => {
     const db = fixture();
     // The fixture has no February trips, so every row is dropped: past the 5% limit, the run fails.
-    await expect(run(db, visualFlow(), { month: '2024-02' })).rejects.toThrow('trips_valid: dropped 6000 of 6000 rows (100%), more than the 5% allowed');
+    await expect(run(db, visualFlow(), { month: '2024-02' })).rejects.toThrow('trips_valid: dropped 6,000 of 6,000 rows (100%), more than the 5% allowed');
     const doc = visualFlow();
     const valid = doc.steps[0]!;
     if (valid.kind === 'expectations') delete valid.maxDropped;
@@ -211,7 +211,7 @@ describe('a failed run leaves the previous versions current', () => {
     const doc = visualFlow();
     const valid = doc.steps[0]!;
     if (valid.kind === 'expectations') valid.maxDropped = 0.001;
-    await expect(run(db, doc)).rejects.toThrow(/^trips_valid: dropped \d+ of 6000 rows \([\d.]+%\), more than the 0.1% allowed$/);
+    await expect(run(db, doc)).rejects.toThrow(/^trips_valid: dropped [\d,]+ of 6,000 rows \([\d.]+%\), more than the 0.1% allowed$/);
     expect(db.query("SELECT count(*) FROM sqlite_schema WHERE name = 'zone_hour'").rows[0]![0]).toBe(0);
   });
 

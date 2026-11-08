@@ -85,7 +85,7 @@ where about 35,000 are usual, and everything else held.
 6. **One cause card.** The head, one chip (the episode's day, "Day 2 · since Thu 13:00", or "Back to normal"'s "after
    Thu–Sun · only Flex Fare", which names the episode, with one line under it saying whether anything is left to do:
    "Nothing to do · Thu published short, Fri–Sun held", a held load being never published and nothing waiting on a
-   person to release it; or the weather that names its day), the day's count on a line with its usual range (the
+   person to release it; never the weather, §11), the day's count on a line with its usual range (the
    amount line, under the head on every day, carrying the day's own change, "−65%", when the count is outside its
    range and the head doesn't say it), one visual chosen by the cause (the part and the rest on one bar at one scale,
    today's ink over a dashed usual, so a part that held and a rest that stopped read at their real sizes, each labelled
@@ -94,11 +94,11 @@ where about 35,000 are usual, and everything else held.
    the trips missing one wash with a dashed edge, labelled "still ~330/h" and "~77k missing"; a strip of days each with
    its own range, four weeks on an amount day and the week on a calm one, an episode's days marked), the gate when it
    held, came near, or the day had something wrong, what it reaches ("Outputs not published", "Outputs built from a short day", never "published" alone; §10), the folded findings as counted rows ("16
-   changes this explains", with what they are in words: "shares · values gone · times"; "12 more changes this day")
-   that open in place into compact rows, a column's together, three and then "Show all", each today against its usual,
-   and one verb with the others behind ⋯. Then a health row of five cells (File, Amount, Hours, Values, Shape: ↳ where
-   the cause explains it; "All 5 normal" on a calm day), at most two more stories, and counted rows for the rest and
-   the notes. A tap opens a sheet that is visual too: a waterfall from a usual day to this one (a long name wraps), the
+   changes this explains", with what they are in words: "shares · values gone · times"; "12 more this day" under it,
+   "12 more changes this day" alone) that open in place into compact rows, a column's together, three and then "Show
+   all", each today against its usual, and one verb with the others behind ⋯. The health row (§11) sits in the card,
+   after its visuals and before the gate. Then at most two more stories, and counted rows for the rest and the notes,
+   each row carrying the mark its findings carry in the health row. A tap opens a sheet that is visual too: a waterfall from a usual day to this one (a long name wraps), the
    part's own days (its axis printed, each day's tick coloured only when outside that day's range, and, where its count
    has no range of its own, the range its split is judged on: New Year's Day 2024's Flex Fare at 2.3k–8.6k), its
    column's composition usual and today (the part labelled, over the bar when it's narrow, a vendor named beside its
@@ -165,6 +165,33 @@ where about 35,000 are usual, and everything else held.
     rule: a canvas card's line and its badge take the card's own severity and nothing else does (a routine count, such
     as Nov 15, 2022's ordinary 4.6% dropped, is neutral ink); the status line after a run takes its day's verdict,
     held or published alike; and no tick (seal) shows on what the load reaches when the day has no run of its own.
+
+11. **The card's context, its health row, and the sheet's chrome.** The weather is context and never takes the chip a
+    cause takes: on a day that isn't wrong, today's snow (and the day before's when the day's trips are the news) is a
+    plain note after the day's visuals, "❄ 1.5 cm today · 7.2 cm Sat" (Sun Jan 7, 2024; Sat Jan 6 says "❄ 7.2 cm
+    today" under "A normal Saturday"), nothing to tap, counted at a glance; not on a day with something wrong (its cause
+    is told) nor on the day after an episode (it says what is left of it): their weather is on the weather's card. The
+    detail draws it under the eight weeks of trips, in their columns, headed "Snow, for context", with no sentence. The
+    health row is headed once ("Health", counted) and is the same on every day: five cells (File, Amount, Hours, Values,
+    Shape), no mark where nothing is out of the ordinary, ↳ where the cause groups them, and each a tap from what it
+    measured: the file check in words over the list → file → load chain ("5,732 trips in the day's file, its bytes as
+    published"), the amount line and four weeks, the day's hours over a usual day's, and every finding of its kinds,
+    the ones the cause absorbed too, worst first; a dot in it is the dot on "7 notes" under it. It sits in the cause
+    card after the visuals, so a day with something wrong keeps it in the first screen. Every finding is in one tier,
+    and the rows on screen add up to what was found (Thu Sep 21, 2023: 1 cause, 2 absorbed, 6 explained, 8 the same
+    day: 17); what the cause absorbed is one tap away in its health cell. An episode's chip draws its days so far, each
+    its trips against its guess, the viewed day darker, so day 3 reads apart from day 2 (Thu 35%, Fri 4%, Sat 5% of a
+    usual day: more of the same); its shortfall so far (days.shortfall, as its hours count it) is in the chip's
+    accessible name and the detail. Once the source is told on a day of the episode the card says "Source told on Fri"
+    and its verb moves to "Open an incident", "Tell the source again" behind ⋯; each verb's accessible name and title
+    say what it does and whom it reaches. "How it's judged" draws what the day's range is learned from, inside its
+    frame: the six weekdays before as dots, the day last year as a diamond with its date, each group named, and today's
+    band and value; two sentences, the rest of the method behind "More on the method"; "About this flow" says the same.
+    The sheet's head fits 390 px: the day on its own row, no arrow past the first or last load; what it reads and what
+    reads it under it, each chip cut short and two or more folded into one ("‹ 2 inputs"); the tabs scrolled to the one
+    chosen, their edges faded while tabs lie past them. A held gate is said from its figures wherever its message would
+    show ("Held at trips_valid: 10.45% of arrived rows dropped · limit 10%"), and the runtime prints its counts with
+    thousands separators. A part's mark sits against its own name on the bar's outer side.
 
 ## Consequences
 

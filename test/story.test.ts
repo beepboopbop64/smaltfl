@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
-import { STRIP_KEY, approx, compact, countLabel, gateLabels, glanceStrings, partLabel, shortWho, splitOf, splitSentence, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
+import { CELL_KINDS, HEALTH_HEAD, STRIP_KEY, approx, compact, countLabel, gateLabels, glanceStrings, partLabel, shortWho, splitOf, splitSentence, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
 import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
 const DAY = '2023-10-11'; // a Wednesday
@@ -234,5 +234,66 @@ describe('the words at a glance', () => {
     expect(s.labels.follows).toMatch(/^\d+ changes? this explains$/);
     for (const k of s.labels.kinds) expect(k).toMatch(/^(shares|values gone|blanks|spreads|times|checks|new values|new pairs|other)$/);
     expect(s.labels.kinds.length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe('the context, the health row and the tiers (ADR 0008 §6)', () => {
+  it('tells snow as a note after the numbers, never in the chip a cause takes, and never as a reason', () => {
+    // A calm day with snow: a plain note of today's, and no chip.
+    const calm = story({ '2023-10-04': { snow: 6 } }, '2023-10-04');
+    expect(calm.chip).toBeNull();
+    expect(calm.labels.context).toBe('❄ 6.0 cm today');
+    expect(glanceStrings(calm)).toContain('❄ 6.0 cm today');
+    expect(words(calm)).toBeLessThanOrEqual(16);
+    // A day of fewer trips after a snowy one: today's and the day before's, its weekday named.
+    const before = plusDays(DAY, -1);
+    const low = story({ [DAY]: { more: 0.8, snow: 1.5 }, [before]: { snow: 7.2 } });
+    expect(low).toMatchObject({ hero: 'amount', state: 'unusual' });
+    expect(low.chip).toBeNull();
+    expect(low.labels.context).toBe('❄ 1.5 cm today · 7.2 cm Tue');
+    for (const l of glanceStrings(low)) expect(l).not.toMatch(/because|caused by|due to/);
+    // A day with something wrong tells its cause; the day after an episode, what is left of it: no weather on either.
+    expect(story({ [DAY]: { onlyVendor1: true, dropShare: 0.105, snow: 4 } }).labels.context).toBeNull();
+    expect(story({ [DAY]: { onlyVendor1: true, dropShare: 0.105 }, [plusDays(DAY, 1)]: { snow: 4 } }, plusDays(DAY, 1)).labels.context).toBeNull();
+  });
+
+  it('heads the health row once, counted at a glance, the same five cells on every day', () => {
+    for (const s of [story({}, '2023-10-04'), story({ [DAY]: { onlyVendor1: true, dropShare: 0.105 } }), story({ [DAY]: { vendorSurge: 2.3 } })]) {
+      expect(s.labels.health).toBe(HEALTH_HEAD);
+      expect(glanceStrings(s)).toContain(HEALTH_HEAD);
+      expect(s.health.map((c) => c.cell)).toEqual(Object.keys(CELL_KINDS));
+    }
+  });
+
+  it('accounts for every finding in one tier, so the rows on screen add up to what was found', () => {
+    for (const trouble of [{ onlyVendor1: true, dropShare: 0.105 }, { vendorGone: true }, { vendorSurge: 2.3 }, { stopAt: 13, vendorShare: 0.5 }, { newValue: true }, { more: 0.55, snow: 2 }] as Trouble[]) {
+      const h = new HistoryRanges(historyWith({ [DAY]: trouble }));
+      const found = newsOf(h, DAY, vendorNames).filter((f) => f.severity !== 'ok');
+      const s = storyOf(h, DAY, found, options);
+      const tiers = [s.cause, ...s.stories, ...s.more, ...s.absorbed, ...s.follows, ...s.sameDay, ...s.notes, s.context].filter((f) => !!f);
+      // Each finding told once, in exactly one tier.
+      expect(new Set(tiers.map((f) => f!.key)).size, JSON.stringify(trouble)).toBe(tiers.length);
+      expect(tiers.map((f) => f!.key).sort(), JSON.stringify(trouble)).toEqual(found.map((f) => f.key).sort());
+      // The rows' counts are their tiers' sizes, and what the cause absorbed is a tap away in its health cell.
+      if (s.labels.follows) expect(s.labels.follows).toMatch(new RegExp(`^${s.follows.length} `));
+      if (s.labels.sameDay) expect(s.labels.sameDay).toMatch(new RegExp(`^${s.sameDay.length} `));
+      if (s.labels.notes) expect(s.labels.notes).toMatch(new RegExp(`^${s.notes.length} `));
+      for (const f of s.absorbed) expect(Object.values(CELL_KINDS).flat(), f.kind).toContain(f.kind);
+    }
+  });
+
+  it('says the noun of the same day’s changes once, under the changes the cause explains', () => {
+    const s = story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } });
+    if (s.follows.length && s.sameDay.length) expect(s.labels.sameDay).toMatch(/^\d+ more this day$/);
+    const alone = story({ [DAY]: { more: 0.55 } });
+    if (!alone.follows.length && alone.sameDay.length) expect(alone.labels.sameDay).toMatch(/^\d+ more changes? this day$/);
+  });
+
+  it('draws an episode’s days so far, the viewed day last and none after it', () => {
+    const next = plusDays(DAY, 1);
+    const s = story({ [DAY]: { onlyVendor1: true, dropShare: 0.105 }, [next]: { onlyVendor1: true, dropShare: 0.105 }, [plusDays(DAY, 2)]: { onlyVendor1: true, dropShare: 0.105 } }, next);
+    expect(s.episode).toMatchObject({ days: 2, since: DAY });
+    expect(s.episode!.trend.map((d) => d.day)).toEqual([DAY, next]);
+    for (const d of s.episode!.trend) expect(d.trips / d.expected).toBeLessThan(0.5);
   });
 });

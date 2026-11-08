@@ -18,8 +18,8 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, type EpisodeDay } from '../core/days.js';
-import { STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Gate, type Story, type Told } from '../core/story.js';
-import { amountLine, bulletTrack, chain, composition, dayStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
+import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
+import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
 import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule } from '../core/policy.js';
@@ -2070,7 +2070,14 @@ function drillHead(card: string, tabs: Tab[], tab: Tab): HTMLElement {
   const id = dataOf(card);
   const ups = (profileOf(card) ? [id] : (steps().get(id)?.inputs ?? [])).filter(visible);
   const downs = [...readersOf(id), ...profiles().filter((p) => p.of === id).map((p) => p.id)].filter((x) => x !== card && visible(profileOf(x)?.of ?? x));
-  const chip = (x: string, up: boolean) => h('button', { type: 'button', class: `nav-chip ${up ? 'up' : 'down'}`, 'aria-label': `${up ? 'What it reads' : 'What reads it'}: ${x}`, onclick: () => select(x) }, up ? `‹ ${x}` : `${x} ›`);
+  const chip = (x: string, up: boolean) => h('button', { type: 'button', class: `nav-chip ${up ? 'up' : 'down'}`, title: x, 'aria-label': `${up ? 'What it reads' : 'What reads it'}: ${x}`, onclick: () => select(x) }, up ? `‹ ${x}` : `${x} ›`);
+  // Two or more on a side fold into one chip that opens their list ("‹ 2 inputs"), so the row fits a phone.
+  const side = (xs: string[], up: boolean): Child => {
+    if (xs.length < 2) return xs[0] ? chip(xs[0], up) : '';
+    const noun = up ? `${xs.length} inputs` : `${xs.length} readers`;
+    return h('details', { class: `nav-fold ${up ? 'up' : 'down'}` }, h('summary', { class: 'nav-chip', 'aria-label': `${up ? 'What it reads' : 'What reads it'}: ${xs.join(', ')}` }, up ? `‹ ${noun}` : `${noun} ›`),
+      h('div', { class: 'nav-list' }, ...xs.map((x) => chip(x, up))));
+  };
   const news = cardNews(card);
   const kind = historyOf(profileOf(card)?.of ?? id);
   const day = newsDay();
@@ -2081,11 +2088,29 @@ function drillHead(card: string, tabs: Tab[], tab: Tab): HTMLElement {
     h('div', { class: 'drill-title' },
       h('div', { style: 'flex:1;min-width:0' }, h('p', { class: 'eyebrow' }, profileOf(card) ? `PROFILE · OF ${id.toUpperCase()}` : kindLabel(id)), h('h2', {}, card)),
       h('button', { class: 'close', type: 'button', 'aria-label': 'Close', onclick: () => select(null) }, '×')),
-    h('div', { class: 'drill-nav', role: 'group', 'aria-label': 'Next to it in the flow, and the day' }, ...ups.map((x) => chip(x, true)), dayPicker() ?? '', ...downs.map((x) => chip(x, false))),
+    // The day on its own row, then what it reads and what reads it, each chip cut short to fit (ADR 0008).
+    dayPicker() ?? '',
+    ups.length || downs.length ? h('div', { class: 'drill-nav', role: 'group', 'aria-label': 'Next to it in the flow' }, side(ups, true), h('span', { class: 'nav-gap' }), side(downs, false)) : '',
     stoppedLine(card, tab),
-    h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'What to look at' },
+    fitTabs(h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'What to look at' },
       ...tabs.map((t) => h('button', { type: 'button', role: 'tab', id: `drill-tab-${t}`, 'aria-selected': String(t === tab), 'aria-controls': 'drill-panel', onclick: () => openTab(card, t) },
-        TAB_LABEL[t], t === 'news' && worst && (worst === 'alert' || worst === 'warn') && count ? h('span', { class: 'tab-mark', 'aria-label': worst === 'alert' ? 'something’s wrong' : 'unusual' }, glyphEl(worst, 14)) : null))));
+        TAB_LABEL[t], t === 'news' && worst && (worst === 'alert' || worst === 'warn') && count ? h('span', { class: 'tab-mark', 'aria-label': worst === 'alert' ? 'something’s wrong' : 'unusual' }, glyphEl(worst, 14)) : null)))));
+}
+
+/** A strip of tabs wider than the screen: the chosen one scrolled into view, and each edge faded while tabs lie past
+ * it, so a tab off screen reads as there. */
+function fitTabs(strip: HTMLElement): HTMLElement {
+  const edges = () => {
+    strip.classList.toggle('fade-l', strip.scrollLeft > 2);
+    strip.classList.toggle('fade-r', strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 2);
+  };
+  strip.addEventListener('scroll', edges, { passive: true });
+  requestAnimationFrame(() => {
+    const on = strip.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (on && (on.offsetLeft < strip.scrollLeft || on.offsetLeft + on.offsetWidth > strip.scrollLeft + strip.clientWidth)) strip.scrollLeft = on.offsetLeft - (strip.clientWidth - on.offsetWidth) / 2;
+    edges();
+  });
+  return strip;
 }
 
 /** A run that stopped on this load, said from any tab: what stopped it, and whose rows are on screen. */
@@ -2102,6 +2127,18 @@ function stoppedLine(card: string, tab: Tab): HTMLElement | null {
     tab !== 'news' ? h('button', { type: 'button', class: 'linkish', onclick: () => openTab(card, 'news') }, ' Why ›') : null);
 }
 
+/** What stopped the run, said from the gate's own figures when a gate held ("Held at trips_valid: 10.45% of arrived rows
+ * dropped · limit 10%", as its bars say it), else the run's message. */
+function failedSaid(): string {
+  const f = state.failed;
+  if (!f) return '';
+  const day = viewedDay() ?? newsDay();
+  const g = day && f.origin && !f.file ? storyFor(day)?.gate : null;
+  if (!g?.held || g.step !== f.origin) return f.message;
+  const l = gateLabels(g);
+  return `Held at ${g.step}: ${l.share}${l.limit ? ` · ${l.limit}` : ''}`;
+}
+
 /** The day's load, to step through from inside a sheet. */
 function dayPicker(): HTMLElement | null {
   const l = loads.list[loads.at];
@@ -2109,10 +2146,13 @@ function dayPicker(): HTMLElement | null {
   if (!l || list.length < 2) return null;
   const k = list.indexOf(loads.at);
   const busy = state.running || loads.playing || !state.engine;
-  return h('span', { class: 'day-pick' },
-    h('button', { type: 'button', class: 'btn small', 'aria-label': 'The day before', disabled: busy || k <= 0, onclick: () => void useLoad(list[k - 1]!) }, '‹'),
+  // No day before the first load or after the last: no arrow there (a greyed one reads as broken), its place kept.
+  const first = k <= 0;
+  const last = k < 0 || k >= list.length - 1;
+  return h('div', { class: 'day-pick', role: 'group', 'aria-label': 'The day' },
+    h('button', { type: 'button', class: `btn small${first ? ' gone' : ''}`, 'aria-label': 'The day before', 'aria-hidden': first ? 'true' : 'false', tabindex: first ? '-1' : '0', disabled: busy || first, onclick: () => void useLoad(list[k - 1]!) }, '‹'),
     h('span', { class: 'day-at', 'aria-live': 'polite' }, `${dayLabel(l.day)}${l.note ? ` · ${l.note}` : ''}`),
-    h('button', { type: 'button', class: 'btn small', 'aria-label': 'The day after', disabled: busy || k < 0 || k >= list.length - 1, onclick: () => void useLoad(list[k + 1]!) }, '›'));
+    h('button', { type: 'button', class: `btn small${last ? ' gone' : ''}`, 'aria-label': 'The day after', 'aria-hidden': last ? 'true' : 'false', tabindex: last ? '-1' : '0', disabled: busy || last, onclick: () => void useLoad(list[k + 1]!) }, '›'));
 }
 
 // ------------------------------------------------------------------ tabs: about
@@ -2123,7 +2163,7 @@ async function aboutTab(card: string, id: string, who: string): Promise<HTMLElem
   const source = state.doc.sources.find((src) => src.id === id);
   const description = profileOf(card)?.description ?? st?.description ?? source?.description;
   if (description) box.append(h('p', { class: 'lede' }, description));
-  if (state.failed && (state.failed.origin === id || (!state.failed.origin && !nodeOf(id)))) box.append(h('p', { class: 'status bad' }, state.failed.message));
+  if (state.failed && (state.failed.origin === id || (!state.failed.origin && !nodeOf(id)))) box.append(h('p', { class: 'status bad' }, failedSaid()));
   const io = inOut(id);
   if (io) box.append(io);
   const n = nodeOf(id);
@@ -2828,11 +2868,33 @@ function causeDetail(story: Story, card: string): void {
   if (story.hero === 'amount' || story.hero === 'calm') {
     const days = stripOf({ of: 'trips' }, day, 56, story.severity);
     if (days.length) body.push(block('Trips, eight weeks', svgNode(dayStrip({ days, h: 90, labels: stripLabels(days), key: STRIP_KEY, unit: '/day', aria: `Trips day by day for eight weeks to ${dayLabel(day)}.` }))));
-    if (story.context) body.push(oneLine(`${story.context.title}.`));
+    // The weather the card notes, under the same days, drawn and not said: context beside the trips, never a reason.
+    const wx = story.labels.context && days.length ? weatherBars(story, days.map((d) => d.day)) : null;
+    if (wx) body.push(wx);
   }
   // A population's own rows (the value and each field blank on it, all at one share) would say the split again.
   if (story.hero === 'finding' && story.cause && story.split?.via !== 'blanks') body.push(findingVisual(story.cause), oneLine(story.cause.detail));
   openDetail(story.head, story.severity, body, anchorOf(story), card, story.primary);
+}
+
+/** The snow a card notes, as bars under its strip of days (each day's column where the strip has it), the days the
+ * card names said at its corner in the order their bars stand ("Sat 7.2 cm · Sun 1.5 cm"). A block of context: no band,
+ * no mark, no sentence. */
+function weatherBars(story: Story, days: readonly string[]): HTMLElement | null {
+  const w = history?.file.weather;
+  if (!w || !history) return null;
+  const of = (d: string) => { const k = history!.file.days.indexOf(d); return k < 0 ? 0 : (w.snow[k] ?? 0); };
+  const values = days.map(of);
+  if (!values.some((v) => v > 0)) return null;
+  const fmt = (v: number) => `${v.toFixed(1)} cm`;
+  const ddd = (d: string) => WEEKDAY_NAMES[dateOf(d).getUTCDay()]!.slice(0, 3);
+  // The days the card's note names: today's, and the day before's when the day's trips are the news.
+  const named = [dayPlus(story.day, -1), story.day].filter((d) => of(d) >= 1 && (d === story.day || story.hero === 'amount'));
+  const snowy = days.filter((d) => of(d) >= 1);
+  return block('Snow, for context', svgNode(contextBars({
+    values, label: fmt, kind: 'snow', gx: 12, note: named.map((d) => `${ddd(d)} ${fmt(of(d))}`).join(' · '),
+    aria: `Snow in Manhattan each day of the same weeks, for context: ${snowy.slice(-4).map((d) => `${fmt(of(d))} on ${dayLabel(d)}`).join(', ') || 'under a centimetre a day'}.`,
+  })));
 }
 
 /** The episode's hours (ADR 0008): every hour from its first day to the day after its last, each over the usual hour,
@@ -3005,20 +3067,37 @@ function findingDetail(f: Finding, card: string): void {
   openDetail(f.title, f.severity, body, f, card);
 }
 
-/** The method, once: how a day is judged (the brief's 'How it's judged'). */
+/** The method, once: how a day is judged (the brief's 'How it's judged'), drawn from the day's own trips: the points
+ * its range is learned from, named, and two sentences; the rest of the method one tap further. */
 function judgedDetail(story: Story | null): void {
   const day = story?.day ?? newsDay();
   const r = day ? rangesOf({ of: 'trips' })?.at(day) : null;
   const body: (Node | null)[] = [];
+  const band = r ? `usual ${compact(r.low)}–${compact(r.high)}` : '';
+  const wd = day ? WEEKDAY_NAMES[dateOf(day).getUTCDay()]! : '';
   if (r && day) {
-    const dots = r.guesses.flatMap((g) => g.from.map((x) => ({ by: g.by, day: x.day, value: x.value, weight: g.weight * x.weight })));
-    const days = [...dots.map((d) => ({ day: d.day, v: d.value, low: null, high: null })), { day, v: story?.amount?.value ?? null, low: r.low, high: r.high, sev: story?.severity === 'alert' || story?.severity === 'warn' ? story.severity : null }];
-    body.push(block('The days a day like it is learned from', svgNode(dayStrip({ days, labels: [[0, 'weeks before'], [days.length - 1, 'today', 'end']], bandLabel: `usual ${compact(r.low)}–${compact(r.high)}`, aria: `The same weekday in the weeks before and the day last year, and today's range from them: ${fmtInt(r.low)} to ${fmtInt(r.high)}.` }))));
+    const weeks = r.guesses.find((g) => g.by === 'weeks');
+    const year = r.guesses.find((g) => g.by === 'year');
+    const yd = year?.from.map((x) => x.day) ?? [];
+    // Last year's days as they were, and their date: the guess moves them by how this year has compared lately.
+    const span = (a: string, b: string) => (a === b ? shortDay(a) : a.slice(0, 7) === b.slice(0, 7) ? `${shortDay(a)}–${Number(b.slice(8))}` : `${shortDay(a)}–${shortDay(b)}`);
+    const yearLabel: [string, string] = ['last year', yd.length ? span(yd[0]!, yd.at(-1)!) : ''];
+    body.push(svgNode(learnStrip({
+      weeks: weeks?.from.map((x) => x.value) ?? [], weeksLabel: weeks ? `${weeks.from.length} ${wd}s before` : '',
+      year: year?.from.map((x) => x.value) ?? [], yearLabel,
+      today: { v: story?.amount?.value ?? null, low: r.low, high: r.high, sev: story?.severity === 'alert' || story?.severity === 'warn' ? story.severity : null },
+      bandLabel: band,
+      aria: `${weeks ? `The ${weeks.from.length} ${wd}s before (${weeks.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}${weeks && year ? ' and ' : ''}${year ? `the day last year (${year.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}: today's range from them, ${fmtInt(r.low)} to ${fmtInt(r.high)}.`,
+    })));
   }
+  // Two sentences, as the picture has it; the rules for shares, levels and quantiles are a tap further.
   body.push(
-    oneLine('Each number is judged against what a day like it has: the same weekday over the six weeks before and the day last year, each weighted by how well it has been guessing.'),
-    oneLine('The band is that guess, give or take three typical misses; a share or a level is told only a typical miss past its edge. Holidays are judged by last year’s.'),
-    oneLine('Shares are over all trips, blanks included; quantiles come from a 2,000-row sample; hours count trips before the checks.'));
+    oneLine(r?.special
+      ? `A holiday is judged against itself last year, moved by how this year has compared with last year lately.`
+      : `A day is judged against the same weekday in the six weeks before and the day last year, weighted by how well each guesses.`),
+    oneLine(r ? `The band is that guess give or take its typical misses: ${band.replace(/^usual /, '')} for this ${r.special ? 'day' : wd}.` : 'The band is that guess give or take its typical misses.'),
+    h('details', { class: 'fold vf-more-method' }, h('summary', {}, 'More on the method'),
+      h('p', { class: 'vf-sub' }, 'A share or a level is told only a typical miss past its band’s edge. Shares are over all trips, blanks included; quantiles come from a 2,000-row sample; hours count trips before the checks.')));
   openDetail('How it’s judged', 'ok', body);
 }
 
@@ -3039,21 +3118,29 @@ function actionsOf(f: Finding, card: string, primary: Act | null): HTMLElement {
  * shown and the rest behind "Show all". `kinds` say in words what the rows are ("shares · times · checks"); an
  * explained row carries ↳.
  */
-function foldRow(label: string, kinds: readonly string[], items: readonly Told[], card: string, open = false, explained = false): HTMLElement {
-  // A column's findings side by side (Passengers 1 to 5 together), in the order the column first comes.
-  const firstAt = new Map<string, number>();
-  items.forEach((f, i) => { const c = f.columns?.[0] ?? f.key; if (!firstAt.has(c)) firstAt.set(c, i); });
-  const sorted = items.map((f, i) => ({ f, i })).sort((a, b) => firstAt.get(a.f.columns?.[0] ?? a.f.key)! - firstAt.get(b.f.columns?.[0] ?? b.f.key)! || a.i - b.i).map((x) => x.f);
-  const rows = sorted.map((f) => compactRow(f, card));
-  const rest = rows.slice(3);
-  rest.forEach((r) => (r.hidden = true));
-  const all: HTMLElement | null = rest.length ? h('button', { type: 'button', class: 'vf-all', onclick: () => { rest.forEach((r) => (r.hidden = false)); all!.remove(); } }, `Show all ${rows.length}`) : null;
-  const list = h('div', { class: 'vf-group', hidden: !open }, ...rows, all);
+function foldRow(label: string, kinds: readonly string[], items: readonly Told[], card: string, open = false, explained = false, mark?: VizMark): HTMLElement {
+  const list = h('div', { class: 'vf-group', hidden: !open }, ...shownRows(items, card, 3));
   const btn = h('button', { type: 'button', class: 'vf-fold', 'aria-expanded': String(open), onclick: () => { list.hidden = !list.hidden; btn.setAttribute('aria-expanded', String(!list.hidden)); } },
-    explained ? glyphEl('explained', 14) : h('span', { class: 'g-slot' }),
+    explained ? glyphEl('explained', 14) : mark ? glyphEl(mark, 14) : h('span', { class: 'g-slot' }),
     h('span', { class: 'vf-fold-t' }, label, kinds.length ? h('span', { class: 'vf-kinds' }, kinds.join(' · ')) : null),
     h('span', { class: 'vf-chev' }, glyphEl('chev', 14)));
   return h('div', { class: 'vf-foldwrap' }, btn, list);
+}
+
+/** Findings as compact rows, a column's side by side (Passengers 1 to 5 together) in the order the column first comes,
+ * the first `n` shown and the rest behind "Show all". */
+function shownRows(items: readonly Told[], card: string, n: number, bySeverity = false): HTMLElement[] {
+  // With `bySeverity`, a column's rows go together within each severity as found, the worst first.
+  const band = (f: Told) => (bySeverity ? SEV_RANK[f.was] : 0);
+  const group = (f: Told) => `${band(f)}|${f.columns?.[0] ?? f.key}`;
+  const firstAt = new Map<string, number>();
+  items.forEach((f, i) => { if (!firstAt.has(group(f))) firstAt.set(group(f), i); });
+  const sorted = items.map((f, i) => ({ f, i })).sort((a, b) => band(a.f) - band(b.f) || firstAt.get(group(a.f))! - firstAt.get(group(b.f))! || a.i - b.i).map((x) => x.f);
+  const rows = sorted.map((f) => compactRow(f, card));
+  const rest = rows.slice(n);
+  rest.forEach((r) => (r.hidden = true));
+  const all: HTMLElement | null = rest.length ? h('button', { type: 'button', class: 'vf-all', onclick: () => { rest.forEach((r) => (r.hidden = false)); all!.remove(); } }, `Show all ${rows.length}`) : null;
+  return all ? [...rows, all] : rows;
 }
 
 /** A finding's title split into what, today and usual: "Passengers 1: 0.2% (usually 70–75%)", "Checks dropped 46%
@@ -3089,13 +3176,24 @@ function causeCard(story: Story, card: string): HTMLElement {
   const hero = heroOf(story);
   const amount = amountVisual(story);
   const info = h('button', { type: 'button', class: 'vf-info', 'aria-label': 'How it’s judged', onclick: () => judgedDetail(story) }, glyphEl('info', 16));
+  // Once the source has been told on a day of the episode, the card says so and its verb moves on (ADR 0008 §6).
+  const told = toldOf(story);
+  const primary = told && story.primary === 'notify' ? 'incident' : story.primary;
+  const ep = story.episode;
   return h('section', { class: `vf-card ${story.state}`, ...(anchor ? { id: `finding-${anchor.key}` } : {}) },
     h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head', role: 'status', 'aria-live': 'polite' }, m && !calm ? glyphEl(m, 18) : '', story.head)),
-    story.chip ? h('button', { type: 'button', class: 'vf-chip-btn', onclick: () => causeDetail(story, card) }, story.chip, glyphEl('chev', 13)) : null,
+    // An episode's chip draws its days so far, each its trips against a usual day, so day 3 reads apart from day 2.
+    story.chip ? h('button', { type: 'button', class: 'vf-chip-btn', 'aria-label': `${story.chip}${ep ? `: ${ep.trend.map((d) => `${WEEKDAY_NAMES[dateOf(d.day).getUTCDay()]!.slice(0, 3)} ${Math.round((d.trips / Math.max(1, d.expected)) * 100)}% of a usual day`).join(', ')}${ep.short ? `; about ${fmtInt(ep.short.estimate)} trips short so far` : ''}` : ''}. Open.`, onclick: () => causeDetail(story, card) },
+      ep && ep.trend.length > 1 ? svgNode(trendPips({ days: ep.trend })) : '', story.chip, glyphEl('chev', 13)) : null,
+    told ? h('p', { class: 'vf-told' }, glyphEl('ack', 14), told) : null,
     story.labels.after ? h('p', { class: 'vf-after' }, story.labels.after) : null,
     amount ? h('div', { class: 'vf-amount' }, h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, amount), info) : info,
     hero ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, hero) : null,
     story.hero === 'hours' && story.split ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.split.name} and everything else: open`, onclick: () => causeDetail(story, card) }, splitVisual(story)) : null,
+    // The weather after the numbers, as a plain note: context, never a cause, and nothing to tap (ADR 0008 §6).
+    story.labels.context ? h('p', { class: 'vf-wx' }, story.labels.context) : null,
+    // The five health cells, under the day's visuals so they stay in the first screen on a day with something wrong.
+    healthRow(story, card),
     // The checks on every day with something wrong, passed or held, and on a near miss (ADR 0008 §10).
     g && (held || g.near || (story.severity === 'alert' && !calm)) && story.hero !== 'gate' ? h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', held ? 'Checks held' : g.near ? 'Checks near the limit' : 'Checks passed'), gateVisual(g, false, gateScale(story))) : null,
     // What the day's outputs are: never "published" alone, which reads as good news; a tap names them.
@@ -3103,7 +3201,21 @@ function causeCard(story: Story, card: string): HTMLElement {
       svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'published' })), reachLabel(story, outs.length), h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
     story.labels.follows ? foldRow(story.labels.follows, story.labels.kinds, story.follows, card, profileOf(card) !== undefined, true) : null,
     story.labels.sameDay ? foldRow(story.labels.sameDay, [], story.sameDay, card, profileOf(card) !== undefined, true) : null,
-    anchor && story.primary ? actionsOf(anchor, card, story.primary) : null);
+    anchor && primary ? actionsOf(anchor, card, primary) : null);
+}
+
+/** Whether the source was told on an earlier day of the episode a day is part of. */
+function toldBefore(day: string): boolean {
+  const since = storyFor(day)?.episode?.since;
+  return !!since && dataLog.entries.some((e) => e.act === 'notify' && e.day >= since && e.day < day);
+}
+
+/** Whether the source was told on a day of the story's episode, today or before: "Source told on Fri". */
+function toldOf(story: Story): string | null {
+  const from = story.episode?.since ?? story.day;
+  const e = dataLog.entries.filter((x) => x.act === 'notify' && x.day >= from && x.day <= story.day).at(-1);
+  // Said by the load's day, as the app's days are: the clock time is in the record's line under the verbs.
+  return e ? `Source told ${e.day === story.day ? 'today' : `on ${WEEKDAY_NAMES[dateOf(e.day).getUTCDay()]!.slice(0, 3)}`}` : null;
 }
 
 /**
@@ -3125,21 +3237,65 @@ function outputsDetail(story: Story, outs: string[]): void {
   openDetail(reachLabel(story, outs.length), story.severity, [oneLine(held ? (keep ? keep.replace(/^./, (c) => c.toUpperCase()) : null) : (l?.long ?? null)), list]);
 }
 
-/** The health row: five cells, each the worst of its kinds; ↳ where the day's cause groups them. Calm days: one row. */
-function healthRow(story: Story): HTMLElement {
-  const names: Record<string, string> = { file: 'File', amount: 'Amount', hours: 'Hours', values: 'Values', shape: 'Shape' };
-  const cells = () => h('nav', { class: 'vf-health', 'aria-label': 'Health' }, ...story.health.map((c) => {
-    const m: VizMark | null = c.explained ? 'explained' : c.severity === 'alert' ? 'alert' : c.severity === 'warn' ? 'warn' : c.severity === 'note' ? 'note' : null;
-    const said = c.explained ? `${c.follows} grouped under the day’s cause${c.sameDay ? `, ${c.sameDay} more came the same day` : ''}` : c.severity === 'alert' ? 'something’s wrong' : c.severity === 'warn' ? 'unusual' : c.severity === 'note' ? 'worth knowing' : c.cell === 'file' && story.amount ? `bytes as listed, ${fmtInt(story.amount.value)} rows` : 'normal';
-    return h('span', { class: `vf-cell ${c.explained ? 'explained' : c.severity ?? 'ok'}`, role: 'img', 'aria-label': `${names[c.cell]}: ${said}` }, m ? glyphEl(m, 14) : h('span', { class: 'g-slot' }), h('span', { 'aria-hidden': 'true' }, names[c.cell]!));
-  }));
-  if (story.health.every((c) => c.severity === null && !c.explained)) {
-    const wrap = h('div', { class: 'vf-allok-wrap' });
-    const btn = h('button', { type: 'button', class: 'vf-allok', 'aria-expanded': 'false', onclick: () => { const open = btn.getAttribute('aria-expanded') !== 'true'; btn.setAttribute('aria-expanded', String(open)); wrap.querySelector('.vf-health')?.remove(); if (open) wrap.append(cells()); } }, h('span', {}, 'All 5 normal'), h('span', { class: 'vf-chev' }, glyphEl('chev', 13)));
-    wrap.append(btn);
-    return wrap;
+/**
+ * The health row (ADR 0008 §6): its heading, and five cells, each the worst of its kinds, ↳ where the day's cause groups
+ * them, no mark where nothing is out of the ordinary; the same row on every day. Each cell opens what it measured: its
+ * check in words and visuals, and every finding of its kinds, the ones the cause absorbed too.
+ */
+function healthRow(story: Story, card: string): HTMLElement {
+  return h('div', { class: 'vf-healthwrap' },
+    h('p', { class: 'vf-health-h', 'aria-hidden': 'true' }, story.labels.health),
+    h('nav', { class: 'vf-health', 'aria-label': `${story.labels.health}: five measures of the day’s trips` }, ...story.health.map((c) => {
+      const m: VizMark | null = c.explained ? 'explained' : c.severity === 'alert' ? 'alert' : c.severity === 'warn' ? 'warn' : c.severity === 'note' ? 'note' : null;
+      const said = c.explained ? `${c.follows} grouped under the day’s cause${c.sameDay ? `, ${c.sameDay} more came the same day` : ''}` : c.severity === 'alert' ? 'something’s wrong' : c.severity === 'warn' ? 'unusual' : c.severity === 'note' ? 'a note' : 'normal';
+      return h('button', { type: 'button', class: `vf-cell ${c.explained ? 'explained' : c.severity ?? 'ok'}`, 'aria-label': `${CELL_NAMES[c.cell]}: ${said}. Open.`, onclick: () => healthDetail(story, c.cell, card) }, m ? glyphEl(m, 14) : '', h('span', { 'aria-hidden': 'true' }, CELL_NAMES[c.cell]));
+    })));
+}
+
+/** What a health cell measures, in a line under its title. */
+const CELL_WHAT: Record<Cell, string> = {
+  file: 'The day’s file, against the data’s published list',
+  amount: 'The day’s trips, against a day like it',
+  hours: 'Trips each hour, against a usual day',
+  values: 'Each coded value’s share of the trips',
+  shape: 'Each measure’s spread, and the times of day',
+};
+
+/** A health cell, opened: what it measures, drawn, and each finding of its kinds a tap from its own detail. */
+function healthDetail(story: Story, cell: Cell, card: string): void {
+  const c = story.health.find((x) => x.cell === cell)!;
+  const day = story.day;
+  const k = history ? history.file.days.indexOf(day) : -1;
+  const kinds = CELL_KINDS[cell];
+  const rank = (f: Told) => (f.tier === 'cause' || f.tier === 'standalone' ? 0 : 1);
+  const mine = story.findings.filter((f) => kinds.includes(f.kind) && f.was !== 'ok').sort((a, b) => rank(a) - rank(b) || SEV_RANK[a.was] - SEV_RANK[b.was] || b.score - a.score);
+  const body: (Node | null)[] = [h('p', { class: 'vf-sub' }, CELL_WHAT[cell])];
+  if (cell === 'file') {
+    const load = loads.list.find((l) => l.day === day);
+    const checked = !!(load && integrity.checks.get(load.file));
+    body.push(svgNode(chain({ nodes: ['list', 'file', 'load'], broken: 99, aria: checked ? 'The day’s file hashes to what the data’s list publishes, and the load was read from it.' : 'The day’s file was read; no list was there to check it against.' })));
+    if (k >= 0) body.push(oneLine(`${fmtInt(history!.file.rows[k]!)} trips in the day’s file${checked ? ', its bytes as published' : ''}.`));
   }
-  return cells();
+  if (cell === 'amount') {
+    body.push(amountVisual(story));
+    const days = stripOf({ of: 'trips' }, day, 28, story.severity);
+    if (days.length) body.push(svgNode(dayStrip({ days, labels: stripLabels(days), key: STRIP_KEY, unit: '/day', aria: `Trips day by day for four weeks to ${dayLabel(day)}, each against its own usual range.` })));
+  }
+  if (cell === 'hours' && history && k >= 0) {
+    const r = rangesOf({ of: 'trips' })?.at(day);
+    const raw = r ? usualHours(history, k, r.expected) : null;
+    const got = history.file.hours?.[k];
+    if (r && raw && got) {
+      const sum = raw.reduce((a, b) => a + b, 0) || 1;
+      const usual = story.hours?.usual ?? raw.map((x) => (x / sum) * r.expected);
+      const wd = WEEKDAY_NAMES[dateOf(day).getUTCDay()]!;
+      body.push(svgNode(hourBars({ got, usual, ...(story.hours ? { cut: story.hours.from, to: story.hours.to, cutLabel: clockText(story.hours.from * 60) } : {}), ghostLabel: `usual ${wd}`, aria: `Trips by hour on ${dayLabel(day)}, against a usual ${wd}${story.hours ? `: short from ${clockText(story.hours.from * 60)}` : ''}.` })));
+    }
+  }
+  if (mine.length) body.push(h('div', { class: 'vf-list' }, ...shownRows(mine, card, 6, true)));
+  else body.push(oneLine(cell === 'file' ? null : { amount: 'A normal amount for the day.', hours: 'Trips every hour.', values: 'Values as usual.', shape: 'Spreads and times as usual.' }[cell]));
+  const sev: Severity = c.explained ? 'ok' : c.severity ?? 'ok';
+  openDetail(CELL_NAMES[cell], sev, body);
 }
 
 /** A standalone finding as a card: its mark and title, its visual, one verb. */
@@ -3147,11 +3303,12 @@ const storyCard = (f: Told, card: string): HTMLElement => findingCard(f, card);
 
 /** The day's news for the trips and their profile: the story, drawn. */
 function storyNews(card: string, story: Story): HTMLElement[] {
-  const out: HTMLElement[] = [causeCard(story, card), healthRow(story)];
+  const out: HTMLElement[] = [causeCard(story, card)];
   for (const f of story.stories) out.push(storyCard(f, card));
   const rows: HTMLElement[] = [];
-  if (story.labels.more) rows.push(foldRow(story.labels.more, [], story.more, card));
-  if (story.labels.notes) rows.push(foldRow(story.labels.notes, [], story.notes, card));
+  // Each row carries the mark its findings carry in the health row, so a dot there is "a note" here, said once.
+  if (story.labels.more) rows.push(foldRow(story.labels.more, [], story.more, card, false, false, story.more.some((f) => f.severity === 'alert') ? 'alert' : 'warn'));
+  if (story.labels.notes) rows.push(foldRow(story.labels.notes, [], story.notes, card, false, false, 'note'));
   if (rows.length) out.push(h('div', { class: 'vf-rows' }, ...rows));
   return out;
 }
@@ -3840,6 +3997,19 @@ function relearn(): void {
 
 const ACT_LABEL: Record<Act, string> = { expected: 'OK this day', incident: 'Open an incident', notify: 'Tell the source', rule: 'Add a check', quarantine: 'Set aside for review', refetch: 'Fetch it again', export: 'Export for audit' };
 
+/** What each verb does, said in its accessible name and its title after the words on it (ADR 0008 §6). */
+const actDoes = (a: Act | 'resolved', f: Finding): string => ({
+  expected: 'mark it as expected on this day, with a note; it is told as a note from then on',
+  incident: 'open an incident with a note; its days are left out of what a usual day is learned from',
+  resolved: 'resolve the incident with a note; its days count again in what a usual day is learned from',
+  notify: `draft a note to whoever publishes ${publisherOf(f)}, to send from your phone or copy`,
+  rule: 'add a check beside the table that flags rows like these from now on',
+  quarantine: 'set rows like these aside for review in a box beside the table',
+  refetch: 'fetch the day’s file again, check it against the list, and run on it',
+  export: 'export the record, its runs and files for an auditor to check offline',
+})[a];
+const actAttrs = (a: Act | 'resolved', label: string, f: Finding) => ({ 'aria-label': `${label}: ${actDoes(a, f)}`, title: actDoes(a, f).replace(/^./, (c) => c.toUpperCase()) });
+
 function actButton(a: Act, f: Finding, card: string): HTMLElement | null {
   const day = actDay(f);
   if (!day) return null;
@@ -3849,12 +4019,15 @@ function actButton(a: Act, f: Finding, card: string): HTMLElement | null {
   if (a === 'rule' && !ruleFor(f)) return null;
   if (a === 'quarantine' && !quarantineFor(f)) return null;
   const open = done.some((e) => e.act === 'incident') && !done.some((e) => e.act === 'resolved');
-  if (a === 'incident' && open) return h('button', { type: 'button', class: 'btn small', onclick: () => void ask(f, card, 'resolved') }, 'Resolve the incident');
+  if (a === 'incident' && open) return h('button', { type: 'button', class: 'btn small', ...actAttrs('resolved', 'Resolve the incident', f), onclick: () => void ask(f, card, 'resolved') }, 'Resolve the incident');
   // Fetching a refused file again, and exporting, are done, not noted.
-  if (a === 'refetch') return h('button', { type: 'button', class: 'btn small', disabled: state.running, onclick: () => void refetch() }, ACT_LABEL[a]);
-  if (a === 'export') return ledger ? h('button', { type: 'button', class: 'btn small quiet', onclick: () => void exportAudit() }, ACT_LABEL[a]) : null;
+  if (a === 'refetch') return h('button', { type: 'button', class: 'btn small', ...actAttrs(a, ACT_LABEL[a], f), disabled: state.running, onclick: () => void refetch() }, ACT_LABEL[a]);
+  if (a === 'export') return ledger ? h('button', { type: 'button', class: 'btn small quiet', ...actAttrs(a, ACT_LABEL[a], f), onclick: () => void exportAudit() }, ACT_LABEL[a]) : null;
+  // Told the source already in this episode: the verb stays, behind ⋯, said as again.
+  const again = a === 'notify' && !done.some((e) => e.act === a) && toldBefore(day);
   if (done.some((e) => e.act === a)) return null;
-  return h('button', { type: 'button', class: `btn small${a === 'expected' || a === 'incident' ? '' : ' quiet'}`, onclick: () => void ask(f, card, a) }, ACT_LABEL[a]);
+  const label = again ? 'Tell the source again' : ACT_LABEL[a];
+  return h('button', { type: 'button', class: `btn small${a === 'expected' || a === 'incident' ? '' : ' quiet'}`, ...actAttrs(a, label, f), onclick: () => void ask(f, card, a) }, label);
 }
 
 /** The day's file, fetched again past any cache, checked, and run on if it matches now. */

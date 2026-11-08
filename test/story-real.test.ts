@@ -8,7 +8,7 @@ import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
 import { lacked, reachLabel, shortfall, type EpisodeDay } from '../src/core/days.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
-import { countRange, gateLabels, glanceStrings, partLabel, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
+import { CELL_KINDS, countRange, gateLabels, glanceStrings, partLabel, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
 
 const HISTORY = new URL('../dist/app/data/history.json', import.meta.url);
 const has = existsSync(HISTORY) && (JSON.parse(readFileSync(HISTORY, 'utf8')) as HistoryFile).days.length > 400;
@@ -252,6 +252,51 @@ describe.skipIf(!has)('the story on the real history', () => {
     expect(Math.abs(r.expected - story('2024-01-01').split!.part.usual)).toBeLessThan(1);
     // Where the count has its own range, that is the one.
     expect(countRange(h!, 'payment_type', '0', '2023-09-22')).toMatchObject({ low: h!.of({ of: 'count', column: 'payment_type', value: '0' })!.at('2023-09-22')!.low });
+  });
+
+  it('tells the snow of Jan 6 and 7, 2024 as context after the numbers, not in a cause’s chip', () => {
+    // Sun Jan 7: fewer trips, with today's snow and Saturday's; Sat Jan 6: a normal Saturday with its own.
+    const sun = story('2024-01-07');
+    expect(sun).toMatchObject({ state: 'unusual', chip: null });
+    expect(sun.labels.context).toBe('❄ 1.5 cm today · 7.2 cm Sat');
+    // Each number is the snow it shows, to its one decimal.
+    const snow = (d: string) => file!.weather!.snow[file!.days.indexOf(d)]!;
+    expect([...sun.labels.context!.matchAll(/(\d+\.\d) cm/g)].map((m) => Number(m[1]))).toEqual([snow('2024-01-07'), snow('2024-01-06')].map((x) => Math.round(x * 10) / 10));
+    expect(glanceStrings(sun).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(45);
+    const sat = story('2024-01-06');
+    expect(sat).toMatchObject({ head: 'A normal Saturday', chip: null });
+    expect(sat.labels.context).toBe('❄ 7.2 cm today');
+    expect(glanceStrings(sat).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(16);
+    // Sat Sep 23, 2023 had 33 mm of rain: its cause is told, its weather left to the weather's card.
+    expect(story('2023-09-23').labels.context).toBeNull();
+  });
+
+  it('accounts for every finding in one tier: the grouped rows add up to what the old view counted', () => {
+    // The old view counted every finding; the story groups them. Thu Sep 21: 1 cause + 2 absorbed + 6 + 8 = 17.
+    for (const day of ['2023-09-21', '2023-09-22', '2023-09-23', '2022-11-15', '2024-01-01', '2024-01-06', '2024-01-07', '2023-09-18']) {
+      const found = newsOf(h!, day, names).filter((f) => f.severity !== 'ok');
+      const s = story(day);
+      const tiers = [s.cause, ...s.stories, ...s.more, ...s.absorbed, ...s.follows, ...s.sameDay, ...s.notes, s.context].filter((f) => !!f).map((f) => f!.key);
+      expect(new Set(tiers).size, day).toBe(tiers.length);
+      expect(tiers.sort(), day).toEqual(found.map((f) => f.key).sort());
+      // What no row lists (what the cause absorbed) is in a health cell, a tap from the card.
+      for (const f of s.absorbed) expect(Object.values(CELL_KINDS).flat(), `${day}: ${f.title}`).toContain(f.kind);
+    }
+    const thu = story('2023-09-21');
+    expect([thu.cause ? 1 : 0, thu.absorbed.length, thu.follows.length, thu.sameDay.length]).toEqual([1, 2, 6, 8]);
+  });
+
+  it('draws an episode’s days in its chip, and counts its shortfall as its hours do, to the viewed day', () => {
+    const sat = story('2023-09-23');
+    expect(sat.episode!.trend.map((d) => d.day)).toEqual(['2023-09-21', '2023-09-22', '2023-09-23']);
+    // Thursday a third of a usual day, Friday and Saturday a twentieth: day 3 reads as more of the same.
+    expect(sat.episode!.trend.map((d) => Math.round((d.trips / d.expected) * 100))).toEqual([35, 4, 5]);
+    const trips = h!.of({ of: 'trips' })!;
+    for (const viewed of ['2023-09-22', '2023-09-23']) {
+      const days: EpisodeDay[] = file!.days.filter((d) => d >= '2023-09-21' && d <= viewed).map((d) => ({ day: d, got: file!.hours![file!.days.indexOf(d)]!, low: trips.at(d)!.low, expected: trips.at(d)!.expected, alert: story(d).severity === 'alert' }));
+      expect(story(viewed).episode!.short, viewed).toEqual(shortfall(days, { day: '2023-09-21', ...story('2023-09-21').hours! }, viewed));
+    }
+    expect(story('2023-09-21').episode).toBeNull();
   });
 
   it('tells calm days and the day after an episode calmly', () => {

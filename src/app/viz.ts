@@ -277,9 +277,11 @@ export function amountLine(o: { value: number; low: number; high: number; valueL
   s += `<text x="0" y="30" class="count${o.sev === 'alert' ? ' count-bad' : ''}">${esc(o.valueLabel)}<tspan class="count-unit" dx="6">trips</tspan>${o.changeLabel ? `<tspan class="count-chg${o.sev ? ` chg-${o.sev}` : ''}" dx="8">${esc(o.changeLabel)}</tspan>` : ''}</text>`;
   s += `<text x="${w - 30}" y="${below ? 47 : 30}" text-anchor="end" class="lbl-m">${esc(o.bandLabel)}</text>`;
   s += `<line class="base" x1="4" x2="${w - 4}" y1="${ty}" y2="${ty}"/>`;
-  // The band shows past the dot (its 11 px and 4 more) however narrow the range.
+  // The band shows past the dot (its 11 px and 4 more) however narrow the range; its ends stand above and below the
+  // dot's halo, so a dot on an end never hides it (Sat Jan 6, 2024: 97,117 just inside 94k).
   const [b0, b1] = bandSpan(x(o.low), x(o.high), o.value < o.low || o.value > o.high ? x(o.value) : null, 15, 4, w - 4);
   s += `<rect class="ghost-2 edge" x="${f1(b0)}" y="${ty - 5}" width="${f1(b1 - b0)}" height="10" rx="3"/>`;
+  s += `<path class="band-end" d="M${f1(b0 + 0.75)} ${ty - 9}V${ty + 9}M${f1(b1 - 0.75)} ${ty - 9}V${ty + 9}"/>`;
   s += `<circle class="dot${o.sev ? ` dot-${o.sev}` : ''}" cx="${f1(x(o.value))}" cy="${ty}" r="5.5"/>`;
   const k = (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v));
   s += `<text x="4" y="${h - 1}" class="tick" aria-hidden="true">0</text><text x="${w - 4}" y="${h - 1}" text-anchor="end" class="tick" aria-hidden="true">${k(max)}</text>`;
@@ -330,9 +332,11 @@ export function partBar({ left, right, w = 334, aria }: { left: Part; right: Par
   const lw = slot(left) * scale;
   draw(left, 0, lw + gap - 1);
   draw(right, lw + gap, w + 4);
+  // A part's mark sits against its name on the outer side (before the left one, after the right one), so it never
+  // floats on a guess at how wide the name is set.
   const name = (p: Part, x: number, anchor: 'start' | 'end') =>
-    `<text x="${f1(x + (p.sev && anchor === 'start' ? 16 : 0))}" y="12" text-anchor="${anchor}" class="lbl-b">${esc(p.name)}</text>` +
-    (p.sev ? `<g transform="translate(${f1(anchor === 'start' ? x : x - p.name.length * 6.9 - 16)} 1)">${glyph(p.sev, 13)}</g>` : '') +
+    `<text x="${f1(x + (p.sev ? (anchor === 'start' ? 16 : -16) : 0))}" y="12" text-anchor="${anchor}" class="lbl-b">${esc(p.name)}</text>` +
+    (p.sev ? `<g transform="translate(${f1(anchor === 'start' ? x : x - 13)} 1)">${glyph(p.sev, 13)}</g>` : '') +
     `<text x="${f1(x)}" y="26" text-anchor="${anchor}" class="lbl-m">${esc(p.label)}</text>`;
   s += name(left, 0, 'start') + name(right, w, 'end');
   return `${s}</svg>`;
@@ -528,6 +532,126 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
     s += `<line class="hair" x1="${gx}" x2="${w}" y1="${f1(y(ymax)) + 0.5}" y2="${f1(y(ymax)) + 0.5}"/><text x="0" y="${f1(y(ymax) - 3)}" class="tick" aria-hidden="true">${esc(k(ymax))}${esc(o.unit)}</text>`;
   }
   for (const [i, t, anchor] of o.labels ?? []) s += `<text x="${f1(gx + i * cw + cw / 2)}" y="${h - 2}" text-anchor="${anchor ?? 'middle'}" class="tick" aria-hidden="true">${esc(t)}</text>`;
+  return `${s}</svg>`;
+}
+
+/**
+ * A row of context under a strip of days (snow: context, never a cause), each day's column where dayStrip puts it
+ * (the same width, gutter and count of days): a bar from 0 for each day that had any, 3 px at least. `note` names the
+ * last days' amounts at the top right, in the order their bars stand ("Sat 7.2 cm · Sun 1.5 cm"), clear of every bar; a
+ * larger day further back is labelled over its own bar. No band and no severity: there is no usual to be outside of.
+ */
+export function contextBars(o: { values: readonly number[]; note: string; label: (v: number) => string; kind: 'snow'; gx?: number; w?: number; h?: number; aria: string }): string {
+  const w = o.w ?? 334;
+  const n = o.values.length;
+  const gx = o.gx ?? 12;
+  const h = o.h ?? 52;
+  const cw = (w - gx) / Math.max(1, n);
+  const bw = Math.min(14, cw - 2);
+  const base = h - 1.5;
+  const top = 18;
+  const max = Math.max(0, ...o.values);
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  s += `<line class="base" x1="${gx}" x2="${w}" y1="${base}" y2="${base}"/>`;
+  if (o.note) s += `<text x="${w}" y="11" text-anchor="end" class="lbl-m">${esc(o.note)}</text>`;
+  if (!(max > 0)) return `${s}</svg>`;
+  o.values.forEach((v, i) => {
+    if (!(v > 0)) return;
+    const cx = gx + i * cw + cw / 2;
+    const bh = Math.max(MIN_MARK, (v / max) * (base - top));
+    s += `<path class="wx-bar ${o.kind}" d="${colPath(cx - bw / 2, base, bw, bh, 1.5)}"/>`;
+  });
+  // The largest day, when it stands clear of the note's corner (a storm weeks back), says its amount over its bar.
+  const tall = o.values.indexOf(max);
+  const cx = gx + tall * cw + cw / 2;
+  const noteLeft = w - o.note.length * 6.2 - 8;
+  if (cx + 20 < noteLeft) s += `<text x="${f1(Math.max(20, cx))}" y="${top - 3}" text-anchor="middle" class="lbl-m">${esc(o.label(max))}</text>`;
+  return `${s}</svg>`;
+}
+
+/**
+ * An episode's days so far, drawn small in its chip (ADR 0008 §6): each day's trips against its guess as a bar under a
+ * usual ghost, the viewed day last and darker, so day 3 reads apart from day 2 (and a recovery from more of the same).
+ * aria-hidden: the chip's own label says it.
+ */
+export function trendPips({ days }: { days: readonly { trips: number; expected: number }[] }): string {
+  const bw = 5;
+  const gap = 2;
+  const h = 16;
+  const w = days.length * (bw + gap) - gap;
+  const top = 1;
+  const full = h - top;
+  let s = `<svg class="viz trend" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" focusable="false">`;
+  days.forEach((d, i) => {
+    const x = i * (bw + gap);
+    const r = Math.min(1.25, d.trips / Math.max(1, d.expected));
+    const bh = d.trips > 0 ? Math.max(2, (r / 1.25) * full) : 0;
+    const uh = full / 1.25;
+    s += `<rect class="ghost" x="${x + 0.5}" y="${f1(h - uh + 0.5)}" width="${bw - 1}" height="${f1(uh - 1)}" rx="1"/>`;
+    if (bh) s += `<rect class="${i === days.length - 1 ? 'ink-strong' : 'ink'}" x="${x}" y="${f1(h - bh)}" width="${bw}" height="${f1(bh)}" rx="1"/>`;
+  });
+  return `${s}</svg>`;
+}
+
+/**
+ * What a day's usual range is learned from (the "How it's judged" sheet): the same weekday in the weeks before as dots,
+ * the day last year as a diamond (a holiday has only that), each group named under it, and today's column, its range
+ * as a band (labelled above it, inside the frame) with today's value as a tick. Counts from 0; every label sits inside
+ * the frame.
+ */
+export function learnStrip(o: { weeks: readonly number[]; weeksLabel: string; year: readonly number[]; yearLabel: [string, string]; today: { v: number | null; low: number; high: number; sev?: 'alert' | 'warn' | null }; bandLabel: string; aria: string; w?: number }): string {
+  const w = o.w ?? 334;
+  const h = 132;
+  const top = 22;
+  const base = h - 32;
+  const gx = 14;
+  const nW = o.weeks.length;
+  const nY = o.year.length;
+  // Columns: the weeks, a gap, last year, a gap, today (wider), all within the frame.
+  const units = nW + nY + 1.6 + (nW ? 0.8 : 0) + 0.8;
+  const cw = Math.min(34, (w - gx) / units);
+  const raw = Math.max(1, ...o.weeks, ...o.year, o.today.high, o.today.v ?? 0);
+  const ymax = niceMax(raw * 1.05);
+  const y = (v: number) => base - (v / ymax) * (base - top);
+  const k = (v: number) => (v >= 1000 ? `${Number((v / 1000).toPrecision(3))}k` : String(v));
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  s += `<line class="base" x1="${gx}" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
+  s += `<line class="hair" x1="${gx}" x2="${w}" y1="${f1(y(ymax)) + 0.5}" y2="${f1(y(ymax)) + 0.5}"/>`;
+  s += `<text x="0" y="${base}" class="tick" aria-hidden="true">0</text><text x="0" y="${f1(y(ymax) - 3)}" class="tick" aria-hidden="true">${esc(k(ymax))}</text>`;
+  let x = gx;
+  const group = (vals: readonly number[], shape: 'dot' | 'diamond', lines: [string, string?]) => {
+    const x0 = x;
+    vals.forEach((v) => {
+      const cx = x + cw / 2;
+      s += shape === 'dot' ? `<circle class="learn-dot" cx="${f1(cx)}" cy="${f1(y(v))}" r="4"/>` : `<path class="learn-year" d="M${f1(cx)} ${f1(y(v) - 5.5)}l5.5 5.5-5.5 5.5-5.5-5.5z"/>`;
+      x += cw;
+    });
+    const mid = (x0 + x) / 2;
+    s += `<line class="hair" x1="${f1(x0 + 3)}" x2="${f1(x - 3)}" y1="${base + 6}" y2="${base + 6}"/>`;
+    const anchor = mid - lines[0].length * 3.1 < 0 ? 'start' : 'middle';
+    const tx = anchor === 'start' ? x0 : mid;
+    s += `<text x="${f1(tx)}" y="${base + 19}" text-anchor="${anchor}" class="lbl-m">${esc(lines[0])}</text>`;
+    if (lines[1]) s += `<text x="${f1(tx)}" y="${base + 31}" text-anchor="${anchor}" class="tick">${esc(lines[1])}</text>`;
+  };
+  if (nW) {
+    group(o.weeks, 'dot', [o.weeksLabel]);
+    x += cw * 0.8;
+  }
+  if (nY) group(o.year, 'diamond', o.yearLabel);
+  x += cw * 0.8;
+  // Today, at the right edge: its range as a band, its value as a tick, the column framed; the band's label above it.
+  const tw = cw * 1.6;
+  const cx = w - tw / 2;
+  const bw = Math.min(18, tw - 6);
+  const v = o.today.v;
+  const vy = v !== null ? Math.min(y(v), base - 2) : null;
+  const outside = v !== null && (v < o.today.low || v > o.today.high);
+  const [t, b] = bandSpan(y(o.today.high), y(o.today.low), outside ? vy : null, 7, top, base);
+  s += `<rect class="ghost-2" x="${f1(cx - bw / 2)}" y="${f1(t)}" width="${f1(bw)}" height="${f1(b - t)}" rx="2"/>`;
+  if (vy !== null) s += `<rect class="${outside && o.today.sev ? `sev-${o.today.sev}-fill` : 'ink-strong'}" x="${f1(cx - bw / 2 - 2)}" y="${f1(vy - 1.5)}" width="${f1(bw + 4)}" height="3" rx="1"/>`;
+  s += `<rect class="today-ring" x="${f1(cx - tw / 2 + 0.5)}" y="${top - 6}" width="${f1(tw - 1)}" height="${f1(base - top + 8)}" rx="3"/>`;
+  s += `<text x="${f1(cx + tw / 2)}" y="${top - 10}" text-anchor="end" class="lbl-m">${esc(o.bandLabel)}</text>`;
+  s += `<text x="${f1(cx + tw / 2)}" y="${base + 19}" text-anchor="end" class="lbl-m">today</text>`;
   return `${s}</svg>`;
 }
 

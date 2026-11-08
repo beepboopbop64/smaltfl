@@ -3,7 +3,7 @@
  * broken numbers, and escapes what it is given.
  */
 import { describe, expect, it } from 'vitest';
-import { amountLine, bandSpan, bulletTrack, composition, dayStrip, dumbbellRows, episodeBars, episodeLine, gateBars, glyph, hourBars, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, waterfall, wrapName } from '../src/app/viz.js';
+import { amountLine, bandSpan, bulletTrack, composition, contextBars, dayStrip, dumbbellRows, episodeBars, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -19,6 +19,8 @@ const charts: [string, string, boolean][] = [
   ['rules', ruleRows({ rules: [{ label: 'Distance', warns: false, rows: 2059, low: 1700, high: 4100, usualLabel: 'usual 1.7k–4.1k' }, { label: 'Passengers', warns: true, rows: 4613, low: null, high: null, usualLabel: '' }], aria: 'Rows each check fails' }), true],
   ['lineage', lineage({ source: 'trips', step: 'trips_valid', outputs: ['zone_hour', 'borough_hour', 'weather_effect'], aria: 'Not published' }), false],
   ['dumbbell', dumbbellRows({ rows: [{ label: 'Credit card', today: 0.002, low: 0.75, high: 0.8, todayLabel: '0.2%', usualLabel: 'usually 75–80%', sev: 'alert' }, { label: 'JFK', today: 0, low: 0.037, high: 0.061, todayLabel: 'none', usualLabel: 'usually 3.7–6.1%', gone: true }], aria: 'Shares that moved' }), true],
+  ['context', contextBars({ values: [0, 0, 7.2, 1.5], note: 'Sat 7.2 cm · Sun 1.5 cm', label: (v) => `${v.toFixed(1)} cm`, kind: 'snow', aria: 'Snow in Manhattan each day, for context: 7.2 cm on Sat, 1.5 cm on Sun' }), true],
+  ['learned', learnStrip({ weeks: [98_000, 101_000, 95_000, 99_000, 97_000, 100_000], weeksLabel: '6 Saturdays before', year: [92_000], yearLabel: ['last year', 'Sep 24'], today: { v: 5732, low: 81_000, high: 147_000, sev: 'alert' }, bandLabel: 'usual 81k–147k', aria: 'The six Saturdays before and the day last year: today’s range from them, 81,000 to 147,000' }), true],
   ['quantiles', quantileStrip({ today: [0, 0.6, 1.1, 1.9, 4], usual: [{ low: 0.46, high: 0.76 }, null, { low: 1.7, high: 2.0 }, null, { low: 3.4, high: 3.9 }], moved: 0, sev: 'warn', fmt: (v) => `${v} mi`, ends: ['short', 'long'], aria: 'Distance: shorter at the bottom' }), false],
 ];
 
@@ -211,5 +213,78 @@ describe('the news’s charts', () => {
     expect(glyph('warn')).toContain('g-tri');
     for (const g of ['alert', 'warn', 'note', 'held', 'explained', 'ack'] as const) expect(glyph(g)).toContain('aria-hidden="true"');
     expect(stripBar({ v: 4633, low: 84912, high: 155515, ymax: 160000, sev: 'alert' })).toContain('sev-alert-fill');
+  });
+
+  it('keeps the band’s ends standing past the amount line’s dot, so a value on an end never hides it', () => {
+    // Sat Jan 6, 2024: 97,117 just inside a 94k–156k range.
+    const svg = amountLine({ value: 97_117, low: 94_000, high: 156_000, valueLabel: '97,117', bandLabel: 'usual 94k–156k', aria: 'Trips' });
+    const ends = /<path class="band-end" d="M([\d.]+) ([\d.]+)V([\d.]+)M([\d.]+) [\d.]+V[\d.]+"/.exec(svg)!;
+    const dot = /<circle class="dot" cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"/.exec(svg)!;
+    // Taller than the dot and its halo (5.5 + 2), above and below; and drawn first, so the dot sits on the band, not under.
+    expect(Number(dot[2]) - Number(ends[2])).toBeGreaterThan(Number(dot[3]) + 1);
+    expect(Number(ends[3]) - Number(dot[2])).toBeGreaterThan(Number(dot[3]) + 1);
+    expect(svg.indexOf('band-end')).toBeLessThan(svg.indexOf('class="dot'));
+    // The left end is at the band's left edge, within the dot's reach: the dot covers it only in the middle.
+    expect(Math.abs(Number(ends[1]) - Number(dot[1]))).toBeLessThan(8);
+  });
+
+  it('puts a part’s mark against its own name, before the left one and after the right one', () => {
+    const svg = partBar({ left: { name: 'Flex Fare', today: 5714, usual: 4700, label: '5,714 · usual ~4.7k' }, right: { name: 'Everything else', today: 18, usual: 104_000, label: '18 · usual ~104k', sev: 'alert' }, aria: 'Split' });
+    expect(svg).toContain('<text x="318" y="12" text-anchor="end" class="lbl-b">Everything else</text>');
+    expect(svg).toContain('<g transform="translate(321 1)">');
+    const left = partBar({ left: { name: 'Vendor 1', today: 3, usual: 35_000, label: '3 · usual ~35k', sev: 'alert' }, right: { name: 'Everything else', today: 90_000, usual: 88_000, label: '90,000 · usual ~88k' }, aria: 'Split' });
+    expect(left).toContain('<g transform="translate(0 1)">');
+    expect(left).toContain('<text x="16" y="12" text-anchor="start" class="lbl-b">Vendor 1</text>');
+  });
+
+  it('draws snow as context in the strip’s own columns, from 0, the days the card names said clear of every bar', () => {
+    const days = Array.from({ length: 56 }, (_, i) => ({ day: `2024-01-${String((i % 28) + 1).padStart(2, '0')}`, v: 90_000, low: 80_000, high: 120_000 }));
+    const strip = dayStrip({ days, unit: '/day', aria: 'Trips' });
+    const values = days.map((_, i) => (i === 20 ? 12 : i === 54 ? 7.2 : i === 55 ? 1.5 : 0));
+    const bars = contextBars({ values, note: 'Sat 7.2 cm · Sun 1.5 cm', label: (v) => `${v.toFixed(1)} cm`, kind: 'snow', gx: 12, aria: 'Snow' });
+    // The strip's tick for the last day and the context bar for it share a centre.
+    const tick = [...strip.matchAll(/<rect class="ink" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"/g)].at(-1)!;
+    const bar = [...bars.matchAll(/<path class="wx-bar snow" d="M([\d.]+) ([\d.]+)V([\d.]+)/g)];
+    expect(bar.length).toBe(3);
+    const bw = Math.min(14, (334 - 12) / 56 - 2);
+    expect(Math.abs(Number(tick[1]) + Number(tick[2]) / 2 - (Number(bar[2]![1]) + bw / 2))).toBeLessThan(0.2);
+    // The note at the top right, above every bar's top; the storm further back says its own amount over its bar.
+    const labels = [...bars.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(\w+)" class="lbl-m">([^<]+)</g)];
+    expect(labels.map((l) => l[4])).toEqual(['Sat 7.2 cm · Sun 1.5 cm', '12.0 cm']);
+    const tops = bar.map((b) => Number(b[3]));
+    expect(Number(labels[0]![2])).toBeLessThan(Math.min(...tops));
+    expect(bars).not.toMatch(/sev-|ghost/);
+  });
+
+  it('draws an episode’s days in its chip, each against a usual day, the viewed day darker', () => {
+    const svg = trendPips({ days: [{ trips: 41_939, expected: 119_400 }, { trips: 4633, expected: 115_000 }, { trips: 5732, expected: 114_000 }] });
+    expect(svg).toContain('aria-hidden="true"');
+    expect([...svg.matchAll(/class="ghost"/g)].length).toBe(3);
+    const ink = [...svg.matchAll(/<rect class="(ink|ink-strong)" x="[\d.]+" y="[\d.]+" width="5" height="([\d.]+)"/g)];
+    expect(ink.map((m) => m[1])).toEqual(['ink', 'ink', 'ink-strong']);
+    // Thursday's third of a day stands taller than Friday's and Saturday's twentieth, which still show (2 px).
+    expect(Number(ink[0]![2])).toBeGreaterThan(2 * Number(ink[1]![2]));
+    expect(Number(ink[1]![2])).toBeGreaterThanOrEqual(2);
+  });
+
+  it('draws what a day is learned from inside its frame: each weekday, the day last year, today’s band, named', () => {
+    const svg = learnStrip({ weeks: [98_000, 101_000, 95_000, 99_000, 97_000, 100_000], weeksLabel: '6 Saturdays before', year: [92_000, 94_000], yearLabel: ['last year', 'Sep 17–24'], today: { v: 5732, low: 81_000, high: 147_000, sev: 'alert' }, bandLabel: 'usual 81k–147k', aria: 'Learned from' });
+    expect([...svg.matchAll(/class="learn-dot"/g)].length).toBe(6);
+    expect([...svg.matchAll(/class="learn-year"/g)].length).toBe(2);
+    for (const label of ['6 Saturdays before', 'last year', 'Sep 17–24', 'usual 81k–147k', 'today']) expect(svg).toContain(`>${label}</text>`);
+    // Every label inside the frame: a start-anchored one from 0, an end-anchored one to the width, a middle one with
+    // room for its half on each side.
+    for (const m of svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)"(?: text-anchor="(\w+)")?[^>]*>([^<]+)</g)) {
+      const x = Number(m[1]);
+      const half = (m[4]!.length * 6.2) / 2;
+      expect(x, m[4]).toBeGreaterThanOrEqual(m[3] === 'middle' ? half : 0);
+      expect(x, m[4]).toBeLessThanOrEqual(m[3] === 'middle' ? 334 - half : 334);
+      expect(Number(m[2]), m[4]).toBeGreaterThan(8);
+    }
+    // Today's value below its band takes the day's severity; a holiday has last year alone.
+    expect(svg).toContain('sev-alert-fill');
+    const holiday = learnStrip({ weeks: [], weeksLabel: '', year: [70_000], yearLabel: ['last year', 'Jan 1'], today: { v: 81_013, low: 49_000, high: 108_000 }, bandLabel: 'usual 49k–108k', aria: 'Learned from' });
+    expect(holiday).not.toContain('learn-dot');
+    expect(holiday).not.toContain('sev-');
   });
 });

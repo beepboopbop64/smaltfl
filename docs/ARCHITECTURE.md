@@ -467,6 +467,11 @@ Builder and drawn in the family's look. The first concepts are on the design can
   as known: the episode's hours and shortfall, History charts and the loads strip stop at it. The outputs of a day
   with something wrong say what they were built from ("Outputs built from a short day"), and the History calendar
   counts only days it has checked.
+- **What a card adds around its cause** (ADR 0008 §11). The weather is a plain note after the day's visuals, never a
+  cause's chip; the health row is headed once and the same on every day, each cell a tap from what it measured (the
+  file check in words, the hours, every finding of its kinds); every finding sits in one tier, so the rows add up to
+  what was found; an episode's chip draws its days so far; a told source is said and the verb moves on; "How it's
+  judged" draws the points a day's range is learned from.
 - **What can be done about a finding.** Each finding offers what fits it, as Datadog's annotations, Anomalo's alerts
   and Monte Carlo's incidents do: mark it expected, with why (kept, but quiet, and the next person sees the note);
   open an incident, and resolve it with what it was, which leaves the day out of what the normal ranges learn from;

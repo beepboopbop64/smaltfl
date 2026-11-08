@@ -237,13 +237,28 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .drill-head { position: sticky; top: 0; z-index: 3; background: var(--surface); margin: 0 calc(-1 * max(16px, env(safe-area-inset-left, 0px))); padding: max(8px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); }
 .drill-title { display: flex; align-items: flex-start; gap: 10px; }
 .drill-title h2 { margin: 2px 0 0; font-size: 18px; overflow-wrap: anywhere; }
-.drill-nav { display: flex; align-items: center; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 8px 0 2px; }
-.drill-nav::-webkit-scrollbar { display: none; }
+/* The sheet's head at 390 px (ADR 0008): the day on its own row; what it reads and what reads it under it, each chip cut
+   short (two or more on a side fold into one); the tabs scrolled to the chosen one, their edges faded while more lie past. */
+.drill-nav { display: flex; align-items: center; gap: 8px; padding: 6px 0 2px; min-width: 0; }
+.drill-nav .nav-gap { flex: 1; min-width: 0; }
 .nav-chip { flex: none; border: 1px solid var(--line); background: var(--sunk); color: var(--ink-2); border-radius: 999px; padding: 4px 10px; min-height: 32px; font: inherit; font-size: 12.5px; font-family: var(--mono); }
-.day-pick { flex: none; display: inline-flex; align-items: center; gap: 4px; margin: 0 4px; }
-.day-pick .btn { min-width: 36px; min-height: 32px; }
-.day-at { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.drill-nav .nav-chip, .drill-nav .nav-fold { flex: 0 1 auto; min-width: 0; max-width: calc(50% - 4px); }
+.drill-nav .nav-chip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; box-sizing: border-box; }
+.nav-fold { position: relative; }
+.nav-fold > summary { list-style: none; display: block; cursor: pointer; line-height: 22px; }
+.drill-nav .nav-fold > summary.nav-chip { max-width: 100%; }
+.nav-fold > summary::-webkit-details-marker { display: none; }
+.nav-fold .nav-list { position: absolute; top: calc(100% + 4px); z-index: 5; display: grid; gap: 6px; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 18px rgb(0 0 0 / 0.16); }
+.nav-fold.up .nav-list { left: 0; } .nav-fold.down .nav-list { right: 0; }
+.nav-fold .nav-list .nav-chip { max-width: 70vw; }
+.day-pick { display: flex; align-items: center; gap: 6px; padding: 8px 0 0; min-width: 0; }
+.day-pick .btn { flex: none; min-width: 40px; min-height: 34px; }
+.day-pick .btn.gone { visibility: hidden; }
+.day-at { flex: 1; min-width: 0; text-align: center; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tabs { display: flex; gap: 0; overflow-x: auto; scrollbar-width: none; margin-top: 4px; }
+.tabs.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+.tabs.fade-l { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); }
+.tabs.fade-l.fade-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs button { flex: none; border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; padding: 10px 12px 9px; min-height: 44px; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 6px; }
 .tabs button[aria-selected="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--smalt); }
@@ -790,6 +805,8 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .cut { stroke: var(--ink); stroke-width: 1.5; }
 .viz .line { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .viz .usual-end { stroke: var(--ink-2); stroke-width: 2; }
+.viz .band-end { stroke: var(--edge); stroke-width: 1.5; fill: none; }
+.viz .wx-bar.snow { fill: var(--teal-fill); } .viz .wx-bar.rain { fill: var(--smalt); opacity: 0.55; }
 .viz .joint { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; }
 .viz .brk { fill: none; stroke: var(--muted); stroke-width: 1.2; }
 .viz .dumb { stroke: var(--ink); stroke-width: 1.6; }
@@ -817,6 +834,8 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .seg-new { fill: var(--smalt); }
 .viz .seg1 { fill: var(--ink); }
 .viz .today-ring { fill: none; stroke: var(--ink-2); stroke-width: 1.2; }
+.viz .learn-dot { fill: var(--ink-2); } .viz .learn-year { fill: var(--ink); }
+.vf-more-method summary { font-size: 13px; color: var(--smalt); cursor: pointer; }
 .viz .pick { fill: var(--ink); }
 .viz .node { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.2; }
 .viz .edge-t { fill: none; stroke: var(--bad); stroke-width: 1.6; } .viz .edge-t.dash { stroke-dasharray: 3 3; }
@@ -864,6 +883,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-fold { overflow: hidden; }
 .vf-kind { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 999px; background: var(--sunk); color: var(--ink-2); white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .vf-group { display: grid; padding: 0 0 6px 20px; }
+.vf-list { display: grid; }
 .vf-row { display: flex; align-items: center; gap: 8px; min-height: 40px; border: 0; border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); background: none; padding: 4px 0; text-align: left; font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer; }
 .vf-row-t { flex: 1; min-width: 0; }
 .vf-row-v { display: grid; justify-items: end; font-family: var(--mono); font-size: 11.5px; color: var(--ink); min-width: 42px; text-align: right; }
@@ -881,12 +901,19 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-menu { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
 .vf-acts .f-log { flex-basis: 100%; margin: 0; }
 .vf-acts .f-form { flex-basis: 100%; }
-.vf-health { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-.vf-cell { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 44px; padding: 0 2px; font-size: 12.5px; color: var(--ink); }
+/* The health row: its heading once, five cells that each open what they measured (ADR 0008 §6). */
+.vf-healthwrap { display: grid; gap: 4px; }
+.vf-health-h { margin: 0; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.vf-health { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--edge); border-radius: 10px; overflow: hidden; }
+.vf-cell { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 44px; padding: 0 2px; border: 0; background: none; font: inherit; font-size: 12.5px; color: var(--ink); cursor: pointer; }
 .vf-cell + .vf-cell { border-left: 1px solid var(--line); }
 .vf-cell.explained, .vf-cell.ok, .vf-cell.note { color: var(--ink-2); }
 .vf-cell.alert, .vf-cell.warn { font-weight: 650; }
-.vf-allok { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; font-size: 13.5px; color: var(--ink-2); }
+.vf-cell:active { background: var(--sunk); }
+/* The weather after the day's numbers: a plain note, nothing to tap. */
+.vf-wx { margin: -4px 0 0; font-size: 13px; color: var(--muted); }
+.vf-told { display: flex; align-items: center; gap: 6px; margin: -6px 0 0; font-size: 13px; color: var(--ink-2); }
+.vf-chip-btn .viz.trend { display: inline-block; margin-right: 6px; }
 .vf-sub { font-size: 12px; color: var(--muted); }
 .vf-story { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 11px; display: grid; gap: 10px; }
 .vf-story-h { display: flex; align-items: center; gap: 8px; border: 0; background: none; padding: 0; text-align: left; font: inherit; font-size: 15px; font-weight: 600; color: var(--ink); cursor: pointer; min-height: 32px; }
@@ -909,8 +936,6 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-one { margin: 0; font-size: 14px; color: var(--ink-2); }
 .vf-readout { justify-self: start; margin: 0; padding: 5px 10px; border-radius: 8px; background: var(--sunk); font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
 .vf-blocks { display: grid; gap: 14px; }
-.vf-allok-wrap { display: grid; gap: 8px; }
-.vf-allok { width: 100%; border-radius: 12px; cursor: pointer; font: inherit; }
 .stopped-line .g { margin-right: 6px; }
 .drill-head .stopped-line { display: flex; align-items: center; gap: 2px; width: fit-content; max-width: 100%; box-sizing: border-box; min-height: 30px; padding: 0 11px; margin: 6px 0 2px; border-radius: 999px; border: 1.5px solid var(--ink-2); background: var(--surface); color: var(--ink); font-size: 12.5px; }
 </style>
@@ -937,7 +962,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 <main>
   <section class="view" id="view-flow" aria-label="Flow">
     <details class="about-flow"><summary>About this flow</summary>
-    <p class="lede" id="lede">NYC yellow-taxi trips from the TLC's records, one load a day as a feed would bring them, checked, joined to their zones and each borough's hourly weather, all run in this browser. Step through January 2024, or a real incident from the records. Each load is judged against two years of days before it: a dot on a card means news. Tap any card for its story: the news first, then its rows, columns, what it dropped, odd rows and history, each with what you can do about it.</p>
+    <p class="lede" id="lede">NYC yellow-taxi trips from the TLC's records, one load a day as a feed would bring them, checked, joined to their zones and each borough's hourly weather, all run in this browser. Step through January 2024, or a real incident from the records. Each load is judged against what a day like it has, the same weekday in the six weeks before and the same day last year: a dot on a card means news. Tap any card for its story: the news first, then its rows, columns, what it dropped, odd rows and history, each with what you can do about it.</p>
     <ul class="legend" aria-label="Legend">
       <li><span class="port-key in" aria-hidden="true"></span>input: data the flow reads</li>
       <li><span class="port-key out" aria-hidden="true"></span>output: a dataset it publishes</li>

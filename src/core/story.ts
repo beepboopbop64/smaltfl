@@ -17,6 +17,7 @@
  */
 import { holidayOf, plusDays, seasonOf } from './calendar.js';
 import { QUANTILES, type HistoryRanges } from './history.js';
+import { shortfall, type EpisodeDay } from './days.js';
 import { MATERIAL, hoursShort, shareWords, type Act, type Finding, type Names, type Severity } from './news.js';
 
 /** Rows today against the rows a day like it has: `usual` is the guess; `low` and `high` its range, when it has one. */
@@ -101,14 +102,16 @@ export interface Story {
   notes: Told[];
   /** Weather worth knowing on the day: context, never a reason. */
   context: Told | null;
-  episode: { days: number; since: string; hour: number | null } | null;
+  /** The episode a day with something wrong is part of: its days so far (each day's trips against its guess, the
+   * viewed day last, none after it), and the trips short over them (days.shortfall: an estimate and its bound). */
+  episode: { days: number; since: string; hour: number | null; trend: { day: string; trips: number; expected: number }[]; short: { estimate: number; bound: number } | null } | null;
   /** The episode a calm day comes after: its days, those the checks held (never published) and the rest (published
    * short), and what it was. */
   recovery: { from: string; to: string; held: string[]; published: string[]; name: string | null } | null;
   health: { cell: Cell; severity: Severity | null; explained: boolean; follows: number; sameDay: number }[];
   primary: Act | null;
   /** Labels the screen shows at a glance, so their words can be counted: rows, chips, the hero's marks. */
-  labels: { amount: string[]; hero: string[]; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[]; after: string | null; key: string[] };
+  labels: { amount: string[]; hero: string[]; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[]; after: string | null; key: string[]; context: string | null; health: string };
   findings: Told[];
 }
 
@@ -138,6 +141,12 @@ export const ACT_VERB: Record<Act, string> = {
   refetch: 'Fetch again',
   export: 'Export for audit',
 };
+
+/** The health row's cells (ADR 0008 §6), in order, each with the kinds of finding it holds and its name on screen. */
+export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'new', 'pair', 'missing'], shape: ['shape'] };
+export const CELL_NAMES: Record<Cell, string> = { file: 'File', amount: 'Amount', hours: 'Hours', values: 'Values', shape: 'Shape' };
+/** The health row's heading: what the five cells are, said once and counted at a glance. */
+export const HEALTH_HEAD = 'Health';
 
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const VALUE_KINDS = new Set<Finding['kind']>(['gone', 'share', 'missing']);
@@ -579,7 +588,24 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   let recovery: Story['recovery'] = null;
   if (badToday) {
     const b = before(day);
-    if (b.days > 0) episode = { days: b.days + 1, since: b.first, hour: b.hour };
+    if (b.days > 0) {
+      // Its days so far, each its trips against its guess (the chip draws them, so day 3 reads apart from day 2), and
+      // the trips short over them as the episode's hours count them (days.shortfall), to the viewed day and no further.
+      const trips = h.of({ of: 'trips' });
+      const trend: { day: string; trips: number; expected: number }[] = [];
+      const ep: EpisodeDay[] = [];
+      for (let d = b.first; d <= day; d = plusDays(d, 1)) {
+        const j = file.days.indexOf(d);
+        const r = trips?.at(d);
+        if (j < 0 || !r) continue;
+        trend.push({ day: d, trips: file.rows[j]!, expected: r.expected });
+        if (file.hours?.[j]) ep.push({ day: d, got: file.hours[j]!, low: r.low, expected: r.expected, alert: true });
+      }
+      const j0 = file.days.indexOf(b.first);
+      const r0 = trips?.at(b.first);
+      const fall = hoursF?.hours ? { day, ...hoursF.hours } : j0 >= 0 && r0 ? (() => { const f = hoursShort(h, j0, r0.expected)?.hours; return f ? { day: b.first, ...f } : null; })() : null;
+      episode = { days: b.days + 1, since: b.first, hour: b.hour, trend, short: fall ? shortfall(ep, fall, day) : null };
+    }
   } else if (k >= 0 && !o.refused && severity !== 'alert' && severity !== 'warn' && o.episode !== false) {
     const yesterday = plusDays(day, -1);
     const last = badDay(h, yesterday, names, hidden);
@@ -632,13 +658,22 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   else if (volume?.lasting && volume.severity === 'note' && volume.value !== undefined && volume.range) head = `${volume.value > volume.range.expected ? 'Busier' : 'Quieter'} than usual for days`;
   else head = calmHead;
 
-  // Snow names its day ("❄ 7.2 cm Sat"): today's, or the day before's when today's trips are the news.
-  const snowOn = (d: string) => {
+  // The weather, as context after the day's numbers and never in the chip a cause takes (ADR 0008 §6): today's snow,
+  // and the day before's when today's trips are the news ("❄ 1.5 cm today · 7.2 cm Sat"). Not on a day with something
+  // wrong, whose cause is told, nor on the day after an episode, which says what is left of it: their weather is on
+  // the weather's own card.
+  const snowOf = (d: string) => {
     const j = file.days.indexOf(d);
-    const cm = j >= 0 ? (file.weather?.snow[j] ?? 0) : 0;
-    return cm >= 1 ? `❄ ${cm.toFixed(1)} cm ${weekdayOf(d).slice(0, 3)}` : null;
+    return j >= 0 ? (file.weather?.snow[j] ?? 0) : 0;
   };
-  const snowChip = k >= 0 && (hero === 'amount' || severity === 'ok' || severity === 'note') ? (snowOn(day) ?? (hero === 'amount' ? snowOn(plusDays(day, -1)) : null)) : null;
+  const cm = (x: number) => `${x.toFixed(1)} cm`;
+  const contextLabel = (() => {
+    if (k < 0 || severity === 'alert' || o.refused) return null;
+    const today = snowOf(day);
+    const before = hero === 'amount' ? snowOf(plusDays(day, -1)) : 0;
+    const parts = [today >= 1 ? `${cm(today)} today` : '', before >= 1 ? `${cm(before)} ${weekdayOf(plusDays(day, -1)).slice(0, 3)}` : ''].filter(Boolean);
+    return parts.length ? `❄ ${parts.join(' · ')}` : null;
+  })();
   const span = (a: string, b: string) => (a === b ? weekdayOf(a).slice(0, 3) : `${weekdayOf(a).slice(0, 3)}–${weekdayOf(b).slice(0, 3)}`);
   // Days said as runs: "Fri–Sun", "Mon, Wed".
   const spans = (ds: readonly string[]) => {
@@ -654,7 +689,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const afterChip = recovery ? [`after ${span(recovery.from, recovery.to)} · ${recovery.name}`, `after ${span(recovery.from, recovery.to)}`].find((c) => !c.includes('null') && wordsIn(c) <= 5)! : null;
   const chip = episode
     ? `Day ${episode.days} · since ${weekdayOf(episode.since).slice(0, 3)}${episode.hour !== null ? ` ${clock(episode.hour)}` : ''}`
-    : afterChip ?? snowChip;
+    : afterChip;
   // And whether anything is left to do: a held load is never published, and nothing waits on a person to release it.
   const after = recovery && o.step ? `Nothing to do · ${[recovery.published.length ? `${spans(recovery.published)} published short` : '', recovery.held.length ? `${spans(recovery.held)} held` : ''].filter(Boolean).join(', ')}` : null;
 
@@ -670,8 +705,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     : cause?.acts[0] ?? standalone[0]?.acts[0] ?? null;
 
   // The health row: each cell the worst of its kinds as told, and whether the cause explains it.
-  const cells: [Cell, Finding['kind'][]][] = [['file', ['integrity', 'schema']], ['amount', ['volume']], ['hours', ['hours']], ['values', ['gone', 'share', 'new', 'pair', 'missing']], ['shape', ['shape']]];
-  const health = cells.map(([cell, kinds]) => {
+  const health = (Object.entries(CELL_KINDS) as [Cell, readonly Finding['kind'][]][]).map(([cell, kinds]) => {
     const mine = told.filter((f) => kinds.includes(f.kind) && f.severity !== 'ok');
     const loudOnes = mine.filter((f) => f.tier === 'cause' || f.tier === 'standalone');
     const folded = mine.filter((f) => f.tier === 'absorbed' || f.tier === 'follows' || f.tier === 'sameDay');
@@ -722,7 +756,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       amount: amount ? [`${fmtInt(amount.value)} trips`, ...(amount.change !== null && hero !== 'amount' && cause?.kind !== 'volume' ? [changeLabel(amount.change)] : []), `usual ${compact(amount.low)}–${compact(amount.high)}`] : [],
       hero: heroLabels,
       follows: follows.length ? `${follows.length} ${follows.length === 1 ? 'change' : 'changes'} this explains` : null,
-      sameDay: sameDay.length ? `${sameDay.length} more ${sameDay.length === 1 ? 'change' : 'changes'} this day` : null,
+      // Under the row of changes it explains, "12 more this day" says the noun once; alone, it says it.
+      sameDay: sameDay.length ? `${sameDay.length} more ${follows.length ? '' : `${sameDay.length === 1 ? 'change' : 'changes'} `}this day` : null,
       notes: notes.length ? `${notes.length} ${notes.length === 1 ? 'note' : 'notes'}` : null,
       more: more.length ? `${more.length} more unusual` : null,
       primary: primary ? ACT_VERB[primary] : null,
@@ -730,6 +765,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       after,
       // A strip of days at a glance (a calm day's week, an amount day's four weeks) carries its one-line key.
       key: shownHero === 'calm' || ((shownHero === 'amount' || shownHero === 'finding') && cause?.kind === 'volume') ? [...STRIP_KEY] : [],
+      context: state === 'recovery' ? null : contextLabel,
+      health: HEALTH_HEAD,
     },
     findings: [...told].sort(byRank),
   };
@@ -762,7 +799,7 @@ export function splitSentence(s: Story): string | null {
 
 /** Every string a story shows at a glance (head, chip, the hero's labels, rows, the verb), for its word budget. */
 export function glanceStrings(s: Story): string[] {
-  return [s.head, s.chip ?? '', s.labels.after ?? '', ...s.labels.amount, ...s.labels.hero, ...s.labels.key, s.labels.follows ?? '', ...s.labels.kinds, s.labels.sameDay ?? '', s.labels.more ?? '', s.labels.notes ?? '', s.labels.primary ?? '', ...s.stories.map((f) => f.title)].filter(Boolean);
+  return [s.head, s.chip ?? '', s.labels.after ?? '', ...s.labels.amount, ...s.labels.hero, ...s.labels.key, s.labels.context ?? '', s.labels.health, s.labels.follows ?? '', ...s.labels.kinds, s.labels.sameDay ?? '', s.labels.more ?? '', s.labels.notes ?? '', s.labels.primary ?? '', ...s.stories.map((f) => f.title)].filter(Boolean);
 }
 
 export { shareWords };

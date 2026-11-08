@@ -336,14 +336,16 @@ export function countExpectations(db: Database, plan: FlowPlan, node: number, ct
 /** Fail the run when a `fail` rule failed for any row, or more rows were dropped than allowed. */
 function enforce(n: ExpectNode, result: ExpectationResult): ExpectationResult {
   const failing = result.rules.filter((r) => r.onFail === 'fail' && r.failed > 0);
-  if (failing.length > 0) throw new RunError(`expectations failed: ${failing.map((r) => `${r.name} (${r.failed} row${r.failed === 1 ? '' : 's'})`).join(', ')}`, n.origin);
+  if (failing.length > 0) throw new RunError(`expectations failed: ${failing.map((r) => `${r.name} (${count(r.failed)} row${r.failed === 1 ? '' : 's'})`).join(', ')}`, n.origin);
   if (n.maxDropped !== null && result.rows > 0 && result.dropped / result.rows > n.maxDropped) {
-    throw new RunError(`dropped ${result.dropped} of ${result.rows} rows (${percent(result.dropped / result.rows)}), more than the ${percent(n.maxDropped)} allowed`, n.origin);
+    throw new RunError(`dropped ${count(result.dropped)} of ${count(result.rows)} rows (${percent(result.dropped / result.rows)}), more than the ${percent(n.maxDropped)} allowed`, n.origin);
   }
   return result;
 }
 
 const percent = (x: number) => `${(x * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
+/** A count as the app prints one: 4,229. */
+const count = (n: number) => n.toLocaleString('en-US');
 
 /** Run engine work, naming the step an engine error came from. */
 function engine<T>(origin: string, work: () => T): T {
