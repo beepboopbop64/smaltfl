@@ -238,7 +238,12 @@ describe('the news’s charts', () => {
   it('marks severity by shape, and every glyph is hidden from screen readers', () => {
     expect(glyph('alert')).toContain('M8 .6l6.7 3.8v7.2');
     expect(glyph('warn')).toContain('g-tri');
-    for (const g of ['alert', 'warn', 'note', 'held', 'explained', 'ack'] as const) expect(glyph(g)).toContain('aria-hidden="true"');
+    for (const g of ['alert', 'warn', 'note', 'held', 'flag', 'closed', 'explained', 'ack'] as const) expect(glyph(g)).toContain('aria-hidden="true"');
+    // A day decided reads by shape (ADR 0009 §12): published as is a flag, not published a box crossed out, paused two
+    // bars; three different shapes, none a colour alone.
+    expect(glyph('flag')).toContain('g-wall');
+    expect(glyph('closed')).toMatch(/g-box.*g-x/);
+    expect(new Set(['held', 'flag', 'closed'].map((g) => glyph(g as 'held').replace(/class="g g-\w+"/, '')))).toHaveProperty('size', 3);
     expect(stripBar({ v: 4633, low: 84912, high: 155515, ymax: 160000, sev: 'alert' })).toContain('sev-alert-fill');
   });
 

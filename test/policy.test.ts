@@ -12,8 +12,9 @@ import smaltfl from '../src/plugin/index.js';
 import { checkAction, checkDecision, DECIDE, readView, runFlow, validateDocument, wrapRead, type Edit, type FlowDocument, type Policies } from '../src/index.js';
 import { EXAMPLE_SOURCES } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
+import { examplePublishing } from './helpers/example.js';
 
-const doc = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
+const doc = examplePublishing();
 const p = doc.policies!;
 
 async function ran(): Promise<Database> {

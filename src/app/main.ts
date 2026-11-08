@@ -18,26 +18,26 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, QUANTILES, type His
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, toldLine, type EpisodeDay } from '../core/days.js';
-import { countedChecks } from '../core/hold.js';
+import { calendarHead, dayMid, dayShort, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
+import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, stagedKeys, standingFor, type DecideAbout, type HistoryRef, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { CELL_KINDS, CELL_NAMES, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
-import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule } from '../core/policy.js';
+import { checkDecision, covers, readView, wrapRead, type DecideOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
 import { flowHash, type Column, type FlowPlan, type PlanNode } from '../core/plan.js';
 import { checksOver, clockText, columnSql, fillGaps, growForest, isolationPath, madsOf, minuteOfDay, needOf, needWords, pathLength, principalComponents, profileColumn, quantile, renamesOf, scoreOf, secondsText, suggestChecks, unusual, type Cut, type Drift, type Forest, type Judge, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
-import type { RunResult, VerifyLevel, VerifyResult } from '../core/protocol.js';
+import type { ReleaseResult, RunResult, VerifyLevel, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
-import { pinFile, runFlow, verifyRun } from '../index.js';
+import { pinFile, releaseRun, runFlow, verifyRun } from '../index.js';
 import { describe as describeFile, severityOf as fileSeverity, type FileCheck } from '../core/integrity.js';
 import { fetchChecked, IntegrityError, type Expected } from './fetch-checked.js';
 import { FlowRecord } from './record.js';
 import { buildBag } from '../core/bag.js';
 import { zip } from '../core/zip.js';
-import { parseCheckpoint, type JSONValue } from '../core/log.js';
+import { entryLeaf, parseCheckpoint, type JSONValue, type LogEntry as RecordEntry } from '../core/log.js';
 import { connect, type Engine } from './engine.js';
 import { besideSlot, edgePath, frameAt, freeSlot, GRID, gridLayout, groupKey, pinLayout, routeVia, type GridLayout } from './layout.js';
 
@@ -50,19 +50,28 @@ interface RunRecord {
   at: Date;
   /** The daily load it ran on, by place in the list. */
   load?: number;
+  /** Its inputs as one text (core/hold.ts inputsKey): what finds its day's pause in the record (ADR 0009 §10). */
+  inputs: string;
+  /** A held run's release, once a decision to publish it as is was applied (or refused) in this engine. */
+  release?: ReleaseResult;
   verified?: VerifyResult;
   signed?: SignedManifest;
   signatureOk?: boolean;
 }
 
 const state = {
-  doc: structuredClone(exampleDoc) as FlowDocument,
+  doc: structuredClone(exampleDoc) as unknown as FlowDocument,
   engine: null as Engine | null,
   runs: [] as RunRecord[],
   running: false,
   selected: null as string | null,
   identity: null as Identity | null,
   failed: null as { origin?: string; message: string; file?: FileCheck } | null,
+  /**
+   * Each dataset name and the run whose version it shows (ADR 0009): what readers get. A held run's versions are
+   * staged, and a name shows them only once a decision releases them.
+   */
+  names: new Map<string, RunRecord>(),
   plans: new Map<string, FlowPlan>(),
   issues: [] as string[],
   /** Who the app reads and acts as: every read goes through this person's policy. */
@@ -153,6 +162,21 @@ const readDataset = (name: string): string | null => {
   return view ? wrapRead(view, `SELECT * FROM ${quoteIdent(name)}`) : null;
 };
 
+/** A dataset as readers get it, the version its name shows (ADR 0009), as the viewer may read it; null when closed to
+ * them, or when nothing is published under the name yet. */
+const readPublished = (name: string): string | null => (state.names.has(name) ? readDataset(name) : null);
+
+/**
+ * What a view of the published names says on a day whose own rows readers don't get (ADR 0009 §12): "As published ·
+ * Wed 20", or "Nothing published yet". Null when readers get the day on screen.
+ */
+function asPublished(): string | null {
+  const r = onScreen();
+  if (!r || isPublished(r)) return null;
+  const day = readersDay(r);
+  return day ? `As published · ${dayShort(day)}` : 'Nothing published yet';
+}
+
 /** Keep each node's columns from the latest run's typed plan, so policies can be applied as the app reads. */
 async function learnColumns(): Promise<void> {
   const run = latest();
@@ -193,9 +217,15 @@ const pct = (x: number) => (x > 0 && x < 0.0005 ? '<0.1%' : x < 1 && x >= 0.9995
 /** Short counts for cards: 9,555 · 12.3k · 456k · 1.2M. */
 const fmtCompact = (n: number) => (Math.abs(n) < 10000 ? fmtInt(n) : Math.abs(n) < 1e6 ? `${(n / 1000).toFixed(Math.abs(n) < 1e5 ? 1 : 0)}k` : `${(n / 1e6).toFixed(1)}M`);
 
-function setStatus(text: string, bad = false, run?: { n: number; state: 'done' | 'failed' | 'refused' }): void {
+/** A held day's mark (ADR 0009 §12): ‖ paused, ⚑ published as is, ✕ not published. */
+const PAUSE_MARK: Record<PauseState, VizMark> = { waiting: 'held', asis: 'flag', dont: 'closed' };
+
+function setStatus(text: string, bad = false, run?: { n: number; state: 'done' | 'held' | 'failed' | 'refused'; mark?: PauseState | null }): void {
   const el = $('status');
   el.textContent = text;
+  // The day's mark before its line, a shape hidden from screen readers and from the line's text, which says the day as
+  // before (ADR 0009 §12).
+  if (run?.mark) el.prepend(glyphEl(PAUSE_MARK[run.mark], 14));
   // A line about a run on a day takes that day's severity, held or published alike: one rule for every alert day.
   const day = run && loads.list.length > 1 ? loads.list[loads.at]?.day : undefined;
   const sev = day ? verdictOf(day)?.severity : undefined;
@@ -230,27 +260,103 @@ function syncHead(): void {
 
 const steps = () => new Map(state.doc.steps.map((st) => [st.id, st]));
 const sourceIds = () => new Set(state.doc.sources.map((src) => src.id));
+/** The day a run ran on: its load's. */
+const dayOfRun = (r: RunRecord | undefined): string | undefined => (r?.load !== undefined ? loads.list[r.load]?.day : undefined);
 /**
- * The run on screen (ADR 0008 §10): the viewed day's own, or after a held or refused run the latest day before it that
- * passed, never a later day's. Every view reads its rows through this one.
+ * The run on screen (ADR 0008 §10, ADR 0009 §12): the viewed day's own, published or staged; after a run that stopped
+ * (a refused file, an engine error) the latest day before it that was published, never a later day's. Every view reads
+ * its rows through this one.
  */
 const latest = (): RunRecord | undefined => {
-  const viewed = loads.list.length > 1 ? loads.list[loads.at]?.day : undefined;
-  const k = shownRun(state.runs.map((r) => (r.load !== undefined ? loads.list[r.load]?.day : undefined)), viewed);
+  const viewed = viewedDay();
+  const k = shownRun(state.runs.map((r) => {
+    const d = dayOfRun(r);
+    return d && (d === viewed || isPublished(r)) ? d : null;
+  }), viewed);
   return k < 0 ? undefined : state.runs[k];
 };
 /** The day of the run on screen, where runs are by day. */
-const shownDay = (): string | undefined => {
-  const r = latest();
-  return r?.load !== undefined ? loads.list[r.load]?.day : undefined;
-};
+const shownDay = (): string | undefined => dayOfRun(latest());
 /** The day on screen: the load picked in the strip. */
 const viewedDay = (): string | undefined => (loads.list.length > 1 ? loads.list[loads.at]?.day : undefined);
-/** The date bar for rows on screen that are another day's, or null. */
+/** The run on screen when it is the viewed day's own (always, without daily loads), not another day's. */
+const onScreen = (): RunRecord | undefined => {
+  const r = latest();
+  return r && dayOfRun(r) === viewedDay() ? r : undefined;
+};
+/**
+ * The bar over rows on screen that aren't what readers get: another day's, after a refused file ("Rows from Thu Sep 21
+ * · the last day published"); or the viewed day's own, staged while it waits or after it was not published ("Staged
+ * Thu 21 · readers see Wed 20"). Null for rows readers get.
+ */
 const rowsFromBar = (): HTMLElement | null => {
   const text = rowsFrom(shownDay(), viewedDay());
-  return text ? h('p', { class: 'rows-from', role: 'note' }, text) : null;
+  if (text) return h('p', { class: 'rows-from', role: 'note' }, text);
+  const r = latest();
+  const day = dayOfRun(r);
+  const staged = r && day && !isPublished(r) ? stagedBar(day, readersDay(r)) : null;
+  return staged ? h('p', { class: 'rows-from staged', role: 'note' }, staged) : null;
 };
+
+// ------------------------------------------------------------------ what readers get (ADR 0009)
+
+/** The record's pauses, by their inputs (core/hold.ts pausesOf), read again as the record grows. */
+const pauseCache = { size: -1, list: [] as Pause[], byKey: new Map<string, Pause>() };
+function pauses(): Pause[] {
+  const entries = ledger?.entries ?? [];
+  if (pauseCache.size !== entries.length) {
+    pauseCache.list = pausesOf(entries, state.doc.publish?.period ?? null);
+    pauseCache.byKey = new Map(pauseCache.list.map((p) => [p.key, p]));
+    pauseCache.size = entries.length;
+  }
+  return pauseCache.list;
+}
+const pauseByInputs = (key: string): Pause | null => (pauses(), pauseCache.byKey.get(key) ?? null);
+
+/** What became of a held run's day, and the pause the record keeps for it. */
+interface PauseNow {
+  state: PauseState;
+  pause: Pause | null;
+}
+
+/**
+ * What became of a held run's day (ADR 0009 §6): waiting for a decision, published as is (released here, or every held
+ * output already showing its versions), or not published. Null for a run that published, and for a held run with
+ * nothing waiting and nothing decided (each name shows its versions already: there is nothing to decide).
+ */
+function pauseOf(r: RunRecord | undefined): PauseNow | null {
+  if (!r || !r.result.holds?.length) return null;
+  const p = pauseByInputs(r.inputs);
+  const now = pauseState({ holds: r.result.holds.length, waiting: r.result.waiting.length, released: r.release?.outcome === 'applied' }, p);
+  return now ? { state: now, pause: p } : null;
+}
+
+/** Whether readers got a run's versions: it published, or a decision published it as is. */
+const isPublished = (r: RunRecord): boolean => {
+  const p = pauseOf(r);
+  return !p || p.state === 'asis';
+};
+
+/** The day of the version a name shows readers now, or null when nothing is published under it. */
+const showsDay = (name: string): string | null => dayOfRun(state.names.get(name)) ?? null;
+
+/** The day readers see in place of a run's: what the first output it holds back shows. */
+function readersDay(r: RunRecord): string | null {
+  const name = r.result.waiting[0] ?? Object.keys(r.result.manifest.outputs)[0];
+  return name ? showsDay(name) : null;
+}
+
+/** Note what a run's or a release's names now show. */
+function noteShown(r: RunRecord, names: readonly string[]): void {
+  for (const n of names) state.names.set(n, r);
+}
+
+/** The tab's title (ADR 0009 §12): ‖ before it while any day waits for a decision, in this visit or an earlier one. */
+let baseTitle = '';
+function syncTitle(): void {
+  baseTitle ||= document.title.replace(/^‖ /, '');
+  document.title = `${pauses().some((p) => p.state === 'open') ? '‖ ' : ''}${baseTitle}`;
+}
 const nodeOf = (id: string): ManifestNode | undefined => latest()?.result.manifest.nodes.find((n) => n.origin === id);
 
 const KIND: Record<string, string> = { sql: 'SQL', filter: 'FILTER', formula: 'FORMULAS', select: 'SELECT', join: 'JOIN', aggregate: 'AGGREGATE', expectations: 'CHECKS' };
@@ -564,9 +670,14 @@ function cardLine(id: string): CardLine {
   const story = sday && (id === loadSource() || id === history?.file.step) ? storyFor(sday) : null;
   if (story && id === loadSource() && (story.severity === 'alert' || story.severity === 'warn')) return { text: shortHead(story), tone: 'drop' };
   if (story?.gate?.held && id === history?.file.step) return { text: `held · ${fmtInt(story.gate.dropped)} of ${fmtInt(story.gate.rows)}`, tone: 'drop' };
-  // An output the held run didn't build, or one built from a day with something wrong upstream (ADR 0008).
+  // An output the held run didn't build, or one built from a day with something wrong upstream (ADR 0008); on a day
+  // paused, an output that waits says what readers see meanwhile, and after a decision what became of it (ADR 0009).
   const out = outputState(id);
   if (out === 'stale') return plain('not published');
+  // Four words that fit the card (ADR 0008 §12): "‖ waits · shows Wed 20", "✕ unpublished · Wed 20".
+  if (out === 'waiting') return plain(`‖ waits · ${showsDay(id) ? `shows ${dayShort(showsDay(id)!)}` : 'none shown'}`);
+  if (out === 'dont') return plain(showsDay(id) ? `✕ unpublished · ${dayShort(showsDay(id)!)}` : '✕ not published');
+  if (out === 'asis') return plain(dayOfRun(onScreen()) ? `⚑ as is · ${dayShort(dayOfRun(onScreen())!)}` : '⚑ published as is');
   if (out === 'alert') return plain(`built ${lacked(storyFor(newsDay()!)!)?.short ?? 'from an alert'}`);
   if (notBuilt(id)) return plain('not built today');
   const view = access(id);
@@ -605,9 +716,14 @@ function shortHead(story: Story): string {
 const notBuilt = (id: string): boolean => !!state.failed?.origin && state.failed.origin !== id && downstreamOf(state.failed.origin).includes(id);
 
 /** An output on the day: not published (its run was held or refused upstream), built from a day with something wrong
- * upstream, or neither. */
-function outputState(id: string): 'stale' | 'alert' | null {
+ * upstream, or neither; on a day paused, an output that waits, and what became of it once decided (ADR 0009). */
+function outputState(id: string): 'stale' | 'alert' | PauseState | null {
   if (!isOutput(id) || !latest()) return null;
+  const own = state.failed ? undefined : onScreen();
+  const p = pauseOf(own);
+  // What waits, or once decided what waited when the day was held (a day run again after its release has nothing left
+  // waiting, and still says what became of it).
+  if (p && (own!.result.waiting.includes(id) || (p.state !== 'waiting' && !!p.pause?.waiting.includes(id)))) return p.state;
   const src = loadSource();
   if (!src || !downstreamOf(src).includes(id)) return null;
   if (state.failed) return 'stale';
@@ -1302,10 +1418,13 @@ function renderCanvas(): void {
     const readable = access(id);
     const classes = [sourceIds().has(id) ? 'source' : steps().get(id)?.dataset ? 'dataset' : 'step'];
     if (state.failed?.origin === id) classes.push('failed', ...(steps().get(id)?.kind === 'expectations' && !state.failed.file ? ['held'] : []));
+    // Checks that held the day's run (ADR 0009): drawn as a held gate is.
+    else if (!state.failed && onScreen()?.result.holds.some((x) => x.by === 'checks' && x.origin === id)) classes.push('failed', 'held');
     const cday = newsDay();
     if (cday && id === loadSource() && storyFor(cday)?.severity === 'alert') classes.push('cause');
     const os = outputState(id);
-    if (os) classes.push(os === 'stale' ? 'not-published' : 'from-alert');
+    if (os === 'asis') classes.push(cday && storyFor(cday)?.severity === 'alert' ? 'from-alert' : n?.status ?? 'built');
+    else if (os) classes.push(os === 'alert' ? 'from-alert' : 'not-published');
     else if (notBuilt(id)) classes.push('not-published');
     else if (readable && !readable.open) classes.push('closed');
     else if (n) classes.push(n.status);
@@ -2566,7 +2685,10 @@ function storyFor(day: string): Story | null {
   const hidden = hiddenTripColumns();
   const gate = gateStep();
   const loaded = loads.list[loads.at]?.day === day;
-  const held = loaded && state.failed && !state.failed.file && gate && state.failed.origin === gate.step ? true : undefined;
+  // Held at the gate: by the run on screen, its checks holding it (ADR 0009 §3), or, for a flow that doesn't say what
+  // holds it, the gate that stopped the run.
+  const own = loaded && gate && !state.failed ? onScreen() : undefined;
+  const held = loaded && gate && ((state.failed && !state.failed.file && state.failed.origin === gate.step) || own?.result.holds.some((x) => x.by === 'checks' && x.origin === gate.step)) ? true : undefined;
   const refused = loaded && !!state.failed?.file;
   const key = `${day}|${checksAsCounted()}|${dataLog.version}|${[...hidden].sort().join(',')}|${held ?? ''}|${refused}`;
   let told = storyCache.get(key);
@@ -2930,7 +3052,11 @@ function chipsOf(f: Finding): HTMLElement | null {
 /** The detail sheet over the tab: a title, the visuals, at most one sentence, its verbs; it keeps the day and the card. */
 function openDetail(title: string, sev: Severity, body: (Node | null)[], f?: Finding | null, card?: string, primary?: Act | null): void {
   document.querySelector('.vf-detail-wrap')?.remove();
-  const close = () => wrap.remove();
+  const close = () => {
+    wrap.remove();
+    if (sheetStale && state.selected) void renderSheet();
+    sheetStale = false;
+  };
   const sheet = h('div', { class: 'vf-detail', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, ...(f ? { id: `finding-${f.key}` } : {}) },
     h('div', { class: 'vf-grab', 'aria-hidden': 'true' }),
     h('div', { class: 'vf-dhead' }, h('h3', {}, sevMark(sev) ? glyphEl(sevMark(sev)!, 16) : '', title), h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: close }, '×')),
@@ -3232,11 +3358,14 @@ function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): v
 }
 
 /** One verb, and the others behind ⋯. */
-function actionsOf(f: Finding, card: string, primary: Act | null): HTMLElement {
-  const main = primary ? actButton(primary, f, card) : null;
-  main?.classList.add('vf-primary');
-  main?.classList.remove('small', 'quiet');
-  const others = [...new Set([...f.acts, 'export' as Act])].filter((a) => a !== primary);
+function actionsOf(f: Finding, card: string, primary: Act | null, lead?: HTMLElement | null): HTMLElement {
+  // A day paused leads with Decide (ADR 0009 §12), every verb of the finding behind ⋯.
+  const main = lead ?? (primary ? actButton(primary, f, card) : null);
+  if (!lead) {
+    main?.classList.add('vf-primary');
+    main?.classList.remove('small', 'quiet');
+  }
+  const others = [...new Set([...f.acts, 'export' as Act])].filter((a) => lead || a !== primary);
   const menu = h('div', { class: 'vf-menu', hidden: true }, ...others.map((a) => actButton(a, f, card)).filter((x): x is HTMLElement => !!x));
   const more = menu.childElementCount ? h('button', { type: 'button', class: 'vf-more', 'aria-label': `More actions: ${Array.from(menu.children).map((b) => b.textContent).join(', ')}`, title: Array.from(menu.children).map((b) => b.textContent).join(' · '), 'aria-expanded': 'false', onclick: (e: Event) => { menu.hidden = !menu.hidden; (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!menu.hidden)); } }, glyphEl('more', 16)) : null;
   const done = findingLog(f);
@@ -3310,6 +3439,9 @@ function causeCard(story: Story, card: string): HTMLElement {
   const told = toldOf(story);
   const primary = told && story.primary === 'notify' ? 'incident' : story.primary;
   const ep = story.episode;
+  // The day paused (ADR 0009 §12): its reach row says what its outputs wait for, and its one verb is Decide.
+  const own = !state.failed && story.day === viewedDay() ? onScreen() : undefined;
+  const paused = own && pauseOf(own) ? pauseRow(own, story) : null;
   return h('section', { class: `vf-card ${story.state}`, ...(anchor ? { id: `finding-${anchor.key}` } : {}) },
     h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head', role: 'status', 'aria-live': 'polite' }, m && !calm ? glyphEl(m, 18) : '', story.head)),
     // An episode's chip draws its days so far, each its trips against a usual day, so day 3 reads apart from day 2.
@@ -3327,11 +3459,11 @@ function causeCard(story: Story, card: string): HTMLElement {
     // The checks on every day with something wrong, passed or held, and on a near miss (ADR 0008 §10).
     g && (held || g.near || (story.severity === 'alert' && !calm)) && story.hero !== 'gate' ? h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', held ? 'Checks held' : g.near ? 'Checks near the limit' : 'Checks passed'), gateVisual(g, false, gateScale(story))) : null,
     // What the day's outputs are: never "published" alone, which reads as good news; a tap names them.
-    story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${reachLabel(story, outs.length)}: ${outs.join(', ')}. Open the list.`, onclick: () => outputsDetail(story, outs) },
+    paused ? paused.reach : story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${reachLabel(story, outs.length)}: ${outs.join(', ')}. Open the list.`, onclick: () => outputsDetail(story, outs) },
       svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'published' })), reachLabel(story, outs.length), h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
     story.labels.follows ? foldRow(story.labels.follows, story.labels.kinds, story.follows, card, profileOf(card) !== undefined, true) : null,
     story.labels.sameDay ? foldRow(story.labels.sameDay, [], story.sameDay, card, profileOf(card) !== undefined, true) : null,
-    anchor && primary ? actionsOf(anchor, card, primary) : null);
+    anchor && (primary || paused?.verb) ? actionsOf(anchor, card, primary, paused?.verb) : paused?.verb ? h('div', { class: 'vf-acts' }, paused.verb) : null);
 }
 
 /** Whether the source was told on an earlier day of the episode a day is part of. */
@@ -3344,6 +3476,129 @@ function toldBefore(day: string): boolean {
 function toldOf(story: Story): string | null {
   // Said by the load's day, as the app's days are: the clock time is in the record's line under the verbs.
   return toldLine(dataLog.entries, story.episode?.since ?? story.day, story.day);
+}
+
+/** What a reach row says without a story to say it from (a day the history doesn't have): only the pause is said. */
+const NO_STORY = { severity: 'ok', split: null, amount: null, gate: null } as const;
+
+/**
+ * A held day's row (ADR 0009 §12): what its outputs wait for, or what became of them, a tap from their list; under it,
+ * once decided, who decided and when; and its one verb, Decide, or, for someone who may not decide, whom it waits on.
+ */
+function pauseRow(r: RunRecord, story: Story | null): { reach: HTMLElement; verb: HTMLElement | null } {
+  const now = pauseOf(r)!;
+  const waiting = r.result.waiting.filter((x) => isOwner() || visible(x));
+  const label = reachLabel(story ?? NO_STORY, waiting.length, now.state);
+  const d = now.pause?.decision ?? null;
+  const under = d?.about.under !== undefined ? ledger?.entries[d.about.under] : undefined;
+  const underDay = (under?.about as { day?: string } | undefined)?.day;
+  const reach = h('div', { class: 'vf-pause' },
+    h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${label}: ${waiting.join(', ')}. Open the list.`, onclick: () => waitingDetail(r, label) },
+      svgNode(reachIcon({ n: waiting.length, state: now.state === 'asis' ? 'published' : 'held' })), label, h('span', { class: 'vf-chev' }, glyphEl('chev', 14))),
+    d && now.state !== 'waiting' ? h('p', { class: 'vf-receipt' }, glyphEl(PAUSE_MARK[now.state], 14), `${personName(d.by)} · ${underDay ? `under ${dayShort(underDay).split(' ')[0]}’s decision` : clock(d.at)}`) : null,
+    now.pause?.otherBuild ? h('p', { class: 'vf-sub' }, 'Decided under another build: decide it again here') : null);
+  if (now.state !== 'waiting') return { reach, verb: null };
+  const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
+  const verb = may
+    ? h('button', { type: 'button', class: 'vf-primary vf-decide', 'aria-label': `Decide what readers get${dayOfRun(r) ? ` for ${dayMid(dayOfRun(r)!)}` : ''}`, onclick: () => decisionSheet(r, story) }, 'Decide')
+    : h('p', { class: 'vf-waiting-on' }, `Waiting on ${deciders()}`);
+  return { reach, verb };
+}
+
+/** Who may decide a held day, by name: the owners, and whoever a decide rule names. */
+function deciders(): string {
+  const p = policies();
+  const names = p ? [...p.principals.filter((x) => x.owner).map((x) => x.name), ...p.rules.flatMap((x) => (x.kind === 'action' && x.action === 'smaltfl:decide' ? x.for.map((id) => p.groups?.find((g) => g.id === id)?.name ?? personName(id)) : []))] : [];
+  return [...new Set(names)].join(' or ') || 'the owner';
+}
+
+/** A time of day, "09:40". */
+const clock = (at: string) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+/** How long a day has waited, "Waiting 2 h". */
+function waited(since: string | undefined): string | null {
+  if (!since) return null;
+  const min = Math.max(0, (Date.now() - new Date(since).getTime()) / 60000);
+  return `Waiting ${min < 1 ? '<1 min' : min < 60 ? `${Math.round(min)} min` : min < 48 * 60 ? `${Math.round(min / 60)} h` : `${Math.round(min / 1440)} days`}`;
+}
+
+/** The outputs a held day keeps back, each waiting with its staged rows and a tap to its card. */
+function waitingDetail(r: RunRecord, label: string): void {
+  const now = pauseOf(r);
+  const list = h('ul', { class: 'vf-outlist' }, ...r.result.waiting.filter((x) => isOwner() || visible(x)).map((o) => h('li', {}, h('button', { type: 'button', onclick: () => (document.querySelector('.vf-detail-wrap')?.remove(), select(o)) },
+    h('span', { class: `o-box${now?.state === 'asis' ? '' : ' held'}`, 'aria-hidden': 'true' }, now?.state === 'asis' ? glyphEl('ack', 14) : ''),
+    h('span', { class: 'o-name' }, o),
+    h('span', { class: 'o-rows' }, `${now?.state === 'asis' ? 'published' : now?.state === 'dont' ? 'not published' : 'waiting'} · ${fmtInt(r.result.manifest.outputs[o]?.rows ?? 0)} rows`),
+    glyphEl('chev', 13)))));
+  const day = dayOfRun(r);
+  const shown = readersDay(r);
+  openDetail(label, 'ok', [oneLine(day && now?.state !== 'asis' ? stagedBar(day, shown) : null), list]);
+}
+
+/** What the trips were on a run: its trips source's rows. */
+const tripsOf = (r: RunRecord | undefined) => r?.result.manifest.nodes.find((n) => n.origin === loadSource())?.rows;
+
+/** Re-draw the sheet behind a detail once the detail closes, when what it shows changed meanwhile. */
+let sheetStale = false;
+
+/**
+ * The decision sheet (ADR 0009 §12): each option as what readers would get, one row each (its mark, at most four words,
+ * one number), the scope, a reason a tap away, and a button that names the result beside the hash of what goes out.
+ * Someone who may not decide sees the rows greyed, and who decides. A receipt follows the decision.
+ */
+function decisionSheet(r: RunRecord, story: Story | null): void {
+  const day = dayOfRun(r) ?? null;
+  const shown = readersDay(r);
+  const later = shown && day && shown > day ? shown : null;
+  const can = { asis: checkDecision(policies(), state.viewer, 'asis'), dont: checkDecision(policies(), state.viewer, 'dont') };
+  const anyone = can.asis.allowed || can.dont.allowed;
+  const n = r.result.waiting.length;
+  let option: DecideOption | null = null;
+  let scope: 'day' | 'untilPass' = 'day';
+  let reason: string | null = null;
+  const unjudged = r.result.holds.some((x) => x.by === 'unjudged');
+  const optionRow = (o: DecideOption, label: string, number: string, off: boolean) => h('button', { type: 'button', role: 'radio', class: 'vf-option', 'data-option': o, 'aria-checked': 'false', disabled: off || !can[o].allowed, onclick: () => ((option = o), sync()) },
+    glyphEl(o === 'asis' ? 'flag' : 'closed', 16), h('span', { class: 'vf-opt-l' }, label), h('span', { class: 'vf-opt-n' }, number));
+  const rows = h('div', { class: 'vf-options', role: 'radiogroup', 'aria-label': 'What readers get' },
+    optionRow('asis', 'Publish as is', later ? `${dayShort(later)} is published` : fmtInt(tripsOf(r) ?? 0), !!later),
+    optionRow('dont', 'Don’t publish', shown ? `${dayShort(shown)} · ${fmtInt(tripsOf(state.names.get(r.result.waiting[0] ?? '')) ?? 0)}` : 'nothing shown', false));
+  const seg = (s: 'day' | 'untilPass', label: string) => h('button', { type: 'button', role: 'radio', class: 'vf-seg-b', 'data-scope': s, 'aria-checked': String(scope === s), onclick: () => ((scope = s), sync()) }, label);
+  const scopes = h('div', { class: 'vf-seg', role: 'radiogroup', 'aria-label': 'For' }, seg('day', 'This day'), seg('untilPass', 'Until a day passes'));
+  const chips = h('div', { class: 'vf-reasons', role: 'radiogroup', 'aria-label': 'Why' }, ...[...(unjudged ? ['No history'] : []), 'Real change', 'Source confirmed', 'Known outage'].map((x) =>
+    h('button', { type: 'button', role: 'radio', class: 'vf-reason', 'aria-checked': 'false', onclick: () => ((reason = reason === x ? null : x), sync()) }, x)));
+  const go = h('button', { type: 'button', class: 'vf-primary vf-go', disabled: true, onclick: () => void submit() }, 'Decide');
+  const hash = h('code', { class: 'vf-hash', title: `Manifest ${r.result.hash}` }, `${r.result.hash.slice(0, 4)} ${r.result.hash.slice(4, 8)}`);
+  const foot = h('div', { class: 'vf-go-row' }, anyone ? go : h('p', { class: 'vf-waiting-on' }, `Only ${deciders()} decides`), hash);
+  const sync = () => {
+    if (option === 'asis') scope = 'day';
+    for (const b of Array.from(rows.querySelectorAll<HTMLElement>('.vf-option'))) b.setAttribute('aria-checked', String(b.dataset.option === option));
+    for (const b of Array.from(scopes.querySelectorAll<HTMLButtonElement>('.vf-seg-b'))) {
+      b.setAttribute('aria-checked', String(b.dataset.scope === scope));
+      b.disabled = b.dataset.scope === 'untilPass' && (option === 'asis' || !day);
+    }
+    for (const b of Array.from(chips.querySelectorAll<HTMLElement>('.vf-reason'))) b.setAttribute('aria-checked', String(b.textContent === reason));
+    go.disabled = !option || (option === 'asis' && !reason);
+    go.textContent = option === 'asis' ? `Publish as is · ${plural(n, 'output')}` : option === 'dont' ? `Don’t publish ${day ? dayShort(day) : 'this run'}${scope === 'untilPass' ? ' on' : ''}` : 'Decide';
+  };
+  const submit = async () => {
+    if (!option) return;
+    go.disabled = true;
+    const chosen = option;
+    const entry = await decide(r, chosen, scope, reason);
+    if (!entry) return sync();
+    const now = pauseOf(r);
+    const out = now?.state === 'asis' ? 'Published as is' : now?.state === 'dont' ? 'Not published' : 'Decided, not yet published';
+    foot.replaceChildren(h('p', { class: 'vf-receipt' }, glyphEl(PAUSE_MARK[now?.state ?? 'waiting'], 16), `${out} · ${personName(entry.by.as)} · ${clock(entry.at)}`), h('button', { type: 'button', class: 'linkish', onclick: () => (location.hash = '#runs') }, `Record #${entry.seq} ✓`));
+    for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('.vf-detail .vf-option, .vf-detail .vf-seg-b, .vf-detail .vf-reason'))) b.disabled = true;
+  };
+  const pause = pauseOf(r)?.pause;
+  if (!day) scope = 'day';
+  openDetail(`${day ? `${dayMid(day)} · w` : 'W'}hat readers get`, 'ok', [
+    oneLine(waited(pause ? ledger?.entries[pause.opened]?.at : undefined)),
+    scopes, rows, chips, foot]);
+  document.querySelector('.vf-detail .vf-dhead h3')?.prepend(glyphEl('held', 16));
+  void story;
+  sync();
 }
 
 /**
@@ -3491,6 +3746,18 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     // The checks' rows on screen may be another run's on a held day: their table is on the Dropped tab, labelled.
     box.append(...(kind === 'checks' ? checksNews(card, story) : storyNews(card, story)));
     return box;
+  }
+  // A day paused with no story to tell it (the history doesn't have the day, or there is none): what held it, what
+  // waits, and Decide (ADR 0009 §3: a source not judged is held, and a person decides).
+  const own = !state.failed && dataOf(card) === loadSource() ? onScreen() : undefined;
+  if (own && pauseOf(own)) {
+    const row = pauseRow(own, null);
+    const now = viewedDay();
+    box.append(h('div', { class: 'verdict alert stopped' },
+      h('p', { class: 'v-day' }, now ? dayLabel(now) : ''),
+      h('h3', { class: 'v-head' }, glyphEl(PAUSE_MARK[pauseOf(own)!.state], 16), own.result.holds.every((x) => x.by === 'unjudged') ? 'Held: not judged' : 'Held'),
+      h('p', { class: 'v-line' }, own.result.holds.map((x) => `${x.origin}: ${x.said}`).join('; '))),
+      row.reach, row.verb ? h('div', { class: 'vf-acts' }, row.verb) : '');
   }
   // The run on this load stopped: a gate held (a check dropping more than it may), so nothing after it was built from
   // this load, and the rows below are the last day that passed, under their date bar (ADR 0008 §10).
@@ -5162,10 +5429,11 @@ async function effectAcrossLoads(who: string): Promise<{ sql: string; days: stri
   const input = node.names[0]!;
   const parts: string[] = [];
   const days: string[] = [];
-  // Only loads run on this same flow: their rows mean the same.
+  // Only loads run on this same flow: their rows mean the same. A held day's rows count only on its own day, under its
+  // staged bar: readers never got them (ADR 0009).
   for (const [k, l] of loads.list.entries()) {
     const r = l.episode === loads.episode ? runOfLoad(k) : undefined;
-    if (!r || r.result.manifest.flow.hash !== run.result.manifest.flow.hash) continue;
+    if (!r || r.result.manifest.flow.hash !== run.result.manifest.flow.hash || (r !== run && !isPublished(r))) continue;
     const ri = await inspect(r);
     const i = ri.index.get(input);
     const read = i === undefined ? null : readIn(ri, i, who);
@@ -5254,9 +5522,12 @@ async function renderPolicies(): Promise<void> {
   // Anyone but the owner sees their own access, the rules that apply to them, and only datasets open to them.
   const owner = isOwner();
   const people = owner ? p.principals : p.principals.filter((x) => x.id === state.viewer);
+  // The names readers get (ADR 0009): on a held day, the last day published, said so.
+  const note = asPublished();
+  const from = note ? note.replace(/^A/, 'a') : 'from this run';
   $('matrix-sub').textContent = owner
-    ? 'Rows each person can read in each output, from this run. Closed means none: a rule applies but can’t filter that output’s rows.'
-    : `The rows ${personName(state.viewer)} can read in each output open to them, from this run.`;
+    ? `Rows each person can read in each output, ${from}. Closed means none: a rule applies but can’t filter that output’s rows.`
+    : `The rows ${personName(state.viewer)} can read in each output open to them, ${from}.`;
   $('people').replaceChildren(
     ...people.map((x) => {
       const attrs = x.owner ? 'sees everything' : Object.entries(x.attributes ?? {}).map(([k, v]) => `${k}: ${v.join(', ')}`).join('; ') || 'no row limits';
@@ -5282,6 +5553,10 @@ async function renderPolicies(): Promise<void> {
   for (const x of people) {
     const cells: HTMLElement[] = [];
     for (const o of outputs) {
+      if (!state.names.has(o)) {
+        cells.push(h('td', { class: 'n closed-cell', title: 'Nothing published under this name yet' }, '—'));
+        continue;
+      }
       const cols = state.columns.get(o);
       const view = cols ? readView(p, x.id, cols) : null;
       const sql = view ? wrapRead(view, `SELECT * FROM ${quoteIdent(o)}`) : null;
@@ -5407,7 +5682,7 @@ async function renderOntology(): Promise<void> {
   const counts = new Map<string, number | null>();
   if (latest() && engine) {
     for (const t of types) {
-      const sql = await readOutput(t.dataset);
+      const sql = readPublished(t.dataset);
       counts.set(t.id, sql ? Number((await engine.query(`SELECT count(*) FROM (${sql})`)).rows[0]![0]) : null);
     }
   }
@@ -5433,9 +5708,13 @@ async function renderOntology(): Promise<void> {
   if (!t || !engine || !latest()) {
     objects.replaceChildren(h('p', { class: 'foot' }, latest() ? 'Choose an object type to see its objects.' : 'Run the flow to see the objects.'));
   } else {
-    const sql = await readOutput(t.dataset);
-    const head = h('div', {}, h('h2', {}, t.name), h('p', { class: 'sub' }, `${t.description ?? ''} Read as ${personName(state.viewer)}.`));
-    if (!sql) {
+    // Actions act on what readers get: the objects are the published version, said so on a held day (ADR 0009).
+    const sql = readPublished(t.dataset);
+    const note = asPublished();
+    const head = h('div', {}, h('h2', {}, t.name), h('p', { class: 'sub' }, `${t.description ?? ''} Read as ${personName(state.viewer)}${note ? ` · ${note.replace(/^A/, 'a')}` : ''}.`));
+    if (!sql && !state.names.has(t.dataset)) {
+      objects.replaceChildren(head, h('p', { class: 'foot' }, `Nothing is published from ${t.dataset} yet: a day waits for a decision.`));
+    } else if (!sql) {
       objects.replaceChildren(head, h('p', { class: 'status bad' }, `Closed to ${personName(state.viewer)}: ${access(t.dataset)?.reason}.`));
     } else {
       const cols = state.columns.get(t.dataset) ?? [];
@@ -5700,14 +5979,16 @@ function renderLoads(): void {
     const r = later ? undefined : runOfLoad(k);
     const top = later ? undefined : verdictOf(l.day);
     const sev = top ? (top.severity === 'note' ? 'ok' : top.severity) : 'none';
-    const held = !later && !!(history && historyOpen() && storyFor(l.day)?.gate?.held);
+    // A flow that says what holds it marks a day by what became of it (ADR 0009 §12); one that doesn't, by its gate.
+    const pm = later ? null : dayPause(l.day);
+    const held = !later && !state.doc.publish && !!(history && historyOpen() && storyFor(l.day)?.gate?.held);
     const range = tripsRanges?.at(l.day);
-    const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: ${fmtInt(l.rows)} trips${top ? `, ${VERDICT_WORD[top.severity]}${top.severity === 'alert' || top.severity === 'warn' ? `: ${top.title}` : ''}` : ''}${held ? ', held' : ''}${r ? '' : ', not run yet'}`;
+    const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: ${fmtInt(l.rows)} trips${top ? `, ${VERDICT_WORD[top.severity]}${top.severity === 'alert' || top.severity === 'warn' ? `: ${top.title}` : ''}` : ''}${held ? ', held' : ''}${pm ? PAUSE_SAID[pm] : ''}${r ? '' : ', not run yet'}`;
     return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', later ? 'later' : '', holidayOf(l.day) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
       svgNode(stripBar({ v: later ? 0 : l.rows, low: range?.low ?? null, high: range?.high ?? null, ymax, sev: sev === 'alert' || sev === 'warn' ? sev : null })),
-      h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 14) : '', held ? glyphEl('held', 14) : ''));
+      h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 14) : '', held ? glyphEl('held', 14) : pm ? glyphEl(PAUSE_MARK[pm], 14) : ''));
   });
   const at = list.indexOf(loads.at);
   const last = at >= list.length - 1;
@@ -5741,6 +6022,21 @@ function renderLoads(): void {
     if (row && at) row.scrollLeft = Math.max(0, at.offsetLeft - row.offsetLeft - row.clientWidth / 2 + at.clientWidth / 2);
   });
   void weekNav;
+}
+
+/** What a day's chip says of its pause, after its trips and verdict. */
+const PAUSE_SAID: Record<PauseState, string> = { waiting: ', paused, waiting on a decision', asis: ', published as is', dont: ', not published' };
+
+/**
+ * What became of a day the flow held (ADR 0009 §12): by its newest run in this visit, else by the record's pause of the
+ * day under the flow on screen (a day held in an earlier visit still waits). Null for a day that published, or none.
+ */
+function dayPause(day: string): PauseState | null {
+  const r = state.runs.find((x) => dayOfRun(x) === day);
+  if (r) return pauseOf(r)?.state ?? null;
+  const flow = state.runs[0]?.result.manifest.flow.hash;
+  const p = flow ? pauses().filter((x) => x.day === day && x.inputs.flow === flow).at(-1) : undefined;
+  return pauseState(null, p ?? null);
 }
 
 /** Run the flow on a load. */
@@ -5831,7 +6127,8 @@ async function playLoads(): Promise<void> {
   for (const k of list.slice(from)) {
     if (!loads.playing) break;
     await useLoad(k);
-    if (state.failed) break;
+    // A day that stopped, or one that waits for a person (ADR 0009), stops the play there.
+    if (state.failed || pauseOf(onScreen())?.state === 'waiting') break;
   }
   loads.playing = false;
   renderLoads();
@@ -5881,6 +6178,33 @@ function healthOf(card: string): Severity | undefined {
 // while the checks are the ones the history counted.
 
 let history: HistoryRanges | null = null;
+/**
+ * The history as the flow judges a day by it (ADR 0009 §3): every day in its ranges, none left out by this browser's
+ * marks (`history` leaves an incident's days out once someone marks one), and the file as the engine pinned it, by the
+ * name a flow's watch gives it.
+ */
+let flowHistory: HistoryRanges | null = null;
+let historyPin: HistoryRef | null = null;
+
+/**
+ * What the flow's story says of each watched source's day (ADR 0009 §3): the claims a run is given, told from the
+ * history the engine pinned. None for a day the history doesn't have, or a watch of another file: the run holds that
+ * source as not judged, and a person decides.
+ */
+const claims = new Map<string, StoryClaim | null>();
+function claimsFor(day: string | undefined): StoryClaim[] | undefined {
+  const watch = state.doc.publish?.watch;
+  if (!watch) return undefined;
+  const out: StoryClaim[] = [];
+  for (const [source, file] of Object.entries(watch)) {
+    if (!day || !flowHistory || !historyPin || historyPin.path !== file) continue;
+    const key = `${day}|${source}|${countedChecks(state.doc, flowHistory, source)}`;
+    if (!claims.has(key)) claims.set(key, dayClaim(flowHistory, state.doc, historyPin, day, source, BUILD_COMMIT));
+    const c = claims.get(key);
+    if (c) out.push(c);
+  }
+  return out;
+}
 
 /** Whether the person may read the history: the trips source is open to them. */
 function historyOpen(): boolean {
@@ -6101,7 +6425,7 @@ function renderRuns(): void {
       const count = (status: string) => nodes.filter((n) => n.status === status).length;
       const li = h('li', { class: 'panel' });
       li.append(
-        h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Run ${r.result.run}`), r.load !== undefined && loads.list[r.load] ? h('span', { class: 'pill load-pill' }, dayLabel(loads.list[r.load]!.day)) : null, h('span', { class: 'pill' }, `${count('built')} built`), h('span', { class: 'pill' }, `${count('reused')} reused`), h('span', { class: 'pill' }, `${count('folded')} folded`), h('span', { class: 'foot num' }, `${fmtMs(r.ms)} · ${r.at.toLocaleTimeString()}`)),
+        h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Run ${r.result.run}`), r.load !== undefined && loads.list[r.load] ? h('span', { class: 'pill load-pill' }, dayLabel(loads.list[r.load]!.day)) : null, pauseOf(r) ? h('span', { class: 'pill held-pill' }, glyphEl(PAUSE_MARK[pauseOf(r)!.state], 13), PAUSE_PILL[pauseOf(r)!.state]) : null, h('span', { class: 'pill' }, `${count('built')} built`), h('span', { class: 'pill' }, `${count('reused')} reused`), h('span', { class: 'pill' }, `${count('folded')} folded`), h('span', { class: 'foot num' }, `${fmtMs(r.ms)} · ${r.at.toLocaleTimeString()}`)),
         h('p', { class: 'rec-root' }, 'Manifest: ', hash4(r.result.hash, 'manifest hash')),
         runFiles(r) ?? '',
         h('div', { class: 'row' },
@@ -6124,6 +6448,9 @@ function renderRuns(): void {
     }),
   );
 }
+
+/** A held run in the run list (ADR 0009 §12): staged while it waits, then what became of it. */
+const PAUSE_PILL: Record<PauseState, string> = { waiting: 'staged', asis: 'published as is', dont: 'not published' };
 
 const LEVEL_SAYS: Record<VerifyLevel, string> = {
   stored: 'the hashes, keys, links and counts as stored',
@@ -6210,21 +6537,33 @@ async function run(): Promise<void> {
   try {
     // A load's own month, for the checks that ask which month a trip is in: last year's loads are a year back.
     const loadDay = loads.list.length > 1 ? loads.list[loads.pinned]?.day : undefined;
-    const month: Record<string, string> = state.doc.parameters?.some((x) => x.name === 'month') && loadDay ? { month: loadDay.slice(0, 7) } : {};
+    const has = (name: string) => !!state.doc.parameters?.some((x) => x.name === name);
+    const parameters: Record<string, string> = has('month') && loadDay ? { month: loadDay.slice(0, 7) } : {};
+    // The day the trips are from: the period that orders the days a flow holds, and the day its claims name (ADR 0009).
+    const period = state.doc.publish?.period;
+    if (period && has(period) && loadDay) parameters[period] = loadDay;
+    const told = claimsFor(loadDay);
     const data = integrity.data ? { commit: integrity.data.commit, manifest: integrity.data.manifest } : null;
-    const result = await runFlow(engine, state.doc, { smaltdb: SMALTDB, parameters: month, data, log: recordHead() });
+    const result = await runFlow(engine, state.doc, { smaltdb: SMALTDB, parameters, data, log: recordHead(), ...(told ? { claims: told } : {}) });
     const ms = performance.now() - t;
-    state.runs.unshift({ result, ms, at: new Date(), ...(loads.pinned >= 0 && loads.list.length > 1 ? { load: loads.pinned } : {}) });
+    // A held run returns, built, checked and recorded, its versions staged: only `published` names show it.
+    const rec: RunRecord = { result, ms, at: new Date(), inputs: inputsKey(inputsOf(result.manifest)), ...(loads.pinned >= 0 && loads.list.length > 1 ? { load: loads.pinned } : {}) };
+    state.runs.unshift(rec);
+    noteShown(rec, result.published);
     // What is shown is what ran: after a refused day, a run on the day still pinned shows that day.
     if (loads.pinned >= 0) loads.at = loads.pinned;
-    await recordRun(result, null);
+    await recordRun(rec, null);
+    // A day decided before (in this visit, or an earlier one) is decided again by the same keys (ADR 0009 §10).
+    if (result.holds.length) await applyDecided(rec);
     await learnColumns();
     const count = (status: string) => result.manifest.nodes.filter((n) => n.status === status && (isOwner() || visible(n.origin))).length;
     void computeChanges();
     await refreshEdits();
     const day = loads.list.length > 1 && loads.list[loads.pinned] ? `${dayLabel(loads.list[loads.pinned]!.day)}: ` : '';
-    const stats = `${day}Run ${result.run} took ${fmtMs(ms)}: ${count('built')} built, ${count('reused')} reused, ${count('folded')} folded${engine.mode === 'page' ? ' (the engine runs in the page here)' : ''}.`;
-    setStatus(loads.list.length > 1 && loads.pinned >= 0 ? dayStatus(loads.pinned, stats) : stats, false, { n: attempts, state: 'done' });
+    const pause = pauseOf(rec);
+    const stats = `${day}Run ${result.run} took ${fmtMs(ms)}: ${count('built')} built, ${count('reused')} reused, ${count('folded')} folded${pause ? `; held: ${result.holds.map((x) => `${x.origin}, ${x.said}`).join('; ')}` : ''}${engine.mode === 'page' ? ' (the engine runs in the page here)' : ''}.`;
+    const said = loads.list.length > 1 && loads.pinned >= 0 ? dayStatus(loads.pinned, stats) : pause ? `Held: ${result.holds[0]!.said}` : stats;
+    setStatus(said, false, { n: attempts, state: pause && pause.state !== 'asis' ? 'held' : 'done', mark: pause?.state ?? null });
     $('status').title = stats;
   } catch (e) {
     const msg = message(e);
@@ -6238,6 +6577,7 @@ async function run(): Promise<void> {
     $('status').title = msg;
     await recordRun(null, msg);
   } finally {
+    syncTitle();
     state.running = false;
     $<HTMLButtonElement>('run').disabled = false;
     // A held run leaves on screen the last day before it that passed, which may not be the run counted last.
@@ -6252,11 +6592,14 @@ async function run(): Promise<void> {
 }
 
 /**
- * A run in the record: its manifest kept by hash, the files it read, and the load; a failed one with why. Before it,
- * the flow, when it changed since the record last saw it, whatever changed it.
+ * A run in the record: its manifest kept by hash, the files it read, the load, its day and its inputs; a held one
+ * (ADR 0009 §9) with what held it, the outputs that wait, and the staged key of every output it held, which is what a
+ * decision names; a failed one with why. Before it, the flow, when it changed since the record last saw it, whatever
+ * changed it.
  */
-async function recordRun(result: RunResult | null, error: string | null): Promise<void> {
+async function recordRun(rec: RunRecord | null, error: string | null): Promise<void> {
   if (!ledger) return;
+  const result = rec?.result ?? null;
   try {
     const fh = await flowHash(state.doc);
     const last = ledger.last('flow');
@@ -6271,13 +6614,157 @@ async function recordRun(result: RunResult | null, error: string | null): Promis
       const blob = await ledger.keep('manifest', result.manifest);
       // The plan it ran, kept by the record too: a run from an earlier visit still carries it when exported.
       const planRow = state.engine ? (await state.engine.query(`SELECT plan FROM _smaltfl_plans WHERE hash = '${result.manifest.plan.replace(/[^0-9a-f]/g, '')}'`)).rows[0] : undefined;
-      const plan = planRow ? await ledger.keep('plan', JSON.parse(String(planRow[0]))) : null;
+      const typed = planRow ? (JSON.parse(String(planRow[0])) as FlowPlan) : null;
+      const plan = typed ? await ledger.keep('plan', typed) : null;
       const files = result.manifest.nodes.filter((n) => n.file).map((n) => ({ source: n.origin, ...n.file! }));
-      await ledger.append('run', state.viewer, { run: result.run, manifest: result.hash, blob, plan, load, outcome: 'ok', files: files as unknown as JSONValue, data: result.manifest.data ?? null });
+      // Its day (the period's value) and its inputs find the day again after the engine is gone (ADR 0009 §10).
+      const period = typed?.publish?.period;
+      const value = period ? result.manifest.parameters[period] : undefined;
+      const day = typeof value === 'string' ? value : load;
+      const held = result.holds.length > 0;
+      const keys = held && typed ? stagedKeys(result.manifest, heldOutputs(typed, result.holds)) : {};
+      await ledger.append('run', state.viewer, {
+        run: result.run, manifest: result.hash, blob, plan, load, outcome: held ? 'held' : 'ok', files: files as unknown as JSONValue, data: result.manifest.data ?? null,
+        day, inputs: inputsOf(result.manifest) as unknown as JSONValue,
+        ...(held ? { holds: result.holds as unknown as JSONValue, waiting: result.waiting, keys } : {}),
+      });
     } else await ledger.append('run', state.viewer, { run: null, load, outcome: 'failed', error });
   } catch (e) {
     console.warn(`smaltfl: couldn't record the run: ${message(e)}`);
   }
+}
+
+// ------------------------------------------------------------------ deciding a held day (ADR 0009 §5, §6, §10)
+
+/** The outputs a held run holds back, with their staged keys: what a decision names (core/hold.ts stagedKeys). */
+async function keysOf(r: RunRecord): Promise<Record<string, string>> {
+  return stagedKeys(r.result.manifest, heldOutputs(await planFor(r), r.result.holds));
+}
+
+/** The day a run is of, by its plan's period: what a decision is about. */
+async function periodDay(r: RunRecord): Promise<string | null> {
+  const period = (await planFor(r)).publish?.period;
+  const v = period ? r.result.manifest.parameters[period] : undefined;
+  return typeof v === 'string' ? v : (dayOfRun(r) ?? null);
+}
+
+/** A day's newest run in this engine, when it was held: what a decision on the day applies to. */
+const heldRunOf = (day: string): RunRecord | undefined => {
+  const r = state.runs.find((x) => dayOfRun(x) === day);
+  return r?.result.holds.length ? r : undefined;
+};
+
+/**
+ * Publish a held run as a decision recorded first says (ADR 0009 §5, §9): the plugin checks it against the run and
+ * the policies stored with it, then the record keeps what came of it, citing the decision by its leaf. A refusal is
+ * kept too.
+ */
+async function release(r: RunRecord, decision: RecordEntry, keys: Record<string, string>): Promise<ReleaseResult | null> {
+  if (!ledger || !state.engine) return null;
+  const leaf = entryLeaf(decision);
+  const out = await releaseRun(state.engine, { run: r.result.run, manifest: r.result.hash, keys, option: 'asis', actor: decision.by.as, reason: decision.reason, decision: leaf });
+  r.release = out;
+  noteShown(r, out.published);
+  const about: ReleaseAbout = { run: r.result.run, manifest: r.result.hash, outputs: keys, decision: decision.seq, leaf, outcome: out.outcome, why: out.why };
+  await ledger.append('release', decision.by.as, about as unknown as JSONValue);
+  return out;
+}
+
+/**
+ * After a held run: a decision the record holds for the same inputs and keys is applied again (published as is: released
+ * again, citing it; not published: nothing to do), which is how a decision outlives the engine (ADR 0009 §10). A
+ * decision under another build is shown and applied only by a person, as an amendment. Undecided, a standing decision
+ * not to publish until a day passes closes the day, recorded as applied under it (§6).
+ */
+async function applyDecided(r: RunRecord): Promise<void> {
+  if (!ledger || !r.result.waiting.length) return;
+  try {
+    const keys = await keysOf(r);
+    const inputs = inputsOf(r.result.manifest);
+    const found = decisionFor(ledger.entries, inputs, keys);
+    if (found?.kind === 'same') {
+      if (found.decision.about.option === 'asis') await release(r, ledger.entries[found.decision.seq]!, keys);
+      return;
+    }
+    if (found) return;
+    const day = await periodDay(r);
+    const standing = day ? standingFor(ledger.entries, day, (await planFor(r)).publish?.period ?? null) : null;
+    if (!standing || !day) return;
+    const may = checkDecision(policies(), standing.by, 'dont');
+    if (!may.allowed) return;
+    const about: DecideAbout = { day, run: r.result.run, manifest: r.result.hash, inputs, outputs: keys, option: 'dont', scope: 'day', policies: await policiesHash(policies() ?? null), rule: may.rule ?? null, under: standing.seq };
+    await ledger.append('decide', standing.by, about as unknown as JSONValue, standing.reason);
+  } catch (e) {
+    console.warn(`smaltfl: couldn't apply the day's decision again: ${message(e)}`);
+  }
+}
+
+/**
+ * Decide a held day (ADR 0009 §5, §6), given its held run here or, for a day held in an earlier visit, its day.
+ * Checked here first, so the page asks nothing the plugin would refuse; the day's held run must be in the engine
+ * (after a reload it is run again, and the decision stops if that run made other keys than the pause names); the
+ * decision is appended to the record; then, to publish as is, the release follows, its outcome recorded. Publish as
+ * is covers this day only (Q-50), and a run with no day (a flow without daily loads) is decided for itself alone.
+ */
+async function decide(target: RunRecord | string, option: DecideOption, scope: 'day' | 'untilPass', reason: string | null): Promise<RecordEntry | null> {
+  if (!ledger || !state.engine || state.running) return null;
+  const may = checkDecision(policies(), state.viewer, option);
+  if (!may.allowed) {
+    setStatus(`${may.reason.replace(/^./, (c) => c.toUpperCase())}.`, true);
+    return null;
+  }
+  if (option === 'asis' && !reason?.trim()) {
+    setStatus('Publishing a held day as is needs a reason.', true);
+    return null;
+  }
+  let r = typeof target === 'string' ? heldRunOf(target) : target;
+  if (!r && typeof target === 'string') {
+    // The engine lost the day (a reload, or another flow ran it since): run it again, and decide on that run, if it
+    // made the keys the day's pause names.
+    const before = pauses().filter((p) => p.day === target && p.state !== 'passed').at(-1) ?? null;
+    const k = loads.list.findIndex((l) => l.day === target);
+    if (k < 0) {
+      setStatus(`${dayMid(target)} isn't one of the loads here: it can't be run again to decide it.`, true);
+      return null;
+    }
+    await useLoad(k);
+    r = heldRunOf(target);
+    if (!r) return null;
+    if (before && before.key === r.inputs && !sameKeys(before.keys, await keysOf(r))) {
+      setStatus(`${dayMid(target)} ran again with other keys than its pause names, under another build: decide it from this run.`, true);
+      return null;
+    }
+  }
+  if (!r) return null;
+  const day = await periodDay(r);
+  const keys = await keysOf(r);
+  const p = pauseByInputs(r.inputs);
+  // A standing decision needs a day to stand until: a run with none is decided for itself.
+  const about: DecideAbout = { day, run: r.result.run, manifest: r.result.hash, inputs: inputsOf(r.result.manifest), outputs: keys, option, scope: option === 'asis' || !day ? 'day' : scope, policies: await policiesHash(policies() ?? null), rule: may.rule ?? null };
+  const entry = await ledger.append('decide', state.viewer, about as unknown as JSONValue, reason?.trim() || null, p?.decision?.seq ?? null);
+  let refused: string | null = null;
+  if (option === 'asis') {
+    const out = await release(r, entry, keys);
+    if (out?.outcome === 'refused') refused = out.why;
+  }
+  const now = pauseOf(r);
+  setStatus(refused ? `The decision is recorded; the engine refused to publish ${day ? dayShort(day) : 'the run'}: ${refused}.` : dayStatus(r.load ?? -1, now?.state === 'asis' ? 'Published as is' : now?.state === 'dont' ? 'Not published' : 'Decided'), !!refused, { n: attempts, state: now && now.state !== 'asis' ? 'held' : 'done', mark: now?.state ?? null });
+  afterDecision();
+  return entry;
+}
+
+/** Everything that shows a day's pause, drawn again after a decision. */
+function afterDecision(): void {
+  syncTitle();
+  renderCanvas();
+  renderLoads();
+  renderRuns();
+  // A detail open over the sheet (the decision's receipt) stays; the sheet behind it is drawn again when it closes.
+  if (state.selected && document.querySelector('.vf-detail-wrap')) sheetStale = true;
+  else if (state.selected) void renderSheet();
+  if (location.hash === '#results') void renderResults();
+  if (location.hash === '#policies') void renderPolicies();
+  if (location.hash === '#ontology') void renderOntology();
 }
 
 // ------------------------------------------------------------------ integrity, card by card
@@ -6316,7 +6803,7 @@ function levelOf(r: RunRecord | undefined): number {
   const v = r?.verified;
   if (!v) return 0;
   const ok = (kinds: string[]) => v.checks.filter((c) => kinds.includes(c.check)).every((c) => c.ok);
-  const stored = ok(['stored', 'coherent', 'key', 'published', 'previous', 'accounting', 'flow']);
+  const stored = ok(['stored', 'coherent', 'key', 'published', 'previous', 'accounting', 'flow', 'held']);
   if (!stored) return 0;
   if (v.level === 'stored') return 1;
   if (!ok(['rerun', 'expectations'])) return 1;
@@ -6450,8 +6937,12 @@ async function saveFile(name: string, bytes: Uint8Array<ArrayBuffer> | string, t
   }
 }
 
-const KIND_WORD: Record<string, (e: { about: Record<string, unknown>; by: { as: string } }) => string> = {
-  run: ({ about: a }) => (a.outcome === 'ok' ? `Ran the flow${a.load ? ` on ${dayLabel(String(a.load))}` : ''}: run ${String(a.run)}, manifest ${String(a.manifest).slice(0, 12)}…, ${Array.isArray(a.files) ? `${a.files.length} file${a.files.length === 1 ? '' : 's'} read by their hashes` : ''}` : `A run${a.load ? ` on ${dayLabel(String(a.load))}` : ''} stopped: ${String(a.error ?? '')}`),
+const KIND_WORD: Record<string, (e: { about: Record<string, unknown>; by: { as: string }; reason: string | null }) => string> = {
+  run: ({ about: a }) => (a.outcome === 'ok' ? `Ran the flow${a.load ? ` on ${dayLabel(String(a.load))}` : ''}: run ${String(a.run)}, manifest ${String(a.manifest).slice(0, 12)}…, ${Array.isArray(a.files) ? `${a.files.length} file${a.files.length === 1 ? '' : 's'} read by their hashes` : ''}`
+    : a.outcome === 'held' ? `Held the flow${a.day ?? a.load ? ` on ${dayMid(String(a.day ?? a.load))}` : ''}: run ${String(a.run)}, ${plural(Array.isArray(a.waiting) ? a.waiting.length : 0, 'output')} waiting`
+    : `A run${a.load ? ` on ${dayLabel(String(a.load))}` : ''} stopped: ${String(a.error ?? '')}`),
+  decide: ({ about: a, reason }) => `Decided ${a.day ? dayMid(String(a.day)) : `run ${String(a.run)}`}: ${a.option === 'asis' ? 'publish as is' : `don’t publish${a.scope === 'untilPass' ? ', until a day passes' : ''}`}${typeof a.under === 'number' ? `, under #${a.under}` : ''}${reason ? ` (${reason})` : ''}`,
+  release: ({ about: a }) => (a.outcome === 'applied' ? `Released ${plural(Object.keys((a.outputs as Record<string, string> | null) ?? {}).length, 'output')} of run ${String(a.run)}, by decision #${String(a.decision)}` : `A release of run ${String(a.run)} was refused: ${String(a.why ?? '')}`),
   flow: ({ about: a }) => (a.before ? `The flow changed: ${String(a.before).slice(0, 12)}… to ${String(a.after).slice(0, 12)}…` : `The flow as it first ran here: ${String(a.after).slice(0, 12)}…`),
   file: ({ about: a }) => describeFile(a as unknown as FileCheck).title,
   act: ({ about: a, by }) => `${personName(by.as)} ${ACT_DONE[a.act as LogAct] ?? String(a.act)}: ${String(a.title)}`,
@@ -6528,8 +7019,9 @@ async function checkAgainst(file: File | undefined): Promise<void> {
 
 /**
  * The audit bag (E9): the record and its checkpoints, the signer's card, every manifest, plan and flow document the
- * record names, the data's list, a proof for each dataset of the latest run, and a readable account. The source files
- * are left out: an auditor gets each from the data branch by its sha256.
+ * record names, what the engine names and the releases it kept (ADR 0009 §11), the data's list, a proof for each
+ * dataset as published, and a readable account. The source files are left out: an auditor gets each from the data
+ * branch by its sha256.
  */
 async function exportAudit(): Promise<void> {
   if (!ledger) return;
@@ -6551,18 +7043,26 @@ async function exportAudit(): Promise<void> {
     { path: 'record/card.json', bytes: json(ledger.identity.card) },
   ];
   for (const b of await ledger.blobs()) payload.push({ path: `blobs/${b.kind}-${b.hash}.json`, bytes: enc.encode(b.json + '\n') });
-  // What the engine holds of this visit's runs, when it is running (a refused start-up leaves it without one).
+  // What the engine holds of this visit's runs, when it is running (a refused start-up leaves it without one): its
+  // plans, flows and runs, the version each dataset name shows and the releases it kept (ADR 0009 §11).
+  const named: { datasets: { name: string; key: string; run: number; manifest: string; release: number | null }[]; releases: unknown[] } = { datasets: [], releases: [] };
   if (state.engine) {
     for (const [hash, plan] of (await state.engine.query('SELECT hash, plan FROM _smaltfl_plans')).rows) payload.push({ path: `engine/plans/${String(hash)}.json`, bytes: enc.encode(String(plan) + '\n') });
     for (const [hash, doc] of (await state.engine.query('SELECT hash, doc FROM _smaltfl_flows')).rows) payload.push({ path: `engine/flows/${String(hash)}.json`, bytes: enc.encode(String(doc) + '\n') });
     for (const [id, hash, manifest] of (await state.engine.query('SELECT id, hash, manifest FROM _smaltfl_runs')).rows) payload.push({ path: `engine/runs/${String(id)}-${String(hash)}.json`, bytes: enc.encode(String(manifest) + '\n') });
+    Object.assign(named, await state.engine.callPlugin('smaltfl', 'names', []));
+    payload.push({ path: 'engine/datasets.json', bytes: json(named.datasets) }, { path: 'engine/releases.json', bytes: json(named.releases) });
   }
   if (integrity.manifestBytes) payload.push({ path: 'data/MANIFEST.json', bytes: integrity.manifestBytes });
   if (integrity.data) payload.push({ path: 'data/commit.txt', bytes: enc.encode(`${integrity.data.commit}\n`) });
-  // A proof for each dataset of the latest run: its run entry is in the record whose root the bag names.
-  const runEntry = r ? [...entries].reverse().find((e) => e.kind === 'run' && (e.about as { manifest?: string }).manifest === r.result.hash) : undefined;
-  if (r && runEntry) {
-    for (const [name, rec] of Object.entries(r.result.manifest.outputs)) payload.push({ path: `proofs/${name}.json`, bytes: json({ dataset: name, ...rec, run: r.result.run, manifest: r.result.hash, entry: runEntry, inclusion: ledger.proofOf(runEntry.seq, head.size) }) });
+  // A proof for each dataset as published, what its name shows: by its run's entry, or, for a day published as is, by
+  // the release that published it, in the record whose root the bag names. Its manifest is the run's that made it.
+  for (const d of named.datasets) {
+    const runEntry = [...entries].reverse().find((e) => e.kind === 'run' && (e.about as { manifest?: string }).manifest === d.manifest);
+    const releaseEntry = d.release === null ? undefined : [...entries].reverse().find((e) => e.kind === 'release' && (e.about as unknown as ReleaseAbout).manifest === d.manifest && (e.about as unknown as ReleaseAbout).outcome === 'applied' && (e.about as unknown as ReleaseAbout).outputs[d.name] === d.key);
+    const entry = releaseEntry ?? runEntry;
+    const made = state.runs.find((x) => x.result.hash === d.manifest)?.result.manifest.outputs[d.name];
+    if (entry && made) payload.push({ path: `proofs/${d.name}.json`, bytes: json({ dataset: d.name, ...made, run: d.run, manifest: d.manifest, entry, inclusion: ledger.proofOf(entry.seq, head.size) }) });
   }
   payload.push({ path: 'README.html', bytes: enc.encode(auditReadme(head, r)) });
   const name = `smaltfl-audit-${state.doc.id}-${head.size}`;
@@ -6655,6 +7155,8 @@ async function start(): Promise<void> {
   try {
     setStatus('Opening this flow’s record, and starting the engine…');
     await loadLog();
+    // A day held in an earlier visit still waits (ADR 0009 §10): the tab says so before anything runs.
+    syncTitle();
     const engine = await connect();
     // The daily loads the data has, if any: the flow starts on the first.
     type Listed = Omit<Load, 'episode' | 'note'> & { note?: string };
@@ -6680,8 +7182,12 @@ async function start(): Promise<void> {
     if (integrity.data) await checkList(index!);
     // Each day's numbers for two years and a quarter, for each load's normal range, when the data has them.
     const hf = integrity.files.history;
-    const past = index?.history && hf ? (JSON.parse(new TextDecoder().decode(await checked(hf.path, hf))) as HistoryFile) : null;
-    if (past?.format === HISTORY_FORMAT && past.days.length) history = new HistoryRanges(past);
+    const pastBytes = index?.history && hf ? await checked(hf.path, hf) : null;
+    const past = pastBytes ? (JSON.parse(new TextDecoder().decode(pastBytes)) as HistoryFile) : null;
+    if (past?.format === HISTORY_FORMAT && past.days.length) {
+      history = new HistoryRanges(past);
+      flowHistory = new HistoryRanges(past);
+    }
     const first = loads.list[0];
     setStatus(first ? `Loading ${dayLabel(first.day)}: ${fmtInt(first.rows)} trips, the zones and the weather, each checked against the data's list…` : 'Loading the trips, the zones and the weather…');
     // Each source's file, checked here and pinned in the engine, which hashes it again and reads it as smaltfl:<file>.
@@ -6693,6 +7199,12 @@ async function start(): Promise<void> {
       await pinFile(engine, src.file, bytes, want.sha256);
       await engine.exec(pinnedDdl(src));
       if (src.file === 'trips.parquet' && first) loads.bytes.set(0, bytes);
+    }
+    // The history pinned in the engine as the flow's watch names it (ADR 0009 §3): a claim told from it is checked against
+    // the bytes the engine hashed, and a run whose claim was told from other bytes holds its day as not judged.
+    if (pastBytes && flowHistory && hf && Object.values(state.doc.publish?.watch ?? {}).includes(hf.path)) {
+      const pin = await pinFile(engine, hf.path, pastBytes, hf.sha256);
+      historyPin = { path: pin.name, sha256: pin.sha256, bytes: pin.bytes };
     }
     if (first) loads.pinned = 0;
     if (first) loads.at = 0;

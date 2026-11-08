@@ -10,7 +10,7 @@
  * set by class in page.html under `.viz`, so light and dark both work.
  */
 
-export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack';
+export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack';
 
 export const esc = (s: unknown): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
@@ -26,6 +26,11 @@ export function glyph(kind: Mark, size = 16): string {
       return `<svg ${a}><path class="g-tri" d="M8 1.9l6.6 12H1.4z"/><rect class="g-mark" x="7.1" y="5.9" width="1.8" height="4.4" rx=".9"/><circle class="g-mark" cx="8" cy="12" r="1"/></svg>`;
     case 'held':
       return `<svg ${a}><rect class="g-wall" x="3.6" y="1.5" width="2.8" height="13" rx="1"/><rect class="g-wall" x="9.6" y="1.5" width="2.8" height="13" rx="1"/></svg>`;
+    // A held day decided (ADR 0009 §12): published as is, a flag on its pole; not published, a box crossed out.
+    case 'flag':
+      return `<svg ${a}><rect class="g-wall" x="3" y="1.5" width="1.8" height="13" rx=".9"/><path class="g-wall" d="M4.8 2.2h8.4l-2.3 3.3 2.3 3.3H4.8z"/></svg>`;
+    case 'closed':
+      return `<svg ${a}><rect class="g-box" x="2" y="2" width="12" height="12" rx="2"/><path class="g-x" d="M5.2 5.2l5.6 5.6M10.8 5.2l-5.6 5.6"/></svg>`;
     case 'explained':
       return `<svg ${a}><path class="g-arrow" d="M4 2.5v6.5h8M9.2 6.2L12 9l-2.8 2.8"/></svg>`;
     case 'note':

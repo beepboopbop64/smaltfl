@@ -49,12 +49,13 @@ export function stoppedLine(o: { refused: boolean; origin?: string | undefined; 
 }
 
 /**
- * The date bar over a panel whose rows are another day's (ADR 0008 §10): "Rows from Thu Sep 21 · the last day that
- * passed". Null when the rows are the viewed day's own.
+ * The date bar over a panel whose rows are another day's (ADR 0008 §10): "Rows from Thu Sep 21 · the last day
+ * published", after a refused file (ADR 0009 §12: a held day shows its own rows, staged). Null when the rows are the
+ * viewed day's own.
  */
 export function rowsFrom(shown: string | null | undefined, viewed: string | null | undefined): string | null {
   if (!shown || !viewed || shown === viewed) return null;
-  return `Rows from ${dayMid(shown)} · the last day that passed`;
+  return `Rows from ${dayMid(shown)} · the last day published`;
 }
 
 /**

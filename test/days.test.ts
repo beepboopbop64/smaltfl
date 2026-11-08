@@ -49,7 +49,7 @@ describe('what the screens say of it', () => {
   });
 
   it('puts another day’s rows under a bar naming that day, and the day’s own under none', () => {
-    expect(rowsFrom('2023-09-21', '2023-09-22')).toBe('Rows from Thu Sep 21 · the last day that passed');
+    expect(rowsFrom('2023-09-21', '2023-09-22')).toBe('Rows from Thu Sep 21 · the last day published');
     expect(rowsFrom('2023-09-22', '2023-09-22')).toBeNull();
     expect(rowsFrom(undefined, '2023-09-22')).toBeNull();
     expect(noRowsBefore('2023-09-23')).toBe('No rows: no day before Sat 23 passed in this visit');

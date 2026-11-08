@@ -786,6 +786,7 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
 .g-fill { fill: var(--bad); } .g-cut { fill: var(--surface); }
 .g-tri { fill: var(--warn-wash); stroke: var(--warn); stroke-width: 2; stroke-linejoin: round; } .g-mark { fill: var(--warn); }
 .g-wall { fill: var(--ink); }
+.g-box { fill: none; stroke: var(--ink); stroke-width: 1.8; } .g-x { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
 .g-arrow { fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .g-note { fill: var(--muted); }
 .g-ring { fill: none; stroke: currentColor; stroke-width: 1.4; } .g-i { fill: currentColor; }
@@ -915,6 +916,32 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-more { border: 1px solid var(--edge); border-radius: 8px; background: var(--surface); color: var(--ink-2); min-width: 44px; min-height: 42px; display: grid; place-items: center; cursor: pointer; }
 .vf-menu { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
 .vf-acts .f-log { flex-basis: 100%; margin: 0; }
+/* A day paused (ADR 0009 §12): its reach row, its receipt, Decide, and the decision sheet. */
+.vf-pause { display: grid; gap: 2px; }
+.vf-receipt { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--ink-2); }
+.vf-waiting-on { margin: 0; align-self: center; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.vf-decide, .vf-go { border: 0; border-radius: 8px; background: var(--smalt); color: var(--surface); font: inherit; font-size: 14.5px; font-weight: 600; min-height: 42px; padding: 0 18px; cursor: pointer; }
+.vf-go:disabled { background: var(--sunk); color: var(--muted); cursor: default; }
+.vf-options { display: grid; gap: 8px; }
+.vf-option { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 52px; padding: 0 12px; border: 1.5px solid var(--edge); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.vf-option[aria-checked="true"] { border-color: var(--smalt); box-shadow: inset 0 0 0 1.5px var(--smalt); }
+.vf-option:disabled { color: var(--muted); cursor: default; }
+.vf-option:disabled .g-wall { fill: var(--muted); } .vf-option:disabled .g-box, .vf-option:disabled .g-x { stroke: var(--muted); }
+.vf-opt-l { font-weight: 600; }
+.vf-opt-n { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--ink-2); }
+.vf-seg { display: grid; grid-template-columns: 1fr 1fr; border: 1.5px solid var(--edge); border-radius: 10px; overflow: hidden; }
+.vf-seg-b { min-height: 38px; border: 0; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 13.5px; cursor: pointer; }
+.vf-seg-b + .vf-seg-b { border-left: 1.5px solid var(--edge); }
+.vf-seg-b[aria-checked="true"] { background: var(--smalt-wash); color: var(--ink); font-weight: 600; }
+.vf-seg-b:disabled { color: var(--muted); background: var(--sunk); cursor: default; }
+.vf-reasons { display: flex; flex-wrap: wrap; gap: 8px; }
+.vf-reason { min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1.5px solid var(--edge); background: var(--surface); color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
+.vf-reason[aria-checked="true"] { border-color: var(--smalt); color: var(--ink); font-weight: 600; }
+.vf-go-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; }
+.vf-go-row .linkish { background: none; border: 0; padding: 0; color: var(--smalt); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.vf-hash { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+#status > .g { flex: none; margin-right: 6px; vertical-align: -2px; }
+.held-pill { display: inline-flex; align-items: center; gap: 4px; }
 .vf-acts .f-form { flex-basis: 100%; }
 /* The health row: its heading once, five cells that each open what they measured (ADR 0008 §6). */
 .vf-healthwrap { display: grid; gap: 4px; }

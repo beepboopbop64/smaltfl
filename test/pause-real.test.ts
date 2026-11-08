@@ -20,6 +20,7 @@ import { pinFile, releaseRun, runFlow, verifyRun } from '../src/index.js';
 import smaltfl from '../src/plugin/index.js';
 import { EXAMPLE_SOURCES, pinnedDdl } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
+import { exampleDoc } from './helpers/example.js';
 
 const DATA = new URL('../dist/app/data/', import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, DATA), 'utf8')) as unknown;
@@ -27,15 +28,15 @@ const has = existsSync(new URL('history.json', DATA)) && existsSync(new URL('loa
 describe.skipIf(!has)('the owner’s example, held through the engine on the real files (ADR 0009 §1, §4, §5)', () => {
   const file = has ? (read('history.json') as HistoryFile) : null;
   const h = file ? new HistoryRanges(file) : null;
-  const example = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
-  // The example as ADR 0009 §2 has it: a day parameter, and the default publish block.
-  const doc: FlowDocument = { ...example, smaltfl: 2, parameters: [...(example.parameters ?? []), { name: 'day', type: 'text', default: null }], publish: { hold: ['checks', 'wrong'], watch: { trips: 'history.json' }, period: 'day', together: true } };
+  // The example as shipped: a day parameter, and the default publish block of ADR 0009 §2.
+  const doc: FlowDocument = exampleDoc();
   const bytes = (path: string) => {
     const raw = readFileSync(new URL(path, DATA));
     return new Uint8Array(path.endsWith('.parquet.txt') ? Buffer.from(raw.toString('utf8'), 'base64') : raw);
   };
 
   it('publishes Wed 20, holds Thu 21 and Fri 22 with their manifests, and releases Thu 21 as is', async () => {
+    expect(doc.publish).toEqual({ hold: ['checks', 'wrong'], watch: { trips: 'history.json' }, period: 'day', together: true });
     const db = Database.openMemory({ plugins: [io, external, parquet, smaltfl] });
     // The sources and the history pinned in the engine, as the page pins them, each by the hash the data's list gives.
     const list = read('loads.json') as { files: Record<string, { path: string; sha256: string; bytes: number }>; episodes: { loads: { day: string; file: string; sha256: string; rows: number }[] }[] };

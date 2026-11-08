@@ -17,6 +17,7 @@ import { identifiers } from '../src/core/sqltext.js';
 import { columnSql, drift, fillGaps, isolationForest, madsOf, needOf, needWords, niceCeil, profileColumn, psi, quantile, random, renamesOf, secondsText, suggestChecks, unusual, type ColumnFacts } from '../src/core/quality.js';
 import { EXAMPLE_SOURCES } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
+import { examplePublishing } from './helpers/example.js';
 
 const facts = (values: unknown[]): ColumnFacts => {
   const present = values.filter((v) => v !== null);
@@ -182,7 +183,7 @@ describe('data quality on real data', () => {
       await db.callPlugin('@smaltdb/external', 'registerFile', [s.file, new Uint8Array(readFileSync(new URL(`../fixtures/xs/${s.file}`, import.meta.url)))]);
       await db.execAsync(s.ddl);
     }
-    const doc = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
+    const doc = examplePublishing();
     const first = await runFlow(db, doc, { smaltdb: SMALTDB });
     const plan = JSON.parse(String(db.query('SELECT plan FROM _smaltfl_plans WHERE hash = ?', [first.manifest.plan]).rows[0]![0])) as FlowPlan;
     const tables = new Map<number, string>();

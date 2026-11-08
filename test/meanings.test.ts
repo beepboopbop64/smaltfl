@@ -18,9 +18,10 @@ import { shapeOf } from '../src/core/optimize.js';
 import { checksOver, selectsStar, suggestChecks, profileColumn } from '../src/core/quality.js';
 import { EXAMPLE_SOURCES } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
+import { examplePublishing } from './helpers/example.js';
 import { visualFlow } from './fixtures/taxi.js';
 
-const example = () => JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
+const example = examplePublishing;
 const ontology = (extra: object = {}) => ({ objectTypes: [], linkTypes: [], actionTypes: [], ...extra });
 
 describe('what the columns mean', () => {

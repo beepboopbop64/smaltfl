@@ -14,8 +14,9 @@ import smaltfl from '../src/plugin/index.js';
 import { runFlow, verifyRun, type FlowDocument } from '../src/index.js';
 import { EXAMPLE_SOURCES } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
+import { exampleDoc, examplePublishing } from './helpers/example.js';
 
-const doc = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
+const doc = examplePublishing();
 const fixture = (name: string) => new Uint8Array(readFileSync(new URL(`../fixtures/xs/${name}`, import.meta.url)));
 
 async function engine(): Promise<Database> {
@@ -89,6 +90,22 @@ describe('the example flow on real data (tier XS)', () => {
     expect(dry).toBeCloseTo(1, 1);
     const weather = db.query('SELECT condition, count(*) FROM weather_hourly GROUP BY 1 ORDER BY 1').rows;
     expect(weather.reduce((n, [, c]) => n + Number(c), 0)).toBe(6 * 744);
+  });
+
+  it('as shipped, holds a day it has no claim for and publishes nothing, building what the example that publishes reuses (ADR 0009 §2, §3)', async () => {
+    const db = await engine();
+    // The fixtures have no history: no claim can be told for the trips, so the run holds them as not judged.
+    const held = await runFlow(db, exampleDoc(), { smaltdb: SMALTDB, parameters: { day: '2024-01-15' } });
+    expect(held.holds.map((x) => [x.by, x.origin, x.said])).toEqual([['unjudged', 'trips', 'no claim for trips']]);
+    expect(held.published).toEqual([]);
+    // Nothing was published before it: every output waits.
+    expect(held.waiting).toEqual(Object.keys(held.manifest.outputs).sort());
+    expect(db.query('SELECT count(*) FROM _smaltfl_datasets').rows[0]![0]).toBe(0);
+    // Holding changes no node: the example run as it was before reuses every node the held run built, and publishes.
+    const published = await runFlow(db, doc, { smaltdb: SMALTDB });
+    expect(published.manifest.nodes.filter((x) => x.status === 'built').map((x) => x.origin)).toEqual([]);
+    expect(Object.fromEntries(Object.entries(published.manifest.outputs).map(([k, o]) => [k, o.key]))).toEqual(Object.fromEntries(Object.entries(held.manifest.outputs).map(([k, o]) => [k, o.key])));
+    expect(published.published).toEqual(Object.keys(published.manifest.outputs).sort());
   });
 
   it('reuses everything on a second run, and verifies', async () => {
