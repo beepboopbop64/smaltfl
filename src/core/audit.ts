@@ -171,6 +171,8 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     if (!plan && (m.smaltflRun === 1 || a.outcome === 'held')) problems.push("its plan isn't in the bag, so what it ran can't be checked");
     // A held run: its holds are what its manifest's counts and its claims hold, and the keys it names are its own.
     const said = a.outcome === 'held' && typed ? heldProblems(e.about, typed, m, problems) : '';
+    // Recorded as published: a plan that holds on its checks must not have counts that hold it.
+    if (a.outcome === 'ok' && typed?.publish && checksHolds(typed, m).length) problems.push("it was recorded as published, and its manifest's counts hold it");
     const flow = flows.get(m.flow.hash);
     if (flow && (await flowHash(JSON.parse(text(flow.bytes)) as FlowDocument)) !== m.flow.hash) problems.push("its flow document doesn't hash to what the manifest says");
     const read = m.nodes.filter((n) => n.file);
@@ -356,6 +358,12 @@ function flowOf(flows: Map<string, BagFile>, hash: string): FlowDocument | null 
   }
 }
 
+/** What a run's checks hold, from its manifest's counts alone: none for a plan that doesn't hold on its checks. */
+function checksHolds(plan: FlowPlan, m: RunManifest): Hold[] {
+  const pub = plan.publish;
+  return pub ? holdsOf({ ...plan, publish: { ...pub, hold: pub.hold.filter((k) => k === 'checks'), watch: [] } }, m, []) : [];
+}
+
 /**
  * What is wrong with a held run's entry, pushed onto `problems`, and what held it, said, for its line. Its plan holds;
  * its checks' holds are what its manifest's counts hold; each story hold's claim matches the manifest (its day, its
@@ -371,7 +379,7 @@ function heldProblems(about: unknown, plan: FlowPlan, m: RunManifest, problems: 
   }
   const holds = Array.isArray(a.holds) ? (a.holds as Hold[]) : [];
   if (holds.length === 0) problems.push('it was held, and names nothing that held it');
-  const checks = holdsOf({ ...plan, publish: { ...pub, hold: pub.hold.filter((k) => k === 'checks'), watch: [] } }, m, []);
+  const checks = checksHolds(plan, m);
   const stated = holds.filter((h) => h.by === 'checks');
   if (JSON.stringify(checks.map((h) => [h.node, h.said])) !== JSON.stringify(stated.map((h) => [h.node, h.said]))) problems.push("the checks it says held it aren't what its manifest's counts hold");
   const claims = holds.flatMap((h) => (h.by === 'story' && h.claim ? [h.claim] : []));

@@ -442,6 +442,14 @@ describe('an audit bag with a day held, decided and released (ADR 0009 §11)', (
     expect(report.lines.map((l) => l.what)).toContain(`decision #${under.seq}: don't publish for 2024-01-13, by ana, under #${standing.seq} (rule stewards), on run ${sat.r.run}'s keys`);
   });
 
+  it('fails a run its checks held, recorded as published', async () => {
+    const s = await holdingRecord();
+    const r = await runFlow(s.db, s.doc, { smaltdb: SMALTDB, parameters: { month: '2024-02', day: '2024-02-01' }, log: s.rec.head() });
+    expect(r.published).toEqual([]);
+    const entry = await keepRun(s.rec, s.db, r.manifest, r.hash, r.run, { day: '2024-02-01', inputs: inputsOf(r.manifest) as unknown as JSONValue });
+    expect(failed(await auditBag(await pausedBag(s)))).toEqual([`run ${r.run} (#${entry.seq}): it was recorded as published, and its manifest's counts hold it`]);
+  });
+
   it("fails a held run whose manifest isn't in the bag", async () => {
     const s = await released();
     const blob = (s.thu.entry.about as { blob: string }).blob;
