@@ -9,14 +9,15 @@
  *   Anything else (an amount, a share, a surge, the checks alone) has nothing to fill, and neither has a day whose rows
  *   aren't below their range: the part's rows were coded another way, and a fill would count them twice (S2).
  * - The donor is a good day near the held one: the same weekday or the nearest day, before or after, within four
- *   weeks, judged with nothing wrong of it, never a special day unless the held day is one, and a file in the data's
- *   list (S3). The flow's own rule comes first.
+ *   weeks, judged with nothing wrong of it (and judged at all: never a day not judged yet), never a day the flow's
+ *   calendar marks unless the held day is one, and a file in the data's list (S3). The watch's own rule comes first:
+ *   the one it names, else its pattern's (ADR 0010 §3, C1).
  */
 import { isSpecial, plusDays } from './calendar.js';
 import { dayShort } from './days.js';
-import { fillStepOf, type DonorRule, type FillStep, type FlowDocument, type Missing } from './document.js';
+import { fillStepOf, isGeneralWatch, type DonorRule, type FillStep, type FlowDocument, type Missing } from './document.js';
 import type { HistoryRanges } from './history.js';
-import { dayClaim, type HistoryRef, type StoryClaim } from './hold.js';
+import { calendarFor, dayClaim, donorDefault, donorGood, type FlowFor, type HistoryRef, type StoryClaim } from './hold.js';
 import type { JSONValue, LogEntry } from './log.js';
 import type { DecisionOption } from './policy.js';
 import type { Story } from './story.js';
@@ -100,9 +101,12 @@ export function fillable(claim: Pick<StoryClaim, 'state' | 'below'> | null, stor
 
 /** What finding a donor needs: the flow's history and document, the held day, the watched source, and the rule. */
 export interface DonorQuery {
-  /** The flow's verdict's history: every day of it (flowStory refuses ranges that leave days out). */
+  /** The flow's verdict's history: every day of it (flowStory refuses ranges that leave days out), with the flow's
+   * calendar for the source. */
   h: HistoryRanges;
-  doc: Pick<FlowDocument, 'steps'>;
+  /** The flow as it judges its days: its steps, watches, ontology and calendar. A donor is judged as the held day is,
+   * and the calendar says which days are special. */
+  doc: FlowFor;
   day: string;
   source: string;
   rule: DonorRule;
@@ -112,9 +116,6 @@ export interface DonorQuery {
   /** The history file the claims are told from, as pinned in the engine, and the build that tells them. */
   history: HistoryRef;
   build: string;
-  /** The days a donor is not taken from unless the held day is one: the flow's calendar (until ADR 0010's lands, the
-   * built-in one). */
-  special?: (day: string) => boolean;
 }
 
 /** A day's donor candidates by a rule and direction, nearest first: 7, 14, 21, 28 days away, or 1 to 28. */
@@ -127,12 +128,14 @@ function candidates(day: string, rule: DonorRule, direction: Direction): string[
 
 /**
  * The first good day by a rule and direction (S3), with its file and the flow's verdict on it: within four weeks;
- * judged, with nothing wrong of it (not wrong, not refused); not special unless the held day is; in the data's list. A
- * day the history doesn't have isn't judged, so isn't a donor; after the held day, a day past the history's end hasn't
- * arrived yet, and while one may still come the answer is `not arrived`.
+ * judged, with nothing wrong of it (`donorGood`: not wrong, not refused, not unlearned); not a day the flow's calendar
+ * for the source marks unless the held day is one (ADR 0010 §2: a flow with no calendar marks none); in the data's
+ * list. A day the history doesn't have isn't judged, so isn't a donor; after the held day, a day past the history's end
+ * hasn't arrived yet, and while one may still come the answer is `not arrived`.
  */
 export function donorFor(q: DonorQuery): DonorPick | NoDonor {
-  const special = q.special ?? ((d: string) => isSpecial(d));
+  const calendar = calendarFor(q.doc, q.source);
+  const special = (d: string) => isSpecial(d, calendar);
   const heldSpecial = special(q.day);
   const days = q.h.file.days;
   const last = days.at(-1) ?? '';
@@ -146,7 +149,7 @@ export function donorFor(q: DonorQuery): DonorPick | NoDonor {
     const file = q.listed(d);
     if (!file) continue;
     const claim = dayClaim(q.h, q.doc, q.history, d, q.source, q.build);
-    if (!claim || claim.state === 'wrong' || claim.state === 'refused') continue;
+    if (!claim || !donorGood(claim)) continue;
     // The run judges it as the donor source's claim (judgeDonors): the flow's verdict on the day, named for the donor.
     return { rule: q.rule, direction: q.direction, day: d, file, claim: { ...claim, source: donorIdOf(q.source) } };
   }
@@ -174,8 +177,16 @@ export function donorChoices(q: Omit<DonorQuery, 'rule' | 'direction'>, rule: Do
   return { picks, none };
 }
 
-/** The flow's donor rule: its own setting, else the same weekday (until ADR 0010's patterns choose it, W1). */
-export const donorRuleOf = (doc: Pick<FlowDocument, 'publish'>): DonorRule => doc.publish?.donor ?? 'weekday';
+/**
+ * The rule a watched source's paused days are filled by (S3, C1): a watch in the general form names it, else its
+ * pattern gives it (`donorDefault`: weekly, the same weekday); a watch given as a file name takes the flow's
+ * `publish.donor` (format 2), else the same weekday. The plan says the same (`plannedDonor`).
+ */
+export function donorRuleOf(doc: Pick<FlowDocument, 'publish'>, source: string): DonorRule {
+  const w = Object.entries(doc.publish?.watch ?? {}).find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1];
+  if (w !== undefined && isGeneralWatch(w)) return donorDefault(w);
+  return doc.publish?.donor ?? donorDefault(w ?? '');
+}
 
 // ------------------------------------------------------------------ the derived document
 

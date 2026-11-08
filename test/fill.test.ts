@@ -4,14 +4,14 @@
  * the synthetic history and made-up record entries; the real history's donors are test/fill-real.test.ts.
  */
 import { describe, expect, it } from 'vitest';
-import { isSpecial } from '../src/core/calendar.js';
+import { isSpecial, NONE, US_1 } from '../src/core/calendar.js';
 import type { FlowDocument } from '../src/core/document.js';
 import { validateDocument } from '../src/core/document.js';
 import { dayVersions, donorChoices, donorFor, donorRuleOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument, type DonorQuery, type Repair } from '../src/core/fill.js';
 import { HistoryRanges } from '../src/core/history.js';
-import { flowStory, type HistoryRef } from '../src/core/hold.js';
+import { donorGood, flowStory, type HistoryRef } from '../src/core/hold.js';
 import type { LogEntry } from '../src/core/log.js';
-import { flowHash } from '../src/core/plan.js';
+import { flowHash, plannedDonor, translate } from '../src/core/plan.js';
 import type { Split, Story } from '../src/core/story.js';
 import { historyWith } from './helpers/history.js';
 
@@ -100,16 +100,56 @@ describe('the donor (S3)', () => {
     expect(donorFor(query(h, DAY, { listed: (d) => (d < '2023-09-13' ? listedAll(d) : null) }))).toEqual({ rule: 'weekday', direction: 'before', none: 'no good day within four weeks' });
   });
 
-  it('never takes a special day unless the held day is one', () => {
+  it('never takes a day the flow’s calendar marks unless the held day is one', () => {
     // Mon Sep 11, 2023: the Monday before is Labor Day.
     const h = new HistoryRanges(historyWith({ '2023-09-11': { stopAt: 13 }, '2023-11-23': { stopAt: 13 } }));
     expect(isSpecial('2023-09-04')).toBe(true);
     expect(donorFor(query(h, '2023-09-11'))).toMatchObject({ day: '2023-08-28' });
-    // With the flow's calendar injected, as ADR 0010's will be (W1): a day it doesn't mark is a donor.
-    expect(donorFor(query(h, '2023-09-11', { special: () => false }))).toMatchObject({ day: '2023-09-04' });
     // Thanksgiving held: a day like any other is still a donor for it.
     expect(isSpecial('2023-11-23')).toBe(true);
     expect(donorFor(query(h, '2023-11-23'))).toMatchObject({ day: '2023-11-16' });
+  });
+
+  it('skips the days the flow’s own calendar marks, not a built-in list (ADR 0010 §2, I6)', () => {
+    // The made-up history has its holidays light; here Labor Day 2023 and the day after Thanksgiving 2023 carry a
+    // usual day's trips, so only the calendar keeps them from being donors.
+    const held = { '2023-09-11': { stopAt: 13 }, '2023-12-01': { stopAt: 13 }, '2023-09-04': { more: 1 / 0.7 }, '2023-11-24': { more: 1 / 0.7 } };
+    // The example's legacy watch: us-nyc/1 marks both.
+    const legacy = new HistoryRanges(historyWith(held));
+    expect(donorFor(query(legacy, '2023-09-11'))).toMatchObject({ day: '2023-08-28' });
+    expect(donorFor(query(legacy, '2023-12-01'))).toMatchObject({ day: '2023-11-17' });
+    // A flow with no calendar (Q-58) marks no day: Labor Day is a Monday like any other, and is the donor.
+    const none: FlowDocument = { ...doc(), smaltfl: 3, calendar: { base: 'none' } };
+    expect(validateDocument(none)).toEqual([]);
+    const hNone = new HistoryRanges(historyWith(held), { calendar: NONE });
+    expect(donorFor({ ...query(hNone, '2023-09-11'), doc: none })).toMatchObject({ day: '2023-09-04', claim: { state: 'calm' } });
+    // A watch that says the calendar doesn't apply to its source is the same.
+    const off: FlowDocument = { ...doc(), smaltfl: 3, publish: { ...doc().publish!, watch: { trips: { history: 'history.json', calendar: false } } } };
+    expect(validateDocument(off)).toEqual([]);
+    expect(donorFor({ ...query(hNone, '2023-09-11'), doc: off })).toMatchObject({ day: '2023-09-04' });
+    // us/1 marks Labor Day, and not the day after Thanksgiving, which us-nyc/1 adds.
+    const us: FlowDocument = { ...doc(), smaltfl: 3, calendar: { base: 'us' } };
+    const hUs = new HistoryRanges(historyWith(held), { calendar: US_1 });
+    expect([isSpecial('2023-11-24'), isSpecial('2023-11-24', US_1)]).toEqual([true, false]);
+    expect(donorFor({ ...query(hUs, '2023-09-11'), doc: us })).toMatchObject({ day: '2023-08-28' });
+    expect(donorFor({ ...query(hUs, '2023-12-01'), doc: us })).toMatchObject({ day: '2023-11-24', claim: { state: 'calm' } });
+  });
+
+  it('never takes a day not judged yet: nothing says it is good (C9, I7)', () => {
+    // The history's first Thanksgiving, and the eve before it, have no last year to judge them by. Held the day after
+    // (itself special, so a special day may give), the nearest days before are those two, which publish marked and
+    // give nothing: the donor is the Tuesday.
+    const h = new HistoryRanges(historyWith({ '2021-11-26': { stopAt: 13 } }));
+    const first = flowStory(h, '2021-11-25', doc(), 'trips');
+    expect(first.state).toBe('unlearned');
+    expect(flowStory(h, '2021-11-24', doc(), 'trips').state).toBe('unlearned');
+    expect(donorGood({ state: 'unlearned' })).toBe(false);
+    const pick = donorFor(query(h, '2021-11-26', { rule: 'nearest' }));
+    expect(pick).toMatchObject({ day: '2021-11-23' });
+    expect(donorChoices(query(h, '2021-11-26'), 'nearest').picks.map((p) => p.day).filter((d) => d === '2021-11-24' || d === '2021-11-25')).toEqual([]);
+    // A day not judged yet, held under a flow that lists unlearned, is never filled: nothing says what it is missing.
+    expect(fillable({ state: 'unlearned', below: false }, first, 'tpep_pickup_datetime')).toBe(false);
+    expect(offersOf({ story: first, claim: { state: 'unlearned', below: false }, fill: fillStep, donors: [{ day: '2021-11-23' }] })).toEqual([]);
   });
 
   it('after the day, waits for a day that hasn’t arrived, and takes none the history lacks', () => {
@@ -133,10 +173,21 @@ describe('the donor (S3)', () => {
     expect(none2.picks.map((p) => p.day)).toEqual(['2023-10-12', '2023-10-18']);
   });
 
-  it('follows the flow’s rule, else the same weekday until ADR 0010’s patterns choose', () => {
-    expect(donorRuleOf(doc())).toBe('weekday');
-    expect(donorRuleOf({ publish: { hold: ['wrong'], donor: 'nearest' } })).toBe('nearest');
-    expect(donorRuleOf({})).toBe('weekday');
+  it('follows the watch’s rule, else its pattern’s; a legacy watch the flow’s, else the same weekday (C1, I5)', async () => {
+    expect(donorRuleOf(doc(), 'trips')).toBe('weekday');
+    expect(donorRuleOf({ publish: { hold: ['wrong'], donor: 'nearest' } }, 'trips')).toBe('nearest');
+    expect(donorRuleOf({}, 'trips')).toBe('weekday');
+    const general = (w: Record<string, unknown>): FlowDocument => ({ ...doc(), smaltfl: 3, publish: { ...doc().publish!, watch: { trips: { history: 'history.json', ...w } } } });
+    expect(donorRuleOf(general({}), 'TRIPS')).toBe('weekday');
+    expect(donorRuleOf(general({ pattern: 'weekly' }), 'trips')).toBe('weekday');
+    expect(donorRuleOf(general({ donor: 'nearest' }), 'trips')).toBe('nearest');
+    // The plan says the same rule for the watched source, whichever format it is.
+    const legacy: FlowDocument = { ...doc(), publish: { ...doc().publish!, donor: 'nearest' } };
+    for (const d of [doc(), legacy, general({}), general({ donor: 'nearest' })]) {
+      expect(validateDocument(d)).toEqual([]);
+      const plan = await translate(d, { day: '2023-10-11' });
+      expect(plannedDonor(plan.publish, plan.nodes.findIndex((n) => n.origin === 'trips'))).toBe(donorRuleOf(d, 'trips'));
+    }
   });
 });
 

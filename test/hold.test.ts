@@ -617,6 +617,9 @@ describe('what holds a derived run (amendment 1 S4, S10)', () => {
       ['derived', 'fills 13:00–23:59 from 2023-09-14'],
     ]);
     expect(holdsOf(plan, m, judged, { derived: true, donors: [{ node: donor, unjudged: 'no claim for trips_donor' }] }).map((h) => [h.by, h.origin, h.said])[1]).toEqual(['donor', 'trips_donor', 'no claim for trips_donor']);
+    // A donor day not judged yet (ADR 0010 §1, C9) publishes as itself, but nothing says it is good: it holds a fill.
+    const unlearned = donorClaim({ state: 'unlearned', head: 'Not judged yet' });
+    expect(holdsOf(plan, m, judged, { derived: true, donors: [{ node: donor, claim: unlearned }] }).map((h) => [h.by, h.said])[1]).toEqual(['donor', 'the donor day 2023-09-14: Not judged yet']);
     // The complete part: no donor, the same hold.
     const part = await derivedPlan(null);
     expect(holdsOf(part, manifestOf(part), judged, { derived: true }).at(-1)).toMatchObject({ by: 'derived', said: 'keeps all but 13:00–23:59' });

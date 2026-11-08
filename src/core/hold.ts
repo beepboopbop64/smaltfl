@@ -253,8 +253,9 @@ export function judgeDonors(plan: Pick<FlowPlan, 'nodes' | 'publish'>, claims: r
   return out;
 }
 
-/** Whether a donor's claim says it is good: judged, with nothing wrong of it (S3). */
-export const donorGood = (c: Pick<StoryClaim, 'state'>): boolean => c.state !== 'wrong' && c.state !== 'refused';
+/** Whether a donor's claim says it is good: judged, with nothing wrong of it (S3). A day not judged yet (ADR 0010 §1,
+ * C9) has nothing to say it is good, so it is never a donor, though it publishes. */
+export const donorGood = (c: Pick<StoryClaim, 'state'>): boolean => c.state !== 'wrong' && c.state !== 'refused' && c.state !== 'unlearned';
 
 const count = (n: number) => n.toLocaleString('en-US');
 const percent = (x: number) => `${(x * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
