@@ -5409,7 +5409,8 @@ async function renderResults(): Promise<void> {
     const effect = await engine.query(`SELECT borough, condition, hours, trips_per_hour, vs_dry FROM (${from}) WHERE condition <> 'dry' ORDER BY borough, condition`);
     const dry = await engine.query(`SELECT borough, hours, trips_per_hour FROM (${from}) WHERE condition = 'dry'`);
     const width = Math.min(720, Math.max(300, $('effect-chart').clientWidth || 340));
-    $('effect-chart').replaceChildren(effectChart(effect.rows as [string, string, number, number, number][], dry.rows as [string, number, number][], width, empty));
+    // The day on screen staged (ADR 0009 §12): its rows are in the effect, under the bar that says so.
+    $('effect-chart').replaceChildren(rowsFromBar() ?? '', effectChart(effect.rows as [string, string, number, number, number][], dry.rows as [string, number, number][], width, empty));
   } catch (e) {
     $('effect-chart').replaceChildren(h('p', { class: 'foot' }, message(e)));
   }
