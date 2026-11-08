@@ -3,7 +3,10 @@
  * the engine worker (`serve({ plugins: [smaltfl] })`), in Node with `Database.open…(…, { plugins: [smaltfl] })`.
  *
  * Methods, called with `callPlugin('smaltfl', name, args)` (or `runFlow` / `verifyRun` from the core):
- *   run [plan, { smaltdb, context }]  → RunResult     run a flow plan; only what changed is rebuilt
+ *   run [plan, { smaltdb, context }]  → RunResult     run a flow plan; only what changed is rebuilt, and with a
+ *                                                     publish block only what nothing holds is published (ADR 0009)
+ *   release [ReleaseInput]            → ReleaseResult publish a held run's outputs as a recorded decision says, or
+ *                                                     refuse, saying why; refusals are kept too (ADR 0009 §5)
  *   verify [run, { smaltdb, level }]  → VerifyResult  check a run's hashes, recompute it, decode its files again
  *   pin [name, bytes, sha256]         → { sha256 }    hash a source file in the engine, refuse a mismatch, serve it
  *                                                     as smaltfl:<name> (ADR 0006 §3); null bytes unpin it
@@ -18,6 +21,7 @@ import type { RunManifest } from '../core/manifest.js';
 import { PLUGIN_NAME, type RunOptions, type VerifyOptions } from '../core/protocol.js';
 import { act, listEdits, verifyEdits, type ActInput } from './actions.js';
 import { pin, pinnedSource } from './pinned.js';
+import { release } from './release.js';
 import { RunError, runPlan } from './runtime.js';
 import { ensureStore } from './store.js';
 import { verifyRun } from './verify.js';
@@ -36,6 +40,7 @@ const smaltfl: SmaltPlugin = {
   setup(host) {
     host.addSource(pinnedSource);
     host.addMethod('run', (ctx, [plan, options]) => runPlan(ctx.db, plan, options as RunOptions, VERSION, ctx.signal, COMMIT));
+    host.addMethod('release', (ctx, [input]) => release(ctx.db, input));
     host.addMethod('verify', (ctx, [run, options]) => verifyRun(ctx.db, Number(run), options as VerifyOptions, ctx.signal));
     host.addMethod('pin', (_ctx, [name, bytes, sha256]) => pin(name, bytes, sha256));
     host.addMethod('act', (ctx, [input]) => act(ctx.db, input as ActInput));

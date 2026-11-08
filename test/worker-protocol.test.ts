@@ -8,7 +8,7 @@ import * as client from 'smaltdb';
 import { Database } from 'smaltdb/engine';
 import { EngineServer } from 'smaltdb-src/engine/server.js';
 import type { Request, Response } from 'smaltdb-src/shared/protocol.js';
-import { runFlow, verifyRun } from '../src/index.js';
+import { releaseRun, runFlow, verifyRun, type FlowDocument } from '../src/index.js';
 import smaltfl from '../src/plugin/index.js';
 import { literal } from '../src/core/sqltext.js';
 import { loadFixture, makeTrips, visualFlow, ZONES } from './fixtures/taxi.js';
@@ -66,6 +66,23 @@ describe('through the worker protocol', () => {
     expect([...viaRows]).toEqual(local.query('SELECT * FROM zone_hour ORDER BY 1, 2, 3').rows);
     const v = await verifyRun(c, viaClient.run, { smaltdb: SMALTDB });
     expect(v.ok).toBe(true);
+  });
+
+  it('holds a run and releases it, the holds crossing by structured clone and a refused release returning', async () => {
+    const c = await openClient();
+    const doc: FlowDocument = { ...visualFlow(), smaltfl: 2, parameters: [...(visualFlow().parameters ?? []), { name: 'day', type: 'text', default: null }], publish: { hold: ['checks'] } };
+    const held = await runFlow(c, doc, { smaltdb: SMALTDB, parameters: { month: '2024-02', day: '2024-02-01' } });
+    expect(held.holds).toEqual([{ by: 'checks', node: 2, origin: 'trips_valid', said: 'dropped 400 of 400 rows (100%), more than the 5% allowed', reaches: ['borough_hour', 'zone_hour'] }]);
+    expect(held).toMatchObject({ published: [], waiting: ['borough_hour', 'zone_hour'] });
+    expect(await c.query("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'zone_hour'")).toEqual([{ n: 0 }]);
+    const keys = Object.fromEntries(held.waiting.map((n) => [n, held.manifest.outputs[n]!.key]));
+    const input = { run: held.run, manifest: held.hash, keys, option: 'asis' as const, actor: 'owner', reason: 'Real change', decision: 'd'.repeat(64) };
+    await expect(releaseRun(c, { ...input, reason: null })).resolves.toMatchObject({ outcome: 'refused', why: 'publish as is needs a reason', published: [] });
+    await expect(releaseRun(c, input)).resolves.toMatchObject({ outcome: 'applied', why: null, published: ['borough_hour', 'zone_hour'] });
+    expect(await c.query('SELECT count(*) AS n FROM zone_hour')).toEqual([{ n: 0 }]);
+    const v = await verifyRun(c, held.run, { smaltdb: SMALTDB, manifest: held.hash });
+    expect(v.checks.filter((x) => !x.ok)).toEqual([]);
+    expect(v.checks.filter((x) => x.check === 'held').map((x) => x.origin)).toEqual(['holds', 'borough_hour', 'zone_hour']);
   });
 
   it("carries a run's error back, with the step it came from", async () => {

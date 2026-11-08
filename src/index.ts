@@ -5,7 +5,7 @@
  */
 import type { FlowDocument } from './core/document.js';
 import { translate } from './core/plan.js';
-import type { PluginCaller, RunContext, RunResult, VerifyLevel, VerifyResult } from './core/protocol.js';
+import type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunResult, VerifyLevel, VerifyResult } from './core/protocol.js';
 import { PLUGIN_NAME } from './core/protocol.js';
 import type { ParamValue } from './core/sqltext.js';
 
@@ -60,18 +60,29 @@ export { meaningOf, propertyOf } from './core/ontology.js';
 export { claimHolds, countedChecks, dayClaim, decisionFor, flowStory, heldOutputs, holdsOf, inputsKey, inputsOf, judgeClaims, pausesOf, reachOf, sameKeys, stagedKeys, standingFor, tripped, waitingOf } from './core/hold.js';
 export type { ClaimFacts, DecideAbout, Decided, HeldAbout, HistoryRef, Hold, Inputs, Judged, Pause, ReleaseAbout, StoryClaim } from './core/hold.js';
 export { PLUGIN_NAME } from './core/protocol.js';
-export type { PluginCaller, RunContext, RunOptions, RunResult, VerifyCheck, VerifyLevel, VerifyOptions, VerifyResult } from './core/protocol.js';
+export type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunOptions, RunResult, VerifyCheck, VerifyLevel, VerifyOptions, VerifyResult } from './core/protocol.js';
 export type { ParamType, ParamValue } from './core/sqltext.js';
 
 /**
  * Translate a flow document and run its plan in the engine that `db` reaches (which needs the smaltfl plugin). The
  * document goes with the plan: the plugin checks that it hashes to the plan's flow hash, and keeps it with the run.
- * `data` and `log` are recorded in the manifest as the caller's claims (ADR 0006 §4).
+ * `data` and `log` are recorded in the manifest as the caller's claims (ADR 0006 §4). For a document with a publish
+ * block, `claims` are what the story says of each watched source's day (core/hold.ts dayClaim): a run returns what
+ * holds it, and only `published` names show its versions (ADR 0009).
  */
-export async function runFlow(db: PluginCaller, doc: FlowDocument, options: { smaltdb: string; parameters?: Readonly<Record<string, ParamValue>>; data?: RunContext['data']; log?: RunContext['log'] }): Promise<RunResult> {
+export async function runFlow(db: PluginCaller, doc: FlowDocument, options: { smaltdb: string; parameters?: Readonly<Record<string, ParamValue>>; data?: RunContext['data']; log?: RunContext['log']; claims?: RunContext['claims'] }): Promise<RunResult> {
   const plan = await translate(doc, options.parameters ?? {});
-  const context: RunContext = { doc, data: options.data ?? null, log: options.log ?? null };
+  const context: RunContext = { doc, data: options.data ?? null, log: options.log ?? null, ...(options.claims !== undefined ? { claims: options.claims } : {}) };
   return (await db.callPlugin(PLUGIN_NAME, 'run', [plan, { smaltdb: options.smaltdb, context }], { lock: true })) as RunResult;
+}
+
+/**
+ * Publish a held run's outputs as a decision says (ADR 0009 §5), after the decision is in the record: `decision` is
+ * its entry's leaf. The plugin checks it against the run and its stored policies, and returns a refusal, saying why,
+ * rather than throwing; either way it keeps the release.
+ */
+export async function releaseRun(db: PluginCaller, input: ReleaseInput): Promise<ReleaseResult> {
+  return (await db.callPlugin(PLUGIN_NAME, 'release', [input], { lock: true })) as ReleaseResult;
 }
 
 /**

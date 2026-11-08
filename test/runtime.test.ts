@@ -215,13 +215,6 @@ describe('a failed run leaves the previous versions current', () => {
     expect(db.query("SELECT count(*) FROM sqlite_schema WHERE name = 'zone_hour'").rows[0]![0]).toBe(0);
   });
 
-  it('refuses a plan that says what holds it until the runtime holds, rather than publish it (ADR 0009)', async () => {
-    const db = fixture();
-    const doc: FlowDocument = { ...visualFlow(), smaltfl: 2, publish: { hold: ['checks'] } };
-    await expect(run(db, doc)).rejects.toThrow("this runtime doesn't hold runs yet: a plan with a publish block (plan/1) is refused rather than published");
-    expect(db.query("SELECT count(*) FROM sqlite_schema WHERE name = 'zone_hour'").rows[0]![0]).toBe(0);
-  });
-
   it("reports the engine's error for a broken expression, on its step", async () => {
     const doc = visualFlow();
     const formula = doc.steps.find((s) => s.id === 'trips_enriched')!;

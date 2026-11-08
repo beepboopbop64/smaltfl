@@ -10,9 +10,16 @@
  *   _smaltfl_checks(key, result)                       expectation counts, by the expectation's key
  *   _smaltfl_edits(seq, action, object, …, prev, hash)  actions' edits and refusals, in a hash chain
  *   _smaltfl_flows(hash, doc)                          flow documents runs were translated from, by flow hash
+ *   _smaltfl_holds(run, holds, claims)                 what held each run of a plan with a publish block, and its
+ *                                                      watched sources as judged (ADR 0009 §3): a row for every
+ *                                                      such run, holds [] when it published, so verify can judge
+ *                                                      it again from what was stored
+ *   _smaltfl_releases(id, run, manifest, names, …)     each release of a held run, applied or refused (ADR 0009 §5)
  */
 import type { Database } from 'smaltdb/engine';
+import type { Hold, Judged } from '../core/hold.js';
 import type { ExpectationResult } from '../core/manifest.js';
+import type { DecideOption } from '../core/policy.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 
 export function ensureStore(db: Database): void {
@@ -24,6 +31,70 @@ export function ensureStore(db: Database): void {
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_checks(key TEXT PRIMARY KEY, result TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_flows(hash TEXT PRIMARY KEY, doc TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_edits(seq INTEGER PRIMARY KEY, action TEXT NOT NULL, object_type TEXT NOT NULL, object TEXT NOT NULL, params TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, outcome TEXT NOT NULL, reason TEXT NOT NULL, prev TEXT, hash TEXT NOT NULL)');
+  db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_holds(run INTEGER PRIMARY KEY, holds TEXT NOT NULL, claims TEXT NOT NULL)');
+  db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_releases(id INTEGER PRIMARY KEY, run INTEGER, manifest TEXT, names TEXT NOT NULL, option TEXT, actor TEXT, reason TEXT, decision TEXT, outcome TEXT NOT NULL, why TEXT, at TEXT NOT NULL)');
+}
+
+/** What held a run, and its watched sources as the run judged them. Runs inside the run's transaction. */
+export function recordHolds(db: Database, run: number, holds: readonly Hold[], judged: readonly Judged[]): void {
+  db.run('INSERT INTO _smaltfl_holds(run, holds, claims) VALUES (?, ?, ?)', [run, JSON.stringify(holds), JSON.stringify(judged)]);
+}
+
+/** A run's stored holds and judged sources, or null for a run with no row (a plan without a publish block). */
+export function holdsOfRun(db: Database, run: number): { holds: Hold[]; judged: Judged[] } | null {
+  const row = db.query('SELECT holds, claims FROM _smaltfl_holds WHERE run = ?', [run]).rows[0];
+  return row ? { holds: JSON.parse(String(row[0])) as Hold[], judged: JSON.parse(String(row[1])) as Judged[] } : null;
+}
+
+/** A release as the store keeps it: what was asked, and what came of it. */
+export interface StoredRelease {
+  id: number;
+  run: number | null;
+  manifest: string | null;
+  /** The outputs it names, with their keys. */
+  names: Record<string, string>;
+  option: DecideOption | string | null;
+  actor: string | null;
+  reason: string | null;
+  /** The decide entry's log/1 leaf it cites. */
+  decision: string | null;
+  outcome: 'applied' | 'refused';
+  why: string | null;
+  at: string;
+}
+
+export function recordRelease(db: Database, r: Omit<StoredRelease, 'id'>): number {
+  const out = db.run('INSERT INTO _smaltfl_releases(run, manifest, names, option, actor, reason, decision, outcome, why, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+    r.run, r.manifest, JSON.stringify(r.names), r.option, r.actor, r.reason, r.decision, r.outcome, r.why, r.at,
+  ]);
+  return Number(out.lastInsertRowid);
+}
+
+const releaseOf = (row: readonly unknown[]): StoredRelease => ({
+  id: Number(row[0]),
+  run: row[1] === null ? null : Number(row[1]),
+  manifest: row[2] === null ? null : String(row[2]),
+  names: JSON.parse(String(row[3])) as Record<string, string>,
+  option: row[4] === null ? null : String(row[4]),
+  actor: row[5] === null ? null : String(row[5]),
+  reason: row[6] === null ? null : String(row[6]),
+  decision: row[7] === null ? null : String(row[7]),
+  outcome: String(row[8]) as StoredRelease['outcome'],
+  why: row[9] === null ? null : String(row[9]),
+  at: String(row[10]),
+});
+
+/** A run's releases, applied and refused, in the order they were asked for; every release when `run` is left out. */
+export function releasesOf(db: Database, run?: number): StoredRelease[] {
+  const cols = 'id, run, manifest, names, option, actor, reason, decision, outcome, why, at';
+  const rows = run === undefined ? db.query(`SELECT ${cols} FROM _smaltfl_releases ORDER BY id`).rows : db.query(`SELECT ${cols} FROM _smaltfl_releases WHERE run = ? ORDER BY id`, [run]).rows;
+  return rows.map(releaseOf);
+}
+
+/** The version a dataset name shows now, and the run that made it current; null for a name smaltfl doesn't hold. */
+export function currentOf(db: Database, name: string): { key: string; run: number } | null {
+  const row = db.query('SELECT key, run FROM _smaltfl_datasets WHERE name = ?', [name]).rows[0];
+  return row ? { key: String(row[0]), run: Number(row[1]) } : null;
 }
 
 /** An expectation's recorded counts: the same key means the same input and rules, so the same counts. */

@@ -178,7 +178,10 @@ published. Cached check counts must still hold. And older builds must refuse wha
 
 9. **The record.** Three kinds of log/1 entry. Kinds and `about` are data, so log/1 doesn't change.
    - `run`, with the outcome `held`. It carries the run, manifest, plan and files as an `ok` run does; the holds, each
-     with its kind, its node and what it says (a story hold with its claim); the waiting outputs; and the staged keys.
+     with its kind, its node and what it says (a story hold with its claim); the waiting outputs; and the staged key
+     of every held output, waiting or not, which is what a decision names. The same day run again in an empty engine
+     (after a reload) has every held output waiting, and the same keys, so its decision is still the same one. A held
+     run with nothing waiting opens no pause.
    - `decide`. It carries:
      - the day, the run and the manifest;
      - the run's inputs: the flow hash, the parameters, and each source's file sha256;
@@ -268,8 +271,11 @@ key changes and nothing is rebuilt. A held run's manifest is an ordinary run/1 m
       `ccbc4d7bee92ae2e153ab8a345e6a3d807e201193ab9dade82a48362dc3cd8c8`. Every node key is the same as without the
       block.
 - Document format 2 is not a new hash: flow/1 hashes the document as before.
-- New store tables, not hashed: `_smaltfl_holds(run, holds, claims)` and `_smaltfl_releases(id, run, manifest, names,
-  option, actor, reason, decision, outcome, at)`. `_smaltfl_datasets` is unchanged, so no migration is needed.
+- New store tables, not hashed: `_smaltfl_holds(run, holds, claims)`, a row for every run of a plan with a `publish`
+  block (holds `[]` when it published), its `claims` the watched sources as the run judged them, so verify can judge
+  them again; and `_smaltfl_releases(id, run, manifest, names, option, actor, reason, decision, outcome, why, at)`,
+  `names` the outputs with their keys and `why` a refusal's reason. `_smaltfl_datasets` is unchanged, so no migration
+  is needed.
 
 ## Consequences
 

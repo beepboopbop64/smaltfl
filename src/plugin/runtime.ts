@@ -2,6 +2,11 @@
  * Running a flow plan in the engine (ARCHITECTURE.md §5): snapshot the sources, type every node, key it, then build
  * each stored node that has no version yet, in one statement with its folded inputs. Dataset names move to the new
  * versions only when everything has run, in one transaction, so a failed run leaves the previous versions current.
+ *
+ * A plan with a publish block (plan/1, ADR 0009) can hold: its checks (with `checks` in `hold`) count without
+ * throwing, each watched source is judged by the page's claim, and what holds keeps its outputs back. A held run is
+ * built, checked, hashed and stored like any other, its versions staged; only the outputs nothing holds are pointed,
+ * and a release (release.ts) publishes the rest when a person decides. A plan without the block runs as it always did.
  */
 import type { Database } from 'smaltdb/engine';
 import { canonicalJSON } from '../core/canonical.js';
@@ -17,15 +22,15 @@ import { flowHash } from '../core/plan.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, ColumnType, ExpectNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
 import { validatePlan } from '../core/plan.js';
-import { tripped } from '../core/hold.js';
+import { heldOutputs, holdsOf, judgeClaims, tripped, waitingOf, type Hold, type Judged } from '../core/hold.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 import type { Declared, TableHash } from './dataset-hash.js';
 import { hashTable, tableColumns } from './dataset-hash.js';
-import { pinnedLocation, takeOpened } from './pinned.js';
+import { pinned, pinnedLocation, takeOpened } from './pinned.js';
 
 const STATIC: Record<Exclude<Declared, 'ANY'>, ColumnType> = { INTEGER: 'int', REAL: 'real', TEXT: 'text', BLOB: 'blob' };
-import { ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, nameInUse, pointDataset, recordCheck, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
+import { currentOf, ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, nameInUse, pointDataset, recordCheck, recordHolds, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
 
 export class RunError extends Error {
   override name = 'RunError';
@@ -50,8 +55,6 @@ export function pluginsOf(db: Database): [string, string][] {
 
 export async function runPlan(db: Database, input: unknown, options: RunOptions, version: string, signal?: AbortSignal, commit = 'dev'): Promise<RunResult> {
   validatePlan(input);
-  // A plan that says what holds it (plan/1, ADR 0009) is refused until the runtime holds, never run as if it didn't.
-  if (input.publish !== undefined) throw new RunError("this runtime doesn't hold runs yet: a plan with a publish block (plan/1) is refused rather than published");
   if (typeof options?.smaltdb !== 'string' || options.smaltdb === '') throw new RunError('a run needs the engine version: { smaltdb: "0.9.0" }');
   // An engine built from its sources (as in this repo's tests) reports 'unknown': there is nothing to check against.
   const actual = engineVersion(db);
@@ -113,6 +116,10 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
 
   // 4. Check expectations and build what isn't stored yet, inputs first. Folded nodes run inside the statement of
   // the stored node that reads them. An expectation's counts are recorded by key, so a reused one isn't recounted.
+  // A flow that holds on its checks records counts that trip and goes on: what they hold is read from the manifest
+  // (core/hold.ts holdsOf), so a check reused by key holds again. Any other flow throws on them, reused ones too: a
+  // count a holding flow recorded never lets a flow that doesn't hold publish the same day.
+  const holdsChecks = plan.publish?.hold.includes('checks') ?? false;
   const ctx: EmitContext = { table: (i) => (stored.has(i) ? tables.get(i) : undefined), columns };
   for (const i of needed) {
     const n = plan.nodes[i]!;
@@ -121,11 +128,10 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     const key = keys.get(i)!;
     let expectations: ExpectationResult | undefined;
     if (n.op === 'expect') {
-      expectations = findCheck(db, key) ?? undefined;
-      if (!expectations) {
-        expectations = enforce(n, countExpectations(db, plan, i, ctx));
-        recordCheck(db, key, expectations);
-      }
+      const known = findCheck(db, key);
+      expectations = known ?? countExpectations(db, plan, i, ctx);
+      if (!holdsChecks) enforce(n, expectations);
+      if (!known) recordCheck(db, key, expectations);
     }
     const checked = expectations ? { expectations } : {};
     if (!stored.has(i)) {
@@ -175,16 +181,40 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   };
   const hash = await manifestHash(manifest);
 
-  // 6. The plan, the document, the run and the dataset names, together.
+  // What holds the run (ADR 0009 §3, §4): its checks from the manifest's counts, each watched source by its claim,
+  // checked against the run's day, the history pinned in the engine and the snapshot's rows. Nothing, for a plan
+  // without a publish block.
+  let judged: Judged[] = [];
+  let holds: Hold[] = [];
+  let held: string[] = [];
+  let waiting: string[] = [];
+  if (plan.publish) {
+    judged = judgeClaims(plan, context.claims, {
+      rows: (node) => records.get(node)?.rows,
+      pinned: (path) => {
+        const p = pinned(path);
+        return p && { sha256: p.sha256, bytes: p.bytes.byteLength };
+      },
+    });
+    holds = holdsOf(plan, manifest, judged);
+    held = heldOutputs(plan, holds);
+    const current = Object.fromEntries(held.map((name) => [name, currentOf(db, name)?.key]));
+    waiting = waitingOf(manifest, held, current);
+  }
+  const holding = new Set(held);
+
+  // 6. The plan, the document, the run and the dataset names, together: only the outputs nothing holds. A held
+  // output's version stays staged, by its key, until a release points its name at it.
   const run = inTransaction(db, () => {
     db.run('INSERT INTO _smaltfl_plans(hash, plan) VALUES (?, ?) ON CONFLICT(hash) DO NOTHING', [typed, canonicalJSON(plan)]);
     if (doc !== null) db.run('INSERT INTO _smaltfl_flows(hash, doc) VALUES (?, ?) ON CONFLICT(hash) DO NOTHING', [plan.flow.hash, doc]);
     const r = db.run('INSERT INTO _smaltfl_runs(flow, hash, manifest, started, finished) VALUES (?, ?, ?, ?, ?)', [plan.flow.id, hash, canonicalJSON(manifest), started, new Date().toISOString()]);
     const id = Number(r.lastInsertRowid);
-    for (const o of plan.outputs) pointDataset(db, o.name, keys.get(o.node)!, tables.get(o.node)!, id);
+    for (const o of plan.outputs) if (!holding.has(o.name)) pointDataset(db, o.name, keys.get(o.node)!, tables.get(o.node)!, id);
+    if (plan.publish) recordHolds(db, id, holds, judged);
     return id;
   });
-  return { run, hash, manifest };
+  return { run, hash, manifest, holds, published: plan.outputs.map((o) => o.name).filter((name) => !holding.has(name)), waiting };
 }
 
 interface Snapshot {

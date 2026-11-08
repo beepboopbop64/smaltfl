@@ -7,6 +7,10 @@
  *   writes (published); the run it chains to is there with that hash (previous); and rows in and out add up
  *   (accounting). Against accidents and naive edits only: whoever can write the whole store can rewrite it
  *   consistently.
+ *   A run of a plan with a publish block (ADR 0009 §11) is also checked *held*: its stored holds are what its
+ *   manifest's counts and its stored claims hold (each claim judged again against the manifest: its day, its
+ *   history's file, the snapshot's rows), and every output it held that a name shows was released, by a release of
+ *   this run, with this manifest and key and a decision's leaf, so a held output pointed by hand fails.
  * - **rerun:** recomputing every stored node from the run's snapshots, with the same plan, gives the same content
  *   hashes and the same expectation counts. The recomputed rows go to temporary tables, which are dropped after.
  * - **rederive:** the source files the run read are still pinned with the hashes it recorded, each source is still the
@@ -19,6 +23,7 @@ import type { FlowDocument } from '../core/document.js';
 import type { EmitContext } from '../core/emit.js';
 import { createTable, emitSelect } from '../core/emit.js';
 import { hex } from '../core/hash.js';
+import { heldOutputs, holdsOf, judgeClaims, type StoryClaim } from '../core/hold.js';
 import { nodeKey } from '../core/keys.js';
 import type { ManifestNode, RunManifest } from '../core/manifest.js';
 import { manifestHash, ontologyHash, planHash, policiesHash } from '../core/manifest.js';
@@ -31,7 +36,7 @@ import { quoteIdent as q } from '../core/sqltext.js';
 import { hashTable } from './dataset-hash.js';
 import { PINNED_PREFIX, pinned, pinnedLocation, takeOpened } from './pinned.js';
 import { aborted, countExpectations, engineVersion, RunError } from './runtime.js';
-import { datasetView, ensureStore, findVersion } from './store.js';
+import { currentOf, datasetView, ensureStore, findVersion, holdsOfRun, releasesOf } from './store.js';
 
 type Json = Parameters<typeof canonicalJSON>[0];
 const same = (a: unknown, b: unknown) => canonicalJSON(a as Json) === canonicalJSON(b as Json);
@@ -151,6 +156,42 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
     if (!v) notes.push('its version is no longer stored');
     else if (!view || String(view[0]) !== datasetView(o.name, v.table)) notes.push("the name's view isn't the one the runtime writes");
     check({ node: o.node, origin: o.name, check: 'published', ok: notes.length === 0, expected: rec.key, actual: String(named[0]), ...(notes.length ? { note: notes.join('; ') } : {}) });
+  }
+
+  // Held: what held the run, computed again from what was stored; and no held output shown without a release.
+  const kept = holdsOfRun(db, runId);
+  if (plan.publish || kept) {
+    const notes: string[] = [];
+    let holds = kept?.holds ?? [];
+    if (!plan.publish) notes.push("the run's plan doesn't hold, yet a record of what held it is stored");
+    else if (!kept) notes.push("the run's plan says what holds it, and no record of what held it is stored");
+    else {
+      if (!same(kept.judged.map((j) => j.node), plan.publish.watch.map(([n]) => n))) notes.push("the sources it judged aren't the plan's watched sources");
+      // Each claim again, against the manifest: the run checked the pinned history's hash as it ran.
+      const claims = kept.judged.flatMap((j) => ('claim' in j ? [j.claim] : []));
+      const historyOf = (path: string) => claims.find((c: StoryClaim) => c.history.path === path)?.history;
+      const again = judgeClaims(plan, claims, { rows: (node) => byNode.get(node)?.rows, pinned: (path) => historyOf(path) });
+      for (const j of kept.judged) {
+        if (!('claim' in j)) continue;
+        const k = again.find((x) => x.node === j.node);
+        if (!k || 'unjudged' in k || !same(k.claim, j.claim)) notes.push(`its claim for ${plan.nodes[j.node]?.origin ?? j.node} doesn't match the run${k && 'unjudged' in k ? `: ${k.unjudged}` : ''}`);
+      }
+      holds = holdsOf(plan, manifest, kept.judged);
+      if (!same(holds, kept.holds)) notes.push("the holds stored with it aren't what its manifest and its claims hold");
+    }
+    const said = holds.length ? `held by ${holds.map((x) => `${x.origin} (${x.by === 'checks' ? 'its checks' : x.by === 'story' ? x.said : 'not judged'})`).join(', ')}` : 'nothing held it';
+    check({ node: -1, origin: 'holds', check: 'held', ok: notes.length === 0, note: notes.length ? notes.join('; ') : said });
+    // Fail closed: the outputs that should have been held, from the holds computed again, and those stored.
+    const held = new Set(plan.publish ? [...heldOutputs(plan, holds), ...heldOutputs(plan, kept?.holds ?? [])] : []);
+    const releases = releasesOf(db, runId).filter((x) => x.outcome === 'applied');
+    for (const o of plan.outputs) {
+      if (!held.has(o.name)) continue;
+      const named = currentOf(db, o.name);
+      if (!named || named.run !== runId) continue; // still staged: nothing to check
+      const key = manifest.outputs[o.name]!.key;
+      const rel = releases.find((x) => x.names[o.name] === key && x.manifest === String(row[1]) && /^[0-9a-f]{64}$/.test(x.decision ?? ''));
+      check({ node: o.node, origin: o.name, check: 'held', ok: !!rel, expected: key, actual: named.key, note: rel ? `released by release ${rel.id}, citing the decision ${rel.decision!.slice(0, 16)}…` : `run ${runId} held it, and its name shows it with no release` });
+    }
   }
 
   // Accounting: an expectation reads its input's rows, and a stored one keeps what it didn't drop.
