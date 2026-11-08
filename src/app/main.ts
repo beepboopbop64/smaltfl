@@ -6683,7 +6683,11 @@ async function applyDecided(r: RunRecord): Promise<void> {
     const inputs = inputsOf(r.result.manifest);
     const found = decisionFor(ledger.entries, inputs, keys);
     if (found?.kind === 'same') {
-      if (found.decision.about.option === 'asis') await release(r, ledger.entries[found.decision.seq]!, keys);
+      // Published as is, again: unless a later day is what readers see now (stepping back to a day decided before), as a
+      // release never moves a name back (ADR 0009 §5; Q-51).
+      const day = await periodDay(r);
+      const shown = readersDay(r);
+      if (found.decision.about.option === 'asis' && !(day && shown && shown > day)) await release(r, ledger.entries[found.decision.seq]!, keys);
       return;
     }
     if (found) return;
