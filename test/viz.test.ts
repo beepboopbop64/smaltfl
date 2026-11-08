@@ -448,18 +448,23 @@ describe('a held day’s options, drawn as what readers get (ADR 0009 §12)', ()
     expect(Math.max(...a.values(), ...b.values())).toBeLessThanOrEqual(34 + 1e-9);
   });
 
-  it('hatches another day’s rows only, dashes only the hours the day’s own rows lack, and never draws a trickle under 3 px', () => {
+  it('hatches another day’s rows only, dashes only the hours the day’s own rows lack, and draws the trickle as one ribbon', () => {
     expect(asis).not.toContain('hatch-col');
     expect(dont).not.toMatch(/class="ink-strong"/);
-    // One absent area over the short hours, on the day's own rows; none on another day's.
-    expect(asis.match(/class="absent"/g)).toHaveLength(1);
+    // One absent area over the short hours, on the day's own rows; none on another day's. Its dashed edge never runs
+    // along the baseline or the trickle.
+    expect(asis.match(/class="absent-fill"/g)).toHaveLength(1);
     expect(dont).not.toContain('absent');
-    const d = /<path class="absent" d="M([\d.]+) [\d.]+(.*?)V[\d.]+Z"/.exec(asis)!;
+    const d = /<path class="absent-edge" d="M([\d.]+) ([\d.]+)/.exec(asis)!;
     expect(Number(d[1])).toBeCloseTo((13 * 300) / 24 + 0.75, 0);
+    const base = Number(/<path class="ink-strong" d="M[\d.]+ ([\d.]+)V/.exec(asis)![1]);
+    expect(Number(d[2])).toBeLessThanOrEqual(base - 5 - 3 + 1e-9);
     // Without a short span, nothing is absent.
     expect(decisionRow({ mark: 'flag', label: 'Publish as is', number: '1', cause: 'hours', rows: { cause: 'hours', hours: thu }, usual: { cause: 'hours', hours: usualThu }, scale, aria: 'Publish as is: 1 trip' })).not.toContain('absent');
-    // 30 trips of 5,200 is under 1 px, drawn at 3.
-    for (const [hr, ht] of heights(asis, 'ink-strong')) if (hr >= 13) expect(ht).toBeGreaterThanOrEqual(3 - 1e-9);
+    // 30 trips of 5,200 is under 1 px, drawn at 5, each short hour abutting the next.
+    const short = [...asis.matchAll(/<path class="ink-strong" d="M([\d.]+) [\d.]+V[\d.]+Q[^"]*H([\d.]+)Q[^"]*" data-k="(\d+)"/g)].filter((m) => Number(m[3]) >= 13);
+    expect(short).toHaveLength(11);
+    for (const [hr, ht] of heights(asis, 'ink-strong')) if (hr >= 13) expect(ht).toBeGreaterThanOrEqual(5 - 1e-9);
   });
 
   it('marks each option as what it does, labels what the short hours lack in their wash, and marks the hour they fell on the day’s own row', () => {

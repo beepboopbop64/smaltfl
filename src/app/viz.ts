@@ -1253,15 +1253,23 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
     const got = o.rows.hours;
     const usual = !o.other && o.usual?.cause === 'hours' ? o.usual.hours : null;
     const sh = o.short ?? null;
-    // The trips the short hours lack, under the usual hours' skyline: one area, its edge dashed.
+    // In the short hours the trips that came abut into one ribbon, 5 px at least, so a trickle reads as trips still
+    // coming (as the card's hour chart draws it); the trips they lack are a wash under the usual hours' skyline, 3 px
+    // clear of the ribbon, its dashed edge up its sides and along the skyline, never along the trickle.
+    const inShort = (i: number) => !!sh && !!usual && i >= sh[0] && i <= sh[1];
+    const tall = (i: number) => { const v = got[i] ?? 0; return v > 0 ? Math.max(inShort(i) ? 5 : MIN_MARK, y(v)) : 0; };
     if (usual && sh) {
-      let d = `M${f1(sh[0] * cw + 0.75)} ${base}`;
-      for (let i = sh[0]; i <= sh[1]; i++) d += `V${f1(base - y(Math.max(usual[i] ?? 0, got[i] ?? 0)))}H${f1((i + 1) * cw - (i === sh[1] ? 0.75 : 0))}`;
-      s += `<path class="absent" d="${d}V${base}Z"/>`;
+      const x0 = (i: number) => f1(i * cw + (i === sh[0] ? 0.75 : 0));
+      const x1 = (i: number) => f1((i + 1) * cw - (i === sh[1] ? 0.75 : 0));
+      let up = '';
+      for (let i = sh[0]; i <= sh[1]; i++) up += `${i === sh[0] ? 'M' : 'L'}${x0(i)} ${f1(base - y(Math.max(usual[i] ?? 0, got[i] ?? 0)))}H${x1(i)}`;
+      let down = '';
+      for (let i = sh[1]; i >= sh[0]; i--) down += `L${x1(i)} ${f1(base - tall(i) - 3)}H${x0(i)}`;
+      s += `<path class="absent-fill" d="${up}${down}Z"/>`;
+      s += `<path class="absent-edge" d="M${x0(sh[0])} ${f1(base - tall(sh[0]) - 3)}L${up.slice(1)}L${x1(sh[1])} ${f1(base - tall(sh[1]) - 3)}"/>`;
     }
     for (let i = 0; i < 24; i++) {
-      const v = got[i] ?? 0;
-      if (v > 0) s += `<path class="${fill}" d="${colPath(i * cw + 1.25, base, bw, Math.max(MIN_MARK, y(v)), 1.5)}" data-k="${i}"/>`;
+      if (tall(i) > 0) s += `<path class="${fill}" d="${inShort(i) ? colPath(i * cw + (i === sh![0] ? 0.75 : 0), base, cw - (i === sh![0] || i === sh![1] ? 0.75 : 0), tall(i), 0.5) : colPath(i * cw + 1.25, base, bw, tall(i), 1.5)}" data-k="${i}"/>`;
     }
     // What the short hours lack, said in the wash that draws it ("~77k missing"), so it can't read as part of what
     // goes out; it sits over the wash's middle, clear of the trickle under it.
