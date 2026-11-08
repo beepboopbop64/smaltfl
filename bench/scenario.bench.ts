@@ -5,7 +5,8 @@
  *   SMALTFL_BENCH_ROWS=1000000 npm run bench
  *
  * Each tier measures the compiled SQL run directly (the baseline smaltfl's overhead is measured against), a first
- * run, a run with nothing changed, a run after editing one gold step, and a verification. Results are written to
+ * run, a run with nothing changed, a run after editing one gold step, and a verification; then the same flow holding on
+ * its checks (ADR 0009), which rebuilds nothing, and its verification with the held check. Results are written to
  * bench/results/node.json. The budgets in SCENARIO.md are for Chromium on a laptop; these are a baseline to track.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -13,6 +14,7 @@ import { cpus } from 'node:os';
 import { it } from 'vitest';
 import { emitExpectCounts, emitSelect } from '../src/core/emit.js';
 import { shapeOf } from '../src/core/optimize.js';
+import type { FlowDocument } from '../src/core/document.js';
 import type { FlowPlan } from '../src/core/plan.js';
 import { runFlow, translate, verifyRun } from '../src/index.js';
 import { hashTable } from '../src/plugin/dataset-hash.js';
@@ -81,6 +83,18 @@ it('scenario benchmarks', async () => {
     const verify = ms(t);
     if (!v.ok) throw new Error(`verification failed at ${rows} rows`);
 
+    // The cost of holding (ADR 0009): the same flow with a publish block that holds on its checks. Holding changes no
+    // key, so nothing is rebuilt; what it adds is judging the run and recording its holds, then verify's held check.
+    const holding: FlowDocument = { ...visualFlow(), smaltfl: 2, publish: { hold: ['checks'] } };
+    t = performance.now();
+    const held = await runFlow(db, holding, { smaltdb: SMALTDB });
+    const holdingRun = ms(t);
+    if (held.holds.length || held.waiting.length) throw new Error(`the fixture's checks held the run at ${rows} rows`);
+    t = performance.now();
+    const hv = await verifyRun(db, held.run, { smaltdb: SMALTDB });
+    const holdingVerify = ms(t);
+    if (!hv.ok || !hv.checks.some((c) => c.check === 'held')) throw new Error(`verification of the holding run failed at ${rows} rows`);
+
     results.push({
       trips: rows,
       directSqlMs: baseline,
@@ -90,6 +104,8 @@ it('scenario benchmarks', async () => {
       unchangedRunMs: unchanged,
       editGoldStepMs: editGold,
       verifyMs: verify,
+      holdingRunMs: holdingRun,
+      holdingVerifyMs: holdingVerify,
       zoneHourRows: first.manifest.outputs.zone_hour!.rows,
     });
     console.log(JSON.stringify(results.at(-1)));
