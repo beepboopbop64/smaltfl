@@ -472,6 +472,13 @@ Builder and drawn in the family's look. The first concepts are on the design can
   file check in words, the hours, every finding of its kinds); every finding sits in one tier, so the rows add up to
   what was found; an episode's chip draws its days so far; a told source is said and the verb moves on; "How it's
   judged" draws the points a day's range is learned from.
+- **The other tabs and the canvas** (ADR 0008 §12). The checks' rules are one label and one order everywhere, a count
+  past its range is marked past a notch, and the checks' (i) and sheet are about the rows dropped. Suggested checks
+  lead with a plain sentence, never bound a documented code or a tail more than 1% of rows reach, and say what their
+  rows cover. `src/core/effect.ts` reads a table that measures against a baseline (weather_effect's vs_dry), so its
+  News says when there is nothing to measure. Columns, Odd rows, Dropped and History say their samples, renames,
+  dropped rows' reasons and chips plainly (`quality.renamesOf`, `needOf`). On a phone the canvas stacks its sections
+  (`layout.gridLayout`'s wrap).
 - **What can be done about a finding.** Each finding offers what fits it, as Datadog's annotations, Anomalo's alerts
   and Monte Carlo's incidents do: mark it expected, with why (kept, but quiet, and the next person sees the note);
   open an incident, and resolve it with what it was, which leaves the day out of what the normal ranges learn from;

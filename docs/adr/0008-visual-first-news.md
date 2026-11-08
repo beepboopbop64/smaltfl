@@ -193,6 +193,28 @@ where about 35,000 are usual, and everything else held.
     show ("Held at trips_valid: 10.45% of arrived rows dropped · limit 10%"), and the runtime prints its counts with
     thousands separators. A part's mark sits against its own name on the bar's outer side.
 
+12. **The other tabs and the canvas, drawn the same way.** The checks' rules are one label and one order wherever
+    they are drawn (story.ruleUsual, ruleOrder: the most rows first, warn-only rules last): "never fails" for a rule no
+    day to this one failed (in_month, whose band of half a row printed "usual 1–1"), one number when both ends round
+    to it, and nothing after a count with no range. A count past its usual range runs on past a notch as an outlined
+    box, as trips beyond usual do (Jan 1, 2024: 6,942 rows dropped, Distance 4,305, Duration 1,553), on the rules and
+    the gate's count bar. The checks' head says its share as its bar does ("Passed: 8.6% dropped"); its (i) shows how
+    the rows dropped are judged; its sheet adds what the card lacks (the rows dropped day by day, what a held run kept
+    back, the rows a tap away). A share that isn't nothing never prints "0.0%" ("<0.1%"). A suggested check leads with
+    a plain sentence, its count and its reason, the SQL folded under it; a documented code column gets its documented
+    codes, never a bound (weather codes over 12 are rain and snow, said so), and a bound is suggested only for a tail
+    fewer than 1% of the rows reach, counted over every row; a file of many days says "in this file", not "today". A
+    table that measures an effect against a baseline (a `vs_<baseline>` column, weather_effect's vs_dry; core/effect.ts)
+    says "No effect to measure today" when its rows are all the baseline, and draws each ratio against the baseline's
+    1× otherwise. A column whose values tie says "all equal"; a column's top value is its name and share apart ("Curb
+    Mobility · 75%", "$0.50 · 96%"); the Columns tab keys its marks (↳ ▲▼ ○) and every sample says its size ("1,976 of
+    81,013 rows"); a rename is said as one ("Renamed LocationID → location_id"); a dropped row's why is said from its
+    values and what its rule needs ("Duration 19 s (needs 1 min–3 h)"); History's chips are named by the number each
+    draws ("Extras $2.50 share"), its picker a neutral control. On a phone the canvas stacks its sections one under the
+    next, two cards a row, from the top (an arrangement is never stacked; an edge into a lower row runs down the gap
+    above it); a card's line fits it ("−30% trips", "Flex Fare trips: 5.3%"), a step's badge counts the rows it left
+    out and its line their share, and the loads strip keys its holiday line.
+
 ## Consequences
 
 - news.ts finds; story.ts tells. newsOf no longer folds findings ("Likely from …" is gone); its titles and details
@@ -212,4 +234,6 @@ where about 35,000 are usual, and everything else held.
   monthly joint counts of every coded column with the payment type and the vendor in the history, so Extras' changes
   can be tested against a split; per-borough counts, so a split can name a borough; a gate that holds outputs built
   from a day with an alert upstream (a plan change); "a share that has never been 0 alerts at 0"; storing a multi-day
-  incident as one record entry; the Columns, History, Odd rows and Dropped tabs drawn the same way.
+  incident as one record entry; the Columns, History, Odd rows and Dropped tabs drawn as fully as the News (§12 made
+  them plainer); a weather_effect whose baseline is the history's dry hours (on a one-day load its join
+  to dry hours at the same hour of day keeps no wet hour, so it never measures anything: a change to the document).
