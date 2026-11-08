@@ -30,11 +30,10 @@ import { validatePlan } from '../core/plan.js';
 import { heldOutputs, holdsOf, judgeClaims, judgeDonors, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef } from '../core/hold.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q } from '../core/sqltext.js';
-import type { Declared, TableHash } from './dataset-hash.js';
-import { hashTable, tableColumns } from './dataset-hash.js';
+import type { TableHash } from './dataset-hash.js';
+import { hashTable, sourceColumns } from './dataset-hash.js';
 import { pinned, pinnedLocation, takeOpened } from './pinned.js';
 
-const STATIC: Record<Exclude<Declared, 'ANY'>, ColumnType> = { INTEGER: 'int', REAL: 'real', TEXT: 'text', BLOB: 'blob' };
 import { currentOf, ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, nameInUse, pointDataset, recordCheck, recordDerived, recordHolds, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
 
 export class RunError extends Error {
@@ -328,8 +327,7 @@ interface Snapshot {
 async function snapshot(db: Database, n: TableNode, env: KeyEnv): Promise<Snapshot> {
   const st = describe(db, `SELECT * FROM ${q(n.table)}`, n.origin);
   // An external table's columns read as untyped (`any`) even when declared: take the declared types where it has them.
-  const declared = st.external ? tableColumns(db, n.table) : [];
-  const schema = st.schema.map(([name, type], k): Column => [name, type === 'any' && declared[k] && declared[k][1] !== 'ANY' ? STATIC[declared[k][1]] : type]);
+  const schema = engine(n.origin, () => sourceColumns(db, n.table, db.prepare(`SELECT * FROM ${q(n.table)}`))) as Column[];
   const watched = !st.external && watchable(db, n.table);
   const watch = `_smaltfl_w_${(await sha256Hex(n.table.toLowerCase())).slice(0, 24)}`;
   const last = watched ? lastSnapshot(db, n.table) : null;

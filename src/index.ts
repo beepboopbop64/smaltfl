@@ -8,6 +8,7 @@ import { translate } from './core/plan.js';
 import type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunOptions, RunResult, VerifyLevel, VerifyResult } from './core/protocol.js';
 import { PLUGIN_NAME } from './core/protocol.js';
 import type { ParamValue } from './core/sqltext.js';
+import type { MeasureSettings, Measures } from './core/measures.js';
 
 export { canonicalJSON } from './core/canonical.js';
 export { hashOf, hex, sha256, sha256Hex, unhex, utf8 } from './core/hash.js';
@@ -52,7 +53,7 @@ export { calendarProblems, dayLastYear, holidayOf, holidaysOf, isSpecial, NONE, 
 export type { Calendar, CalendarBase, CalendarDate, CalendarDay, CalendarDef, CalendarWindow } from './core/calendar.js';
 export { NormalRanges } from './core/normal.js';
 export type { Backtest, DailySeries, Guess, NoRange, NormalOptions, NormalRange, Place, Scale } from './core/normal.js';
-export { HISTORY_FORMAT, HistoryRanges, metricKey, seriesOf } from './core/history.js';
+export { HISTORY_FORMAT, HISTORY_FORMATS, HistoryRanges, isHistory, metricKey, seriesOf } from './core/history.js';
 export type { DayError, HistoryFile, Metric, ValueHistory } from './core/history.js';
 export { isPlaceholder, MATERIAL, newsOf, PLACEHOLDERS, schemaChanges, tableNewsOf } from './core/news.js';
 export { coverageOf, flowNames, judgeOf, LEGACY_JUDGE, materialFor, notJudgedChip, nounFor } from './core/news.js';
@@ -77,6 +78,9 @@ export type { DecideAbout, Decided, DerivedAbout, HeldAbout, Inputs, Pause, Rele
 export { DONOR_WINDOW, dayVersions, donorChoices, donorFor, donorIdOf, donorRuleOf, donorSourceOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument } from './core/fill.js';
 export type { Direction, DonorPick, DonorQuery, FillCounts, NoDonor, Offer, OfferInput, Repair, Version } from './core/fill.js';
 export { PLUGIN_NAME } from './core/protocol.js';
+// One load's numbers, and a source's tail (ADR 0010 §6, E11, E12).
+export { appendPeriods, checksOf, emptyHistory, hourOf, measuresHash, measuresLeaf, measuresOf, measuresProblem, periodOf, periodOfMeasures, samePeriod, scanColumns, settingsFor, tailBefore, tailRef, SAMPLE } from './core/measures.js';
+export type { CheckRules, HistoryHeader, MeasureInput, MeasureSettings, Measures, Period, TailRef } from './core/measures.js';
 export type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunOptions, RunResult, VerifyCheck, VerifyLevel, VerifyOptions, VerifyResult } from './core/protocol.js';
 export type { ParamType, ParamValue } from './core/sqltext.js';
 
@@ -113,6 +117,14 @@ export async function releaseRun(db: PluginCaller, input: ReleaseInput): Promise
  */
 export async function verifyRun(db: PluginCaller, run: number, options: { smaltdb: string; level?: VerifyLevel; manifest?: string }): Promise<VerifyResult> {
   return (await db.callPlugin(PLUGIN_NAME, 'verify', [run, { smaltdb: options.smaltdb, level: options.level ?? 'rerun', ...(options.manifest !== undefined ? { manifest: options.manifest } : {}) }], { lock: true })) as VerifyResult;
+}
+
+/**
+ * A watched source's load measured in the engine before its run (ADR 0010 §6, E11): the page asks for it to tell its
+ * claim (its `measured`), and the run takes the same record when its snapshot is the one measured.
+ */
+export async function measureLoad(db: PluginCaller, table: string, settings: MeasureSettings): Promise<Measures> {
+  return (await db.callPlugin(PLUGIN_NAME, 'measure', [{ table, settings }], { lock: true })) as Measures;
 }
 
 /** Pin a source file's bytes in the engine (served as smaltfl:<name>), refused unless they hash to `sha256` when given. */

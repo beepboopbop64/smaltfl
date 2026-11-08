@@ -1,0 +1,479 @@
+/**
+ * One load's numbers (ADR 0010 §6, E11 measures/0), and a source's appended periods as a tree (E12 tail/0). Pure: no
+ * DOM, no engine. The plugin measures a load in the engine (src/plugin/measure.ts runs the statements emit.ts writes)
+ * and assembles the record here, so the history builder, a run and verify make the same record from the same rows.
+ *
+ * - `measuresOf` assembles a load's measures from what the engine counted: the column facts, an even sample, one scan
+ *   of the counted, followed and time columns, and the checks' counts. The same arithmetic the history builder has
+ *   always done (scripts/data/history.ts), so a period built offline and the same load measured by its own run are
+ *   equal, field for field.
+ * - `measuresHash` and `measuresLeaf` hash a record (E11, E12); `tailRoot` is the root of a source's tail.
+ * - `periodOf` takes a period out of a history file: the numbers the file keeps of it (`samePeriod` compares them with
+ *   a load's measures). `appendPeriods` folds a tail of measures onto a history file, as the builder folds its days.
+ */
+import { canonicalJSON } from './canonical.js';
+import { hashOf, utf8 } from './hash.js';
+import { timeOf, type HistoryFile, type ValueHistory } from './history.js';
+import { leafHash, rootOf } from './log.js';
+import type { StepDef } from './document.js';
+import { watchesOf, type FlowPlan } from './plan.js';
+import { minuteOfDay, numbersOf, profileColumn, quantile, type Kind } from './quality.js';
+
+/** The checks that count a source's rows, as a history and a measures record name them: the step and its rules. */
+export interface CheckRules {
+  step: string;
+  rules: { name: string; check: string; onFail: string }[];
+}
+
+/**
+ * One load's numbers, the canonical record (E11): what the source's snapshot holds, counted exactly where a count is
+ * kept, with a median and quantiles from the same even sample the profile takes.
+ */
+export interface Measures {
+  smaltflMeasures: 0;
+  /** The watched source's id, and the slot the load covers (a day). */
+  source: string;
+  slot: string;
+  every: 'day';
+  /** The E1 sha256 of the load's bytes (null for a source read from a table), and its snapshot's dataset/0 hash. */
+  file: string | null;
+  snapshot: string;
+  /** The checks whose counts `dropped` and `failed` are, or null when no checks read the source alone. */
+  checks: CheckRules | null;
+  columns: string[];
+  types: string[];
+  kinds: Kind[];
+  rows: number;
+  dropped: number;
+  failed: number[];
+  present: number[];
+  p50: (number | null)[];
+  quantiles: (number[] | null)[];
+  sample: number;
+  /** The rows in each part of the slot: a day's 24 hours, by its time column; none without one. */
+  parts: number[];
+  /** Each counted or followed column's values (each as JSON), and each pair's (`a|b`), with their rows, sorted by
+   * the value's text. */
+  values: Record<string, [value: string, rows: number][]>;
+  pairs: Record<string, [value: string, rows: number][]>;
+}
+
+/**
+ * How a watched source's loads are measured: the same settings make the same record, and the plugin caches a file's
+ * measures by its sha256 and these settings' canonical JSON. Counted columns are kept value by value each period,
+ * followed ones only for the values new to them, and pairs among `paired`, in that order.
+ */
+export interface MeasureSettings {
+  source: string;
+  slot: string;
+  every: 'day';
+  /** The checks as the document writes them (what the record names), and each one's text as the run counts it, its
+   * parameters bound (the plan's). */
+  checks: CheckRules | null;
+  counting: string[] | null;
+  counted: string[];
+  followed: string[];
+  paired: string[];
+  /** The time column the parts are counted by, and its zone (null: the hour as the text writes it). */
+  time: string | null;
+  zone: string | null;
+  sample: number;
+}
+
+/** The profile box's sample, as the app and the history take it (src/app/main.ts SAMPLE). */
+export const SAMPLE = 2000;
+/** Quantiles kept of a measure or a time (a time's in minutes of the day): history.ts QUANTILES. */
+const PS = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
+const NUMERIC = new Set(['int', 'real', 'num']);
+
+/** The columns one scan reads, every row: the counted and followed ones the source has, then its time column. */
+export function scanColumns(s: Pick<MeasureSettings, 'counted' | 'followed' | 'time'>, columns: readonly string[]): string[] {
+  const have = new Set(columns);
+  return [...new Set([...s.counted, ...s.followed, ...(s.time ? [s.time] : [])])].filter((c) => have.has(c));
+}
+
+/** What a history's header says of how its periods were measured: enough to measure the next one the same way. */
+export type HistoryHeader = Pick<HistoryFile, 'format' | 'columns' | 'values' | 'pairs' | 'sample'> & Partial<Pick<HistoryFile, 'time' | 'zone'>>;
+
+/**
+ * The checks that count a plan's watched source alone (ADR 0010 §6): the expectations whose one input is the source,
+ * or the source's fill step (C7), as the run counts them. Null when none does.
+ */
+export function checksOf(plan: Pick<FlowPlan, 'nodes'>, node: number, steps?: readonly StepDef[]): { checks: CheckRules; counting: string[] } | null {
+  const reads = (i: number) => i === node || (plan.nodes[i]?.op === 'fill' && plan.nodes[i]!.inputs[0] === node);
+  const n = plan.nodes.find((x) => x.op === 'expect' && x.inputs.length === 1 && reads(x.inputs[0]!));
+  if (!n || n.op !== 'expect') return null;
+  // As the document writes them, when the caller has it: a rule with a parameter is the same rule whatever its value.
+  const step = steps?.find((x) => x.id === n.origin);
+  const written = step?.kind === 'expectations' && step.rules.length === n.rules.length ? step.rules : null;
+  return {
+    checks: { step: n.origin, rules: n.rules.map(([name, check, onFail], k) => ({ name, check: written?.[k]?.check ?? check, onFail })) },
+    counting: n.rules.map(([, check]) => check),
+  };
+}
+
+/**
+ * How a plan's watched source is measured for its run's slot (ADR 0010 §6), the same for the page that tells the claim,
+ * the run that judges it and verify: the columns its base history counts, follows and pairs, else the watch's `count`
+ * and `follow`, else its bad and serious columns; the watch's time and zone (else the base's); the checks that read it
+ * alone. Null for a node the plan doesn't watch, or a run with no slot.
+ */
+export function settingsFor(plan: Pick<FlowPlan, 'nodes' | 'parameters' | 'publish'>, node: number, base: HistoryHeader | null, steps?: readonly StepDef[]): MeasureSettings | null {
+  const w = watchesOf(plan.publish).find((x) => x.node === node);
+  if (!w || w.period === null) return null;
+  const slot = plan.parameters[w.period];
+  if (typeof slot !== 'string') return null;
+  const st = w.settings;
+  let counted: string[];
+  let followed: string[];
+  let paired: string[];
+  if (base) {
+    counted = Object.entries(base.values ?? {}).filter(([, vh]) => vh.counts).map(([c]) => c);
+    followed = Object.entries(base.values ?? {}).filter(([, vh]) => !vh.counts).map(([c]) => c);
+    paired = [...new Set(Object.keys(base.pairs ?? {}).flatMap((k) => k.split('|')))];
+  } else {
+    counted = st?.count ?? (st?.bad ?? []).map(([c]) => c);
+    followed = st?.follow ?? (st?.newValues ?? []).map(([c]) => c).filter((c) => !counted.includes(c));
+    paired = [];
+  }
+  const c = checksOf(plan, node, steps);
+  return { source: plan.nodes[node]!.origin, slot, every: 'day', checks: c?.checks ?? null, counting: c?.counting ?? null, counted, followed, paired, time: st?.time ?? (base ? timeOf(base) : null), zone: st?.zone ?? base?.zone ?? null, sample: base?.sample ?? SAMPLE };
+}
+
+/** What the engine counted of a load, for `measuresOf`. */
+export interface MeasureInput {
+  file: string | null;
+  snapshot: string;
+  /** The snapshot's columns and their types. */
+  schema: readonly (readonly [string, string])[];
+  /** emitColumnFacts' row: the rows, then each column's present, distinct, min, max and mean. */
+  facts: readonly unknown[];
+  /** emitSample's rows, every `ceil(rows / sample)`-th, all columns. */
+  sample: readonly (readonly unknown[])[];
+  /** Every row of `scanColumns`, in that order. */
+  scan: readonly (readonly unknown[])[];
+  /** The checks' row (emitRuleCounts): the rows, each rule's failures, the rows the drop rules leave out; null without checks. */
+  checks: readonly unknown[] | null;
+}
+
+/** The hour of a time in a zone, or as the text writes it (characters 12–13) with no zone; null when it has none. */
+export function hourOf(t: unknown, zone: string | null): number | null {
+  if (zone === null) {
+    if (typeof t !== 'string' || t.length < 13) return null;
+    const h = Number(t.slice(11, 13));
+    return Number.isInteger(h) && h >= 0 && h < 24 ? h : null;
+  }
+  const ms = typeof t === 'number' ? t : typeof t === 'string' ? Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t : `${t.replace(' ', 'T')}Z`) : NaN;
+  if (!Number.isFinite(ms)) return null;
+  const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: 'numeric', hourCycle: 'h23' }).format(ms));
+  return Number.isInteger(h) && h >= 0 && h < 24 ? h : null;
+}
+
+const byText = (a: readonly [string, number], b: readonly [string, number]) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+const six = (x: number) => Number(x.toPrecision(6));
+
+/** A load's measures (E11), from what the engine counted of its snapshot. */
+export function measuresOf(s: MeasureSettings, x: MeasureInput): Measures {
+  const rows = Number(x.facts[0]);
+  const kinds: Kind[] = [];
+  const p50: (number | null)[] = [];
+  const present: number[] = [];
+  const quantiles: (number[] | null)[] = [];
+  x.schema.forEach(([name, type], k) => {
+    const values = x.sample.map((r) => r[k]);
+    const f = x.facts;
+    const p = profileColumn(name, type, { rows, present: Number(f[1 + 5 * k]), distinct: Number(f[2 + 5 * k]), min: f[3 + 5 * k], max: f[4 + 5 * k], mean: num(f[5 + 5 * k]) }, values);
+    kinds.push(p.kind);
+    present.push(p.facts.present);
+    const xs = p.kind === 'time' ? values.map(minuteOfDay).filter((v): v is number => v !== null) : NUMERIC.has(type) ? numbersOf('measure', values) : [];
+    xs.sort((a, b) => a - b);
+    p50.push(xs.length ? six(quantile(xs, 0.5)) : null);
+    quantiles.push(xs.length && (p.kind === 'measure' || p.kind === 'time') ? PS.map((q) => six(quantile(xs, q))) : null);
+  });
+  const columns = x.schema.map(([c]) => c);
+  const scanned = scanColumns(s, columns);
+  const at = (c: string) => scanned.indexOf(c);
+  const singles = new Map<string, Map<string, number>>();
+  for (const c of [...s.counted, ...s.followed]) if (at(c) >= 0 && !singles.has(c)) singles.set(c, new Map());
+  const paired = s.paired.filter((c) => at(c) >= 0);
+  const pairs = new Map<string, Map<string, number>>();
+  for (let a = 0; a < paired.length; a++) for (let b = a + 1; b < paired.length; b++) pairs.set(`${paired[a]}|${paired[b]}`, new Map());
+  const parts = s.time && at(s.time) >= 0 ? new Array<number>(24).fill(0) : [];
+  const time = s.time ? at(s.time) : -1;
+  // Each column's values as JSON, each text made once: a value's id is its place in its column's list, and a pair's
+  // rows are counted by the two ids, its text made at the end. The same counts as one text a cell.
+  const cols = [...singles.keys()];
+  const place = cols.map((c) => at(c));
+  const texts = cols.map(() => new Map<unknown, number>());
+  const said: string[][] = cols.map(() => []);
+  const counts: number[][] = cols.map(() => []);
+  const ix = new Map(cols.map((c, k) => [c, k]));
+  const pairOf = [...pairs.keys()].map((name) => name.split('|').map((c) => ix.get(c)!) as [number, number]);
+  const pairCounts = pairOf.map(() => new Map<number, number>());
+  const ids = new Array<number>(cols.length);
+  for (const r of x.scan) {
+    for (let k = 0; k < cols.length; k++) {
+      const v = r[place[k]!] ?? null;
+      let id = texts[k]!.get(v);
+      if (id === undefined) {
+        const text = JSON.stringify(v);
+        // Two raw values with one text (a number and its string never share a column, but -0 and 0 do) share an id.
+        id = said[k]!.indexOf(text);
+        if (id < 0) {
+          id = said[k]!.length;
+          said[k]!.push(text);
+          counts[k]!.push(0);
+        }
+        texts[k]!.set(v, id);
+      }
+      ids[k] = id;
+      counts[k]![id]!++;
+    }
+    for (let p = 0; p < pairOf.length; p++) {
+      const [a, b] = pairOf[p]!;
+      const key = ids[a]! * 1048576 + ids[b]!;
+      const m = pairCounts[p]!;
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    if (time >= 0) {
+      const h = hourOf(r[time], s.zone);
+      if (h !== null) parts[h]!++;
+    }
+  }
+  cols.forEach((c, k) => {
+    const m = singles.get(c)!;
+    said[k]!.forEach((text, id) => m.set(text, counts[k]![id]!));
+  });
+  [...pairs.values()].forEach((m, p) => {
+    const [a, b] = pairOf[p]!;
+    for (const [key, n] of pairCounts[p]!) m.set(`[${said[a]![Math.floor(key / 1048576)]},${said[b]![key % 1048576]}]`, n);
+  });
+  const sorted = (m: Map<string, Map<string, number>>) => Object.fromEntries([...m].map(([k, v]) => [k, [...v.entries()].sort(byText)]));
+  const c = x.checks;
+  const n = s.checks?.rules.length ?? 0;
+  if (c && Number(c[0]) !== rows) throw new Error(`${s.source} ${s.slot}: ${rows} rows profiled, ${Number(c[0])} checked`);
+  return {
+    smaltflMeasures: 0,
+    source: s.source,
+    slot: s.slot,
+    every: s.every,
+    file: x.file,
+    snapshot: x.snapshot,
+    checks: s.checks ? { step: s.checks.step, rules: s.checks.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })) } : null,
+    columns,
+    types: x.schema.map(([, t]) => t),
+    kinds,
+    rows,
+    dropped: c ? Number(c[n + 1]) : 0,
+    failed: c ? Array.from({ length: n }, (_, k) => Number(c[k + 1])) : [],
+    present,
+    p50,
+    quantiles,
+    sample: s.sample,
+    parts,
+    values: sorted(singles),
+    pairs: sorted(pairs),
+  };
+}
+
+/** A measures record's hash (E11): SHA-256 of `smaltfl/measures/0\n` and its canonical JSON. */
+export const measuresHash = (m: Measures): Promise<string> => hashOf('measures/0', m);
+
+/** A measures record's leaf in its source's tail (E12): the RFC 9162 leaf over the same bytes its hash covers. */
+export const measuresLeaf = (m: Measures): string => leafHash(utf8(`smaltfl/measures/0\n${canonicalJSON(m as unknown as Parameters<typeof canonicalJSON>[0])}`));
+
+/** A tail as a claim names it (E12): its size and root; null for an empty one. */
+export interface TailRef {
+  size: number;
+  root: string;
+}
+
+/** The root of a tail of measures, in its order (E12 tail/0); null when it is empty. */
+export function tailRef(ms: readonly Measures[]): TailRef | null {
+  if (ms.length === 0) return null;
+  return { size: ms.length, root: rootOf(ms.map(measuresLeaf)) };
+}
+
+/**
+ * A source's tail before a slot (ADR 0010 §6): the periods appended from its own runs, one per slot (the first to
+ * arrive, C5), in slot order, before the slot judged. A period is judged by the base plus this.
+ */
+export function tailBefore(tail: readonly Measures[], slot: string): Measures[] {
+  return [...tail].filter((m) => m.slot < slot).sort((a, b) => (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0));
+}
+
+/** Why a value isn't a measures record a run could have made, or null when it is one: a tail file is checked so. */
+export function measuresProblem(m: unknown): string | null {
+  if (typeof m !== 'object' || m === null || Array.isArray(m)) return "isn't a record";
+  const r = m as Record<string, unknown>;
+  if (r.smaltflMeasures !== 0) return "isn't measures/0";
+  if (typeof r.source !== 'string' || typeof r.slot !== 'string' || r.every !== 'day') return 'names no source and slot';
+  if (!Number.isSafeInteger(r.rows) || (r.rows as number) < 0) return 'counts no rows';
+  for (const k of ['columns', 'types', 'kinds', 'failed', 'present', 'p50', 'quantiles', 'parts'] as const) if (!Array.isArray(r[k])) return `has no ${k}`;
+  for (const k of ['values', 'pairs'] as const) if (typeof r[k] !== 'object' || r[k] === null || Array.isArray(r[k])) return `has no ${k}`;
+  return null;
+}
+
+// ------------------------------------------------------------------ periods of a history file
+
+/** What a history file keeps of one period: the numbers a load's measures must equal for the file to tell its story. */
+export interface Period {
+  slot: string;
+  rows: number;
+  dropped: number;
+  failed: number[];
+  present: number[];
+  p50: (number | null)[];
+  quantiles: (number[] | null)[];
+  parts: number[];
+  /** Each counted column's values with rows that period, sorted by the value's text. */
+  counts: Record<string, [string, number][]>;
+}
+
+/** A history file's period `k`: the numbers it keeps of it. */
+export function periodOf(file: HistoryFile, k: number): Period {
+  const counts: Record<string, [string, number][]> = {};
+  for (const [column, vh] of Object.entries(file.values ?? {})) {
+    if (!vh.counts) continue;
+    counts[column] = vh.values.flatMap((v, i): [string, number][] => ((vh.counts![k]?.[i] ?? 0) > 0 ? [[v, vh.counts![k]![i]!]] : [])).sort(byText);
+  }
+  return { slot: file.days[k]!, rows: file.rows[k]!, dropped: file.dropped[k]!, failed: [...file.failed[k]!], present: [...file.present[k]!], p50: [...file.p50[k]!], quantiles: (file.quantiles[k] ?? []).map((q) => (q ? [...q] : null)), parts: [...(file.hours[k] ?? [])], counts };
+}
+
+/** The same numbers of a load's measures, as `file` keeps them: its counted columns are those it counts each period. */
+export function periodOfMeasures(m: Measures, file: Pick<HistoryFile, 'values'>): Period {
+  const counts: Record<string, [string, number][]> = {};
+  for (const [column, vh] of Object.entries(file.values ?? {})) if (vh.counts) counts[column] = (m.values[column] ?? []).filter(([, n]) => n > 0).map(([v, n]): [string, number] => [v, n]).sort(byText);
+  return { slot: m.slot, rows: m.rows, dropped: m.dropped, failed: [...m.failed], present: [...m.present], p50: [...m.p50], quantiles: m.quantiles.map((q) => (q ? [...q] : null)), parts: [...m.parts], counts };
+}
+
+/**
+ * Where a history file's period `k` differs from a load's measures, or null when it tells the same numbers: every
+ * number it keeps of the period, the columns, and for a column or pair it follows only for new values, the values it
+ * says were first seen that day and the rows they brought.
+ */
+export function samePeriod(file: HistoryFile, k: number, m: Measures): string | null {
+  if (file.days[k] !== m.slot) return `the file's period ${k} is ${file.days[k] ?? 'none'}, the measures' ${m.slot}`;
+  if (canonicalJSON(file.columns) !== canonicalJSON(m.columns) || canonicalJSON(file.types) !== canonicalJSON(m.types)) return 'its columns differ';
+  const a = periodOf(file, k);
+  const b = periodOfMeasures(m, file);
+  for (const key of ['rows', 'dropped', 'failed', 'present', 'p50', 'quantiles', 'parts', 'counts'] as const) {
+    if (canonicalJSON(a[key] as Parameters<typeof canonicalJSON>[0]) !== canonicalJSON(b[key] as Parameters<typeof canonicalJSON>[0])) return `its ${key} differ`;
+  }
+  const fresh = (vh: ValueHistory, entries: readonly [string, number][], name: string): string | null => {
+    const seen = new Map(entries);
+    const novel = vh.values.flatMap((v, i) => (vh.first[i] === k ? [v] : []));
+    if (novel.some((v) => !seen.has(v))) return `${name}: a value first seen that day isn't in the load`;
+    if ([...seen.keys()].some((v) => {
+      const i = vh.values.indexOf(v);
+      return i < 0 || vh.first[i]! > k || vh.last[i]! < k;
+    })) return `${name}: a value in the load isn't one the file saw that day`;
+    const rows = novel.reduce((t, v) => t + seen.get(v)!, 0);
+    const said = vh.fresh.find(([d]) => d === k)?.[1] ?? 0;
+    return k >= file.warmup && rows !== said ? `${name}: ${rows} rows of new values, the file says ${said}` : null;
+  };
+  for (const [column, vh] of Object.entries(file.values ?? {})) {
+    const why = fresh(vh, m.values[column] ?? [], column);
+    if (why) return why;
+  }
+  for (const [pair, vh] of Object.entries(file.pairs ?? {})) {
+    const why = fresh(vh, m.pairs[pair] ?? [], pair);
+    if (why) return why;
+  }
+  return null;
+}
+
+/** A history file with no periods yet, for a source whose base is empty: its header from the settings and the first
+ * load's columns, its counted and followed columns and pairs declared. */
+export function emptyHistory(o: { flow: string; source: string; settings: Pick<MeasureSettings, 'checks' | 'counted' | 'followed' | 'paired' | 'time' | 'zone' | 'sample'>; columns: string[]; types: string[]; kinds: Kind[]; warmup?: number; built?: string }): HistoryFile {
+  const s = o.settings;
+  const have = new Set(o.columns);
+  const vh = (counted: boolean): ValueHistory => ({ values: [], first: [], last: [], days: [], rows: [], fresh: [], ...(counted ? { counts: [] } : {}) });
+  const values: Record<string, ValueHistory> = {};
+  for (const c of s.counted) if (have.has(c)) values[c] = vh(true);
+  for (const c of s.followed) if (have.has(c) && !values[c]) values[c] = vh(false);
+  const paired = s.paired.filter((c) => have.has(c));
+  const pairs: Record<string, ValueHistory> = {};
+  for (let a = 0; a < paired.length; a++) for (let b = a + 1; b < paired.length; b++) pairs[`${paired[a]}|${paired[b]}`] = vh(false);
+  return {
+    format: 'smaltfl-history/3', built: o.built ?? '', flow: o.flow, source: o.source, every: 'day', time: s.time, zone: s.zone, skipped: [],
+    step: s.checks?.step ?? '', rules: s.checks?.rules.map((r) => ({ ...r })) ?? [],
+    columns: [...o.columns], types: [...o.types], kinds: [...o.kinds], sample: s.sample,
+    days: [], rows: [], dropped: [], failed: [], present: [], p50: [], missing: [], quantiles: [], hours: [], warmup: o.warmup ?? 28, values, pairs,
+  };
+}
+
+/**
+ * A history file with a tail of measures folded in after its last period (ADR 0010 §6), as the builder folds its days:
+ * each value's first and last period, the periods it was seen and its rows; the rows of values never seen before, once
+ * the warmup is past; and each counted column's rows a period. Values stay in order of rows over the history (ties
+ * keep their order). The file itself is left as it was. A period at or before the file's last, or out of order, or of
+ * other columns, is refused: the tail extends the file.
+ */
+export function appendPeriods(file: HistoryFile, ms: readonly Measures[]): HistoryFile {
+  if (ms.length === 0) return file;
+  const out: HistoryFile = structuredClone(file);
+  if (out.days.length === 0 && out.columns.length === 0) {
+    out.columns = [...ms[0]!.columns];
+    out.types = [...ms[0]!.types];
+    out.kinds = [...ms[0]!.kinds];
+  }
+  const touched = new Set<ValueHistory>();
+  for (const m of ms) {
+    const last = out.days.at(-1);
+    if (last !== undefined && m.slot <= last) throw new Error(`the tail's ${m.slot} isn't after the history's ${last}`);
+    if (canonicalJSON(m.columns) !== canonicalJSON(out.columns) || canonicalJSON(m.types) !== canonicalJSON(out.types)) throw new Error(`the tail's ${m.slot} has other columns than the history`);
+    const d = out.days.length;
+    out.days.push(m.slot);
+    out.rows.push(m.rows);
+    out.dropped.push(m.dropped);
+    out.failed.push([...m.failed]);
+    out.present.push([...m.present]);
+    out.p50.push([...m.p50]);
+    out.quantiles.push(m.quantiles.map((q) => (q ? [...q] : null)));
+    out.hours.push([...m.parts]);
+    const fold = (vh: ValueHistory, entries: readonly [string, number][]) => {
+      touched.add(vh);
+      let novel = 0;
+      const row = vh.counts ? new Array<number>(vh.values.length).fill(0) : null;
+      for (const [key, n] of entries) {
+        let i = vh.values.indexOf(key);
+        if (i < 0) {
+          i = vh.values.length;
+          vh.values.push(key);
+          vh.first.push(d);
+          vh.last.push(d);
+          vh.days.push(0);
+          vh.rows.push(0);
+          row?.push(0);
+          if (d >= out.warmup) novel += n;
+        }
+        vh.last[i] = d;
+        vh.days[i]!++;
+        vh.rows[i]! += n;
+        if (row) row[i] = n;
+      }
+      if (novel) vh.fresh.push([d, novel]);
+      if (vh.counts && row) vh.counts.push(row);
+    };
+    for (const [column, vh] of Object.entries(out.values ?? {})) fold(vh, m.values[column] ?? []);
+    for (const [pair, vh] of Object.entries(out.pairs ?? {})) fold(vh, m.pairs[pair] ?? []);
+  }
+  // In order of rows over the history, as the builder writes them.
+  for (const vh of touched) {
+    const order = vh.values.map((_, i) => i).sort((a, b) => vh.rows[b]! - vh.rows[a]!);
+    if (order.every((i, j) => i === j)) {
+      if (vh.counts) vh.counts = vh.counts.map((r) => (r.length < vh.values.length ? [...r, ...new Array<number>(vh.values.length - r.length).fill(0)] : r));
+      continue;
+    }
+    const pick = <T>(xs: T[]) => order.map((i) => xs[i]!);
+    vh.values = pick(vh.values);
+    vh.first = pick(vh.first);
+    vh.last = pick(vh.last);
+    vh.days = pick(vh.days);
+    vh.rows = pick(vh.rows);
+    if (vh.counts) vh.counts = vh.counts.map((r) => order.map((i) => r[i] ?? 0));
+  }
+  return out;
+}

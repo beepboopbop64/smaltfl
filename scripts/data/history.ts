@@ -26,7 +26,7 @@ import { runFlow, sourceOf, type ExpectationsStep, type FlowDocument, type FlowP
 import { emitColumnFacts, emitRead, emitSample, type EmitContext } from '../../src/core/emit.js';
 import { shapeOf } from '../../src/core/optimize.js';
 import { minuteOfDay, numbersOf, profileColumn, quantile, type Kind } from '../../src/core/quality.js';
-import { HISTORY_FORMAT, type DayError, type HistoryFile, type ValueHistory } from '../../src/core/history.js';
+import { type DayError, type HistoryFile, type ValueHistory } from '../../src/core/history.js';
 import { EXAMPLE_SOURCES } from '../../examples/sources.js';
 import example from '../../examples/nyc-taxis-weather.smaltfl.json';
 
@@ -221,7 +221,7 @@ async function main(): Promise<void> {
   const pairs: Record<string, ValueHistory> = {};
   for (const c of Object.keys(results[0]!.pairs)) pairs[c] = followed(results.map((r) => r.pairs[c] ?? []), false);
   const history: HistoryFile = {
-    format: HISTORY_FORMAT,
+    format: 'smaltfl-history/2',
     built: new Date().toISOString().slice(0, 19) + 'Z',
     flow: doc.id,
     step: STEP,

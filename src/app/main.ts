@@ -14,7 +14,7 @@ import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/docume
 import { GROUP_COLORS, insertAfter, periodOf, sourceOf, takeOut, validateDocument, watchHistory, withoutDisplay } from '../core/document.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDayHours, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, stampShift, type EmitContext } from '../core/emit.js';
 import { effectOf, type Effect } from '../core/effect.js';
-import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, QUANTILES, type HistoryFile, type Metric } from '../core/history.js';
+import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, type HistoryFile, type Metric } from '../core/history.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
@@ -8864,7 +8864,7 @@ async function start(): Promise<void> {
     const hf = integrity.files.history;
     const pastBytes = index?.history && hf ? await checked(hf.path, hf) : null;
     const past = pastBytes ? (JSON.parse(new TextDecoder().decode(pastBytes)) as HistoryFile) : null;
-    if (past?.format === HISTORY_FORMAT && past.days.length) {
+    if (isHistory(past) && past.days.length) {
       history = new HistoryRanges(past);
       flowHistory = new HistoryRanges(past);
     }

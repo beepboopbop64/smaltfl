@@ -49,10 +49,18 @@ export function emitRead(plan: FlowPlan, node: number, ctx: EmitContext): string
  */
 export function emitExpectCounts(plan: FlowPlan, node: number, ctx: EmitContext): string {
   const n = plan.nodes[node] as ExpectNode;
-  const failures = n.rules.map(([, check]) => `coalesce(sum(CASE WHEN (\n${check}\n) THEN 0 ELSE 1 END), 0)`);
-  const drops = dropChecks(n);
+  return emitRuleCounts(emitRead(plan, n.inputs[0]!, ctx), n.rules);
+}
+
+/**
+ * The same counts over any relation, for rules given as an expectation has them (`[name, check, onFail]`): what a
+ * load's measures say its checks drop (ADR 0010 §6), counted over the source's snapshot as the run counts them.
+ */
+export function emitRuleCounts(sql: string, rules: readonly (readonly [name: string, check: string, onFail: string])[]): string {
+  const failures = rules.map(([, check]) => `coalesce(sum(CASE WHEN (\n${check}\n) THEN 0 ELSE 1 END), 0)`);
+  const drops = rules.filter(([, , onFail]) => onFail === 'drop').map(([, check]) => `(\n${check}\n)`);
   const dropped = drops.length ? `coalesce(sum(CASE WHEN ${drops.join(' AND ')} THEN 0 ELSE 1 END), 0)` : '0';
-  return `SELECT count(*), ${[...failures, dropped].join(', ')} FROM (\n${emitRead(plan, n.inputs[0]!, ctx)}\n)`;
+  return `SELECT count(*), ${[...failures, dropped].join(', ')} FROM (\n${sql}\n)`;
 }
 
 /**

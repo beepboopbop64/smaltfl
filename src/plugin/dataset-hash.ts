@@ -40,6 +40,22 @@ export function tableColumns(db: Database, table: string): [string, Declared][] 
   return db.query('SELECT name, type FROM pragma_table_info(?)', [table]).rows.map(([n, t]) => [String(n), normalize(String(t ?? ''))]);
 }
 
+const STATIC: Record<Exclude<Declared, 'ANY'>, 'int' | 'real' | 'text' | 'blob'> = { INTEGER: 'int', REAL: 'real', TEXT: 'text', BLOB: 'blob' };
+
+/**
+ * A source table's columns as a snapshot keeps them: the engine's static types, and for an external table, whose
+ * columns read as untyped (`any`) even when declared, the declared types where it has them. The runtime's snapshot
+ * and a measure before the run copy a source into a table of these columns, so both hash it the same.
+ */
+export function sourceColumns(db: Database, table: string, st: { columns: readonly string[]; columnTypes: readonly string[]; externalSources: readonly unknown[] }): [string, string][] {
+  const declared = st.externalSources.length > 0 ? tableColumns(db, table) : [];
+  return st.columns.map((name, k): [string, string] => {
+    const type = st.columnTypes[k]!;
+    const d = declared[k];
+    return [name, type === 'any' && d && d[1] !== 'ANY' ? STATIC[d[1]] : type];
+  });
+}
+
 /** SQLite's affinity rules, folded onto the STRICT types; anything else is ANY, which keeps values as they are. */
 export function normalize(declared: string): Declared {
   const t = declared.toUpperCase();

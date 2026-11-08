@@ -7,13 +7,29 @@ import { plusDays, daysBetween, US_NYC_1, type Calendar } from './calendar.js';
 import { NormalRanges, type DailySeries, type Scale } from './normal.js';
 import type { Kind } from './quality.js';
 
+/**
+ * The time column a history's parts are counted by: a /3 file names it; a /2 file was built for the taxi example alone,
+ * which counted its trips by pickup hour.
+ */
+export function timeOf(file: Pick<HistoryFile, 'format' | 'columns' | 'time'>): string | null {
+  if (file.time !== undefined) return file.time;
+  return file.format === 'smaltfl-history/2' && file.columns.includes('tpep_pickup_datetime') ? 'tpep_pickup_datetime' : null;
+}
+
 /** A day that couldn't be measured: left out of the history, with why. */
 export interface DayError {
   day: string;
   error: string;
 }
 
-export const HISTORY_FORMAT = 'smaltfl-history/2';
+/** The builder's format now (ADR 0010 §6): /2 with the source, its slot's length, its time and zone, the columns it
+ * couldn't count, and the checks each period was counted with. */
+export const HISTORY_FORMAT = 'smaltfl-history/3';
+/** The formats this build reads: /2 is /3 with a day a period, counted with one set of checks. */
+export const HISTORY_FORMATS: readonly string[] = ['smaltfl-history/2', HISTORY_FORMAT];
+/** Whether a file is a history this build reads, with days in it. */
+export const isHistory = (f: unknown): f is HistoryFile =>
+  typeof f === 'object' && f !== null && HISTORY_FORMATS.includes((f as HistoryFile).format) && Array.isArray((f as HistoryFile).days);
 
 /**
  * A column's values (or a pair of columns' values) over the history: each value as JSON (a pair's as a JSON array),
@@ -34,12 +50,23 @@ export interface ValueHistory {
 
 /** The history's file: the checks and columns measured, then a row of numbers a day, in order. */
 export interface HistoryFile {
-  format: typeof HISTORY_FORMAT;
+  format: 'smaltfl-history/2' | 'smaltfl-history/3';
   built: string;
   flow: string;
-  /** The checks step whose counts these are, and its rules as published. */
+  /** /3: the watched source, its slot's length, and the time column its parts are counted by, in its zone (null: as the
+   * text writes it). A /2 file has a day a period, by its pickup time. */
+  source?: string;
+  every?: 'day';
+  time?: string | null;
+  zone?: string | null;
+  /** /3: the columns it couldn't count, and why ("2.1M values"). */
+  skipped?: [column: string, why: string][];
+  /** The checks step whose counts these are, and its rules as published: the latest period's. */
   step: string;
   rules: { name: string; check: string; onFail: string }[];
+  /** /3: where the checks changed, each set of rules with the first period counted with it, in order; none when every
+   * period was counted with `rules`. */
+  checks?: { from: number; step: string; rules: { name: string; check: string; onFail: string }[] }[];
   columns: string[];
   types: string[];
   /** Each column's kind on most days. */

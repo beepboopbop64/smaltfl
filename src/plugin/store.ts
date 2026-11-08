@@ -23,9 +23,14 @@
  *                                                      version each name showed before it, which a withdrawal points
  *                                                      back to (S10)
  *   _smaltfl_withdrawals(release, withdraws)           each applied withdrawal, and the release it took back (Q-61)
+ *   _smaltfl_measures(run, node, slot, hash, measures) each watched load's measures, as the run measured its snapshot
+ *                                                      (ADR 0010 §6, E11): what its claim's `measured` was checked
+ *                                                      against, and what a derived run's claim is checked against (C4)
  */
 import type { Database } from 'smaltdb/engine';
+import { canonicalJSON } from '../core/canonical.js';
 import type { Repair } from '../core/fill.js';
+import type { Measures } from '../core/measures.js';
 import type { FillHold, Hold, Judged, RunRef } from '../core/hold.js';
 import type { ExpectationResult } from '../core/manifest.js';
 import type { DecisionOption } from '../core/policy.js';
@@ -45,6 +50,27 @@ export function ensureStore(db: Database): void {
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_derived(run INTEGER PRIMARY KEY, from_run INTEGER NOT NULL, from_manifest TEXT NOT NULL, holds TEXT NOT NULL, donors TEXT NOT NULL, filled INTEGER)');
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_repairs(release INTEGER PRIMARY KEY, run INTEGER NOT NULL, from_run INTEGER NOT NULL, from_manifest TEXT NOT NULL, repair TEXT NOT NULL, before TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_withdrawals(release INTEGER PRIMARY KEY, withdraws INTEGER NOT NULL)');
+  db.exec('CREATE TABLE IF NOT EXISTS _smaltfl_measures(run INTEGER NOT NULL, node INTEGER NOT NULL, slot TEXT NOT NULL, hash TEXT NOT NULL, measures TEXT NOT NULL, PRIMARY KEY (run, node))');
+}
+
+/** A watched load's measures as a run stored them (ADR 0010 §6): its slot, its measures/0 hash and the record. */
+export interface StoredMeasures {
+  run: number;
+  node: number;
+  slot: string;
+  hash: string;
+  measures: Measures;
+}
+
+/** Runs inside the run's transaction. */
+export function recordMeasures(db: Database, m: StoredMeasures): void {
+  db.run('INSERT INTO _smaltfl_measures(run, node, slot, hash, measures) VALUES (?, ?, ?, ?, ?)', [m.run, m.node, m.slot, m.hash, canonicalJSON(m.measures as unknown as Parameters<typeof canonicalJSON>[0])]);
+}
+
+/** A run's stored measures, by node; every run's when `run` is left out, in order. */
+export function measuresOfRun(db: Database, run?: number): StoredMeasures[] {
+  const rows = run === undefined ? db.query('SELECT run, node, slot, hash, measures FROM _smaltfl_measures ORDER BY run, node').rows : db.query('SELECT run, node, slot, hash, measures FROM _smaltfl_measures WHERE run = ? ORDER BY node', [run]).rows;
+  return rows.map((r) => ({ run: Number(r[0]), node: Number(r[1]), slot: String(r[2]), hash: String(r[3]), measures: JSON.parse(String(r[4])) as Measures }));
 }
 
 /** A derived run as the store keeps it (ADR 0009 amendment 1 S4): the held run it repairs, its own holds (`derived`,

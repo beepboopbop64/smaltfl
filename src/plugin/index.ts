@@ -11,6 +11,9 @@
  *                                                     the versions before a fill), or refuse, saying why; refusals
  *                                                     are kept too (ADR 0009 §5, amendment 1 S10)
  *   verify [run, { smaltdb, level }]  → VerifyResult  check a run's hashes, recompute it, decode its files again
+ *   measure [{ table, settings }]     → Measures      a watched source's load measured before its run (ADR 0010 §6),
+ *                                                     copied and hashed as its snapshot will be; cached by the file's
+ *                                                     sha256 and the settings, which the run takes
  *   pin [name, bytes, sha256]         → { sha256 }    hash a source file in the engine, refuse a mismatch, serve it
  *                                                     as smaltfl:<name> (ADR 0006 §3); null bytes unpin it
  *   manifest [run]                    → RunManifest   a stored run's manifest
@@ -27,6 +30,7 @@ import type { SmaltPlugin } from 'smaltdb/engine';
 import type { RunManifest } from '../core/manifest.js';
 import { PLUGIN_NAME, type RunOptions, type VerifyOptions } from '../core/protocol.js';
 import { act, listEdits, verifyEdits, type ActInput } from './actions.js';
+import { measure } from './measure.js';
 import { pin, pinnedSource } from './pinned.js';
 import { release } from './release.js';
 import { RunError, runPlan } from './runtime.js';
@@ -49,6 +53,7 @@ const smaltfl: SmaltPlugin = {
     host.addMethod('run', (ctx, [plan, options]) => runPlan(ctx.db, plan, options as RunOptions, VERSION, ctx.signal, COMMIT));
     host.addMethod('release', (ctx, [input]) => release(ctx.db, input));
     host.addMethod('verify', (ctx, [run, options]) => verifyRun(ctx.db, Number(run), options as VerifyOptions, ctx.signal));
+    host.addMethod('measure', (ctx, [input]) => measure(ctx.db, input));
     host.addMethod('pin', (_ctx, [name, bytes, sha256]) => pin(name, bytes, sha256));
     host.addMethod('act', (ctx, [input]) => act(ctx.db, input as ActInput));
     host.addMethod('edits', (ctx) => listEdits(ctx.db));
