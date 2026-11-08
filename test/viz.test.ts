@@ -3,7 +3,7 @@
  * broken numbers, and escapes what it is given.
  */
 import { describe, expect, it } from 'vitest';
-import { amountLine, bandSpan, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
+import { amountLine, bandSpan, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -21,6 +21,7 @@ const charts: [string, string, boolean][] = [
   ['dumbbell', dumbbellRows({ rows: [{ label: 'Credit card', today: 0.002, low: 0.75, high: 0.8, todayLabel: '0.2%', usualLabel: 'usually 75–80%', sev: 'alert' }, { label: 'JFK', today: 0, low: 0.037, high: 0.061, todayLabel: 'none', usualLabel: 'usually 3.7–6.1%', gone: true }], aria: 'Shares that moved' }), true],
   ['context', contextBars({ values: [0, 0, 7.2, 1.5], note: 'Sat 7.2 cm · Sun 1.5 cm', label: (v) => `${v.toFixed(1)} cm`, kind: 'snow', aria: 'Snow in Manhattan each day, for context: 7.2 cm on Sat, 1.5 cm on Sun' }), true],
   ['learned', learnStrip({ weeks: [98_000, 101_000, 95_000, 99_000, 97_000, 100_000], weeksLabel: '6 Saturdays before', year: [92_000], yearLabel: ['last year', 'Sep 24'], today: { v: 5732, low: 81_000, high: 147_000, sev: 'alert' }, bandLabel: 'usual 81k–147k', aria: 'The six Saturdays before and the day last year: today’s range from them, 81,000 to 147,000' }), true],
+  ['episode days', episodeDays({ days: [{ label: 'Thu 21', trips: 41_939, usual: 119_398, low: 89_028, short: 77_459, marks: ['alert', 'held'] }, { label: 'Fri 22', trips: 4633, usual: 114_913, low: 84_912, short: 110_280, marks: ['alert', 'held'], at: true }], total: '~187k short so far (≥130k)', aria: 'Trips each day, Thu 21 to Fri 22, against a usual day: Thu 41,939, Fri 4,633; about 187,000 short so far' }), true],
   ['quantiles', quantileStrip({ today: [0, 0.6, 1.1, 1.9, 4], usual: [{ low: 0.46, high: 0.76 }, null, { low: 1.7, high: 2.0 }, null, { low: 3.4, high: 3.9 }], moved: 0, sev: 'warn', fmt: (v) => `${v} mi`, ends: ['short', 'long'], aria: 'Distance: shorter at the bottom' }), false],
 ];
 
@@ -316,6 +317,46 @@ describe('the news’s charts', () => {
     // Thursday's third of a day stands taller than Friday's and Saturday's twentieth, which still show (2 px).
     expect(Number(ink[0]![2])).toBeGreaterThan(2 * Number(ink[1]![2]));
     expect(Number(ink[1]![2])).toBeGreaterThanOrEqual(2);
+  });
+
+  it('draws an episode’s days as a calendar page, never as bars that read as a battery or as ‖', () => {
+    const svg = episodeIcon({ n: 3, at: 2 });
+    expect(svg).toContain('aria-hidden="true"');
+    expect([...svg.matchAll(/class="cal-(day|at)"/g)].map((m) => m[1])).toEqual(['day', 'day', 'at']);
+    expect(svg).toContain('class="cal-band"');
+    // Seven cells at most, the viewed day among the last shown; on the day after an episode, none dark.
+    expect([...episodeIcon({ n: 9, at: 8 }).matchAll(/class="cal-(day|at)"/g)].map((m) => m[1])).toEqual(['day', 'day', 'day', 'day', 'day', 'day', 'at']);
+    expect(episodeIcon({ n: 4, at: null })).not.toContain('cal-at');
+  });
+
+  it('draws an episode’s days so far: one bar a day from 0 over its usual day, each day’s marks, the shortfall a segment a day', () => {
+    const days = [
+      { label: 'Thu 21', trips: 41_939, usual: 119_398, low: 89_028, short: 77_459, marks: ['alert', 'held'] as const },
+      { label: 'Fri 22', trips: 4633, usual: 114_913, low: 84_912, short: 110_280, marks: ['alert', 'flag'] as const },
+      { label: 'Sat 23', trips: 5732, usual: 113_000, low: 81_000, short: 103_000, marks: [] as const, notRun: true, at: true },
+    ];
+    const svg = episodeDays({ days, total: '~291k short so far (≥210k)', aria: 'Trips each day' });
+    // Each run day's count over its bar; a day not run has its usual day in a dashed frame and no count.
+    expect(svg).toContain('>42k</text>');
+    expect(svg).toContain('>4.6k</text>');
+    expect(svg).not.toContain('>5.7k</text>');
+    expect([...svg.matchAll(/class="notrun"/g)].length).toBe(1);
+    expect([...svg.matchAll(/class="ghost"/g)].length).toBe(3);
+    // Below its range, a day's bar takes the severity's fill.
+    expect([...svg.matchAll(/class="sev-alert-fill"/g)].length).toBe(2);
+    // Its marks: ! ‖ and ! ⚑ under their dates; the shortfall, three segments on one bar, its total said.
+    expect([...svg.matchAll(/class="g g-(alert|held|flag)"/g)].map((m) => m[1])).toEqual(['alert', 'held', 'alert', 'flag']);
+    expect([...svg.matchAll(/class="absent"/g)].length).toBe(3);
+    expect(svg).toContain('>~291k short so far (≥210k)</text>');
+    expect(svg).toContain('class="today-ring"');
+  });
+
+  it('draws a held day’s severity and what became of it side by side in a strip of days', () => {
+    const svg = dayStrip({ days: [{ day: '2023-09-21', v: 41_939, low: 89_028, high: 160_128, sev: 'alert', marks: ['alert', 'held'] }, { day: '2023-09-25', v: 91_341, low: 72_000, high: 130_000 }], aria: 'Trips' });
+    const at = [...svg.matchAll(/<g transform="translate\(([\d.]+) [\d.]+\)"><svg [^>]*class="g g-(\w+)"/g)].map((m) => [Number(m[1]), m[2]] as const);
+    expect(at.map((x) => x[1])).toEqual(['alert', 'held']);
+    // Side by side, 16 apart, centred on the day's column.
+    expect(at[1]![0] - at[0]![0]).toBe(16);
   });
 
   it('draws what a day is learned from inside its frame: each weekday, the day last year, today’s band, named', () => {

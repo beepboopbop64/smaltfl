@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
 import { lacked, reachLabel, shortfall, type EpisodeDay } from '../src/core/days.js';
-import { afterLine, decisionDrawing, pauseLines, sheetText, sheetWords } from '../src/core/decision.js';
+import { afterLine, decisionDrawing, pausedGlance, pauseLines, sheetText, sheetWords } from '../src/core/decision.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
 import { CELL_KINDS, countRange, gateHead, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, splitSteps, storyOf, wordsIn } from '../src/core/story.js';
 
@@ -175,7 +175,11 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('names the episode a calm day comes after, and says nothing is left to do', () => {
     const s = story('2023-09-25');
-    expect(s.chip).toBe('after Thu–Sun · only Flex Fare');
+    // Its days from the hour the first fell, never what its last day was (Thu lost its trips from 13:00, not all but Flex
+    // Fare): what it was is a tap away.
+    expect(s.chip).toBe('after Thu 13:00–Sun');
+    expect(story('2022-09-19').chip).toBe('after Sat 15:00–Sun');
+    expect(story('2022-11-21').chip).toBe('after Mon–Sun');
     expect(s.labels.after).toBe('Nothing to do · Thu published short, Fri–Sun held');
     expect(s.recovery).toMatchObject({ held: ['2023-09-22', '2023-09-23', '2023-09-24'], published: ['2023-09-21'] });
   });
@@ -183,7 +187,9 @@ describe.skipIf(!has)('the story on the real history', () => {
   it('tells Fri Sep 22, 2023 as the Flex Fare trips alone arriving, the run held with fewer rows dropped than usual', () => {
     const s = story('2023-09-22');
     expect(s.head).toBe('Only Flex Fare records arrived');
-    expect(s.chip).toBe('Day 2 · since Thu 13:00');
+    // Its chip counts the trips short so far, as its hours do: day 3 reads apart from day 2.
+    expect(s.chip).toBe('Day 2 · ~187k short');
+    expect(story('2023-09-23').chip).toBe('Day 3 · ~290k short');
     expect(s.split!.part.today).toBe(4613);
     expect(s.split!.rest.today).toBe(20);
     expect(s.gate).toMatchObject({ held: true, dropped: 2116 });
@@ -197,7 +203,9 @@ describe.skipIf(!has)('the story on the real history', () => {
     expect(story('2022-11-14').head).toBe('Vendor 1 sent almost nothing');
     const s = story('2022-11-15');
     expect(s.head).toBe('Vendor 1 sent almost nothing');
-    expect(s.chip).toBe('Day 2 · since Mon');
+    // A part that vanished counts each day whole, its guess less its trips, as its amount line's change does.
+    expect(s.chip).toBe('Day 2 · ~66k short');
+    expect(s.episode!.short!.estimate).toBeCloseTo((h!.of({ of: 'trips' })!.at('2022-11-14')!.expected - 82_278) + (h!.of({ of: 'trips' })!.at('2022-11-15')!.expected - 90_728), 0);
     expect(s.split!.part.today).toBe(3);
   });
 
@@ -372,11 +380,13 @@ describe.skipIf(!has)('the story on the real history', () => {
       expect(s.state, d).toBe('wrong');
       // The card: its glance without the story's verb (behind ⋯), and the pause row with its verb, in each of its states:
       // waiting with Decide, waiting on the owner for someone who may not decide, and each receipt.
-      const base = glanceStrings(s).filter((x) => x !== s.labels.primary);
+      // The pause row names what paused it (its checks too when they held), readers' day and the three outputs; the
+      // checks are drawn as a paused card draws them (decision.ts pausedGlance).
       const words = (xs: readonly string[]) => xs.reduce((t, x) => t + wordsIn(x), 0);
+      const by = s.gate?.held ? ['trips', 'checks'] : ['trips'];
       for (const [state, may, under, standing] of [['waiting', true, null, false], ['waiting', false, null, false], ['asis', true, null, false], ['dont', true, null, false], ['dont', true, null, true], ['dont', true, 'Wed', true]] as const) {
-        const l = pauseLines({ state, outputs: 3, who: 'Owner', at: '23:59', under, may, deciders: 'Owner', standing });
-        const said = [...base, l.reach, l.verb ?? ''];
+        const l = pauseLines({ state, names: ['zone_hour', 'borough_hour', 'weather_effect'], by, readers: plus(d, -1), who: 'Owner', at: '23:59', under, may, deciders: 'Owner', standing });
+        const said = pausedGlance(s, l);
         expect(words(said), `${d} ${state}${may ? '' : ' (may not decide)'}: ${said.join(' | ')}`).toBeLessThanOrEqual(60);
       }
       // The sheet, drawn as the page draws it, the day before what readers keep; at its wordiest, the day after already
@@ -393,12 +403,22 @@ describe.skipIf(!has)('the story on the real history', () => {
     expect(rows('2023-09-20')).toBe(108_434);
     const nov = decisionDrawing(h, story('2022-11-14'), '2022-11-14', '2022-11-13', { day: rows('2022-11-14'), readers: rows('2022-11-13') });
     expect(nov).toMatchObject({ cause: 'split', part: 'Vendor 1 · 2', asis: { part: 2, rest: 82_276 } });
-    // The day after an episode says what became of its days, in fewer words than "Nothing to do · …" did.
-    const after = afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'dont' }, { day: '2023-09-23', state: 'dont' }, { day: '2023-09-24', state: 'dont' }])!;
-    const mon = story('2023-09-25');
-    expect(mon.labels.after).toBe('Nothing to do · Thu published short, Fri–Sun held');
-    // Its strip keys a day of the episode this visit didn't run, where one is ("not run"): counted too.
-    expect(glanceStrings(mon).filter((x) => x !== mon.labels.after).reduce((t, x) => t + wordsIn(x), 0) + wordsIn(after) + wordsIn('not run')).toBeLessThanOrEqual(24);
+    // The day after an episode says what became of its days, the day on screen first once it published, with Decide
+    // while one waits: in each state, a day of it not run keyed in its strip ("not run"; the strip draws only the
+    // episode's own days so), within its 24 words, on each of the episodes the app loads.
+    for (const day of ['2023-09-25', '2022-09-19', '2022-11-21']) {
+      const mon = story(day);
+      const rec = mon.recovery!;
+      const days: string[] = [];
+      for (let x = rec.from; x <= rec.to; x = plus(x, 1)) days.push(x);
+      const states: ('waiting' | 'asis' | 'dont' | null)[][] = [days.map(() => 'waiting'), days.map((_, i) => (i === 0 ? 'asis' : 'dont')), days.map((_, i) => (i === days.length - 1 ? null : 'waiting'))];
+      for (const fates of states) {
+        const after = afterLine(days.map((x, i) => ({ day: x, state: fates[i]! })), { today: { day, state: 'published' } })!;
+        const said = [...glanceStrings(mon).filter((x) => x !== mon.labels.after), after.text, after.verb ?? '', fates.includes(null) ? 'not run' : ''];
+        expect(said.reduce((t, x) => t + wordsIn(x), 0), `${day}: ${said.join(' | ')}`).toBeLessThanOrEqual(24);
+      }
+    }
+    expect(story('2023-09-25').labels.after).toBe('Nothing to do · Thu published short, Fri–Sun held');
   }, 60_000);
 
   it('accounts for every finding in one tier: the grouped rows add up to what the old view counted', () => {
@@ -431,6 +451,9 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('tells calm days and the day after an episode calmly', () => {
     expect(story('2024-01-15')).toMatchObject({ state: 'calm', head: 'Normal for MLK Day' });
-    expect(story('2023-09-25')).toMatchObject({ state: 'recovery', head: 'Back to normal', chip: 'after Thu–Sun · only Flex Fare' });
+    expect(story('2023-09-25')).toMatchObject({ state: 'recovery', head: 'Back to normal', chip: 'after Thu 13:00–Sun' });
+    // A calm day says its cells are all normal: a blank cell can't be told from one not checked.
+    expect(story('2024-01-15').labels.health).toBe('Health · all normal');
+    expect(story('2024-01-06').labels.health).toBe('Health');
   });
 });

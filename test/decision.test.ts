@@ -4,7 +4,7 @@
  * within their budgets.
  */
 import { describe, expect, it } from 'vitest';
-import { afterLabel, afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, goLabel, heldLine, outputPausedLine, pauseLines, ribbonOf, runFigures, sheetText, sheetWords, waitedLabel, type SheetIn, type Sight } from '../src/core/decision.js';
+import { afterLabel, afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, goLabel, heldLine, outputPausedLine, pausedChecks, pauseLines, pauseReasons, pauseWords, ribbonOf, runFigures, sheetText, sheetWords, waitedLabel, type SheetIn, type Sight } from '../src/core/decision.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
 import { storyOf, wordsIn } from '../src/core/story.js';
@@ -116,22 +116,50 @@ describe('the decision sheet’s words (ADR 0009 §12: 45 at a glance)', () => {
 });
 
 describe('the cause card’s pause row, the day after an episode, and the record of decisions (ADR 0009 §12)', () => {
-  it('says what waits with one verb, Decide; whom it waits on for someone who may not decide; then the receipt', () => {
-    const base = { outputs: 3, who: null, at: null, under: null, may: true, deciders: 'Owner' };
-    expect(pauseLines({ ...base, state: 'waiting' })).toEqual({ reach: 'Paused · 3 outputs waiting', verb: 'Decide' });
-    expect(pauseLines({ ...base, state: 'waiting', may: false })).toEqual({ reach: 'Paused · waiting on Owner', verb: null });
-    expect(pauseLines({ ...base, state: 'asis', who: 'Owner', at: '09:40' })).toEqual({ reach: 'Published as is · Owner · 09:40', verb: null });
-    expect(pauseLines({ ...base, state: 'dont', who: 'Owner', at: '09:41' }).reach).toBe('Not published · Owner · 09:41');
+  it('says what paused the day, what readers see and the outputs that wait, with one verb; who decides for someone who may not; then the receipt', () => {
+    const names = ['zone_hour', 'borough_hour', 'weather_effect'];
+    const base = { names, by: ['trips'], readers: '2023-09-20', who: null, at: null, under: null, may: true, deciders: 'Owner' };
+    // Thu Sep 21, 2023: the story held it, its checks passed; readers keep Wed 20; the three outputs named.
+    expect(pauseLines({ ...base, state: 'waiting' })).toEqual({ reach: 'Paused by trips', see: 'readers see Wed 20', names, verb: 'Decide', waits: null });
+    // Fri Sep 22: its checks held it too.
+    expect(pauseLines({ ...base, state: 'waiting', by: ['trips', 'checks'] }).reach).toBe('Paused by trips, checks');
+    expect(pauseLines({ ...base, state: 'waiting', may: false })).toEqual({ reach: 'Paused by trips', see: 'readers see Wed 20', names, verb: null, waits: 'Owner decides' });
+    // Nothing the viewer may see held it (a node closed to them): only the pause is said.
+    expect(pauseLines({ ...base, state: 'waiting', by: [] }).reach).toBe('Paused');
+    expect(pauseLines({ ...base, state: 'waiting', readers: null }).see).toBe('nothing published yet');
+    expect(pauseLines({ ...base, state: 'asis', who: 'Owner', at: '09:40' })).toEqual({ reach: 'Published as is · Owner · 09:40', see: null, names, verb: null, waits: null });
+    expect(pauseLines({ ...base, state: 'dont', who: 'Owner', at: '09:41' })).toMatchObject({ reach: 'Not published · Owner · 09:41', see: 'readers see Wed 20' });
     expect(pauseLines({ ...base, state: 'dont', who: 'Owner', under: 'Fri' }).reach).toBe('Not published · under Fri’s decision');
     // A decision that stands says it closes the days after it too.
     expect(pauseLines({ ...base, state: 'dont', who: 'Owner', at: '09:24', standing: true }).reach).toBe('Unpublished until a day publishes');
     // Every held output already showing its versions: published as is, by nobody.
     expect(pauseLines({ ...base, state: 'asis' }).reach).toBe('Published as is');
-    // Never more words than the row it replaces and the verb: 4 + 1.
+    // A row and its verb, not a paragraph: at most 13 words with three outputs named, in every state (the card's budget
+    // holds it: test/story-real.test.ts).
     for (const s of ['waiting', 'asis', 'dont'] as const) for (const may of [true, false]) for (const standing of [false, true]) {
-      const l = pauseLines({ ...base, state: s, may, who: 'Owner', at: '09:40', under: s === 'dont' && !standing ? 'Fri' : null, standing });
-      expect(wordsIn(l.reach) + (l.verb ? wordsIn(l.verb) : 0)).toBeLessThanOrEqual(6);
+      const l = pauseLines({ ...base, by: ['trips', 'checks'], state: s, may, who: 'Owner', at: '09:40', under: s === 'dont' && !standing ? 'Fri' : null, standing });
+      expect(pauseWords(l), JSON.stringify(l)).toBeLessThanOrEqual(13);
     }
+  });
+
+  it('names what paused a day only as far as the viewer may see it', () => {
+    const holds = [{ by: 'story', origin: 'trips' }, { by: 'checks', origin: 'trips_valid' }] as const;
+    expect(pauseReasons(holds)).toEqual(['trips', 'checks']);
+    // The source first, however the plugin ordered its holds (it holds at the checks first on Fri Sep 22, 2023).
+    expect(pauseReasons([...holds].reverse())).toEqual(['trips', 'checks']);
+    expect(pauseReasons([{ by: 'unjudged', origin: 'trips' }])).toEqual(['trips not judged']);
+    // trips_valid closed to the viewer: its checks are neither named nor counted.
+    expect(pauseReasons(holds, (o) => o !== 'trips_valid')).toEqual(['trips']);
+    expect(pauseReasons(holds, () => false)).toEqual([]);
+  });
+
+  it('draws a paused card’s checks in full only when they held the day too, else says in one line that they passed', () => {
+    const g = { step: 'trips_valid', rows: 41_939, dropped: 4_004, share: 0.0955, limit: 0.1, held: false, near: true, usual: { low: 3_700, high: 9_100, expected: 6_000 } };
+    // Thu Sep 21, 2023: near its limit and under it, so fine: one line, its share as its bars say it.
+    expect(pausedChecks(g)).toEqual({ full: false, line: 'Checks passed: 9.55% dropped' });
+    expect(pausedChecks({ ...g, share: 0.06, near: false })).toEqual({ full: false, line: 'Checks passed: 6% dropped' });
+    expect(pausedChecks({ ...g, held: true, near: false, share: 0.4567 })).toEqual({ full: true, line: null });
+    expect(pausedChecks(null)).toEqual({ full: false, line: null });
   });
 
   it('says the day held under the strip, readers’ day and Decide; and atop a waiting output’s News, that it waits', () => {
@@ -161,11 +189,18 @@ describe('the cause card’s pause row, the day after an episode, and the record
     expect(heldLine({ by: 'checks', origin: 'trips_valid', said: '45.67% dropped, more than 10%' }, true)).toBe('trips_valid: 45.67% dropped, more than 10%');
   });
 
-  it('says what became of an episode’s days the day after it, what still waits first', () => {
-    expect(afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'dont' }, { day: '2023-09-23', state: 'dont' }, { day: '2023-09-24', state: 'dont' }])).toBe('Thu as is · Fri–Sun not published');
-    expect(afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'waiting' }, { day: '2023-09-23', state: 'waiting' }, { day: '2023-09-24', state: null }])).toBe('Fri–Sat waiting · Thu as is');
-    expect(afterLine([{ day: '2022-11-14', state: 'published' }, { day: '2022-11-16', state: 'published' }])).toBe('Mon, Wed published');
+  it('says what became of an episode’s days the day after it: the day on screen once it published, what still waits with Decide', () => {
+    const today = { day: '2023-09-25', state: 'published' } as const;
+    expect(afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'dont' }, { day: '2023-09-23', state: 'dont' }, { day: '2023-09-24', state: 'dont' }], { today }))
+      .toEqual({ text: 'Mon 25 published · Thu as is · Fri–Sun unpublished', verb: null });
+    // Thu–Sat wait (Sun not run here, left to the strip): the row says so with Decide, whatever else became of them.
+    expect(afterLine([{ day: '2023-09-21', state: 'waiting' }, { day: '2023-09-22', state: 'waiting' }, { day: '2023-09-23', state: 'waiting' }, { day: '2023-09-24', state: null }], { today }))
+      .toEqual({ text: 'Mon 25 published · Thu–Sat still wait', verb: 'Decide' });
+    expect(afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'waiting' }, { day: '2023-09-23', state: 'waiting' }], { may: false }))
+      .toEqual({ text: 'Fri–Sat still wait', verb: null });
+    expect(afterLine([{ day: '2022-11-14', state: 'published' }, { day: '2022-11-16', state: 'published' }])).toEqual({ text: 'Mon, Wed published', verb: null });
     expect(afterLine([{ day: '2023-09-21', state: null }])).toBeNull();
+    expect(afterLine([{ day: '2023-09-21', state: null }], { today })).toEqual({ text: 'Mon 25 published', verb: null });
   });
 
   it('puts the paused days on a ribbon by month, each once, and says a day’s decision in three lines', () => {

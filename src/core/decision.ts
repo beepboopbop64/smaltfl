@@ -8,19 +8,21 @@
  *   gives readers the day's own rows, what it lacks against a usual day drawn absent; Don't publish keeps the day they
  *   see now, another day's rows, hatched; nothing published yet is absent. Every row is on one scale.
  * - The sheet's words (`sheetText`, `sheetWords`): at most 45 at a glance, whichever button label shows.
- * - The cause card's row (`pauseLines`): what its outputs wait for, or what became of them, and its one verb; and the
- *   held card's line (`heldLine`), what held a day with no story to tell it.
+ * - The cause card's row (`pauseLines`): what paused the day (`pauseReasons`), what readers see, the outputs that wait
+ *   by name, or what became of them, and its one verb; the checks as a paused card draws them (`pausedChecks`) and
+ *   every word it shows (`pausedGlance`); and the held card's line (`heldLine`), what held a day with no story.
  * - The day line under the loads strip (`dayPausedLine`) and the head of a waiting output's News (`outputPausedLine`):
  *   the pause, readers' day, and the verb that opens the sheet, on the first screen.
  * - The status line after a run (`daySentence`), one sentence for every viewer of what they may see, and its title's
  *   figures (`runFigures`), a node closed to the viewer neither counted nor named.
- * - An episode's days once it is over (`afterLine`), and the paused days by month (`ribbonOf`, `decidedLines`).
+ * - An episode's days once it is over, the day on screen first once it published, with Decide while one waits
+ *   (`afterLine`), and the paused days by month (`ribbonOf`, `decidedLines`).
  */
 import { dayMid, dayShort, readersSee, type PauseState } from './days.js';
 import type { HistoryRanges } from './history.js';
 import type { Hold } from './hold.js';
 import type { DecideOption } from './policy.js';
-import { wordsIn, type Story } from './story.js';
+import { gateLabels, wordsIn, type Gate, type Story } from './story.js';
 
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
 /** A count's axis end said short: "120k", "4.8k", "900". */
@@ -236,16 +238,77 @@ export function heldLine(x: Pick<Hold, 'by' | 'origin' | 'said'>, history: boole
 }
 
 /**
- * The cause card's pause row (ADR 0009 §12): what the day's outputs wait for, with its one verb, Decide; for someone
- * who may not decide, whom it waits on, in the row itself; once decided, the receipt: who decided and when, or the
- * standing decision it came under. Its words count in the card's 60 at a glance.
+ * What paused a day, said for the pause row (ADR 0009 §12): the source its story held ("trips"), its checks ("checks"),
+ * a source not judged ("trips not judged"), each once, and only what the viewer may see (`open`, by the holding node):
+ * a node closed to them is neither named nor counted.
  */
-export function pauseLines(o: { state: PauseState; outputs: number; who: string | null; at: string | null; under: string | null; may: boolean; deciders: string; standing?: boolean }): { reach: string; verb: string | null } {
+export function pauseReasons(holds: readonly Pick<Hold, 'by' | 'origin'>[], open: (origin: string) => boolean = () => true): string[] {
+  // The source first, then its checks, whatever order the plugin held them in.
+  const order = { story: 0, unjudged: 1, checks: 2 } as const;
+  const said = holds.filter((x) => open(x.origin)).sort((a, b) => order[a.by] - order[b.by]).map((x) => (x.by === 'checks' ? 'checks' : x.by === 'unjudged' ? `${x.origin} not judged` : x.origin));
+  return [...new Set(said)];
+}
+
+/** The cause card's pause row: its first line, what readers see, the outputs it is about, and its one verb. */
+export interface PauseRow {
+  /** What paused the day while it waits ("Paused by trips, checks"), or the receipt once decided. */
+  reach: string;
+  /** What readers see meanwhile ("readers see Wed 20"), or null where the day itself is published. */
+  see: string | null;
+  /** The outputs it is about, by name: those that wait, or waited. */
+  names: readonly string[];
+  verb: string | null;
+  /** In the verb's place for someone who may not decide: who does ("Owner decides"). */
+  waits: string | null;
+}
+
+/**
+ * The cause card's pause row (ADR 0009 §12): while the day waits, what paused it ("Paused by trips, checks"), what
+ * readers see meanwhile ("readers see Wed 20"), and the outputs that wait, named, with its one verb, Decide; for
+ * someone who may not decide, who does in the verb's place ("Owner decides"); once decided, the receipt (who decided
+ * and when, or the standing decision it came under) and what readers see. Its words count in the card's 60 at a
+ * glance, so readers' day goes without its age here: the day line under the strip, the staged bar and the list of
+ * outputs a tap away carry it.
+ */
+export function pauseLines(o: { state: PauseState; names: readonly string[]; by?: readonly string[]; readers?: string | null; who: string | null; at: string | null; under: string | null; may: boolean; deciders: string; standing?: boolean }): PauseRow {
   const by = o.who ? ` · ${o.who}${o.at ? ` · ${o.at}` : ''}` : '';
-  if (o.state === 'waiting') return o.may ? { reach: `Paused · ${o.outputs} output${o.outputs === 1 ? '' : 's'} waiting`, verb: 'Decide' } : { reach: `Paused · waiting on ${o.deciders}`, verb: null };
-  if (o.state === 'asis') return { reach: `Published as is${by}`, verb: null };
+  const reasons = o.by ?? [];
+  const see = o.readers === undefined ? null : readersSee(o.readers, null);
+  if (o.state === 'waiting') {
+    return { reach: reasons.length ? `Paused by ${reasons.join(', ')}` : 'Paused', see, names: o.names, verb: o.may ? 'Decide' : null, waits: o.may ? null : `${o.deciders} decides` };
+  }
+  if (o.state === 'asis') return { reach: `Published as is${by}`, see: null, names: o.names, verb: null, waits: null };
   // A decision that stands says so, by its effect: the days after it are closed too, until one publishes.
-  return { reach: o.under ? `Not published · under ${o.under}’s decision` : o.standing ? 'Unpublished until a day publishes' : `Not published${by}`, verb: null };
+  return { reach: o.under ? `Not published · under ${o.under}’s decision` : o.standing ? 'Unpublished until a day publishes' : `Not published${by}`, see, names: o.names, verb: null, waits: null };
+}
+
+/** Every word a pause row shows at a glance. */
+export function pauseWords(l: PauseRow): number {
+  return [l.reach, l.see ?? '', ...l.names, l.verb ?? '', l.waits ?? ''].reduce((n, x) => n + wordsIn(x), 0);
+}
+
+/**
+ * The checks on a paused card (ADR 0009 §12). Checks that held the day too are drawn in full, headed by their ‖ alone:
+ * the pause row has named them among what paused it. Checks that passed, near their limit or not, are one line a tap
+ * from their sheet, "Checks passed: 9.55% dropped": not a second problem under a paused card, nor a contradiction of it.
+ */
+export function pausedChecks(g: Pick<Gate, 'held' | 'near' | 'share' | 'limit' | 'step' | 'dropped' | 'rows' | 'usual'> | null): { full: boolean; line: string | null } {
+  if (!g) return { full: false, line: null };
+  if (g.held) return { full: true, line: null };
+  return { full: false, line: `Checks passed: ${gateLabels(g as Gate).said} dropped` };
+}
+
+/**
+ * Every string a paused card shows at a glance (ADR 0009 §12), for its budget of 60: the story's, its verb behind ⋯;
+ * the checks as `pausedChecks` draws them (held: their bars' words without a head; passed: one line); the rows of
+ * changes without the kinds under them (their rows say what they are when opened); the health cells without their
+ * head (the pause row and the checks sit on either side of them, each named); and the pause row with its verb.
+ */
+export function pausedGlance(s: Story, row: PauseRow): string[] {
+  const l = s.labels;
+  const checks = pausedChecks(s.gate);
+  const gate = l.gate.length ? (checks.full ? l.gate.slice(1) : checks.line ? [checks.line] : []) : [];
+  return [s.head, s.chip ?? '', ...l.amount, ...l.hero.slice(0, l.hero.length - l.gate.length), ...gate, ...l.key, l.context ?? '', l.follows ?? '', l.sameDay ?? '', l.more ?? '', l.notes ?? '', ...s.stories.map((f) => f.title), row.reach, row.see ?? '', ...row.names, row.verb ?? '', row.waits ?? ''].filter(Boolean);
 }
 
 /**
@@ -318,14 +381,22 @@ function spans(days: readonly string[]): string {
   return runs.map(([a, b]) => (a === b ? wd(a) : `${wd(a)}–${wd(b)}`)).join(', ');
 }
 
-/** What became of an episode's days, said the day after it under a flow that holds (ADR 0009 §12): "Thu as is ·
- * Fri–Sun not published", or what still waits first, "Thu–Fri waiting". Days not run here are left out; null when none
- * is known. */
-export function afterLine(days: readonly { day: string; state: PauseState | 'published' | null }[]): string | null {
+/**
+ * What became of an episode's days, said the day after it under a flow that holds (ADR 0009 §12), with the day on
+ * screen first once it published (readers now see it): "Mon 25 published · Thu–Sat still wait" with Decide while any
+ * waits (the days decided are left to the strip's marks), else "Mon 25 published · Thu as is · Fri–Sun unpublished".
+ * Days not run here are left out (the strip draws them not run); null when nothing is known.
+ */
+export function afterLine(days: readonly { day: string; state: PauseState | 'published' | null }[], o: { today?: { day: string; state: PauseState | 'published' | null } | null; may?: boolean } = {}): { text: string; verb: string | null } | null {
   const known = days.filter((d): d is { day: string; state: PauseState | 'published' } => d.state !== null);
-  if (!known.length) return null;
-  const words: [PauseState | 'published', string][] = [['waiting', 'waiting'], ['asis', 'as is'], ['dont', 'not published'], ['published', 'published']];
-  return words.map(([s, w]) => [known.filter((d) => d.state === s).map((d) => d.day), w] as const).filter(([ds]) => ds.length).map(([ds, w]) => `${spans(ds)} ${w}`).join(' · ');
+  const lead = o.today?.state === 'published' ? `${dayShort(o.today.day)} published` : null;
+  if (!known.length) return lead ? { text: lead, verb: null } : null;
+  const of = (s: PauseState | 'published') => known.filter((d) => d.state === s).map((d) => d.day);
+  const waiting = of('waiting');
+  if (waiting.length) return { text: [lead, `${spans(waiting)} still wait`].filter(Boolean).join(' · '), verb: o.may === false ? null : 'Decide' };
+  const words: [PauseState | 'published', string][] = [['asis', 'as is'], ['dont', 'unpublished'], ['published', 'published']];
+  const said = words.map(([s, w]) => [of(s), w] as const).filter(([ds]) => ds.length).map(([ds, w]) => `${spans(ds)} ${w}`);
+  return { text: [lead, ...said].filter(Boolean).join(' · '), verb: null };
 }
 
 /** The Runs view's ribbon (ADR 0009 §12): the paused days by month, each its date and what became of it. */

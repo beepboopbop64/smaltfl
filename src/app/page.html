@@ -1022,6 +1022,50 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .loads-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .loads-acts:empty { display: none; }
 .btn.small.primary { background: var(--smalt); border-color: var(--smalt); color: var(--surface); font-weight: 600; }
+/* A paused card's row (ADR 0009 §12): its mark, what paused it, what readers see, and the outputs that wait, named, each
+   a hatched box (published as is: a box with a tick); its checks, when they passed, one line under the health cells. */
+.vf-reach.vf-paused { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 8px; padding: 10px 0 8px; font-weight: 400; }
+.vf-paused .vf-mark { padding-top: 1px; }
+.vf-paused .vf-chev { align-self: center; }
+.vf-paused-t { display: grid; gap: 3px; min-width: 0; }
+.vf-paused-t b { font-weight: 600; color: var(--ink); font-size: 14px; }
+.vf-see-line { font-size: 13.5px; color: var(--ink-2); }
+.vf-outs-named { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; }
+.o-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 12px; color: var(--ink); }
+.o-chip i { flex: none; display: inline-grid; place-items: center; width: 11px; height: 13px; border: 1.5px solid var(--ink-2); border-radius: 3px; box-sizing: border-box; }
+.o-chip.held i { border-color: var(--ink-2); background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--ink-2) 60%, transparent) 0 1.2px, transparent 1.2px 3.5px), var(--surface); }
+.o-chip.pub .g-ack { stroke: var(--ink); }
+.vf-acts .vf-waits { align-self: center; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.vf-card.paused .vf-healthwrap { padding-top: 2px; }
+.vf-checks-ok { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; border: 0; border-top: 1px solid var(--line); background: none; padding: 0; text-align: left; font: inherit; font-size: 13.5px; color: var(--ink-2); cursor: pointer; }
+.vf-checks-ok .vf-chev { margin-left: auto; }
+/* The day after an episode: what became of its days, Decide while one waits. */
+.vf-after { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.vf-after.waiting { color: var(--ink); font-weight: 500; }
+.vf-after .btn { margin-left: auto; }
+.loads-pause.after { font-weight: 400; }
+/* A held day's mark by its date and on its News tab. */
+.day-mark { display: inline-flex; margin-right: 6px; vertical-align: -2px; }
+.tab-mark.pause { margin-left: 3px; }
+/* An episode's chip: its days as a calendar page, the viewed day dark (never a battery, never ‖). */
+.vf-chip-btn .viz.cal-icon { display: inline-block; margin-right: 6px; }
+.viz.cal-icon .cal-page { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.2; }
+.viz.cal-icon .cal-band { fill: var(--ink-2); }
+.viz.cal-icon .cal-ring { stroke: var(--ink-2); stroke-width: 1.4; stroke-linecap: round; }
+.viz.cal-icon .cal-day { fill: var(--muted); }
+.viz.cal-icon .cal-at { fill: var(--ink); stroke: var(--ink); stroke-width: 0.8; }
+/* The episode's sheet: its days, each with what became of it and Decide while it waits. */
+.vf-daylist { list-style: none; margin: 0; padding: 0; display: grid; }
+.vf-daylist li { display: grid; grid-template-columns: 34px 54px 1fr auto; align-items: center; gap: 8px; min-height: 42px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.vf-daylist .dl-marks { display: inline-flex; gap: 2px; }
+.vf-daylist .dl-day { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.vf-daylist .dl-fate { color: var(--ink-2); }
+/* The episodes to pick from: each marked by its days, the one shown pressed. */
+.episodes .ep-chip { display: inline-flex; align-items: center; gap: 5px; }
+.episodes .ep-chip[aria-pressed="true"] { background: var(--smalt); border-color: var(--smalt); color: var(--surface); font-weight: 700; }
+.episodes .ep-chip[aria-pressed="true"] .g-fill { fill: var(--surface); } .episodes .ep-chip[aria-pressed="true"] .g-cut { fill: var(--smalt); }
+.episodes .ep-chip[aria-pressed="true"] .g-tri { fill: var(--surface); stroke: var(--surface); } .episodes .ep-chip[aria-pressed="true"] .g-mark { fill: var(--smalt); }
+.vf-cell.sealed .g { margin-right: 1px; }
 .paused-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; color: var(--ink); font-size: 14px; }
 .paused-line .g { flex: none; }
 .paused-line .btn { margin-left: auto; }

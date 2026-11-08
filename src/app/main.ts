@@ -19,10 +19,10 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type EpisodeDay, type PauseState } from '../core/days.js';
-import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, goLabel, heldLine, outputPausedLine, pauseLines, ribbonOf, runFigures, sheetText, type SheetText, type Sight } from '../core/decision.js';
+import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, goLabel, heldLine, outputPausedLine, pausedChecks, pauseLines, pauseReasons, ribbonOf, runFigures, sheetText, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, dayClaim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, stagedKeys, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
-import { CELL_KINDS, CELL_NAMES, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
-import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
+import { CELL_KINDS, CELL_NAMES, HEALTH_HEAD, STRIP_KEY, cardWords, changeLabel, compact, countLabel, countRange, gateHead, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
+import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
 import { checkDecision, covers, readView, wrapRead, type DecideOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
@@ -229,6 +229,8 @@ const fmtCompact = (n: number) => (Math.abs(n) < 10000 ? fmtInt(n) : Math.abs(n)
 
 /** A held day's mark (ADR 0009 §12): ‖ paused, ⚑ published as is, ✕ not published. */
 const PAUSE_MARK: Record<PauseState, VizMark> = { waiting: 'held', asis: 'flag', dont: 'closed' };
+/** What a held day's mark says, for its accessible name. */
+const PAUSE_WORD: Record<PauseState, string> = { waiting: 'paused', asis: 'published as is', dont: 'not published' };
 /** What a card's mark says to a screen reader, before its line. */
 const CARD_SAID: Record<PauseState, string> = { waiting: 'Paused, ', asis: 'Published as is, ', dont: 'Not published, ' };
 
@@ -2341,7 +2343,8 @@ function drillHead(card: string, tabs: Tab[], tab: Tab): HTMLElement {
   // Two or more on a side fold into one chip that opens their list ("‹ 2 inputs"), so the row fits a phone.
   const side = (xs: string[], up: boolean): Child => {
     if (xs.length < 2) return xs[0] ? chip(xs[0], up) : '';
-    const noun = up ? `${xs.length} inputs` : `${xs.length} readers`;
+    // What reads it are steps, never "readers": readers are the people who get the outputs (ADR 0009).
+    const noun = up ? `${xs.length} inputs` : `feeds ${xs.length} steps`;
     return h('details', { class: `nav-fold ${up ? 'up' : 'down'}` }, h('summary', { class: 'nav-chip', 'aria-label': `${up ? 'What it reads' : 'What reads it'}: ${xs.join(', ')}` }, up ? `‹ ${noun}` : `${noun} ›`),
       h('div', { class: 'nav-list' }, ...xs.map((x) => chip(x, up))));
   };
@@ -2351,6 +2354,10 @@ function drillHead(card: string, tabs: Tab[], tab: Tab): HTMLElement {
   const story = day && kind === 'trips' ? storyFor(day) : null;
   const worst = story ? story.severity : news[0]?.severity;
   const count = story ? (story.severity === 'alert' || story.severity === 'warn' ? 1 : 0) + story.stories.length + story.more.length : news.filter((f) => f.severity === 'alert' || f.severity === 'warn').length;
+  // A day held carries its mark on the News tab too (ADR 0009 §12), where its story is told or an output waits on it.
+  const viewed = viewedDay();
+  const held = viewed ? dayPause(viewed) : null;
+  const pm = held && (story || outputState(id) === held) ? held : null;
   return h('div', { class: 'drill-head' },
     h('div', { class: 'drill-title' },
       h('div', { style: 'flex:1;min-width:0' }, h('p', { class: 'eyebrow' }, profileOf(card) ? `PROFILE · OF ${id.toUpperCase()}` : kindLabel(id)), h('h2', {}, card)),
@@ -2361,7 +2368,8 @@ function drillHead(card: string, tabs: Tab[], tab: Tab): HTMLElement {
     stoppedLine(card, tab),
     fitTabs(h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'What to look at' },
       ...tabs.map((t) => h('button', { type: 'button', role: 'tab', id: `drill-tab-${t}`, 'aria-selected': String(t === tab), 'aria-controls': 'drill-panel', onclick: () => openTab(card, t) },
-        TAB_LABEL[t], t === 'news' && worst && (worst === 'alert' || worst === 'warn') && count ? h('span', { class: 'tab-mark', 'aria-label': worst === 'alert' ? 'something’s wrong' : 'unusual' }, glyphEl(worst, 14)) : null)))));
+        TAB_LABEL[t], t === 'news' && worst && (worst === 'alert' || worst === 'warn') && count ? h('span', { class: 'tab-mark', 'aria-label': worst === 'alert' ? 'something’s wrong' : 'unusual' }, glyphEl(worst, 14)) : null,
+        t === 'news' && pm ? h('span', { class: `tab-mark pause ${pm}`, 'aria-label': PAUSE_WORD[pm] }, glyphEl(PAUSE_MARK[pm], 14)) : null)))));
 }
 
 /** A strip of tabs wider than the screen: the chosen one scrolled into view, and each edge faded while tabs lie past
@@ -2416,9 +2424,11 @@ function dayPicker(): HTMLElement | null {
   // No day before the first load or after the last: no arrow there (a greyed one reads as broken), its place kept.
   const first = k <= 0;
   const last = k < 0 || k >= list.length - 1;
+  const pm = dayPause(l.day);
   return h('div', { class: 'day-pick', role: 'group', 'aria-label': 'The day' },
     h('button', { type: 'button', class: `btn small${first ? ' gone' : ''}`, 'aria-label': 'The day before', 'aria-hidden': first ? 'true' : 'false', tabindex: first ? '-1' : '0', disabled: busy || first, onclick: () => void useLoad(list[k - 1]!) }, '‹'),
-    h('span', { class: 'day-at', 'aria-live': 'polite' }, `${dayLabel(l.day)}${l.note ? ` · ${l.note}` : ''}`),
+    // The day held carries its mark by its date (ADR 0009 §12): ‖ paused, ⚑ published as is, ✕ not published.
+    h('span', { class: 'day-at', 'aria-live': 'polite' }, pm ? h('span', { class: `day-mark ${pm}`, role: 'img', 'aria-label': `${PAUSE_WORD[pm]}:` }, glyphEl(PAUSE_MARK[pm], 15)) : '', `${dayLabel(l.day)}${l.note ? ` · ${l.note}` : ''}`),
     h('button', { type: 'button', class: `btn small${last ? ' gone' : ''}`, 'aria-label': 'The day after', 'aria-hidden': last ? 'true' : 'false', tabindex: last ? '-1' : '0', disabled: busy || last, onclick: () => void useLoad(list[k + 1]!) }, '›'));
 }
 
@@ -3070,15 +3080,27 @@ function heroOf(story: Story): Element | null {
   if (story.hero === 'calm') {
     // After an episode, its days carry their marks: held at the checks, or published with something wrong.
     const rec = story.recovery;
-    // Under a flow that holds, each by what became of it: ‖ waiting, ⚑ published as is, ✕ not published (ADR 0009 §12);
-    // a day of it this visit didn't run, its fate unknown here, is drawn not run (dashed, no mark), never as published
-    // with something wrong.
-    const fate = (d: string): VizMark => {
+    // Under a flow that holds, each by its severity and what became of it: ! ‖ waiting, ! ⚑ published as is, ! ✕ not
+    // published (ADR 0009 §12), as the loads strip draws them; a day of it this visit didn't run, its fate unknown here,
+    // is drawn not run (dashed, no mark), never as published with something wrong.
+    const fate = (d: string): VizMark[] => {
       const f = state.doc.publish ? dayFate(d) : null;
-      return f && f !== 'published' ? PAUSE_MARK[f] : rec!.held.includes(d) && !state.doc.publish ? 'held' : 'alert';
+      return f && f !== 'published' ? ['alert', PAUSE_MARK[f]] : rec!.held.includes(d) && !state.doc.publish ? ['held'] : ['alert'];
     };
     const unrun = (d: string) => !!state.doc.publish && dayFate(d) === null && loads.list.some((l) => l.day === d);
-    const days = stripOf({ of: 'trips' }, day, 7).map((d) => (rec && d.day >= rec.from && d.day <= rec.to ? (unrun(d.day) ? { ...d, notRun: true } : { ...d, sev: 'alert' as const, mark: fate(d.day) }) : d));
+    // A day held before this one keeps its marks in every later strip, decided or not, whether or not this day comes
+    // straight after its episode (Tue Sep 20, 2022 still shows Sat 17 and Sun 18 waiting).
+    const heldBefore = (d: string): VizMark[] | null => {
+      const f = state.doc.publish && d < day ? dayPause(d) : null;
+      if (!f) return null;
+      const sev = storyFor(d)?.severity;
+      return [...(sev === 'alert' || sev === 'warn' ? [sev] : []), PAUSE_MARK[f]];
+    };
+    const days = stripOf({ of: 'trips' }, day, 7).map((d) => {
+      if (rec && d.day >= rec.from && d.day <= rec.to) return unrun(d.day) ? { ...d, notRun: true } : { ...d, sev: 'alert' as const, marks: fate(d.day) };
+      const marks = heldBefore(d.day);
+      return marks ? { ...d, sev: marks[0] === 'alert' || marks[0] === 'warn' ? marks[0] : null, marks } : d;
+    });
     return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, key: STRIP_KEY, aria: `Trips the seven days to ${dayLabel(day)}, each against its own usual range${rec ? `; ${rec.held.length ? `${rec.held.length} held at the checks` : ''}${rec.held.length && rec.published.length ? ', ' : ''}${rec.published.length ? `${rec.published.length} published with something wrong` : ''}` : ''}.` })) : null;
   }
   return null;
@@ -3217,6 +3239,75 @@ function causeDetail(story: Story, card: string): void {
   openDetail(story.head, story.severity, body, anchorOf(story), card, story.primary);
 }
 
+/** An episode's shortfall said with its bound, never the bound alone (ADR 0008 §6): "~187k fewer (≥130k)". */
+function shortSaid(est: number, short: number, noun = 'fewer'): string {
+  const sig = (n: number) => { const mag = 10 ** (Math.floor(Math.log10(Math.max(1, n))) - 1); return Math.floor(n / mag) * mag; };
+  return `~${compact(est)} ${noun} (≥${short >= 1000 ? compact(sig(short)) : fmtInt(short)})`;
+}
+
+/**
+ * What the episode's chip opens (ADR 0008 §11): its days so far and none after the viewed one (on the day after it, all
+ * of them), one bar a day, each day's trips over its usual day with what became of it under its date (! ‖, ! ⚑, ! ✕, a
+ * day not run here dashed), the trips short so far on one bar, a segment a day, as the chip counts them; then the days,
+ * each with Decide while it waits.
+ */
+function episodeSheet(story: Story): void {
+  if (!history) return;
+  const file = history.file;
+  const rec = story.recovery;
+  const first = story.episode?.since ?? rec?.from ?? story.day;
+  const last = story.episode ? story.day : (rec?.to ?? story.day);
+  const span = daysFrom(first, last);
+  const viewed = viewedDay();
+  const inLoads = (d: string) => loads.list.some((l) => l.day === d);
+  // The trips short so far, as the chip and the hours count them: the day it fell from its hour, the days after whole.
+  const fall = (() => { const f = storyFor(first)?.hours; return f ? { day: first, ...f } : null; })();
+  const ep: EpisodeDay[] = [];
+  const rows = span.map((d) => {
+    const k = file.days.indexOf(d);
+    const r = rangesOf({ of: 'trips' })?.at(d);
+    if (k < 0 || !r) return null;
+    const got = file.hours?.[k] ?? [file.rows[k]!];
+    ep.push({ day: d, got, low: r.low, expected: r.expected, alert: storyFor(d)?.severity === 'alert' });
+    return { day: d, trips: file.rows[k]!, usual: r.expected, low: r.low };
+  }).filter((x): x is { day: string; trips: number; usual: number; low: number } => !!x);
+  if (!rows.length) return;
+  const whole = (to: string) => ep.filter((d) => d.day <= to).reduce((t, d) => {
+    const got = d.got.reduce((a, b) => a + b, 0);
+    return { estimate: t.estimate + Math.max(0, d.expected - got), bound: t.bound + Math.max(0, d.low - got) };
+  }, { estimate: 0, bound: 0 });
+  const so = (to: string) => (fall ? shortfall(ep, fall, to) : whole(to));
+  const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
+  const fateOf = (d: string): PauseState | 'published' | 'notrun' | null => {
+    const f = state.doc.publish ? dayFate(d) : null;
+    return f ?? (state.doc.publish && inLoads(d) && (!viewed || d < viewed) ? 'notrun' : null);
+  };
+  const said: Record<string, string> = { waiting: 'waits for a decision', asis: 'published as is', dont: 'not published', published: 'published', notrun: 'not run' };
+  let before = 0;
+  const days = rows.map((x) => {
+    const est = so(x.day).estimate;
+    const short = est - before;
+    before = est;
+    const f = fateOf(x.day);
+    const sev = storyFor(x.day)?.severity;
+    const sevMarks: VizMark[] = sev === 'alert' || sev === 'warn' ? [sev] : [];
+    const marks: VizMark[] = f === 'notrun' ? [] : f && f !== 'published' ? [...sevMarks, PAUSE_MARK[f]] : sevMarks;
+    return { label: dayShort(x.day), trips: x.trips, usual: x.usual, low: x.low, short, marks, notRun: f === 'notrun', at: x.day === viewed, day: x.day, fate: f };
+  });
+  const total = so(last);
+  const totalSaid = total.estimate >= 1 ? shortSaid(total.estimate, total.bound, 'short so far') : null;
+  const svg = svgNode(episodeDays({
+    days, total: totalSaid,
+    aria: `Trips each day, ${dayMid(first)} to ${dayMid(last)}, against a usual day: ${days.map((d) => `${d.label} ${d.notRun ? 'not run' : `${fmtInt(d.trips)} (usual ~${compact(d.usual)})`}${d.fate && d.fate !== 'notrun' ? `, ${said[d.fate]}` : ''}`).join('; ')}${totalSaid ? `; about ${fmtInt(total.estimate)} trips short so far, at least ${fmtInt(total.bound)}` : ''}.`,
+  }));
+  const list = state.doc.publish ? h('ul', { class: 'vf-daylist' }, ...days.map((d) => h('li', {},
+    h('span', { class: 'dl-marks', 'aria-hidden': 'true' }, ...d.marks.map((m) => glyphEl(m, 14))),
+    h('span', { class: 'dl-day' }, d.label),
+    h('span', { class: 'dl-fate' }, d.fate ? said[d.fate] : ''),
+    d.fate === 'waiting' && may ? h('button', { type: 'button', class: 'btn small primary', 'aria-label': `Decide what readers get for ${dayMid(d.day)}`, onclick: () => (document.querySelector('.vf-detail-wrap')?.remove(), decideDay(d.day)) }, 'Decide ›') : null))) : null;
+  openDetail(`${dayShort(first)} to ${dayShort(last)}`, story.episode ? story.severity : 'ok', [svg, list]);
+}
+
 /** The snow a card notes, as bars under its strip of days (each day's column where the strip has it), the days the
  * card names said at its corner in the order their bars stand ("Sat 7.2 cm · Sun 1.5 cm"). A block of context: no band,
  * no mark, no sentence. */
@@ -3276,8 +3367,7 @@ function hoursDetail(story: Story): HTMLElement | null {
   const cut = firstIdx * 24 + hrs.from;
   const lastBad = span.indexOf(last);
   const sig = (n: number) => { const mag = 10 ** (Math.floor(Math.log10(Math.max(1, n))) - 1); return Math.floor(n / mag) * mag; };
-  const bound = short >= 1000 ? compact(sig(short)) : fmtInt(short);
-  const shortLabel = `~${compact(est)} fewer (≥${bound})`;
+  const shortLabel = shortSaid(est, short);
   const floorLabel = blank.length ? `under ${Math.ceil(floor / 100) * 100}/h ${blank.length > 1 ? `${ddd(blank[0]!)}–${ddd(blank.at(-1)!)}` : ddd(blank[0]!)}` : undefined;
   const svg = svgNode(episodeBars({
     days, cut, cutLabel: clockText(hrs.from * 60), floorLabel, at: span.indexOf(story.day),
@@ -3546,16 +3636,21 @@ function causeCard(story: Story, card: string): HTMLElement {
   const told = toldOf(story);
   const primary = told && story.primary === 'notify' ? 'incident' : story.primary;
   const ep = story.episode;
-  // The day paused (ADR 0009 §12): its reach row says what its outputs wait for, and its one verb is Decide.
+  // The day paused (ADR 0009 §12): its reach row says what paused it, what readers see and the outputs that wait, and
+  // its one verb is Decide.
   const own = !state.failed && story.day === viewedDay() ? onScreen() : undefined;
   const paused = own && pauseOf(own) ? pauseRow(own, story) : null;
-  return h('section', { class: `vf-card ${story.state}`, ...(anchor ? { id: `finding-${anchor.key}` } : {}) },
+  // On a paused card the checks are drawn in full only when they held the day too; else one line (decision.ts).
+  const checks = paused ? pausedChecks(g) : null;
+  const after = afterRow(story);
+  // An episode's chip: its days so far as days, the trips short so far in its words, and a tap to the episode's sheet.
+  const days = ep ? ep.trend.length : story.recovery ? daysFrom(story.recovery.from, story.recovery.to).length : 0;
+  return h('section', { class: `vf-card ${story.state}${paused ? ' paused' : ''}`, ...(anchor ? { id: `finding-${anchor.key}` } : {}) },
     h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head', role: 'status', 'aria-live': 'polite' }, m && !calm ? glyphEl(m, 18) : '', story.head)),
-    // An episode's chip draws its days so far, each its trips against a usual day, so day 3 reads apart from day 2.
-    story.chip ? h('button', { type: 'button', class: 'vf-chip-btn', 'aria-label': `${story.chip}${ep ? `: ${ep.trend.map((d) => `${WEEKDAY_NAMES[dateOf(d.day).getUTCDay()]!.slice(0, 3)} ${Math.round((d.trips / Math.max(1, d.expected)) * 100)}% of a usual day`).join(', ')}${ep.short ? `; about ${fmtInt(ep.short.estimate)} trips short so far` : ''}` : ''}. Open.`, onclick: () => causeDetail(story, card) },
-      ep && ep.trend.length > 1 ? svgNode(trendPips({ days: ep.trend })) : '', story.chip, glyphEl('chev', 13)) : null,
+    story.chip ? h('button', { type: 'button', class: 'vf-chip-btn', 'aria-label': `${story.chip}${ep ? `: ${ep.trend.map((d) => `${WEEKDAY_NAMES[dateOf(d.day).getUTCDay()]!.slice(0, 3)} ${Math.round((d.trips / Math.max(1, d.expected)) * 100)}% of a usual day`).join(', ')}${ep.short ? `; about ${fmtInt(ep.short.estimate)} trips short so far` : ''}` : ''}. Open the episode’s days.`, onclick: () => episodeSheet(story) },
+      days ? svgNode(episodeIcon({ n: days, at: ep ? days - 1 : null })) : '', story.chip, glyphEl('chev', 13)) : null,
     told ? h('p', { class: 'vf-told' }, glyphEl('ack', 14), told) : null,
-    afterOf(story) ? h('p', { class: 'vf-after' }, afterOf(story)) : null,
+    after,
     amount ? h('div', { class: 'vf-amount' }, h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, amount), info) : info,
     hero ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.head}: open`, onclick: () => causeDetail(story, card) }, hero) : null,
     story.hero === 'hours' && story.split ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${story.split.name} and everything else: open`, onclick: () => causeDetail(story, card) }, splitVisual(story)) : null,
@@ -3565,29 +3660,62 @@ function causeCard(story: Story, card: string): HTMLElement {
     // on the first screen (ADR 0009 §12): Decide, every verb of the story behind ⋯, kept there once decided.
     paused ? paused.reach : null,
     paused ? (anchor ? actionsOf(anchor, card, null, paused.verb) : paused.verb ? h('div', { class: 'vf-acts' }, paused.verb) : null) : null,
-    // The five health cells, under the day's visuals so they stay in the first screen on a day with something wrong.
-    healthRow(story, card),
-    // The checks on every day with something wrong, passed or held, and on a near miss (ADR 0008 §10).
-    g && (held || g.near || (story.severity === 'alert' && !calm)) && story.hero !== 'gate' ? h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', held ? 'Checks held' : g.near ? 'Checks near the limit' : 'Checks passed'), gateVisual(g, false, gateScale(story))) : null,
+    // The five health cells, under the day's visuals so they stay in the first screen on a day with something wrong; on
+    // a paused card without their head, the pause row and the checks named on either side of them.
+    healthRow(story, card, !!paused),
+    // The checks on every day with something wrong, passed or held, and on a near miss (ADR 0008 §10). On a paused card,
+    // in full under their ‖ when they held the day too (the pause row names them); else one line, "Checks passed: 6%
+    // dropped", a tap from their sheet, so a check that passed reads as fine and not as a contradiction of the pause.
+    g && (held || g.near || (story.severity === 'alert' && !calm)) && story.hero !== 'gate'
+      ? checks && !checks.full
+        ? h('button', { type: 'button', class: 'vf-checks-ok', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('span', {}, checks.line), h('span', { class: 'vf-chev' }, glyphEl('chev', 14)))
+        : h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', ...(checks?.full ? { 'aria-label': 'Checks held: open' } : {}), onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', checks?.full ? '' : held ? 'Checks held' : g.near ? 'Checks near the limit' : 'Checks passed'), gateVisual(g, false, gateScale(story)))
+      : null,
     // What the day's outputs are: never "published" alone, which reads as good news; a tap names them.
     !paused && story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${reachLabel(story, outs.length)}: ${outs.join(', ')}. Open the list.`, onclick: () => outputsDetail(story, outs) },
       svgNode(reachIcon({ n: outs.length, state: held ? 'held' : 'published' })), reachLabel(story, outs.length), h('span', { class: 'vf-chev' }, glyphEl('chev', 14))) : null,
-    story.labels.follows ? foldRow(story.labels.follows, story.labels.kinds, story.follows, card, profileOf(card) !== undefined, true) : null,
+    // The kinds under the changes it explains are left to the rows themselves on a paused card, for its budget.
+    story.labels.follows ? foldRow(story.labels.follows, paused ? [] : story.labels.kinds, story.follows, card, profileOf(card) !== undefined, true) : null,
     story.labels.sameDay ? foldRow(story.labels.sameDay, [], story.sameDay, card, profileOf(card) !== undefined, true) : null,
     !paused && anchor && primary ? actionsOf(anchor, card, primary) : null);
 }
 
 /**
- * The line under the day after an episode (ADR 0008 §6): under a flow that holds, what became of its days (ADR 0009
- * §12), "Thu as is · Fri–Sun not published", what still waits first; the days not run here left out. Otherwise the
- * story's own, from the history's gate.
+ * The row under the day after an episode (ADR 0008 §6): under a flow that holds, what became of its days (ADR 0009
+ * §12), the day on screen first once it published ("Mon 25 published · Thu–Sat still wait"), with Decide while a day
+ * of it waits; the days not run here left out (its strip draws them not run). Otherwise the story's own line, from the
+ * history's gate.
  */
-function afterOf(story: Story): string | null {
+function afterRow(story: Story): HTMLElement | null {
+  const l = afterOf(story);
+  if (!l) return null;
+  const first = l.verb ? firstWaiting(story) : null;
+  return h('div', { class: `vf-after${first ? ' waiting' : ''}` }, first ? glyphEl('held', 14) : '', h('span', {}, l.text),
+    first && l.verb ? h('button', { type: 'button', class: 'btn small primary vf-decide-after', 'aria-label': `Decide what readers get for ${dayMid(first)}`, onclick: () => decideDay(first) }, `${l.verb} ›`) : null);
+}
+
+/** What the row under the day after an episode says, and its verb: decision.ts afterLine, or the story's own line. */
+function afterOf(story: Story): { text: string; verb: string | null } | null {
   const rec = story.recovery;
-  if (!rec || !state.doc.publish) return story.labels.after;
-  const days: string[] = [];
-  for (let d = rec.from; d <= rec.to; d = new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) days.push(d);
-  return afterLine(days.map((d) => ({ day: d, state: dayFate(d) })));
+  if (!rec || !state.doc.publish) return story.labels.after ? { text: story.labels.after, verb: null } : null;
+  const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
+  const own = story.day === viewedDay() ? onScreen() : undefined;
+  return afterLine(daysFrom(rec.from, rec.to).map((d) => ({ day: d, state: dayFate(d) })), { today: own ? { day: story.day, state: isPublished(own) ? 'published' : (pauseOf(own)?.state ?? null) } : null, may });
+}
+
+/** The first day of an episode a calm day comes after that still waits for a decision, if any. */
+function firstWaiting(story: Story): string | null {
+  const rec = story.recovery;
+  return rec ? (daysFrom(rec.from, rec.to).find((d) => dayFate(d) === 'waiting') ?? null) : null;
+}
+
+/** Decide an earlier day from a later one: its sheet over its run in this visit, else the day run again first (its
+ * news then has Decide), as a day held in an earlier visit is (ADR 0009 §10). */
+function decideDay(day: string): void {
+  const r = heldRunOf(day);
+  if (r) return decisionSheet(r, storyFor(day));
+  const k = loads.list.findIndex((l) => l.day === day);
+  if (k >= 0) void useLoad(k);
 }
 
 /** What became of a day under a flow that holds: paused or decided, published, or null when it wasn't run here and the
@@ -3612,24 +3740,41 @@ function toldOf(story: Story): string | null {
 const NO_STORY = { severity: 'ok', split: null, amount: null, gate: null } as const;
 
 /**
- * A held day's row (ADR 0009 §12): what its outputs wait for, a tap from their list, and its one verb, Decide; for
- * someone who may not decide, whom it waits on, in the row itself; once decided, the receipt in its place, the day's
- * mark before it: who decided and when, or the standing decision it came under. Its words are core/decision.ts
- * pauseLines', counted in the card's budget.
+ * A held day's row (ADR 0009 §12): while it waits, what paused it ("Paused by trips, checks": only what the viewer may
+ * see), what readers see meanwhile, and the outputs that wait, named, each a hatched box, the row a tap from their list;
+ * its one verb, Decide, or for someone who may not decide, who does in its place; once decided, the receipt in its
+ * place, the day's mark before it (who decided and when, or the standing decision it came under), what readers see,
+ * and the outputs. Its words are core/decision.ts pauseLines', counted in the card's budget (pausedGlance).
  */
 function pauseRow(r: RunRecord, story: Story | null): { reach: HTMLElement; verb: HTMLElement | null } {
   const now = pauseOf(r)!;
-  const waiting = r.result.waiting.filter((x) => isOwner() || visible(x));
+  const open = (x: string) => isOwner() || visible(x);
+  // What waits, or once decided what waited when the day was held.
+  const names = inFlowOrder((now.state === 'waiting' ? r.result.waiting : (now.pause?.waiting ?? r.result.waiting)).filter(open));
   const d = now.pause?.decision ?? null;
   const under = d?.about.under !== undefined ? ledger?.entries[d.about.under] : undefined;
   const underDay = (under?.about as { day?: string } | undefined)?.day;
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
-  const l = pauseLines({ state: now.state, outputs: waiting.length, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, may, deciders: deciders(), standing: standsOn(d) });
+  const l = pauseLines({ state: now.state, names, by: pauseReasons(r.result.holds, open), readers: readersDay(r), who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, may, deciders: deciders(), standing: standsOn(d) });
+  const box = now.state === 'asis' ? 'pub' : 'held';
   const reach = h('div', { class: 'vf-pause' },
-    h('button', { type: 'button', class: `vf-reach ${now.state}`, 'aria-label': `${l.reach}${waiting.length ? `: ${waiting.join(', ')}` : ''}. Open the list.`, onclick: () => waitingDetail(r, l.reach, !may && now.state === 'waiting' ? () => decisionSheet(r, story) : null) },
-      now.state === 'waiting' ? svgNode(reachIcon({ n: waiting.length, state: 'held' })) : h('span', { class: 'vf-mark' }, glyphEl(PAUSE_MARK[now.state], 14)), l.reach, h('span', { class: 'vf-chev' }, glyphEl('chev', 14))));
-  const verb = l.verb ? h('button', { type: 'button', class: 'vf-primary vf-decide', 'aria-label': `Decide what readers get${dayOfRun(r) ? ` for ${dayMid(dayOfRun(r)!)}` : ''}`, onclick: () => decisionSheet(r, story) }, l.verb) : null;
+    h('button', { type: 'button', class: `vf-reach vf-paused ${now.state}`, 'aria-label': `${l.reach}${l.see ? `; ${l.see}` : ''}${names.length ? `; ${names.join(', ')}` : ''}. Open the list.`, onclick: () => waitingDetail(r, l.reach, !may && now.state === 'waiting' ? () => decisionSheet(r, story) : null) },
+      h('span', { class: 'vf-mark' }, glyphEl(PAUSE_MARK[now.state], 16)),
+      h('span', { class: 'vf-paused-t' },
+        h('b', {}, l.reach),
+        l.see ? h('span', { class: 'vf-see-line' }, l.see) : null,
+        names.length ? h('span', { class: 'vf-outs-named', 'aria-hidden': 'true' }, ...names.map((o) => h('span', { class: `o-chip ${box}` }, h('i', {}, box === 'pub' ? glyphEl('ack', 11) : ''), o))) : null),
+      h('span', { class: 'vf-chev' }, glyphEl('chev', 14))));
+  const verb = l.verb
+    ? h('button', { type: 'button', class: 'vf-primary vf-decide', 'aria-label': `Decide what readers get${dayOfRun(r) ? ` for ${dayMid(dayOfRun(r)!)}` : ''}`, onclick: () => decisionSheet(r, story) }, l.verb)
+    : l.waits ? h('span', { class: 'vf-waits' }, l.waits) : null;
   return { reach, verb };
+}
+
+/** Steps in the flow's own order (zone_hour, borough_hour, weather_effect), as the canvas lays them out. */
+function inFlowOrder(ids: readonly string[]): string[] {
+  const order = state.doc.steps.map((x) => x.id);
+  return [...ids].sort((a, b) => order.indexOf(a) - order.indexOf(b));
 }
 
 /** Who may decide a held day, by name: the owners, and whoever a decide rule names. */
@@ -3649,7 +3794,12 @@ function waitingDetail(r: RunRecord, label: string, options: (() => void) | null
   const day = dayOfRun(r);
   const shown = readersDay(r);
   const see = options ? h('button', { type: 'button', class: 'vf-see', onclick: options }, 'What readers get', glyphEl('chev', 13)) : null;
-  openDetail(label, 'ok', [oneLine(day && now?.state !== 'asis' ? stagedBar(day, shown) : null), waitingList(r), see]);
+  // The day's other outputs, while it waits: the held run made the versions readers have already (the same keys), so
+  // they are up to date (Thu Sep 21, 2023: zone_list, districts and weather_hourly).
+  const others = now?.state === 'waiting' ? inFlowOrder(Object.keys(r.result.manifest.outputs).filter((o) => !r.result.waiting.includes(o) && (isOwner() || visible(o)))) : [];
+  const upToDate = others.length ? h('div', { class: 'vf-block' }, h('p', { class: 'vf-bh' }, `${others.length} other${others.length === 1 ? '' : 's'} up to date`), h('ul', { class: 'vf-outlist' }, ...others.map((o) => h('li', {}, h('button', { type: 'button', onclick: () => (document.querySelector('.vf-detail-wrap')?.remove(), select(o)) },
+    h('span', { class: 'o-box', 'aria-hidden': 'true' }, glyphEl('ack', 14)), h('span', { class: 'o-name' }, o), h('span', { class: 'o-rows' }, 'as published'), glyphEl('chev', 13)))))) : null;
+  openDetail(label, 'ok', [oneLine(day && now?.state !== 'asis' ? stagedBar(day, shown) : null), waitingList(r), upToDate, see]);
 }
 
 /** Whether the viewer reads every row of a dataset (columns aside): only then is its whole count theirs to see. */
@@ -3663,7 +3813,7 @@ const rowsOpen = (id: string): boolean => {
  * theirs to read, and a tap to its card. */
 function waitingList(r: RunRecord): HTMLElement {
   const now = pauseOf(r);
-  return h('ul', { class: 'vf-outlist' }, ...r.result.waiting.filter((x) => isOwner() || visible(x)).map((o) => h('li', {}, h('button', { type: 'button', onclick: () => (document.querySelector('.vf-detail-wrap')?.remove(), select(o)) },
+  return h('ul', { class: 'vf-outlist' }, ...inFlowOrder(r.result.waiting.filter((x) => isOwner() || visible(x))).map((o) => h('li', {}, h('button', { type: 'button', onclick: () => (document.querySelector('.vf-detail-wrap')?.remove(), select(o)) },
     h('span', { class: `o-box${now?.state === 'asis' ? '' : ' held'}`, 'aria-hidden': 'true' }, now?.state === 'asis' ? glyphEl('ack', 14) : ''),
     h('span', { class: 'o-name' }, o),
     h('span', { class: 'o-rows' }, `${now?.state === 'asis' ? 'published' : now?.state === 'dont' ? 'not published' : 'waiting'}${rowsOpen(o) ? ` · ${fmtInt(r.result.manifest.outputs[o]?.rows ?? 0)} rows` : ''}`),
@@ -3766,7 +3916,7 @@ function decisionSheet(r: RunRecord, story: Story | null): void {
     if (!entry) return sync();
     const now = pauseOf(r);
     const st = now?.state ?? 'waiting';
-    const l = pauseLines({ state: st, outputs: n, who: personName(entry.by.as), at: clock(entry.at), under: null, may: true, deciders: deciders(), standing: option === 'dont' && scope === 'untilPass' && !!day });
+    const l = pauseLines({ state: st, names: r.result.waiting, who: personName(entry.by.as), at: clock(entry.at), under: null, may: true, deciders: deciders(), standing: option === 'dont' && scope === 'untilPass' && !!day });
     foot.replaceChildren(h('p', { class: 'vf-receipt' }, glyphEl(PAUSE_MARK[st], 16), st === 'waiting' ? 'Decided, not yet published' : l.reach), h('button', { type: 'button', class: 'linkish', onclick: () => ((ribbonPick = day), (location.hash = '#runs')) }, `Record #${entry.seq} ✓`));
     // The sheet's top agrees with its receipt: the day's mark now, and no "Waiting" over a day decided.
     headMark.replaceWith(glyphEl(PAUSE_MARK[st], 16));
@@ -3802,14 +3952,24 @@ function outputsDetail(story: Story, outs: string[]): void {
  * them, no mark where nothing is out of the ordinary; the same row on every day. Each cell opens what it measured: its
  * check in words and visuals, and every finding of its kinds, the ones the cause absorbed too.
  */
-function healthRow(story: Story, card: string): HTMLElement {
+function healthRow(story: Story, card: string, paused = false): HTMLElement {
+  // The day's file, matched to the data's list: its cell carries the seal, as the Integrity tab does (ADR 0006 §9).
+  const sealed = fileMatched(story.day);
   return h('div', { class: 'vf-healthwrap' },
-    h('p', { class: 'vf-health-h', 'aria-hidden': 'true' }, story.labels.health),
-    h('nav', { class: 'vf-health', 'aria-label': `${story.labels.health}: five measures of the day’s trips` }, ...story.health.map((c) => {
-      const m: VizMark | null = c.explained ? 'explained' : c.severity === 'alert' ? 'alert' : c.severity === 'warn' ? 'warn' : c.severity === 'note' ? 'note' : null;
-      const said = c.explained ? `${c.follows} grouped under the day’s cause${c.sameDay ? `, ${c.sameDay} more came the same day` : ''}` : c.severity === 'alert' ? 'something’s wrong' : c.severity === 'warn' ? 'unusual' : c.severity === 'note' ? 'a note' : 'normal';
-      return h('button', { type: 'button', class: `vf-cell ${c.explained ? 'explained' : c.severity ?? 'ok'}`, 'aria-label': `${CELL_NAMES[c.cell]}: ${said}. Open.`, onclick: () => healthDetail(story, c.cell, card) }, m ? glyphEl(m, 14) : '', h('span', { 'aria-hidden': 'true' }, CELL_NAMES[c.cell]));
+    // On a paused card the row goes without its head: the pause row and the checks are named on either side of it.
+    paused ? null : h('p', { class: 'vf-health-h', 'aria-hidden': 'true' }, story.labels.health),
+    h('nav', { class: 'vf-health', 'aria-label': `${HEALTH_HEAD}: five measures of the day’s trips` }, ...story.health.map((c) => {
+      const m: VizMark | null = c.explained ? 'explained' : c.severity === 'alert' ? 'alert' : c.severity === 'warn' ? 'warn' : c.severity === 'note' ? 'note' : c.cell === 'file' && sealed ? 'seal' : null;
+      const said = c.explained ? `${c.follows} grouped under the day’s cause${c.sameDay ? `, ${c.sameDay} more came the same day` : ''}` : c.severity === 'alert' ? 'something’s wrong' : c.severity === 'warn' ? 'unusual' : c.severity === 'note' ? 'a note' : c.cell === 'file' && sealed ? 'matches the source’s list' : 'normal';
+      return h('button', { type: 'button', class: `vf-cell ${c.explained ? 'explained' : c.severity ?? 'ok'}${m === 'seal' ? ' sealed' : ''}`, 'aria-label': `${CELL_NAMES[c.cell]}: ${said}. Open.`, onclick: () => healthDetail(story, c.cell, card) }, m ? glyphEl(m, 14) : '', h('span', { 'aria-hidden': 'true' }, CELL_NAMES[c.cell]));
     })));
+}
+
+/** Whether a day's file was checked against the data's list and matched it (ADR 0006): its bytes are the ones listed. */
+function fileMatched(day: string): boolean {
+  const load = loads.list.find((l) => l.day === day);
+  const c = load ? integrity.checks.get(load.file) : undefined;
+  return !!c && fileSeverity(c.class) === 'ok';
 }
 
 /** What a health cell measures, in a line under its title. */
@@ -3834,7 +3994,7 @@ function healthDetail(story: Story, cell: Cell, card: string): void {
     const load = loads.list.find((l) => l.day === day);
     const checked = !!(load && integrity.checks.get(load.file));
     body.push(svgNode(chain({ nodes: ['list', 'file', 'load'], broken: 99, aria: checked ? 'The day’s file hashes to what the data’s list publishes, and the load was read from it.' : 'The day’s file was read; no list was there to check it against.' })));
-    if (k >= 0) body.push(oneLine(`${fmtInt(history!.file.rows[k]!)} trips in the day’s file${checked ? ', its bytes as published' : ''}.`));
+    if (k >= 0) body.push(oneLine(`${fmtInt(history!.file.rows[k]!)} trips in the day’s file${checked ? ', which matches the source’s list' : ''}.`));
   }
   if (cell === 'amount') {
     body.push(amountVisual(story));
@@ -4018,7 +4178,7 @@ function healthStrip(card: string, day: string, findings: Finding[]): HTMLElemen
   const k = history!.file.days.indexOf(day);
   const worst = (kinds: Finding['kind'][]) => findings.filter((f) => kinds.includes(f.kind) && f.severity !== 'ok').sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity])[0];
   const rows: [string, Finding | undefined, string][] = [
-    ['Arrived', findings.find((f) => f.kind === 'integrity'), k >= 0 ? `${fmtInt(history!.file.rows[k]!)} trips in the day’s file${integrity.checks.get(loads.list[loads.at]?.file ?? '') ? ', its bytes as published' : ''}` : 'no file'],
+    ['Arrived', findings.find((f) => f.kind === 'integrity'), k >= 0 ? `${fmtInt(history!.file.rows[k]!)} trips in the day’s file${integrity.checks.get(loads.list[loads.at]?.file ?? '') ? ', which matches the source’s list' : ''}` : 'no file'],
     ['Amount', worst(['volume']), 'a normal amount for the day'],
     ['Complete', worst(['hours']), 'trips every hour'],
     ['Values', worst(['gone', 'share', 'new', 'pair', 'missing']), 'values as usual'],
@@ -6211,7 +6371,12 @@ function renderLoads(): void {
   const ep = loads.episodes.find((e) => e.name === loads.episode);
   const episodes = loads.episodes.length > 1
     ? h('div', { class: 'episodes', role: 'group', 'aria-label': 'Which days' },
-        ...loads.episodes.map((e, i) => h('button', { type: 'button', class: 'nav-chip', 'aria-pressed': String(e.name === loads.episode), disabled: busy || loads.playing, onclick: () => setEpisode(e.name) }, i === 0 ? e.name : `${e.name} ⚠`)))
+        ...loads.episodes.map((e) => {
+          // Its mark from its days, never its place: the worst any of them is told (the history's verdict, the flow's
+          // own), ! for something wrong, the triangle for unusual, none for a calm stretch.
+          const worst = episodeWorst(e.name);
+          return h('button', { type: 'button', class: 'nav-chip ep-chip', 'aria-pressed': String(e.name === loads.episode), 'aria-label': `${e.name}${worst ? `: ${worst === 'alert' ? 'something’s wrong' : 'unusual'} on some days` : ''}`, disabled: busy || loads.playing, onclick: () => setEpisode(e.name) }, e.name, worst ? glyphEl(worst, 13) : '');
+        }))
     : null;
   const weekNav = h('div', { class: 'week-nav' },
     h('button', { type: 'button', class: 'btn small', 'aria-label': 'The week before', disabled: wi === 0, onclick: () => turn(-1) }, '‹'),
@@ -6225,6 +6390,11 @@ function renderLoads(): void {
   const held = own ? pauseOf(own) : null;
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
   const pl = own && held ? dayPausedLine({ state: held.state, readers: readersDay(own), may, standing: standsOn(held.pause?.decision), day: now!.day }) : null;
+  // The day after an episode says what became of its days here too, with Decide while one waits (ADR 0009 §12), as
+  // its News does: only to someone the trips are open to.
+  const nowStory = now && !held && history && historyOpen() && counted && history.file.days.includes(now.day) ? storyFor(now.day) : null;
+  const after = nowStory?.recovery ? afterOf(nowStory) : null;
+  const waitingDay = after?.verb && nowStory ? firstWaiting(nowStory) : null;
   box.replaceChildren(
     h('div', { class: 'loads-head' }, h('p', { class: 'eyebrow' }, `Daily loads · ${loads.episode}`), h('div', { class: 'loads-act' }, play, next)),
     episodes ?? '',
@@ -6237,8 +6407,10 @@ function renderLoads(): void {
     h('div', { class: `loads-now${top ? ` sev-${top.severity}` : ''}` },
       h('p', { 'aria-live': 'polite' }, top && (top.severity === 'alert' || top.severity === 'warn') ? glyphEl(top.severity, 14) : '', ' ', loadSummary()),
       pl && held ? h('p', { class: `loads-pause ${held.state}` }, glyphEl(PAUSE_MARK[held.state], 14), h('b', {}, pl.text)) : null,
+      after ? h('p', { class: `loads-pause after${waitingDay ? ' waiting' : ''}` }, waitingDay ? glyphEl('held', 14) : '', h('b', {}, after.text)) : null,
       h('div', { class: 'loads-acts' },
         pl?.verb && own ? h('button', { type: 'button', class: 'btn small primary vf-decide-day', 'aria-label': `Decide what readers get for ${dayMid(now!.day)}`, onclick: () => decisionSheet(own, storyFor(now!.day)) }, `${pl.verb} ›`) : null,
+        waitingDay && after?.verb ? h('button', { type: 'button', class: 'btn small primary vf-decide-day', 'aria-label': `Decide what readers get for ${dayMid(waitingDay)}`, onclick: () => decideDay(waitingDay) }, `${after.verb} ›`) : null,
         lens && top && visible(src!) ? h('button', { type: 'button', class: 'btn small', onclick: () => openTab(lens, 'news') }, 'The news ›') : null)));
   // The loaded day in view in the scrolling row.
   requestAnimationFrame(() => {
@@ -6248,6 +6420,40 @@ function renderLoads(): void {
   });
   void weekNav;
 }
+
+/** The worst an episode's days are told, by the history's verdict (only to someone the trips are open to): its chip's
+ * mark. Null for a calm stretch, or without a history to judge by. */
+function episodeWorst(name: string): 'alert' | 'warn' | null {
+  if (!history || !historyOpen()) return null;
+  const src = loadSource();
+  if (src && !visible(src)) return null;
+  // The days' verdicts are the History calendar's (calendarSeverity), worked out a few at a time while the page is idle
+  // and kept with the calendar's, the chips drawn again once every load's day is known.
+  const key = `${checksAsCounted()}|${dataLog.version}|${[...hiddenTripColumns()].sort().join(',')}`;
+  if (calendar.key !== key) (calendar.sev.clear(), (calendar.key = key), (calendar.busy = false));
+  const file = history.file;
+  const next = () => loads.list.find((l) => file.days.includes(l.day) && !calendar.sev.has(l.day))?.day;
+  if (next() && !episodeMarks.busy) {
+    episodeMarks.busy = true;
+    const step = () => {
+      if (calendar.key !== key) return void (episodeMarks.busy = false);
+      const t0 = performance.now();
+      for (let day = next(); day && performance.now() - t0 < 24; day = next()) calendar.sev.set(day, calendarSeverity(day));
+      if (next()) idle(step);
+      else (episodeMarks.busy = false), renderLoads();
+    };
+    idle(step);
+  }
+  let worst: 'alert' | 'warn' | null = null;
+  for (const l of loads.list) {
+    if (l.episode !== name) continue;
+    const sev = calendar.sev.get(l.day);
+    if (sev === 'alert') return 'alert';
+    if (sev === 'warn') worst = 'warn';
+  }
+  return worst;
+}
+const episodeMarks = { busy: false };
 
 /** What a day's chip says of its pause, after its trips and verdict. */
 const PAUSE_SAID: Record<PauseState, string> = { waiting: ', paused, waiting on a decision', asis: ', published as is', dont: ', not published' };
@@ -7063,7 +7269,11 @@ async function decideNow(target: RunRecord | string, option: DecideOption, scope
   }
   const now = pauseOf(r);
   if (refused) setStatus(`The decision is recorded; the engine refused to publish ${day ? dayShort(day) : 'the run'}: ${refused}.`, true, { n: attempts, state: now && now.state !== 'asis' ? 'held' : 'done', mark: now?.state ?? null });
-  else sayRun(r);
+  else {
+    // Decided from a later day (the day after an episode, or its sheet), the line keeps saying the day on screen.
+    const shown = onScreen();
+    sayRun(shown && dayOfRun(shown) !== dayOfRun(r) ? shown : r);
+  }
   afterDecision();
   return entry;
 }
@@ -7203,7 +7413,7 @@ async function integrityTab(card: string, id: string, who: string): Promise<HTML
   box.append(h('div', { class: `verdict ${seal === 'bad' ? 'alert' : seal === 'amber' ? 'warn' : seal === 'ok' || levelOf(r) > 0 ? 'ok' : 'note'}` },
     h('p', { class: 'v-day' }, `Run ${r.result.run}${r.load !== undefined && loads.list[r.load] ? ` · ${dayLabel(loads.list[r.load]!.day)}` : ''}`),
     h('h3', { class: 'v-head' }, seal === 'bad' ? 'The chain is broken'
-      : sourceIds().has(id) ? (seal === 'ok' ? 'Sealed: the bytes published' : seal === 'amber' ? 'Read, with a note' : 'Recorded, not yet matched to the list')
+      : sourceIds().has(id) ? (seal === 'ok' ? 'Sealed: matches the source’s list' : seal === 'amber' ? 'Read, with a note' : 'Recorded, not yet matched to the list')
       : ['Recorded, not yet verified', 'Intact: every hash, key and link checks', 'Recomputed: the same datasets from the snapshots', 'Sealed: re-derived from the files’ bytes'][levelOf(r)]!),
     h('p', { class: 'v-line' }, sourceIds().has(id)
       ? (seal === 'ok' ? 'Its bytes, hashed by the engine, are the ones the data’s list publishes.' : state.engine?.mode === 'page' ? 'The engine runs in this page: an audit outside the browser vouches for its hashes.' : 'The file the run read, against the data’s list.')

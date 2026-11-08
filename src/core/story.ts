@@ -104,15 +104,16 @@ export interface Story {
   /** Weather worth knowing on the day: context, never a reason. */
   context: Told | null;
   /** The episode a day with something wrong is part of: its days so far (each day's trips against its guess, the
-   * viewed day last, none after it), and the trips short over them (days.shortfall: an estimate and its bound). */
+   * viewed day last, none after it), and the trips short over them (days.shortfall: an estimate and its bound; with no
+   * hour the trips fell, each day's guess less its trips, as its amount line says it). */
   episode: { days: number; since: string; hour: number | null; trend: { day: string; trips: number; expected: number }[]; short: { estimate: number; bound: number } | null } | null;
-  /** The episode a calm day comes after: its days, those the checks held (never published) and the rest (published
-   * short), and what it was. */
-  recovery: { from: string; to: string; held: string[]; published: string[]; name: string | null } | null;
+  /** The episode a calm day comes after: its days, the hour its first day fell from (null for a whole day), those the
+   * checks held (never published) and the rest (published short), and what it was. */
+  recovery: { from: string; to: string; hour: number | null; held: string[]; published: string[]; name: string | null } | null;
   health: { cell: Cell; severity: Severity | null; explained: boolean; follows: number; sameDay: number }[];
   primary: Act | null;
   /** Labels the screen shows at a glance, so their words can be counted: rows, chips, the hero's marks. */
-  labels: { amount: string[]; hero: string[]; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[]; after: string | null; key: string[]; context: string | null; health: string };
+  labels: { amount: string[]; hero: string[]; gate: string[]; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[]; after: string | null; key: string[]; context: string | null; health: string };
   findings: Told[];
 }
 
@@ -651,7 +652,13 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       const j0 = file.days.indexOf(b.first);
       const r0 = trips?.at(b.first);
       const fall = hoursF?.hours ? { day, ...hoursF.hours } : j0 >= 0 && r0 ? (() => { const f = hoursShort(h, j0, r0.expected)?.hours; return f ? { day: b.first, ...f } : null; })() : null;
-      episode = { days: b.days + 1, since: b.first, hour: b.hour, trend, short: fall ? shortfall(ep, fall, day) : null };
+      // With no hour the trips fell (a part that vanished, a day short throughout), each day counts whole, its guess
+      // less its trips, as its amount line's change says it.
+      const whole = (xs: readonly EpisodeDay[]) => xs.reduce((t, d) => {
+        const got = d.got.reduce((a, b) => a + b, 0);
+        return { estimate: t.estimate + Math.max(0, d.expected - got), bound: t.bound + Math.max(0, d.low - got) };
+      }, { estimate: 0, bound: 0 });
+      episode = { days: b.days + 1, since: b.first, hour: b.hour, trend, short: fall ? shortfall(ep, fall, day) : ep.length ? whole(ep) : null };
     }
   } else if (k >= 0 && !o.refused && severity !== 'alert' && severity !== 'warn' && o.episode !== false) {
     const yesterday = plusDays(day, -1);
@@ -663,7 +670,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       const days: string[] = [];
       for (let d = from; d <= yesterday; d = plusDays(d, 1)) days.push(d);
       const held = o.step ? days.filter((d) => gateOf(h, d, o.step!, o.limit ?? null)?.held) : [];
-      recovery = { from, to: yesterday, held, published: o.step ? days.filter((d) => !held.includes(d)) : [], name: last.name };
+      recovery = { from, to: yesterday, hour: b.days ? b.hour : last.hour, held, published: o.step ? days.filter((d) => !held.includes(d)) : [], name: last.name };
     }
   }
 
@@ -732,10 +739,16 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     }
     return runs.map(([a, b]) => span(a, b)).join(', ');
   };
-  // After an episode, the chip names it ("after Thu–Sun · only Flex Fare"), in five words or fewer.
-  const afterChip = recovery ? [`after ${span(recovery.from, recovery.to)} · ${recovery.name}`, `after ${span(recovery.from, recovery.to)}`].find((c) => !c.includes('null') && wordsIn(c) <= 5)! : null;
+  // After an episode, the chip names its days from the hour its first day fell ("after Thu 13:00–Sun"): never what its
+  // last day was, which its first may not have been (Thu Sep 21, 2023 lost its trips from 13:00, not all but Flex Fare).
+  // What it was is a tap away, in the episode's sheet.
+  const ddd = (d: string) => weekdayOf(d).slice(0, 3);
+  const afterChip = recovery ? `after ${ddd(recovery.from)}${recovery.hour !== null ? ` ${clock(recovery.hour)}` : ''}${recovery.to === recovery.from ? '' : `–${ddd(recovery.to)}`}` : null;
+  // An episode's day, and the trips short so far: day 3 reads apart from day 2 ("Day 3 · ~290k short").
   const chip = episode
-    ? `Day ${episode.days} · since ${weekdayOf(episode.since).slice(0, 3)}${episode.hour !== null ? ` ${clock(episode.hour)}` : ''}`
+    ? episode.short && episode.short.estimate >= 1
+      ? `Day ${episode.days} · ~${compact(episode.short.estimate)} short`
+      : `Day ${episode.days} · since ${ddd(episode.since)}${episode.hour !== null ? ` ${clock(episode.hour)}` : ''}`
     : afterChip;
   // And whether anything is left to do: a held load is never published, and nothing waits on a person to release it.
   const after = recovery && o.step ? `Nothing to do · ${[recovery.published.length ? `${spans(recovery.published)} published short` : '', recovery.held.length ? `${spans(recovery.held)} held` : ''].filter(Boolean).join(', ')}` : null;
@@ -781,9 +794,12 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   if (shownHero === 'hours' && hoursLabels) heroLabels.push(hoursLabels.cut, hoursLabels.floor, hoursLabels.missing, hoursLabels.ghost);
   // The amount line carries the day's count and its usual range on every day; a strip of days adds no words.
   // The checks show on every day with something wrong, passed or not (ADR 0008 §10), and on a near miss.
+  // Its words close the hero's labels (`labels.gate` repeats them), so a paused card can draw the checks its own way.
+  const gateWords: string[] = [];
   if (gate && (gate.held || gate.near || severity === 'alert')) {
     const g = gateLabels(gate);
-    heroLabels.push(gate.held ? 'Checks held' : gate.near ? 'Checks near the limit' : 'Checks passed', g.share, ...(g.limit ? [g.limit] : []), ...(g.margin ? [g.margin] : []), g.rows, ...(g.usual ? [g.usual] : []));
+    gateWords.push(gate.held ? 'Checks held' : gate.near ? 'Checks near the limit' : 'Checks passed', g.share, ...(g.limit ? [g.limit] : []), ...(g.margin ? [g.margin] : []), g.rows, ...(g.usual ? [g.usual] : []));
+    heroLabels.push(...gateWords);
   }
   // What the explained changes are, in words a newcomer has: "shares, times, checks", most first, three at most.
   const kindWord: Partial<Record<Finding['kind'], string>> = { share: 'shares', gone: 'values gone', missing: 'blanks', shape: 'spreads', dropped: 'checks', rule: 'checks', new: 'new values', pair: 'new pairs' };
@@ -802,6 +818,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       // The day's own change sits on the amount line when its count is outside its range and the head doesn't say it.
       amount: amount ? [`${fmtInt(amount.value)} trips`, ...(amount.change !== null && hero !== 'amount' && cause?.kind !== 'volume' ? [changeLabel(amount.change)] : []), `usual ${compact(amount.low)}–${compact(amount.high)}`] : [],
       hero: heroLabels,
+      gate: gateWords,
       follows: follows.length ? `${follows.length} ${follows.length === 1 ? 'change' : 'changes'} this explains` : null,
       // Under the row of changes it explains, "12 more this day" says the noun once; alone, it says it.
       sameDay: sameDay.length ? `${sameDay.length} more ${follows.length ? '' : `${sameDay.length === 1 ? 'change' : 'changes'} `}this day` : null,
@@ -813,7 +830,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       // A strip of days at a glance (a calm day's week, an amount day's four weeks) carries its one-line key.
       key: shownHero === 'calm' || ((shownHero === 'amount' || shownHero === 'finding') && cause?.kind === 'volume') ? [...STRIP_KEY] : [],
       context: state === 'recovery' ? null : contextLabel,
-      health: HEALTH_HEAD,
+      // A calm day's cells, none marked, say so: a blank cell can't be told from one not checked.
+      health: state === 'calm' && health.every((c) => !c.severity && !c.explained) ? `${HEALTH_HEAD} · all normal` : HEALTH_HEAD,
     },
     findings: [...told].sort(byRank),
   };

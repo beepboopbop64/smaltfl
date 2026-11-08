@@ -248,15 +248,31 @@ published. Cached check counts must still hold. And older builds must refuse wha
       not run: a dashed outline, its band and no count, no mark, and a key ("not run"); in the day after an episode's
       strip too, never as published with something wrong. The day readers see carries its age once it is two days or
       more before the day held ("readers see Mon 18 · 3 days old").
-    - **The cause card** keeps its head and its visual. Its reach row reads "‖ Paused · 3 outputs waiting", and its one
-      verb is **Decide**, both under the visual, before the health row and the checks, so they are on the first screen;
-      "Tell the source" moves behind ⋯. Someone who may not decide sees "Paused · waiting on Owner"
-      in the row itself, with no verb: a line of its own would take Sat Sep 18, 2022 to 61 words at a glance. A tap on
-      the row lists the waiting outputs, and then "What readers get ›" opens the decision sheet read only: its rows
-      greyed and "Only Owner decides" in place of the button. Once
-      decided, the row becomes the receipt, the day's mark before it ("⚑ Published as is · Owner · 09:40", "✕ Not
-      published · under Fri's decision", "✕ Unpublished until a day publishes"), and the story's verbs stay behind ⋯. The day after an episode says what
-      became of its days, what still waits first ("Thu as is · Fri–Sun not published"), and its strip marks them.
+    - **The cause card** keeps its head and its visual. Its pause row says, while the day waits, what paused it, only
+      as far as the viewer may see it ("Paused by trips", "Paused by trips, checks"), what readers see meanwhile
+      ("readers see Wed 20"), and the outputs that wait by name, each a hatched box ("zone_hour · borough_hour ·
+      weather_effect"); its one verb is **Decide**, under it, before the health cells and the checks, so they are on the
+      first screen; "Tell the source" moves behind ⋯. Someone who may not decide sees who does in the verb's place
+      ("Owner decides"). The day's mark sits by its date and on its News tab too. On a paused card the checks are drawn
+      in full only when they held the day too, under their ‖ (the row has named them); checks that passed, near their
+      limit or not, are one line, "Checks passed: 9.55% dropped", a tap from their sheet, never a second problem nor a
+      contradiction of the pause. For the budget, a paused card leaves out the health cells' head and the kinds under its
+      rows of changes, and readers' day goes without its age there (the day line, the staged bar and the list carry it).
+      A tap on the row lists the waiting outputs, the day's other outputs as up to date (the held run made the versions
+      readers have: Thu Sep 21's zone_list, districts and weather_hourly), and then "What readers get ›" opens the
+      decision sheet read only: its rows greyed and "Only Owner decides" in place of the button. Once decided, the row
+      becomes the receipt, the day's mark before it ("⚑ Published as is · Owner · 09:40", "✕ Not published · under
+      Fri's decision", "✕ Unpublished until a day publishes"), with readers' day and the outputs, and the story's verbs
+      stay behind ⋯.
+    - **The day after an episode** says what became of its days, the day on screen first once it published: "Mon 25
+      published · Thu–Sat still wait" with **Decide** (on the canvas too) while one waits, else "Mon 25 published · Thu as
+      is · Fri–Sun unpublished"; its chip names the episode's days from the hour its first fell ("after Thu 13:00–Sun"),
+      never what its last day was. A day held keeps its marks (! ‖, ! ⚑, ! ✕) in every later strip of days.
+    - **The episode's chip** draws its days as a calendar page, the viewed day dark (never a battery, never ‖), and
+      counts the trips short so far ("Day 3 · ~290k short", as its hours count them; a part that vanished counts each
+      day whole, as its amount line does). It opens the episode's sheet: one bar a day so far, each day's marks, the
+      trips short so far a segment a day, and Decide for each day still waiting. The episodes to pick from carry the mark
+      of their worst day, never one by their place.
     - **The decision sheet** draws each option as what readers would get, all on one scale. The cause picks the
       drawing, as it picks the hero: 24 hour bars for a day that falls at an hour, the part bar for a split, a strip of
       days for an amount. Another day's rows are hatched (ADR 0008 §10), and absent ones dashed.

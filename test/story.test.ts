@@ -142,11 +142,13 @@ describe('what a viewer may see', () => {
 });
 
 describe('days in a row', () => {
-  it('says which day of an episode it is, and since when', () => {
+  it('says which day of an episode it is, and the trips short so far', () => {
     const next = plusDays(DAY, 1);
     const s = story({ [DAY]: { stopAt: 13 }, [next]: { onlyVendor1: true } }, next);
     expect(s.episode).toMatchObject({ days: 2, since: DAY, hour: 13 });
-    expect(s.chip).toBe('Day 2 · since Wed 13:00');
+    // Day 2's chip counts the trips short so far, as the episode's hours count them (days.shortfall), to this day.
+    expect(s.episode!.short!.estimate).toBeGreaterThan(0);
+    expect(s.chip).toBe(`Day 2 · ~${compact(s.episode!.short!.estimate)} short`);
   });
 
   it('says a day after an episode is back to normal, names the episode, and says nothing is left to do', () => {
@@ -154,13 +156,15 @@ describe('days in a row', () => {
     const s = story({ [DAY]: { onlyVendor1: true, dropShare: 0.105 } }, after);
     expect(s.state).toBe('recovery');
     expect(s.head).toBe('Back to normal');
-    expect(s.chip).toBe('after Wed · only Vendor 1');
+    // Its days, never what its last day was: what it was is a tap away, in the episode's sheet.
+    expect(s.chip).toBe('after Wed');
     expect(s.recovery).toMatchObject({ from: DAY, to: DAY, held: [DAY], published: [] });
     expect(s.labels.after).toBe('Nothing to do · Wed held');
     expect(s.primary).toBeNull();
     // A day that went out short is said as published, not held.
     const short = story({ [DAY]: { stopAt: 13 } }, after);
-    expect(short.chip).toBe('after Wed · trips fell');
+    // From the hour its day fell.
+    expect(short.chip).toBe('after Wed 13:00');
     expect(short.labels.after).toBe('Nothing to do · Wed published short');
     expect(wordsIn(s.chip!)).toBeLessThanOrEqual(5);
     expect(glanceStrings(s).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(24);
@@ -299,10 +303,13 @@ describe('the context, the health row and the tiers (ADR 0008 §6)', () => {
 
   it('heads the health row once, counted at a glance, the same five cells on every day', () => {
     for (const s of [story({}, '2023-10-04'), story({ [DAY]: { onlyVendor1: true, dropShare: 0.105 } }), story({ [DAY]: { vendorSurge: 2.3 } })]) {
-      expect(s.labels.health).toBe(HEALTH_HEAD);
-      expect(glanceStrings(s)).toContain(HEALTH_HEAD);
+      // A calm day's head says its cells are all normal: a blank cell can't be told from one not checked.
+      const head = s.state === 'calm' ? `${HEALTH_HEAD} · all normal` : HEALTH_HEAD;
+      expect(s.labels.health).toBe(head);
+      expect(glanceStrings(s)).toContain(head);
       expect(s.health.map((c) => c.cell)).toEqual(Object.keys(CELL_KINDS));
     }
+    expect(story({}, '2023-10-04').state).toBe('calm');
   });
 
   it('accounts for every finding in one tier, so the rows on screen add up to what was found', () => {

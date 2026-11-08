@@ -477,6 +477,9 @@ export interface StripDay {
   sev?: 'alert' | 'warn' | null;
   /** A mark over the day's column: an earlier day told as something wrong, or held at the checks. */
   mark?: Mark;
+  /** Marks over the day's column side by side, in place of `mark`: a held day's severity and what became of it (! ‖,
+   * ! ⚑, ! ✕), as the loads strip draws them. */
+  marks?: readonly Mark[];
   /** A day of the loads this visit didn't run, its fate unknown here: its band, no tick and no mark, its column dashed
    * (absent), and the key says "not run". */
   notRun?: boolean;
@@ -493,7 +496,7 @@ export interface StripDay {
 export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number; labels?: [number, string, string?][]; aria: string; bandLabel?: string; zero?: boolean; key?: readonly [string, string]; unit?: string }): string {
   const w = o.w ?? 334;
   const n = o.days.length;
-  const marks = o.days.some((d) => d.mark);
+  const marks = o.days.some((d) => d.mark || d.marks?.length);
   const keyH = o.key ? 16 : 0;
   const h = (o.h ?? 64) + keyH + (marks ? 4 : 0);
   // With an axis printed, its 0 sits in a gutter of its own, clear of the first day's band.
@@ -540,7 +543,11 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
     const inside = d.v !== null && d.low !== null && d.high !== null && d.v >= d.low && d.v <= d.high;
     const sev = inside ? null : d.sev;
     if (vy !== null) s += `<rect class="${sev ? `sev-${sev}-fill` : 'ink'}" x="${f1(cx - bw / 2 - 1)}" y="${f1(vy - TICK / 2)}" width="${f1(bw + 2)}" height="${TICK}" rx="1"/>`;
-    if (d.mark) s += `<g transform="translate(${f1(cx - 7)} ${keyH})">${glyph(d.mark, 14)}</g>`;
+    const ms = d.marks?.length ? d.marks : d.mark ? [d.mark] : [];
+    ms.forEach((m, j) => {
+      const x0 = cx - (ms.length * 14 + (ms.length - 1) * 2) / 2 + j * 16;
+      s += `<g transform="translate(${f1(x0)} ${keyH})">${glyph(m, 14)}</g>`;
+    });
   });
   if (last) {
     const lx = gx + (n - 1) * cw + cw / 2;
@@ -611,6 +618,80 @@ export function trendPips({ days }: { days: readonly { trips: number; expected: 
     s += `<rect class="ghost" x="${x + 0.5}" y="${f1(h - uh + 0.5)}" width="${bw - 1}" height="${f1(uh - 1)}" rx="1"/>`;
     if (bh) s += `<rect class="${i === days.length - 1 ? 'ink-strong' : 'ink'}" x="${x}" y="${f1(h - bh)}" width="${bw}" height="${f1(bh)}" rx="1"/>`;
   });
+  return `${s}</svg>`;
+}
+
+/**
+ * An episode's days as a calendar page (its chip's icon): a band on top and a cell a day, up to seven, the viewed day
+ * (`at`) filled dark, so the chip reads as days, never as a battery or as ‖ (held). aria-hidden: the chip's words say it.
+ */
+export function episodeIcon({ n, at }: { n: number; at: number | null }): string {
+  const k = Math.min(7, Math.max(1, n));
+  const cell = 5;
+  const gap = 2;
+  const pad = 3;
+  const w = pad * 2 + k * cell + (k - 1) * gap;
+  const h = 16;
+  // The viewed day, among the last seven shown.
+  const on = at === null ? -1 : at - (n - k);
+  let s = `<svg class="viz cal-icon" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" focusable="false">`;
+  s += `<rect class="cal-page" x="0.75" y="2.25" width="${w - 1.5}" height="${h - 3}" rx="2.5"/><rect class="cal-band" x="0.75" y="2.25" width="${w - 1.5}" height="3.5" rx="1.5"/>`;
+  s += `<line class="cal-ring" x1="${pad + 1}" x2="${pad + 1}" y1="0.75" y2="4"/><line class="cal-ring" x1="${w - pad - 1}" x2="${w - pad - 1}" y1="0.75" y2="4"/>`;
+  for (let i = 0; i < k; i++) s += `<rect class="${i === on ? 'cal-at' : 'cal-day'}" x="${pad + i * (cell + gap)}" y="8" width="${cell}" height="${cell}" rx="1"/>`;
+  return `${s}</svg>`;
+}
+
+/**
+ * An episode's days so far (its sheet): one bar a day from 0, the day's trips in ink over its usual day's ghost, its
+ * count above it and its date under it, each day's marks under its date (what became of it: ! ‖, ! ⚑, ! ✕; a day this
+ * visit didn't run dashed, no bar); then the trips short so far as one bar from 0, a segment a day (absent: a wash with
+ * a dashed edge), its total at its end. No day after the viewed one is drawn.
+ */
+export function episodeDays(o: { days: readonly { label: string; trips: number; usual: number; low: number; short: number; marks: readonly Mark[]; notRun?: boolean; at?: boolean }[]; total: string | null; aria: string; w?: number }): string {
+  const w = o.w ?? 334;
+  const n = o.days.length;
+  const cw = w / Math.max(1, n);
+  const bw = Math.min(30, cw - 10);
+  const top = 16;
+  const base = 104;
+  const ymax = Math.max(1, ...o.days.map((d) => Math.max(d.trips, d.usual))) * 1.04;
+  const y = (v: number) => base - (v / ymax) * (base - top);
+  const shortSum = o.days.reduce((t, d) => t + Math.max(0, d.short), 0);
+  const sy = base + 54;
+  const h = o.total ? sy + 30 : base + 44;
+  const k = (v: number) => (v >= 10_000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(Math.round(v)));
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
+  o.days.forEach((d, i) => {
+    const cx = i * cw + cw / 2;
+    const x = cx - bw / 2;
+    s += `<rect class="ghost" x="${f1(x)}" y="${f1(y(d.usual))}" width="${f1(bw)}" height="${f1(base - y(d.usual))}" rx="2"/>`;
+    // A day not run here keeps its usual day, inside a dashed frame: absent, no count.
+    if (d.notRun) s += `<rect class="notrun" x="${f1(x - 3)}" y="${top - 2}" width="${f1(bw + 6)}" height="${base - top + 2}" rx="3"/>`;
+    else {
+      const th = Math.max(d.trips > 0 ? MIN_MARK : 0, base - y(d.trips));
+      s += `<rect class="${d.trips < d.low ? 'sev-alert-fill' : 'ink'}" x="${f1(x + 4)}" y="${f1(base - th)}" width="${f1(bw - 8)}" height="${f1(th)}" rx="1.5"/>`;
+      s += `<text x="${f1(cx)}" y="${f1(Math.min(base - th, y(d.usual)) - 4)}" text-anchor="middle" class="lbl-m lbl-halo">${esc(k(d.trips))}</text>`;
+    }
+    if (d.at) s += `<rect class="today-ring" x="${f1(i * cw + 2)}" y="${top - 14}" width="${f1(cw - 4)}" height="${base - top + 30}" rx="3"/>`;
+    s += `<text x="${f1(cx)}" y="${base + 13}" text-anchor="middle" class="${d.at ? 'lbl-b' : 'tick'}">${esc(d.label)}</text>`;
+    d.marks.forEach((m, j) => {
+      const x0 = cx - (d.marks.length * 14 + (d.marks.length - 1) * 2) / 2 + j * 16;
+      s += `<g transform="translate(${f1(x0)} ${base + 18})">${glyph(m, 14)}</g>`;
+    });
+  });
+  s += `<text x="0" y="${base}" class="tick" aria-hidden="true">0</text>`;
+  if (o.total && shortSum > 0) {
+    // The trips short so far, a segment a day on one bar from 0, its total at its end.
+    const sw = w - 4;
+    let x = 0;
+    o.days.forEach((d) => {
+      const dw = (Math.max(0, d.short) / shortSum) * sw;
+      if (dw >= 1) s += `<rect class="absent" x="${f1(x + 0.75)}" y="${sy}" width="${f1(Math.max(1, dw - 1.5))}" height="10" rx="2"/>`;
+      x += dw;
+    });
+    s += `<text x="0" y="${sy - 5}" class="lbl-m">${esc(o.total)}</text><text x="0" y="${sy + 24}" class="tick">0</text>`;
+  }
   return `${s}</svg>`;
 }
 

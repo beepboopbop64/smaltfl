@@ -84,8 +84,9 @@ where about 35,000 are usual, and everything else held.
    (i). Banned at a glance: "because", "caused by", "feed stopped", "disappeared", "The band". Budgets: an incident day
    60 words at a glance, an unusual one 45, a calm one 16, a day back to normal 24.
 
-6. **One cause card.** The head, one chip (the episode's day, "Day 2 · since Thu 13:00", or "Back to normal"'s "after
-   Thu–Sun · only Flex Fare", which names the episode, with one line under it saying whether anything is left to do:
+6. **One cause card.** The head, one chip (the episode's day and the trips short so far, "Day 2 · ~187k short", or
+   "Back to normal"'s "after Thu 13:00–Sun", which names the episode's days, ADR 0009 §12; a tap opens the episode's
+   sheet), with one line under it saying whether anything is left to do:
    "Nothing to do · Thu published short, Fri–Sun held", a held load being never published and nothing waiting on a
    person to release it; never the weather, §11), the day's count on a line with its usual range (the
    amount line, under the head on every day, carrying the day's own change, "−65%", when the count is outside its
@@ -156,7 +157,7 @@ where about 35,000 are usual, and everything else held.
     its shortfall counts those days only, the day it began as its head counts it (Sep 21: "~77k fewer", as its hour
     chart's "~77k missing"); a History chart draws the days after it lighter, their bands (made from days before) but no
     value, and a tap picks no later day; the loads strip leaves them unmarked, a band and no count, whatever the visit
-    ran. The episode chips keep their ⚠: they are how to get to the incidents. The History calendar gives each day the
+    ran. The episode chips keep a mark: they are how to get to the incidents, each marked by its worst day (ADR 0009 §12). The History calendar gives each day the
     verdict its News tells (the same story, findings marked as expected left so, a refused file first), the viewed
     day's at once, ringed apart from its own colour; it checks the days to the viewed one a few at a time while the page
     is idle, on after its tab closes, and says "Checking every day · 276 of 693" with a bar until every one is checked,
@@ -193,10 +194,10 @@ where about 35,000 are usual, and everything else held.
     the ones the cause absorbed too, worst first; a dot in it is the dot on "7 notes" under it. It sits in the cause
     card after the visuals, so a day with something wrong keeps it in the first screen. Every finding is in one tier,
     and the rows on screen add up to what was found (Thu Sep 21, 2023: 1 cause, 2 absorbed, 6 explained, 8 the same
-    day: 17); what the cause absorbed is one tap away in its health cell. An episode's chip draws its days so far, each
-    its trips against its guess, the viewed day darker, so day 3 reads apart from day 2 (Thu 35%, Fri 4%, Sat 5% of a
-    usual day: more of the same); its shortfall so far (days.shortfall, as its hours count it) is in the chip's
-    accessible name and the detail. Once the source is told on a day of the episode the card says "Source told on Fri"
+    day: 17); what the cause absorbed is one tap away in its health cell. An episode's chip draws its days so far as a
+    calendar page, the viewed day dark, and says its shortfall so far (days.shortfall, as its hours count it), so day 3
+    reads apart from day 2; each day's trips against its guess are in its accessible name and the episode's sheet
+    (ADR 0009 §12). Once the source is told on a day of the episode the card says "Source told on Fri"
     and its verb moves to "Open an incident", "Tell the source again" behind ⋯; each verb's accessible name and title
     say what it does and whom it reaches. "How it's judged" draws what the day's range is learned from, inside its
     frame: the six weekdays before as dots, the day last year as a diamond with its date, each group named, and today's
