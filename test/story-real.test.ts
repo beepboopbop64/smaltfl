@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
-import { glanceStrings, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
+import { countRange, gateLabels, glanceStrings, partLabel, splitSentence, storyOf, wordsIn } from '../src/core/story.js';
 
 const HISTORY = new URL('../dist/app/data/history.json', import.meta.url);
 const has = existsSync(HISTORY) && (JSON.parse(readFileSync(HISTORY, 'utf8')) as HistoryFile).days.length > 400;
@@ -135,11 +135,11 @@ describe.skipIf(!has)('the story on the real history', () => {
         expect(Math.abs(shown - v), `${label}: ${shown} for ${v}`).toBeLessThanOrEqual(Math.max(unit / 2, loose ? 0.05 * v : 0) + 1e-9);
       });
     };
-    for (const day of ['2023-09-22', '2022-11-15', '2024-01-01', '2023-09-21']) {
+    for (const day of ['2023-09-22', '2022-11-15', '2024-01-01', '2023-09-21', '2022-09-18']) {
       const s = story(day);
       const [part, partNum, , restNum] = s.split ? s.labels.hero : [];
       if (s.split && s.hero === 'split') {
-        expect(part).toBe(s.split.name);
+        expect(part).toBe(partLabel(s.split));
         said(partNum!, s.split.part.today, s.split.part.usual);
         said(restNum!, s.split.rest.today, s.split.rest.usual);
       }
@@ -154,11 +154,15 @@ describe.skipIf(!has)('the story on the real history', () => {
         said(s.hoursLabels.floor, had / (to - from + 1));
         said(s.hoursLabels.missing, usual.slice(from, to + 1).reduce((a, b) => a + b, 0) - had);
       }
-      if (s.gate?.held) {
-        const at = s.labels.hero.indexOf('Checks held');
-        said(s.labels.hero[at + 1]!, s.gate.share * 100);
-        said(s.labels.hero[at + 3]!, s.gate.dropped);
-        said(s.labels.hero[at + 4]!, s.gate.usual!.low, s.gate.usual!.high);
+      if (s.gate?.held || s.gate?.near) {
+        // Each of the gate's labels is on the screen, and says its own number: the share of the rows that arrived,
+        // the margin to the limit when within two points of it, the rows dropped and a day like it's.
+        const g = gateLabels(s.gate);
+        for (const l of [g.share, g.limit, g.margin, g.rows, g.usual]) if (l) expect(s.labels.hero).toContain(l);
+        said(g.share, s.gate.share * 100);
+        if (g.margin) said(g.margin, Math.abs(s.gate.share - s.gate.limit!) * 100);
+        said(g.rows, s.gate.dropped);
+        said(g.usual!, s.gate.usual!.low, s.gate.usual!.high);
       }
     }
   });
@@ -179,6 +183,33 @@ describe.skipIf(!has)('the story on the real history', () => {
       }
       expect(inside / n, JSON.stringify(m)).toBeGreaterThanOrEqual(0.9);
     }
+  });
+
+  it('labels the gate’s two bars, and says a margin within two points of the limit to the share’s decimals', () => {
+    // Sun Sep 18, 2022: held at 10.45% of 4,229 rows against a 10% limit; Thu Sep 21, 2023: 9.55%, just under.
+    expect(gateLabels(story('2022-09-18').gate!)).toEqual({ share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
+    expect(gateLabels(story('2023-09-21').gate!)).toMatchObject({ share: '9.55% of arrived rows dropped', margin: '0.45 pt under', rows: '4,004 rows dropped' });
+    // Far past it, no margin and no zoom: Fri Sep 22, 2023.
+    expect(gateLabels(story('2023-09-22').gate!)).toMatchObject({ share: '46% of arrived rows dropped', margin: null, rows: '2,116 rows dropped' });
+    expect(glanceStrings(story('2022-09-18')).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(60);
+  });
+
+  it('names vendor 1 beside its code where the head names it', () => {
+    const s = story('2022-11-14');
+    expect(s.split).toMatchObject({ name: 'Vendor 1', who: 'Creative Mobile' });
+    expect(s.labels.hero[0]).toBe('Vendor 1 · Creative Mobile');
+    expect(story('2023-09-22').split!.who).toBeUndefined();
+  });
+
+  it('gives a value’s count the range its split is judged on where its own has none (New Year’s Day 2024)', () => {
+    // Flex Fare's count moved too far since last year for its own holiday range; its share's range of a usual New
+    // Year's Day's trips is 2.3k–8.6k, about 4.5k expected: the split's "usual ~4.5k".
+    expect(h!.of({ of: 'count', column: 'payment_type', value: '0' })!.at('2024-01-01')).toBeNull();
+    const r = countRange(h!, 'payment_type', '0', '2024-01-01')!;
+    expect([Math.round(r.low / 100) * 100, Math.round(r.high / 100) * 100, Math.round(r.expected / 100) * 100]).toEqual([2300, 8600, 4500]);
+    expect(Math.abs(r.expected - story('2024-01-01').split!.part.usual)).toBeLessThan(1);
+    // Where the count has its own range, that is the one.
+    expect(countRange(h!, 'payment_type', '0', '2023-09-22')).toMatchObject({ low: h!.of({ of: 'count', column: 'payment_type', value: '0' })!.at('2023-09-22')!.low });
   });
 
   it('tells calm days and the day after an episode calmly', () => {

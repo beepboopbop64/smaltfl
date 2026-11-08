@@ -17,7 +17,7 @@ import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, t
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { approx, compact, countLabel, gateOf, splitSentence, storyOf, type Gate, type Story, type Told } from '../core/story.js';
+import { STRIP_KEY, approx, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, splitSentence, storyOf, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, chain, composition, dayStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
@@ -1137,7 +1137,7 @@ function renderCanvas(): void {
       if (from === to || seen.has(`${from}>${to}`)) continue;
       seen.add(`${from}>${to}`);
       const { d, cx, cy } = edgePath(drawn.at.get(from)!, drawn.at.get(to)!);
-      // A profile box only looks: its edge is dashed.
+      // A profile box only looks: its edge is a light solid line (dashes mean absent, and nothing else).
       const tinted = !profileOf(st.id) && trail.has(input) && trail.has(st.id);
       const path = s('path', { class: `${profileOf(st.id) ? 'edge look' : 'edge'}${tinted ? ` trail${pastGate.has(st.id) ? ' unbuilt' : ''}` : ''}`, d });
       const dot = s('circle', { class: 'edge-dot', cx, cy, r: 2.5 });
@@ -2016,7 +2016,7 @@ function drillHead(card: string, tabs: Tab[], tab: Tab): HTMLElement {
     stoppedLine(card, tab),
     h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'What to look at' },
       ...tabs.map((t) => h('button', { type: 'button', role: 'tab', id: `drill-tab-${t}`, 'aria-selected': String(t === tab), 'aria-controls': 'drill-panel', onclick: () => openTab(card, t) },
-        TAB_LABEL[t], t === 'news' && worst && (worst === 'alert' || worst === 'warn') && count ? h('span', { class: 'tab-mark', 'aria-label': worst === 'alert' ? 'something’s wrong' : 'unusual' }, glyphEl(worst, 12)) : null))));
+        TAB_LABEL[t], t === 'news' && worst && (worst === 'alert' || worst === 'warn') && count ? h('span', { class: 'tab-mark', 'aria-label': worst === 'alert' ? 'something’s wrong' : 'unusual' }, glyphEl(worst, 14)) : null))));
 }
 
 /** A run that stopped on this load, said from any tab: what stopped it, and whose rows are on screen. */
@@ -2555,14 +2555,17 @@ function anchorOf(story: Story): Finding | null {
   return f ? { ...f, title: story.head, detail: [story.chip, ...story.labels.hero].filter(Boolean).join(' · ') } : null;
 }
 
-/** A day's trips, day by day, with each day's own range, ending on the day: for strips. */
+/** A metric day by day, with each day's own range, ending on the day: for strips. A coded value's count takes the
+ * range its split is judged on where its own has none (story.countRange). The day's tick carries the severity given
+ * only when it is outside its own range: a part that held is drawn plain on the day the rest of the trips fell. */
 function stripOf(m: Metric, day: string, n = 28, sevToday?: Severity): StripDay[] {
   const ranges = rangesOf(m);
-  if (!ranges) return [];
+  if (!ranges || !history) return [];
   return daysFrom(dayPlus(day, -(n - 1)), day).map((d) => {
-    const r = ranges.at(d);
+    const r = m.of === 'count' ? countRange(history!, m.column, m.value, d) : ranges.at(d);
     const v = ranges.value(d);
-    return { day: d, v, low: r?.low ?? null, high: r?.high ?? null, sev: d === day && (sevToday === 'alert' || sevToday === 'warn') ? sevToday : null };
+    const outside = v !== null && (!r || v < r.low || v > r.high);
+    return { day: d, v, low: r?.low ?? null, high: r?.high ?? null, sev: d === day && outside && (sevToday === 'alert' || sevToday === 'warn') ? sevToday : null };
   });
 }
 const stripLabels = (days: readonly StripDay[]): [number, string, string?][] => (days.length ? [[0, shortDay(days[0]!.day), 'start'], [days.length - 1, shortDay(days.at(-1)!.day), 'end']] : []);
@@ -2574,9 +2577,9 @@ function splitVisual(story: Story): Element | null {
   const sev = story.severity === 'alert' || story.severity === 'warn' ? story.severity : 'warn';
   const partMoved = sp.kind !== 'held';
   return svgNode(partBar({
-    left: { name: sp.name, today: sp.part.today, usual: sp.part.usual, label: countLabel(sp.part), sev: partMoved ? sev : null },
+    left: { name: partLabel(sp), today: sp.part.today, usual: sp.part.usual, label: countLabel(sp.part), sev: partMoved ? sev : null },
     right: { name: 'Everything else', today: sp.rest.today, usual: sp.rest.usual, label: countLabel(sp.rest), sev: partMoved ? null : sev },
-    aria: `${sp.name} records: ${fmtInt(sp.part.today)} of about ${fmtInt(sp.part.usual)}. Everything else: ${fmtInt(sp.rest.today)} of about ${fmtInt(sp.rest.usual)}.`,
+    aria: `${partLabel(sp)} records: ${fmtInt(sp.part.today)}, where about ${fmtInt(sp.part.usual)} is usual. Everything else: ${fmtInt(sp.rest.today)}, where about ${fmtInt(sp.rest.usual)} is usual.`,
   }));
 }
 
@@ -2610,7 +2613,7 @@ function heroOf(story: Story): Element | null {
   }
   if ((story.hero === 'amount' || story.hero === 'finding') && story.cause?.kind === 'volume') {
     const days = stripOf({ of: 'trips' }, day, 28, story.severity);
-    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, aria: `Trips day by day for four weeks to ${dayLabel(day)}, each against its own usual range.` })) : null;
+    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, key: STRIP_KEY, aria: `Trips day by day for four weeks to ${dayLabel(day)}, each against its own usual range.` })) : null;
   }
   if (story.hero === 'gate' && story.gate) return gateVisual(story.gate, true, gateScale(story));
   // A population seen through its blanks: its share on its own row, zoomed to where it and its range are.
@@ -2625,7 +2628,7 @@ function heroOf(story: Story): Element | null {
     // After an episode, its days carry their marks: held at the checks, or published with something wrong.
     const rec = story.recovery;
     const days = stripOf({ of: 'trips' }, day, 7).map((d) => (rec && d.day >= rec.from && d.day <= rec.to ? { ...d, sev: 'alert' as const, mark: (rec.held.includes(d.day) ? 'held' : 'alert') as VizMark } : d));
-    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, aria: `Trips the seven days to ${dayLabel(day)}, each against its own usual range${rec ? `; ${rec.held.length ? `${rec.held.length} held at the checks` : ''}${rec.held.length && rec.published.length ? ', ' : ''}${rec.published.length ? `${rec.published.length} published with something wrong` : ''}` : ''}.` })) : null;
+    return days.length ? svgNode(dayStrip({ days, labels: stripLabels(days), zero: true, key: STRIP_KEY, aria: `Trips the seven days to ${dayLabel(day)}, each against its own usual range${rec ? `; ${rec.held.length ? `${rec.held.length} held at the checks` : ''}${rec.held.length && rec.published.length ? ', ' : ''}${rec.published.length ? `${rec.published.length} published with something wrong` : ''}` : ''}.` })) : null;
   }
   return null;
 }
@@ -2642,21 +2645,17 @@ function gateScale(story: Story): number | undefined {
   return most || undefined;
 }
 
-/** The checks: the share they dropped against their limit, and the rows against a day like it. */
+/** The checks: the share of the arrived rows they dropped against their limit, zoomed within two points of it, and the
+ * rows they dropped against a day like it, each bar saying what it counts (story.gateLabels). */
 function gateVisual(g: Gate, big = false, countMax?: number): Element {
   const share = g.rows ? g.dropped / g.rows : 0;
   const pastLimit = g.limit !== null && share > g.limit;
-  let said = `${Math.round(share * 100)}%`;
-  for (let d = 0; d <= 3 && g.limit !== null; d++) {
-    const shown = Number((share * 100).toFixed(d));
-    if ((share > g.limit) === (shown > g.limit * 100) && shown !== g.limit * 100) { said = `${(share * 100).toFixed(d)}%`; break; }
-  }
+  const l = gateLabels(g);
   return svgNode(gateBars({
-    rows: g.rows, dropped: g.dropped, rules: g.rules.map((r) => ({ name: r.name, label: RULE_TITLE(r.name), warns: r.warns, rows: r.rows })), limit: g.limit,
-    usual: g.usual ? { low: g.usual.low, high: g.usual.high } : null, held: g.held, big, countMax,
-    shareLabel: `${said} dropped`, limitLabel: g.limit !== null ? `limit ${Math.round(g.limit * 100)}%` : undefined,
-    countLabel: [`${fmtInt(g.dropped)} rows`, g.usual ? `usual ${compact(g.usual.low)}–${compact(g.usual.high)}` : ''],
-    aria: `${g.held ? `Held at ${g.step}` : `The checks at ${g.step}`}: ${said} dropped${g.limit !== null ? ` against a ${Math.round(g.limit * 100)}% limit` : ''}${pastLimit && !g.held ? ', past it' : ''}; ${fmtInt(g.dropped)} rows${g.usual ? `, where a day like it drops ${fmtInt(g.usual.low)} to ${fmtInt(g.usual.high)}` : ''}.`,
+    rows: g.rows, dropped: g.dropped, limit: g.limit, usual: g.usual ? { low: g.usual.low, high: g.usual.high } : null, big, countMax,
+    shareLabel: l.share, limitLabel: l.limit, marginLabel: l.margin, zoom: l.margin !== null,
+    countLabel: [l.rows, l.usual ?? ''],
+    aria: `${g.held ? `Held at ${g.step}` : `The checks at ${g.step}`}: ${l.share}${g.limit !== null ? ` against a ${Math.round(g.limit * 100)}% limit` : ''}${l.margin ? `, ${l.margin.replace('pt', 'points')}` : ''}${pastLimit && !g.held ? ', past it' : ''}; ${l.rows} of ${fmtInt(g.rows)}${g.usual ? `, where a day like it drops ${fmtInt(g.usual.low)} to ${fmtInt(g.usual.high)}` : ''}.`,
   }));
 }
 
@@ -2736,15 +2735,16 @@ function causeDetail(story: Story, card: string): void {
     body.push(block('From a usual day to this one', svgNode(waterfall({
       steps: [
         { name: 'Usual', label: approx(usual), value: usual, total: true, kind: 'total' },
-        { name: movedName.length > 12 ? movedName.slice(0, 11) + '…' : movedName, label: `${moved >= 0 ? '+' : '−'}${approx(Math.abs(moved))}`, value: moved, kind: moved >= 0 ? 'up' : 'down', sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined },
-        { name: otherName.length > 12 ? otherName.slice(0, 11) + '…' : otherName, label: `${other >= 0 ? '+' : '−'}${approx(Math.abs(other))}`, value: other, kind: other >= 0 ? 'up' : 'down' },
+        { name: movedName, label: `${moved >= 0 ? '+' : '−'}${approx(Math.abs(moved))}`, value: moved, kind: moved >= 0 ? 'up' : 'down', sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined },
+        { name: otherName, label: `${other >= 0 ? '+' : '−'}${approx(Math.abs(other))}`, value: other, kind: other >= 0 ? 'up' : 'down' },
         { name: 'Today', label: approx(story.amount.value), value: story.amount.value, total: true, kind: 'total' },
       ],
       aria: `From a usual day's ${fmtInt(usual)} trips to ${fmtInt(story.amount.value)}: ${movedName} ${moved >= 0 ? '+' : '−'}${fmtInt(Math.abs(moved))}, ${otherName} ${other >= 0 ? '+' : '−'}${fmtInt(Math.abs(other))}.`,
     }))));
     const part = stripOf({ of: 'count', column: sp.column, value: sp.value }, day, 28, story.severity);
-    if (part.length) body.push(block(`${sp.name}, day by day`, svgNode(dayStrip({ days: part, labels: stripLabels(part), aria: `${sp.name} trips day by day for four weeks to ${dayLabel(day)}, each against its own usual range.` }))));
-    const comp = compositionOf(sp.column, day, sp.value);
+    const at = part.at(-1);
+    if (part.length) body.push(block(`${sp.name}, day by day`, svgNode(dayStrip({ days: part, h: 88, labels: stripLabels(part), key: STRIP_KEY, unit: '/day', aria: `${sp.name} records day by day for four weeks to ${dayLabel(day)}, each against its own usual range${at?.v !== null && at?.v !== undefined ? `: ${fmtInt(at.v)} on ${dayLabel(day)}${at.low !== null && at.high !== null ? `, where ${fmtInt(at.low)} to ${fmtInt(at.high)} is usual` : ''}` : ''}.` }))));
+    const comp = compositionOf(sp.column, day, sp.value, [partLabel(sp), sp.name]);
     if (comp) body.push(block(`${NEWS_NAMES.column(sp.column)}, usual and today`, comp));
     body.push(oneLine(splitSentence(story)));
     if (sp.blank.length) body.push(h('div', { class: 'vf-chips' }, h('span', { class: 'vf-chip' }, `${sp.blank.length} fields blank on these trips`)));
@@ -2752,7 +2752,7 @@ function causeDetail(story: Story, card: string): void {
   if (story.hours || story.episode) body.push(hoursDetail(story));
   if (story.hero === 'amount' || story.hero === 'calm') {
     const days = stripOf({ of: 'trips' }, day, 56, story.severity);
-    if (days.length) body.push(block('Trips, eight weeks', svgNode(dayStrip({ days, h: 90, labels: stripLabels(days), zero: true, aria: `Trips day by day for eight weeks to ${dayLabel(day)}.` }))));
+    if (days.length) body.push(block('Trips, eight weeks', svgNode(dayStrip({ days, h: 90, labels: stripLabels(days), key: STRIP_KEY, unit: '/day', aria: `Trips day by day for eight weeks to ${dayLabel(day)}.` }))));
     if (story.context) body.push(oneLine(`${story.context.title}.`));
   }
   // A population's own rows (the value and each field blank on it, all at one share) would say the split again.
@@ -2879,12 +2879,7 @@ function gateBlocks(g: Gate, day: string, countMax?: number): (Node | null)[] {
 function gateSheet(story: Story, card: string): void {
   const g = story.gate;
   if (!g) return;
-  const share = g.rows ? g.dropped / g.rows : 0;
-  let said = `${Math.round(share * 100)}%`;
-  for (let d = 0; d <= 3 && g.limit !== null; d++) {
-    const shown = Number((share * 100).toFixed(d));
-    if ((share > g.limit) === (shown > g.limit * 100) && shown !== g.limit * 100) { said = `${(share * 100).toFixed(d)}%`; break; }
-  }
+  const said = pastLimit(g.rows ? g.dropped / g.rows : 0, g.limit);
   const anchor = anchorOf(story);
   openDetail(g.held ? `Held at ${g.step}: ${said} dropped` : `${g.step}: ${said} dropped`, g.held ? 'alert' : 'warn', gateBlocks(g, story.day, gateScale(story)), anchor, card, g.held ? 'notify' : story.primary);
 }
@@ -2895,22 +2890,27 @@ function gateDetail(g: Gate): HTMLElement {
   return h('div', { class: 'vf-blocks' }, ...gateBlocks(g, day).filter((x): x is Node => !!x));
 }
 
-/** A coded column's values as two 100% bars, usual and today, the moved value dark. */
-function compositionOf(column: string, day: string, moved?: string): Element | null {
+/** A share as a bar's label says it: none, under 0.1%, or to a tenth of a point. */
+const shareSaid = (x: number) => (x === 0 ? '0%' : x < 0.001 ? '<0.1%' : pct(x));
+
+/** A coded column's values as two 100% bars, usual and today, the moved value dark and labelled by `names` (in the
+ * usual bar, then today's: "Vendor 1 · Creative Mobile 29.3%", "Vendor 1 <0.1%"). */
+function compositionOf(column: string, day: string, moved?: string, names?: [string, string]): Element | null {
   const vh = history?.file.values?.[column];
   if (!vh?.counts || !history) return null;
   const k = history.file.days.indexOf(day);
   const n = history.file.rows[k] ?? 0;
   if (k < 0 || !n) return null;
   const parts = vh.values.map((v, i) => ({ v, today: (vh.counts![k]![i] ?? 0) / n, usual: rangesOf({ of: 'value', column, value: v })?.at(day)?.expected ?? 0 }))
-    .filter((p) => p.today > 0.001 || p.usual > 0.001).sort((a, b) => b.usual - a.usual).slice(0, 7);
+    .filter((p) => p.today > 0.001 || p.usual > 0.001 || p.v === moved).sort((a, b) => b.usual - a.usual).slice(0, 7);
   const name = (v: string) => (v === 'null' ? 'blank' : NEWS_NAMES.label(column, JSON.parse(v)));
+  const [first, again] = names ?? (moved !== undefined ? [name(moved), name(moved)] : ['', '']);
   return svgNode(composition({
     bars: [
-      { label: 'usual', parts: parts.map((p) => ({ name: p.v, share: p.usual, text: name(p.v) })) },
-      { label: 'today', parts: parts.map((p) => ({ name: p.v, share: p.today, text: name(p.v), gone: p.today === 0 && p.usual > 0.002 })) },
+      { label: 'usual', parts: parts.map((p) => ({ name: p.v, share: p.usual, text: name(p.v), ...(p.v === moved ? { callout: `${first} ${shareSaid(p.usual)}` } : {}) })) },
+      { label: 'today', parts: parts.map((p) => ({ name: p.v, share: p.today, text: name(p.v), gone: p.today === 0 && p.usual > 0.002, ...(p.v === moved ? { callout: `${again} ${shareSaid(p.today)}` } : {}) })) },
     ],
-    moved, aria: `${NEWS_NAMES.column(column)}: ${parts.map((p) => `${name(p.v)} ${pct(p.today)} today, usually ${pct(p.usual)}`).join('; ')}.`,
+    moved, aria: `${NEWS_NAMES.column(column)}: ${parts.map((p) => `${name(p.v)} ${shareSaid(p.today)} today, usually ${shareSaid(p.usual)}`).join('; ')}.`,
   }));
 }
 
@@ -2920,7 +2920,7 @@ function findingDetail(f: Finding, card: string): void {
   const body: (Node | null)[] = [findingVisual(f), chipsOf(f)];
   if (day && f.metric && f.kind !== 'volume') {
     const days = stripOf(f.metric, day, 28, f.severity);
-    if (days.length) body.push(block('Day by day', svgNode(dayStrip({ days, labels: stripLabels(days), aria: `${f.title}, day by day for four weeks.` }))));
+    if (days.length) body.push(block('Day by day', svgNode(dayStrip({ days, labels: stripLabels(days), key: STRIP_KEY, aria: `${f.title}, day by day for four weeks.` }))));
   }
   if (day && f.columns?.[0] && (f.kind === 'share' || f.kind === 'gone' || f.kind === 'new') && history?.file.values?.[f.columns[0]]?.counts) body.push(block(`${NEWS_NAMES.column(f.columns[0])}, usual and today`, compositionOf(f.columns[0], day, f.values?.[0])));
   body.push(oneLine(f.detail));
@@ -3032,7 +3032,7 @@ function healthRow(story: Story): HTMLElement {
   const cells = () => h('nav', { class: 'vf-health', 'aria-label': 'Health' }, ...story.health.map((c) => {
     const m: VizMark | null = c.explained ? 'explained' : c.severity === 'alert' ? 'alert' : c.severity === 'warn' ? 'warn' : c.severity === 'note' ? 'note' : null;
     const said = c.explained ? `${c.follows} grouped under the day’s cause${c.sameDay ? `, ${c.sameDay} more came the same day` : ''}` : c.severity === 'alert' ? 'something’s wrong' : c.severity === 'warn' ? 'unusual' : c.severity === 'note' ? 'worth knowing' : c.cell === 'file' && story.amount ? `bytes as listed, ${fmtInt(story.amount.value)} rows` : 'normal';
-    return h('span', { class: `vf-cell ${c.explained ? 'explained' : c.severity ?? 'ok'}`, role: 'img', 'aria-label': `${names[c.cell]}: ${said}` }, m ? glyphEl(m, 13) : h('span', { class: 'g-slot' }), h('span', { 'aria-hidden': 'true' }, names[c.cell]!));
+    return h('span', { class: `vf-cell ${c.explained ? 'explained' : c.severity ?? 'ok'}`, role: 'img', 'aria-label': `${names[c.cell]}: ${said}` }, m ? glyphEl(m, 14) : h('span', { class: 'g-slot' }), h('span', { 'aria-hidden': 'true' }, names[c.cell]!));
   }));
   if (story.health.every((c) => c.severity === null && !c.explained)) {
     const wrap = h('div', { class: 'vf-allok-wrap' });
@@ -5174,7 +5174,7 @@ function renderLoads(): void {
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
       svgNode(stripBar({ v: l.rows, low: range?.low ?? null, high: range?.high ?? null, ymax, sev: sev === 'alert' || sev === 'warn' ? sev : null })),
-      h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 12) : '', held ? glyphEl('held', 12) : ''));
+      h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 14) : '', held ? glyphEl('held', 14) : ''));
   });
   const at = list.indexOf(loads.at);
   const last = at >= list.length - 1;
@@ -5401,7 +5401,7 @@ function niceTicks(lo: number, hi: number, n: number): number[] {
 const normalView = { metric: 'trips' as 'trips' | 'dropped', focus: '' };
 const backtests = new Map<string, Backtest>();
 
-/** Days as a band chart: the normal range a band, the guess a dashed line, the number a dot. Tap for a day. */
+/** Days as a band chart: the normal range a band, the guess a lighter solid line, the number a dot. Tap for a day. */
 function bandChart(ranges: NormalRanges, days: readonly string[], focus: string, fmt: (v: number) => string, pick: (day: string) => void, limit?: number): SVGSVGElement | null {
   const [W, H, L, R, T, B] = [340, 172, 38, 6, 8, 26];
   const pts = days.map((d) => ({ d, v: ranges.value(d), r: ranges.at(d) }));

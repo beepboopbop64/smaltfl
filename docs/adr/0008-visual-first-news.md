@@ -66,7 +66,10 @@ where about 35,000 are usual, and everything else held.
    differently from one past it because bad rows came. On such a day the verb is "Tell the source", not "Add a check".
    New count metrics (`count`, `droppedRows`, `ruleRows`, scale `count`) give those rows their usual ranges; metrics are
    not hashed, so no encoding changes. A gate within one point below its limit is drawn too ("near"), and a share is
-   never printed equal to the limit it passed or missed.
+   never printed equal to the limit it passed or missed. Each bar says what it counts ("46% of arrived rows dropped",
+   "2,116 rows dropped"); the limit is a tall solid tick and the share's end a pointer (‖ only ever means held). Within
+   two points of the limit the share is drawn again on a printed zoom (0–20% for a 10% limit) and its margin said to
+   the share's own decimals ("10.45% … 0.45 pt over"); on the full bar its end sits 3 px clear of the tick on its side.
 
 5. **Words.** A head is at most six words and carries the number or the time ("Only Flex Fare records arrived", "Trips
    fall 95% from 13:00", "Vendor 1 sent almost nothing", "Normal for MLK Day"); a finding's title at most eight, with
@@ -95,8 +98,12 @@ where about 35,000 are usual, and everything else held.
    that open in place into compact rows, a column's together, three and then "Show all", each today against its usual,
    and one verb with the others behind ⋯. Then a health row of five cells (File, Amount, Hours, Values, Shape: ↳ where
    the cause explains it; "All 5 normal" on a calm day), at most two more stories, and counted rows for the rest and
-   the notes. A tap opens a sheet that is visual too: a waterfall from a usual day to this one, the part's own days,
-   its column's composition usual and today, the split in one sentence; the episode's hours, its readout first saying
+   the notes. A tap opens a sheet that is visual too: a waterfall from a usual day to this one (a long name wraps), the
+   part's own days (its axis printed, each day's tick coloured only when outside that day's range, and, where its count
+   has no range of its own, the range its split is judged on: New Year's Day 2024's Flex Fare at 2.3k–8.6k), its
+   column's composition usual and today (the part labelled, over the bar when it's narrow, a vendor named beside its
+   code, "Vendor 1 · Creative Mobile", as the hero bar names it too; a value gone today takes no width and is named
+   under its bar), the split in one sentence; the episode's hours, its readout first saying
    the fall as the head does ("Thu from 13:00: 3,679 trips · usual ~80k (−95%)") and its shortfall an estimate with
    its bound ("~375k fewer (≥270k)"), never the bound alone; the checks rule by rule against their usual rows, on one
    count scale over an incident's days so far, and the outputs the held run didn't publish. Numbers that sit beside a
@@ -105,7 +112,12 @@ where about 35,000 are usual, and everything else held.
 7. **Marks** carry severity by shape and fill first and colour third (the tokens' hues are too close in greyscale):
    something wrong is a filled hexagon with "!", unusual an outlined triangle on a wash, a note a small dot, ok no mark,
    held ‖, explained ↳, marked as expected ✓. Folded findings keep their shape in grey. Counts start at zero; shares sit
-   on 0–100% or a printed zoom; each day draws its own range; usual is a light ghost behind today's ink.
+   on 0–100% or a printed zoom; each day draws its own range; usual is a light ghost behind today's ink, its edge 3:1
+   against the card in both themes (tracks and control borders too; hairlines 1.8:1), never thinner than today's mark
+   and 4 px more, grown away from a value outside it so the gap stays true. A strip of days carries a one-line key
+   where it is first shown ("usual", "actual"; counted in the glance budget). Dashes mean absent and nothing else: a
+   limit is a solid tick, a guess a lighter solid line, a grouped card a tinted border, a link a solid hairline. Marks in
+   tabs and strips are 14 px; a mark for a number that isn't zero is never under 3 px.
 
 8. **A share or a level is told only a typical miss past its range's edge** (counts from the edge), so a number hugging
    the edge isn't news. Over Jan 2023 to Jan 2024 the days are 6 something wrong (as before), 27 unusual (33 before),

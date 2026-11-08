@@ -33,13 +33,13 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f131a; --surface: #171c25; --sunk: #1e2430; --ink: #e8ebf1; --ink-2: #c3c9d6; --muted: #98a1b3; --line: #2c3442;
+    --bg: #0f131a; --surface: #171c25; --sunk: #1e2430; --ink: #e8ebf1; --ink-2: #c3c9d6; --muted: #98a1b3; --line: #434955;
     --smalt: #8fa8ff; --smalt-wash: #1d2742; --teal: #4fd1c5; --teal-fill: #2bb3a6; --teal-wash: #14302e;
     --ok: #67d391; --warn: #e3b55f; --warn-wash: #33280f; --row-alt: #1b212b; --bad: #ff86b5; --bad-wash: #3a1828; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f131a; --surface: #171c25; --sunk: #1e2430; --ink: #e8ebf1; --ink-2: #c3c9d6; --muted: #98a1b3; --line: #2c3442;
+  --bg: #0f131a; --surface: #171c25; --sunk: #1e2430; --ink: #e8ebf1; --ink-2: #c3c9d6; --muted: #98a1b3; --line: #434955;
   --smalt: #8fa8ff; --smalt-wash: #1d2742; --teal: #4fd1c5; --teal-fill: #2bb3a6; --teal-wash: #14302e;
   --ok: #67d391; --warn: #e3b55f; --warn-wash: #33280f; --row-alt: #1b212b; --bad: #ff86b5; --bad-wash: #3a1828; color-scheme: dark;
 }
@@ -110,7 +110,7 @@ section.view { display: grid; gap: 14px; }
 .swatch { width: 14px; height: 10px; border-radius: 3px; border: 1.5px solid var(--line); background: var(--surface); }
 .swatch.built { border-color: var(--teal); background: var(--teal-wash); }
 .swatch.reused { border-color: var(--muted); }
-.swatch.folded { border-style: dashed; border-color: var(--muted); }
+.swatch.folded { background: var(--bg); }
 .swatch.drop { border-color: var(--warn); background: var(--warn-wash); border-radius: 999px; }
 .port-key { position: relative; width: 22px; height: 10px; }
 .port-key::before { content: ""; position: absolute; top: 4px; height: 2px; background: var(--smalt); }
@@ -140,7 +140,7 @@ section.view { display: grid; gap: 14px; }
 .card.source rect.box { stroke: var(--smalt); }
 .card.dataset rect.box { stroke: var(--teal); }
 .card.built rect.box { fill: var(--teal-wash); stroke: var(--teal); }
-.card.folded rect.box { stroke-dasharray: 5 4; }
+.card.folded rect.box { fill: var(--bg); }
 .card.failed rect.box { fill: var(--bad-wash); stroke: var(--bad); }
 .card.selected rect.box { stroke: var(--smalt); stroke-width: 2.5; }
 .card text { fill: var(--ink); }
@@ -172,15 +172,15 @@ section.view { display: grid; gap: 14px; }
 .section.empty rect.frame { stroke-dasharray: 6 5; }
 .section .empty-hint { fill: var(--muted); font-size: 11.5px; }
 .section.drop rect.frame, .section.selected rect.frame { stroke: var(--smalt); stroke-width: 2.5; }
-.section.lifted rect.frame { stroke: var(--smalt); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.section.lifted rect.frame { stroke: var(--smalt); stroke-width: 3; }
 .card.summary rect.box { stroke: var(--s, var(--ink-2)); }
 .section .toggle { font-family: var(--mono); font-size: 11px; fill: var(--smalt); }
 .section .hit { fill: transparent; cursor: pointer; }
 .card.closed rect.box { fill: var(--sunk); stroke: var(--line); stroke-dasharray: 2 3; }
 .card.closed .name, .card.closed .what { fill: var(--muted); }
 .edge-dot { fill: var(--muted); }
-.edge.look { stroke-dasharray: 4 4; opacity: 0.6; }
-.card.profile rect.box { fill: var(--surface); stroke: var(--violet, var(--smalt)); stroke-dasharray: 6 3; }
+.edge.look { stroke-width: 1; opacity: 0.45; }
+.card.profile rect.box { fill: color-mix(in srgb, var(--violet, var(--smalt)) 7%, var(--surface)); stroke: color-mix(in srgb, var(--violet, var(--smalt)) 55%, var(--surface)); stroke-width: 2; }
 .card.profile .kind { fill: var(--violet, var(--smalt)); }
 
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
@@ -193,7 +193,7 @@ section.view { display: grid; gap: 14px; }
 .chart text { fill: var(--ink); font-size: 12px; }
 .chart .axis { fill: var(--muted); font-size: 11px; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
-.chart .base { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.chart .base { stroke: var(--ink-2); stroke-width: 1.5; }
 .chart .bar.rain { fill: var(--smalt); } .chart .bar.heavy { fill: var(--teal-fill); } .chart .bar.snow { fill: var(--muted); }
 
 .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -462,7 +462,7 @@ table.data td.new, table.data th.new { background: var(--teal-wash); }
 .colline { margin: 0; font-size: 12.5px; color: var(--ink-2); }
 .hist { width: 100%; height: auto; display: block; }
 .hist .b { fill: var(--teal-fill); opacity: 0.85; }
-.hist .med { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 3 2; }
+.hist .med { stroke: var(--ink); stroke-width: 1.5; }
 .hist .ax { fill: var(--muted); font-size: 10px; font-family: var(--mono); }
 .colcard dl.stats { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 14px; margin: 0; font-size: 13px; }
 .colcard dl.stats dt, .colcard dl.stats dd { border: 0; padding: 1px 0; background: none; }
@@ -515,7 +515,7 @@ th.hit, td.hit { background: var(--warn-wash); }
 .ld-date { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ld-stat { font-size: 11px; font-variant-numeric: tabular-nums; }
 .ld-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; }
-.ld-marks { display: flex; gap: 2px; min-height: 13px; align-items: center; justify-content: center; }
+.ld-marks { display: flex; gap: 2px; min-height: 15px; align-items: center; justify-content: center; }
 .load.sev-alert { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
 .load.sev-warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
 .loads-now p .g { vertical-align: -2px; }
@@ -542,7 +542,7 @@ th.hit, td.hit { background: var(--warn-wash); }
 .vf-key span { display: inline-flex; align-items: center; gap: 4px; }
 .vf-key i { display: inline-block; width: 12px; height: 8px; border-radius: 2px; }
 .vf-key .k-band { background: color-mix(in srgb, var(--smalt) 18%, var(--surface)); }
-.vf-key .k-exp { height: 0; border-top: 1.5px dashed var(--smalt); border-radius: 0; }
+.vf-key .k-exp { height: 0; border-top: 1.5px solid color-mix(in srgb, var(--smalt) 60%, var(--surface)); border-radius: 0; }
 .vf-key .k-out { width: 8px; border-radius: 50%; background: var(--warn); }
 .vf-key .k-focus { width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--smalt); box-sizing: border-box; }
 .vf-key .k-hol { height: 3px; background: var(--smalt); opacity: 0.7; }
@@ -569,13 +569,14 @@ th.hit, td.hit { background: var(--warn-wash); }
 .compare .seg button { min-height: 34px; }
 .load.holiday::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: 3px; height: 3px; border-radius: 2px; background: var(--violet, var(--smalt)); opacity: 0.7; }
 .ld-range { position: absolute; top: 4px; left: 5px; font-size: 9px; line-height: 1; color: var(--warn); }
-/* Normal ranges: each day's range a band, its guess a dashed line, its number a dot; out of range in amber. */
+/* Normal ranges: each day's range a band, its guess a lighter solid line, its number a dot; out of range in amber.
+   Dashes mean absent, and nothing else. */
 .bandchart { display: block; width: 100%; height: auto; touch-action: manipulation; cursor: pointer; }
 .bandchart .grid { stroke: var(--line); stroke-width: 1; }
-.bandchart .week { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; }
+.bandchart .week { stroke: var(--line); stroke-width: 1; opacity: 0.6; }
 .bandchart .tick { font-family: var(--mono); font-size: 9px; fill: var(--muted); }
 .bandchart .band { fill: var(--smalt); opacity: 0.16; }
-.bandchart .expected { fill: none; stroke: var(--smalt); stroke-width: 1.2; stroke-dasharray: 3 2; opacity: 0.85; }
+.bandchart .expected { fill: none; stroke: color-mix(in srgb, var(--smalt) 60%, var(--surface)); stroke-width: 1.4; }
 .bandchart .pt { fill: var(--ink-2); }
 .bandchart .pt.bare { fill: var(--muted); opacity: 0.55; }
 .bandchart .pt.out { fill: var(--warn); stroke: var(--surface); stroke-width: 1; }
@@ -726,7 +727,13 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 11px; font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
 @media (prefers-reduced-motion: no-preference) { .card rect.box { transition: fill 0.25s, stroke 0.25s; } }
 /* ---- news, drawn (ADR 0008): marks, charts and the cause card ---- */
-:root { --ghost: color-mix(in srgb, var(--muted) 24%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 42%, var(--surface)); }
+/* Usual is a light ghost whose edge (--edge) is 3:1 against the card in both themes, as are tracks and the borders of
+   controls; axis hairlines (--hair) are 1.8:1 at least. */
+:root { --ghost: color-mix(in srgb, var(--muted) 28%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 44%, var(--surface)); --edge: color-mix(in srgb, var(--muted) 76%, var(--surface)); --hair: color-mix(in srgb, var(--muted) 46%, var(--surface)); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --ghost: color-mix(in srgb, var(--muted) 30%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 44%, var(--surface)); --edge: color-mix(in srgb, var(--muted) 64%, var(--surface)); --hair: color-mix(in srgb, var(--muted) 36%, var(--surface)); }
+}
+:root[data-theme="dark"] { --ghost: color-mix(in srgb, var(--muted) 30%, var(--surface)); --ghost-2: color-mix(in srgb, var(--muted) 44%, var(--surface)); --edge: color-mix(in srgb, var(--muted) 64%, var(--surface)); --hair: color-mix(in srgb, var(--muted) 36%, var(--surface)); }
 .g { flex: none; overflow: visible; vertical-align: -2px; }
 .g-fill { fill: var(--bad); } .g-cut { fill: var(--surface); }
 .g-tri { fill: var(--warn-wash); stroke: var(--warn); stroke-width: 2; stroke-linejoin: round; } .g-mark { fill: var(--warn); }
@@ -737,7 +744,7 @@ button.person[aria-checked="true"] { border-color: var(--smalt); box-shadow: ins
 .g-chev { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .g-seal { fill: var(--ok); } .g-sealmark { fill: none; stroke: var(--surface); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .g-ack { fill: none; stroke: var(--ok); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.g-slot { display: inline-block; width: 13px; flex: none; }
+.g-slot { display: inline-block; width: 14px; flex: none; }
 svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz text { font-family: var(--font); font-size: 12px; fill: var(--ink-2); }
 .viz .lbl-b { font-weight: 600; fill: var(--ink); }
@@ -749,19 +756,28 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz text.tick { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
 .viz text.mono { font-family: var(--mono); font-size: 11px; fill: var(--ink); }
 .viz .tag { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
-.viz .ghost { fill: var(--ghost); } .viz .ghost-2 { fill: var(--ghost-2); }
+.viz .ghost { fill: var(--ghost); stroke: var(--edge); stroke-width: 1; } .viz .ghost-2 { fill: var(--ghost-2); stroke: var(--edge); stroke-width: 1; }
+.viz .ghost.flat { stroke: none; }
+.viz .skyline { fill: none; stroke: var(--edge); stroke-width: 1; stroke-linejoin: round; }
+.viz .track { fill: var(--ghost); stroke: var(--edge); stroke-width: 1; }
 .viz .ink { fill: var(--ink-2); } .viz .ink-strong { fill: var(--ink); }
-.viz .ink-outline { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.5; }
-.viz .base, .viz .hair { stroke: var(--line); stroke-width: 1; }
+.viz .ink-outline { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
+.viz .base, .viz .hair { stroke: var(--hair); stroke-width: 1; }
+.viz .link { stroke: var(--hair); stroke-width: 1; }
+.viz .leader { stroke: var(--ink-2); stroke-width: 1; }
+.viz .pointer { fill: var(--ink); }
+.viz .zoom-wedge { fill: var(--sunk); }
+.viz text.key { font-size: 11px; }
 .viz .cut { stroke: var(--ink); stroke-width: 1.5; }
 .viz .line { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .viz .usual-end { stroke: var(--ink-2); stroke-width: 2; }
 .viz .joint { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; }
+.viz .brk { fill: none; stroke: var(--muted); stroke-width: 1.2; }
 .viz .dumb { stroke: var(--ink); stroke-width: 1.6; }
 .viz .dot { fill: var(--ink); stroke: var(--surface); stroke-width: 2; }
 .viz .dot-alert { fill: var(--bad); } .viz .dot-warn { fill: var(--warn); }
 .viz .gone-x { stroke: var(--bad); stroke-width: 2; stroke-linecap: round; }
-.viz .limit { fill: var(--ink); } .viz .limit-gap { fill: var(--surface); } .viz .wall { fill: var(--ink); }
+.viz .limit { fill: var(--ink); stroke: var(--surface); stroke-width: 2; paint-order: stroke; } .viz .wall { fill: var(--ink); }
 .viz .sev-alert-fill { fill: var(--bad); } .viz .sev-warn-fill { fill: var(--warn); }
 .viz .wf-down { fill: var(--bad); } .viz .wf-up { fill: var(--ghost-2); }
 .viz text.count { font-size: 32px; font-weight: 650; fill: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
@@ -769,18 +785,16 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .count-unit { font-size: 14px; font-weight: 400; fill: var(--muted); letter-spacing: 0; }
 .viz .count-chg { font-size: 17px; font-weight: 650; fill: var(--ink-2); letter-spacing: 0; }
 .viz .count-chg.chg-alert { fill: var(--bad); } .viz .count-chg.chg-warn { fill: var(--warn); }
-.viz .edge { stroke: var(--line); stroke-width: 1; }
+.viz .edge { stroke: var(--edge); stroke-width: 1; }
 .viz .cut-bad { stroke: var(--bad); stroke-width: 1.5; }
 .viz text.lbl-bad { fill: var(--bad); font-weight: 600; }
-.viz .slot { fill: none; stroke: var(--line); stroke-width: 1; }
+.viz .slot { fill: none; stroke: var(--edge); stroke-width: 1; }
 .viz .absent { fill: var(--bad-wash); stroke: var(--bad); stroke-width: 1.5; stroke-dasharray: 4 2.5; }
 .viz .over { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
 .viz .ring-bad { fill: none; stroke: var(--bad); stroke-width: 1.5; }
 .viz .port { fill: var(--smalt); }
 .viz .bracket { fill: none; stroke: var(--bad); stroke-width: 1.4; }
-.viz .hair.dotted { stroke-dasharray: 2 3; }
 .viz .pill { fill: var(--sunk); stroke: var(--line); stroke-width: 1; }
-.viz .seg-gone { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 2; }
 .viz .seg-new { fill: var(--smalt); }
 .viz .seg1 { fill: var(--ink); }
 .viz .today-ring { fill: none; stroke: var(--ink-2); stroke-width: 1.2; }
@@ -835,7 +849,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .gone-x.muted { stroke: var(--muted); }
 .vf-acts { display: flex; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
 .vf-acts .vf-primary { border: 0; border-radius: 8px; background: var(--smalt); color: var(--surface); font: inherit; font-size: 14.5px; font-weight: 600; min-height: 42px; padding: 0 18px; }
-.vf-more { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink-2); min-width: 44px; min-height: 42px; display: grid; place-items: center; cursor: pointer; }
+.vf-more { border: 1px solid var(--edge); border-radius: 8px; background: var(--surface); color: var(--ink-2); min-width: 44px; min-height: 42px; display: grid; place-items: center; cursor: pointer; }
 .vf-menu { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
 .vf-acts .f-log { flex-basis: 100%; margin: 0; }
 .vf-acts .f-form { flex-basis: 100%; }

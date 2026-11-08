@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
-import { approx, compact, countLabel, glanceStrings, splitOf, splitSentence, storyOf, wordsIn, type Story, type StoryOptions } from '../src/core/story.js';
+import { STRIP_KEY, approx, compact, countLabel, gateLabels, glanceStrings, partLabel, shortWho, splitOf, splitSentence, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
 import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
 const DAY = '2023-10-11'; // a Wednesday
@@ -187,6 +187,43 @@ describe('the words at a glance', () => {
     // 70,495 against ~68k beside a +2k step reads as 2.5k: 68.5k doesn't.
     expect([approx(68_486), approx(4_756), approx(110_157), approx(85_000)]).toEqual(['68.5k', '4.8k', '110k', '85k']);
     expect(countLabel({ today: 10_518, usual: 4_508, low: null, high: null })).toBe('10,518 · usual ~4.5k');
+  });
+
+  it('labels the gate’s two bars by what they count, and says a margin within two points of the limit', () => {
+    const gate = (dropped: number, rows: number, limit: number | null = 0.1): Gate => ({ step: 'trips_valid', rows, dropped, share: dropped / rows, limit, held: limit !== null && dropped / rows > limit, near: false, usual: { expected: 5000, low: 3800, high: 5400 }, rules: [] });
+    // Just over: the share and its margin to the same decimals, so one is the other less the limit.
+    expect(gateLabels(gate(442, 4229))).toEqual({ share: '10.45% of arrived rows dropped', limit: 'limit 10%', margin: '0.45 pt over', rows: '442 rows dropped', usual: 'usual 3.8k–5.4k' });
+    expect(gateLabels(gate(4004, 41_939))).toMatchObject({ share: '9.55% of arrived rows dropped', margin: '0.45 pt under' });
+    // Within two points, a whole point and more is said to a tenth; past them, no margin and the share as before.
+    expect(gateLabels(gate(1150, 10_000)).margin).toBe('1.5 pt over');
+    expect(gateLabels(gate(2116, 4633))).toMatchObject({ share: '46% of arrived rows dropped', margin: null });
+    // Never a margin of nothing, nor a share printed as its limit.
+    const hair = gateLabels(gate(100_004, 1_000_000));
+    expect(hair.margin).toBe('0.0004 pt over');
+    expect(hair.share).not.toMatch(/^10(\.0+)?%/);
+    expect(gateLabels(gate(500, 4000, null))).toMatchObject({ limit: null, margin: null, share: '13% of arrived rows dropped' });
+  });
+
+  it('names who a vendor’s code is beside it, short', () => {
+    expect(shortWho('Creative Mobile Technologies, LLC')).toBe('Creative Mobile');
+    expect(shortWho('Curb Mobility, LLC')).toBe('Curb Mobility');
+    expect(shortWho('Myle Technologies Inc')).toBe('Myle Technologies');
+    expect(shortWho('Helix')).toBe('Helix');
+    expect(partLabel({ name: 'Vendor 1', who: 'Creative Mobile' })).toBe('Vendor 1 · Creative Mobile');
+    expect(partLabel({ name: 'Flex Fare' })).toBe('Flex Fare');
+    const named = new HistoryRanges(historyWith({ [DAY]: { vendorGone: true } }));
+    const names = { ...vendorNames, label: (_c: string, v: unknown) => (String(v) === '1' ? 'Creative Mobile Technologies, LLC' : String(v)) };
+    const s = storyOf(named, DAY, newsOf(named, DAY, names), { ...options, names });
+    expect(s.split).toMatchObject({ name: 'Vendor 1', who: 'Creative Mobile' });
+    expect(s.labels.hero[0]).toBe('Vendor 1 · Creative Mobile');
+    // Without a meaning, the code alone.
+    expect(story({ [DAY]: { vendorGone: true } }).split!.who).toBeUndefined();
+  });
+
+  it('counts a strip’s key where a strip of days is shown at a glance', () => {
+    expect(story({}, '2023-10-04').labels.key).toEqual([...STRIP_KEY]);
+    expect(story({ [DAY]: { onlyVendor1: true, dropShare: 0.105 } }).labels.key).toEqual([]);
+    expect(glanceStrings(story({}, '2023-10-04'))).toEqual(expect.arrayContaining([...STRIP_KEY]));
   });
 
   it('names the explained changes in words, not counted chips', () => {

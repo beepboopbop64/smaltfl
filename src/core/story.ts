@@ -34,6 +34,8 @@ export interface Split {
   /** What the part is called: "Flex Fare", "Vendor 1", "Extras $0.50"; `trips` when it reads as a kind of trip. */
   name: string;
   trips: boolean;
+  /** Who a code names, when its name is only the column and the code: "Creative Mobile" for "Vendor 1". */
+  who?: string;
   /** What the named part did: kept to its usual count while the rest moved, or fell away, or surged, while the rest held. */
   kind: 'held' | 'vanished' | 'surged';
   part: Count;
@@ -106,7 +108,7 @@ export interface Story {
   health: { cell: Cell; severity: Severity | null; explained: boolean; follows: number; sameDay: number }[];
   primary: Act | null;
   /** Labels the screen shows at a glance, so their words can be counted: rows, chips, the hero's marks. */
-  labels: { amount: string[]; hero: string[]; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[]; after: string | null };
+  labels: { amount: string[]; hero: string[]; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[]; after: string | null; key: string[] };
   findings: Told[];
 }
 
@@ -167,6 +169,52 @@ export function approx(n: number): string {
 /** A part's count against its usual one, so it can't read as a fraction of it: "10,518 · usual ~4.5k". */
 export const countLabel = (c: Count) => `${fmtInt(c.today)} · usual ~${approx(c.usual)}`;
 
+/** The split's part as its visuals name it: its name, and who a code names beside it ("Vendor 1 · Creative Mobile"). */
+export const partLabel = (sp: Pick<Split, 'name' | 'who'>) => (sp.who ? `${sp.name} · ${sp.who}` : sp.name);
+
+/** A strip of days' key, where it is first shown: each day's usual range as a box, and what it had as a tick. */
+export const STRIP_KEY = ['usual', 'actual'] as const;
+
+/** A share as a percentage that keeps the decimals showing which side of the limit it is on: "10.45%" against 10%. */
+export function pastLimit(x: number, limit: number | null): string {
+  if (limit === null) return `${Math.round(x * 100)}%`;
+  for (let d = 0; d <= 3; d++) {
+    const shown = Number((x * 100).toFixed(d));
+    if ((x > limit) === (shown > limit * 100) && shown !== limit * 100) return `${(x * 100).toFixed(d)}%`;
+  }
+  return `${(x * 100).toFixed(3)}%`;
+}
+
+/** How close to its limit a share has to be for the gate to be drawn zoomed, with its margin said (two points). */
+export const NEAR_LIMIT = 0.02;
+
+/**
+ * The checks' words (ADR 0008), one per bar so neither reads as the other: the share of the rows that arrived that they
+ * dropped ("46% of arrived rows dropped"), the limit, how far from it within two points ("0.45 pt over"), and the rows
+ * they dropped against the rows a day like it drops ("2,116 rows dropped", "usual 3.2k–7.7k").
+ */
+export function gateLabels(g: Gate): { share: string; limit: string | null; margin: string | null; rows: string; usual: string | null } {
+  const off = g.limit === null ? null : g.share - g.limit;
+  const pts = off === null ? 0 : Math.abs(off) * 100;
+  const near = off !== null && off !== 0 && Math.abs(off) <= NEAR_LIMIT;
+  // Near the limit, the share and its margin are said to the same decimals, so one is the other less the limit.
+  let dec = pts < 1 ? 2 : 1;
+  while (near && Number(pts.toFixed(dec)) === 0 && dec < 4) dec++;
+  const share = near ? `${(g.share * 100).toFixed(dec)}%` : pastLimit(g.share, g.limit);
+  return {
+    share: `${share} of arrived rows dropped`,
+    limit: g.limit !== null ? `limit ${Math.round(g.limit * 100)}%` : null,
+    margin: near ? `${pts.toFixed(dec)} pt ${off! > 0 ? 'over' : 'under'}` : null,
+    rows: `${fmtInt(g.dropped)} rows dropped`,
+    usual: g.usual ? `usual ${compact(g.usual.low)}–${compact(g.usual.high)}` : null,
+  };
+}
+
+/** A company's name said short, legal form and all but its first two words left off: "Creative Mobile". */
+export function shortWho(name: string): string {
+  return name.replace(/,?\s+(LLC|L\.L\.C\.|Inc\.?|Ltd\.?|Corp\.?|Co\.?|Company)$/i, '').split(/\s+/).slice(0, 2).join(' ');
+}
+
 /** Words as the screen's budgets count them: whitespace tokens with a letter or a digit in them. */
 export function wordsIn(text: string): number {
   return text.split(/\s+/).filter((t) => /[\p{L}\p{N}]/u.test(t)).length;
@@ -176,7 +224,7 @@ export function wordsIn(text: string): number {
  * What a coded value's part is called in a head, and whether it reads as a kind of trip: a code's short meaning is one
  * ("Flex Fare" trips, "Cash" trips); anything else is said with its column ("Extras $0.50", "Vendor 1").
  */
-function partName(column: string, value: string, names: Names): { name: string; trips: boolean } {
+function partName(column: string, value: string, names: Names): { name: string; trips: boolean; who?: string } {
   const parsed = (() => {
     try {
       return JSON.parse(value) as unknown;
@@ -184,7 +232,11 @@ function partName(column: string, value: string, names: Names): { name: string; 
       return value;
     }
   })();
-  if (/vendor/i.test(column)) return { name: `Vendor ${String(parsed)}`, trips: true };
+  if (/vendor/i.test(column)) {
+    // A vendor is said by its code, as the files and the TLC say it, and named beside it: "Vendor 1 · Creative Mobile".
+    const meant = names.label?.(column, parsed);
+    return { name: `Vendor ${String(parsed)}`, trips: true, ...(meant && meant !== String(parsed) ? { who: shortWho(meant) } : {}) };
+  }
   const label = (names.label ?? names.value)(column, parsed).replace(/\s+trips?$/i, '');
   const meaning = label !== String(parsed) && !/^\$?-?[\d.,]+$/.test(label);
   return meaning && wordsIn(label) <= 3 ? { name: label, trips: true } : { name: `${names.column(column)} ${label.length <= 8 ? label : String(parsed)}`, trips: false };
@@ -259,11 +311,25 @@ function splitWith(h: HistoryRanges, day: string, names: Names, hidden: Readonly
     value: b.value,
     name: named.name,
     trips: named.trips,
+    ...(named.who ? { who: named.who } : {}),
     kind: b.kind,
     part: { today: b.nv, usual, low: near ? counted!.low : null, high: near ? counted!.high : null },
     rest: { today: n - b.nv, usual: Math.max(0, E - usual), low: null, high: null },
     blank,
   };
+}
+
+/**
+ * A coded value's count on a day like it: its count's own range, or, where that has none (a holiday whose count moved
+ * too far since last year to be judged by it: New Year's Day 2024's Flex Fare trips), its share's range of the trips a
+ * day like it has, which is the count a split is judged on (ADR 0008 §2). Null when neither has a range.
+ */
+export function countRange(h: HistoryRanges, column: string, value: string, day: string): { low: number; high: number; expected: number } | null {
+  const own = h.of({ of: 'count', column, value })?.at(day);
+  if (own) return { low: own.low, high: own.high, expected: own.expected };
+  const share = h.of({ of: 'value', column, value })?.at(day);
+  const trips = h.of({ of: 'trips' })?.at(day);
+  return share && trips ? { low: share.low * trips.expected, high: share.high * trips.expected, expected: share.expected * trips.expected } : null;
 }
 
 /**
@@ -537,15 +603,6 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const season = seasonOf(day);
   const calmHead = holiday ? `Normal for ${SHORT_HOLIDAY[holiday] ?? holiday}` : season ? `Normal for ${(SHORT_HOLIDAY[season] ?? season).replace(/^Holiday season$/, 'the holidays')}` : `A normal ${weekdayOf(day)}`;
   const pctShort = (x: number) => `${Math.round(x * 100)}%`;
-  // A share just past its limit keeps the decimals that show it is past: "10.45% dropped", limit 10%.
-  const pastLimit = (x: number, limit: number | null) => {
-    if (limit === null) return pctShort(x);
-    for (let d = 0; d <= 3; d++) {
-      const shown = Number((x * 100).toFixed(d));
-      if ((x > limit) === (shown > limit * 100) && shown !== limit * 100) return `${(x * 100).toFixed(d)}%`;
-    }
-    return `${(x * 100).toFixed(3)}%`;
-  };
   let head: string;
   if (o.refused) head = 'File refused: bytes don’t match';
   else if (hero === 'hours' && hoursF) head = hoursF.title;
@@ -628,7 +685,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
 
   // The labels at a glance.
   const heroLabels: string[] = [];
-  if (shownHero === 'split' && split) heroLabels.push(split.name, countLabel(split.part), 'Everything else', countLabel(split.rest));
+  if (shownHero === 'split' && split) heroLabels.push(partLabel(split), countLabel(split.part), 'Everything else', countLabel(split.rest));
   if (shownHero === 'finding' && population && popShare) heroLabels.push(population.name, popShare.value, `usually ${popShare.range}`);
   // The hour chart: the hour they fall, what still came an hour after it (they don't stop: Sep 21, 2023 kept ~330 an
   // hour), what is missing against a usual day, and which day that is.
@@ -642,7 +699,10 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   })() : null;
   if (shownHero === 'hours' && hoursLabels) heroLabels.push(hoursLabels.cut, hoursLabels.floor, hoursLabels.missing, hoursLabels.ghost);
   // The amount line carries the day's count and its usual range on every day; a strip of days adds no words.
-  if (gate?.held || gate?.near) heroLabels.push(gate.held ? 'Checks held' : 'Checks near the limit', `${pastLimit(gate.share, gate.limit)} dropped`, ...(gate.limit !== null ? [`limit ${pctShort(gate.limit)}`] : []), `${fmtInt(gate.dropped)} rows`, ...(gate.usual ? [`usual ${compact(gate.usual.low)}–${compact(gate.usual.high)}`] : []));
+  if (gate?.held || gate?.near) {
+    const g = gateLabels(gate);
+    heroLabels.push(gate.held ? 'Checks held' : 'Checks near the limit', g.share, ...(g.limit ? [g.limit] : []), ...(g.margin ? [g.margin] : []), g.rows, ...(g.usual ? [g.usual] : []));
+  }
   // What the explained changes are, in words a newcomer has: "shares, times, checks", most first, three at most.
   const kindWord: Partial<Record<Finding['kind'], string>> = { share: 'shares', gone: 'values gone', missing: 'blanks', shape: 'spreads', dropped: 'checks', rule: 'checks', new: 'new values', pair: 'new pairs' };
   const wordOf = (f: Finding) => (f.kind === 'shape' && f.columns?.[0] && file.kinds[file.columns.indexOf(f.columns[0])] === 'time' ? 'times' : (kindWord[f.kind] ?? 'other'));
@@ -667,6 +727,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       primary: primary ? ACT_VERB[primary] : null,
       kinds: shownKinds,
       after,
+      // A strip of days at a glance (a calm day's week, an amount day's four weeks) carries its one-line key.
+      key: shownHero === 'calm' || ((shownHero === 'amount' || shownHero === 'finding') && cause?.kind === 'volume') ? [...STRIP_KEY] : [],
     },
     findings: [...told].sort(byRank),
   };
@@ -699,7 +761,7 @@ export function splitSentence(s: Story): string | null {
 
 /** Every string a story shows at a glance (head, chip, the hero's labels, rows, the verb), for its word budget. */
 export function glanceStrings(s: Story): string[] {
-  return [s.head, s.chip ?? '', s.labels.after ?? '', ...s.labels.amount, ...s.labels.hero, s.labels.follows ?? '', ...s.labels.kinds, s.labels.sameDay ?? '', s.labels.more ?? '', s.labels.notes ?? '', s.labels.primary ?? '', ...s.stories.map((f) => f.title)].filter(Boolean);
+  return [s.head, s.chip ?? '', s.labels.after ?? '', ...s.labels.amount, ...s.labels.hero, ...s.labels.key, s.labels.follows ?? '', ...s.labels.kinds, s.labels.sameDay ?? '', s.labels.more ?? '', s.labels.notes ?? '', s.labels.primary ?? '', ...s.stories.map((f) => f.title)].filter(Boolean);
 }
 
 export { shareWords };
