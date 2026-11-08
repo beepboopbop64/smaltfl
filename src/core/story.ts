@@ -369,9 +369,10 @@ export function splitOf(h: HistoryRanges, day: string, names: Names, hidden: Rea
   const floor = materialFor(E, judge.scale).split;
   const change = n - E;
   const steady = (r: number) => r >= 2 / 3 && r <= 1.5;
-  let best: { column: string; value: string; kind: Split['kind']; nv: number; Ev: number; score: number } | null = null;
+  let best: { column: string; value: string; kind: Split['kind']; nv: number; Ev: number; score: number; bad: boolean } | null = null;
   for (const [column, vh] of Object.entries(file.values ?? {})) {
     if (!vh.counts || hidden.has(column.toLowerCase())) continue;
+    const badCodes = judge.bad.get(column.toLowerCase());
     vh.values.forEach((value, i) => {
       if (value === 'null') return;
       const share = h.of({ of: 'value', column, value })?.at(day)?.expected;
@@ -390,7 +391,15 @@ export function splitOf(h: HistoryRanges, day: string, names: Names, hidden: Rea
       else if (steady(rs) && Math.abs(dr) >= 0.4 * Math.abs(change) && Math.abs(dr) >= floor) kind = 'held';
       if (!kind) return;
       const score = Math.abs(Math.log((rs + 1e-4) / (rr + 1e-4)));
-      if (!best || score > best.score) best = { column, value, kind, nv, Ev, score };
+      // A value marked bad that moved is the day's cause before any other part (ADR 0010 §4): a burst of failed sign-ins
+      // is told by its failures, not by the country it came from.
+      let bad = false;
+      try {
+        bad = !!badCodes?.has(String(JSON.parse(value)));
+      } catch {
+        bad = false;
+      }
+      if (!best || (bad && !best.bad) || (bad === best.bad && score > best.score)) best = { column, value, kind, nv, Ev, score, bad };
     });
   }
   const b = best as { column: string; value: string; kind: Split['kind']; nv: number; Ev: number } | null;
