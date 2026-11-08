@@ -367,6 +367,10 @@ table.grid thead th.new { background: var(--teal-wash); }
 .mini-label, .mini-none { font-size: 10.5px; color: var(--ink-2); font-weight: 400; white-space: normal; }
 .mini-wait { display: block; height: 22px; border-radius: 4px; background: var(--sunk); }
 table.grid td .means { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+/* The grid's numbers start under their header, so a column half in view shows its numbers whole, not "2…"; its
+   right edge fades while more columns lie past it. */
+table.grid td.n { text-align: left; }
+.grid-wrap.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
 /* Columns: one to a line, opening in place. */
 .col-list { display: grid; gap: 4px; }
 .col-item { display: grid; gap: 6px; }

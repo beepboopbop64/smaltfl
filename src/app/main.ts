@@ -13,13 +13,14 @@ import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, takeOut, validateDocument, withoutDisplay } from '../core/document.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, type EmitContext } from '../core/emit.js';
+import { effectOf, type Effect } from '../core/effect.js';
 import { daysFrom, HISTORY_FORMAT, HistoryRanges, metricKey, type HistoryFile, type Metric } from '../core/history.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, lacked, noRowsBefore, reachLabel, rowsFrom, shortfall, shownRun, stoppedLine as stoppedWords, toldLine, type EpisodeDay } from '../core/days.js';
 import { CELL_KINDS, CELL_NAMES, STRIP_KEY, approx, changeLabel, compact, countLabel, countRange, gateLabels, gateOf, partLabel, pastLimit, ruleOrder, ruleUsual, splitSentence, storyOf, type Cell, type Gate, type Story, type Told } from '../core/story.js';
-import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
+import { amountLine, bulletTrack, chain, composition, contextBars, dayStrip, effectBars, learnStrip, episodeBars, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { meaningOf, propertyOf, type Edit, type PropertyType } from '../core/ontology.js';
 import { covers, readView, wrapRead, type Principal, type ReadView, type RowRule } from '../core/policy.js';
@@ -2288,10 +2289,32 @@ function miniDist(p: Profile, meaning?: PropertyType): SVGSVGElement | HTMLEleme
       const m = meaningFor(meaning, t.value);
       return m && m.split(/\s+/).length <= 2 ? m : String(t.value);
     };
-    const said = top.slice(0, 1).map((t) => `${name(t)} ${Math.round(t.share * 100)}%`).join(' · ');
+    // A tie is said as one, never as one value's lead: "all equal", or "3 tie · 17%".
+    const tie = tieOf(p);
+    const said = tie === 'all' ? 'all equal' : tie > 1 ? `${tie === p.top.length && p.facts.distinct > tie ? `${tie}+` : tie} tie · ${Math.round(p.top[0]!.share * 100)}%` : `${name(top[0]!)} ${Math.round(top[0]!.share * 100)}%`;
     return h('span', { class: 'mini-tops' }, svg, h('span', { class: 'mini-label' }, said));
   }
   return null;
+}
+
+/** How many of a column's most common values share the top count: every value ('all', each 1/distinct of the rows
+ * present, the six boroughs of a day's weather_effect) or how many (1: a value leads). */
+function tieOf(p: Profile): 'all' | number {
+  const t = p.top ?? [];
+  if (t.length < 2) return 1;
+  const n = t.filter((x) => Math.abs(x.share - t[0]!.share) < 1e-9).length;
+  return n === t.length && Math.abs(t[0]!.share * p.facts.distinct - 1) < 1e-6 ? 'all' : n;
+}
+
+/** A scroll box's edges fade while there is more past them (the tabs, a wide grid of rows). */
+function fadeEdges(el: HTMLElement): HTMLElement {
+  const edges = () => {
+    el.classList.toggle('fade-l', el.scrollLeft > 2);
+    el.classList.toggle('fade-r', el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  };
+  el.addEventListener('scroll', edges, { passive: true });
+  requestAnimationFrame(edges);
+  return el;
 }
 
 async function dataTab(card: string, id: string, who: string): Promise<HTMLElement> {
@@ -2321,9 +2344,9 @@ async function dataTab(card: string, id: string, who: string): Promise<HTMLEleme
     const means = meaningFor(p, v);
     return h('td', { class: cls }, typeof v === 'number' && p?.unit === 'USD' ? inUnit(text, v, p) : text, means ? h('span', { class: 'means' }, means) : null);
   };
-  const grid = h('div', { class: 'grid-wrap' }, h('table', { class: 'data grid' },
+  const grid = fadeEdges(h('div', { class: 'grid-wrap' }, h('table', { class: 'data grid' },
     h('thead', {}, h('tr', {}, h('th', { class: 'rownum', scope: 'col' }, '#'), ...r.columns.map(head))),
-    h('tbody', {}, ...r.rows.map((row, k) => h('tr', {}, h('th', { class: 'rownum', scope: 'row' }, String(k + 1)), ...row.map((v, j) => cell(v, r.columns[j]!)))))));
+    h('tbody', {}, ...r.rows.map((row, k) => h('tr', {}, h('th', { class: 'rownum', scope: 'row' }, String(k + 1)), ...row.map((v, j) => cell(v, r.columns[j]!))))))));
   const lead = h('div', { class: 'vf-pick', role: 'group', 'aria-label': 'Which rows' },
     h('button', { type: 'button', class: 'vf-pick-chip', 'aria-pressed': String(!blanks), onclick: () => (drill.blanks.delete(card), void renderSheet()) }, `First ${fmtInt(r.rows.length)} of ${fmtInt(total)}`),
     h('button', { type: 'button', class: 'vf-pick-chip', 'aria-pressed': String(blanks), onclick: () => (drill.blanks.set(card, true), void renderSheet()) }, 'With blanks'));
@@ -2588,6 +2611,25 @@ function nounOf(id: string): string {
 
 /** A table's own news, from its rows on the day's run, kept under its content's key and the viewer. */
 const tableNews = { known: new Map<string, Finding[]>(), byKey: new Map<string, Promise<Finding[]>>() };
+
+/** A table's effect against its baseline, from all its rows (the sample, when it holds them all); null otherwise. */
+async function effectFor(id: string, who: string): Promise<Effect | null> {
+  const nv = await nodeView(id, who);
+  if (typeof nv === 'string') return null;
+  const q = await qualityOf(nv.insp, nv.i, who).catch(() => null);
+  if (!q || q.sample.length !== q.rows) return null;
+  return effectOf(q.columns, q.sample);
+}
+
+/** An effect drawn: each value's ratio to the baseline by group, the baseline's 1× a tick ("dry = 1×"). */
+function effectVisual(id: string, e: Effect): HTMLElement {
+  const m = meaningsOf(id);
+  const values = [...new Set(e.rows.map((r) => r.value))].slice(0, 3);
+  const groups = values.map((v) => ({ head: v.replace(/^./, (c) => c.toUpperCase()), rows: e.rows.filter((r) => r.value === v).sort((a, b) => a.group < b.group ? -1 : 1).map((r) => ({ name: r.group, ratio: r.ratio })) }));
+  const title = m(e.ratio)?.title ?? e.ratio;
+  return block(`${title}, by ${(e.group ? m(e.group)?.title ?? e.group : 'row').toLowerCase()}`, svgNode(effectBars({ groups, baseline: e.baseline,
+    aria: `${title} against ${e.baseline} hours: ${e.rows.map((r) => `${r.value} ${r.group} ${r.ratio.toFixed(2)} times`).join(', ')}.` })));
+}
 
 async function tableNewsFor(id: string, who: string): Promise<Finding[]> {
   if (historyOf(id)) return [];
@@ -3428,6 +3470,9 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     h('p', { class: 'v-line' }, `Its load: ${fromStory!.head}`),
     h('button', { type: 'button', class: 'btn small', onclick: () => select(src!) }, `Open ${src} ›`)));
   if (!kind) await tableNewsFor(id, who);
+  // A table that measures an effect against a baseline (weather_effect, against dry hours): drawn, or said to have
+  // nothing to measure on a day whose rows are all the baseline (ADR 0008 §12).
+  const effect = !kind ? await effectFor(id, who) : null;
   const findings = cardNews(card);
   const day = newsDay();
   const telling = findings.filter((f) => f.severity !== 'ok');
@@ -3440,10 +3485,12 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     const head = alerts ? 'Something’s wrong' : warns ? `${warns === 1 ? 'One thing' : `${warns} things`} to look at` : notes ? `${normal}, with ${notes === 1 ? 'a note' : `${notes} notes`}` : normal;
     const calm = findings.find((f) => f.severity === 'ok');
     const sev = alerts ? 'alert' : warns ? 'warn' : notes ? 'note' : 'ok';
+    const idle = effect && !effect.measured && !alerts && !warns;
     box.append(h('div', { class: `verdict ${sev}` },
       h('p', { class: 'v-day' }, kind && day ? `${dayLabel(day)}${loads.list[loads.at]?.note ? ` · ${loads.list[loads.at]!.note}` : ''}` : kind ? '' : 'From its rows on this run'),
-      h('h3', { class: 'v-head' }, head),
-      h('p', { class: 'v-line' }, alerts || warns ? `${listed([alerts ? plural(alerts, 'alert') : '', warns ? plural(warns, 'unusual thing') : '', notes ? plural(notes, 'note') : ''].filter(Boolean))}. The first: ${top.title}.` : (calm ?? top).detail)));
+      h('h3', { class: 'v-head' }, idle ? `No effect to measure ${spanOf(id) === 'today' ? 'today' : 'here'}` : head),
+      h('p', { class: 'v-line' }, idle ? `Its ${plural(effect.total, 'row')} ${effect.total === 1 ? 'is' : 'are all'} ${effect.baseline}: nothing to compare with.` : alerts || warns ? `${listed([alerts ? plural(alerts, 'alert') : '', warns ? plural(warns, 'unusual thing') : '', notes ? plural(notes, 'note') : ''].filter(Boolean))}. The first: ${top.title}.` : (calm ?? top).detail)));
+    if (effect?.measured) box.append(effectVisual(id, effect));
     if (kind === 'trips' && day) box.append(healthStrip(card, day, findings));
     for (const f of telling) box.append(findingCard(f, card));
   }

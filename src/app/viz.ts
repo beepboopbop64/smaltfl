@@ -821,6 +821,39 @@ export function episodeLine(o: { days: readonly { label: string; got: readonly n
 }
 
 /**
+ * An effect against a baseline (weather_effect's trips against dry hours): for each value (rain, snow) a row per group
+ * (borough), its ratio as a bar from 0, the baseline's 1× a solid tick through every row, each ratio printed ("0.92×").
+ */
+export function effectBars(o: { groups: readonly { head: string; rows: readonly { name: string; ratio: number }[] }[]; baseline: string; aria: string; w?: number }): string {
+  const w = o.w ?? 334;
+  const nameW = 96;
+  const labW = 44;
+  const rowH = 20;
+  const headH = 20;
+  const top = 16;
+  const max = Math.max(1.5, ...o.groups.flatMap((g) => g.rows.map((r) => r.ratio))) * 1.05;
+  const x = (v: number) => nameW + (Math.max(0, v) / max) * (w - nameW - labW);
+  const h = top + o.groups.reduce((t, g) => t + headH + g.rows.length * rowH, 0) + 14;
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  s += `<text x="${f1(x(1))}" y="11" text-anchor="middle" class="lbl-m">${esc(o.baseline)} = 1×</text>`;
+  let y = top;
+  for (const g of o.groups) {
+    s += `<text x="0" y="${y + 14}" class="lbl-b">${esc(g.head)}</text>`;
+    y += headH;
+    for (const r of g.rows) {
+      s += `<text x="0" y="${y + 13}" class="lbl-mid">${esc(r.name)}</text>`;
+      s += `<line class="base" x1="${nameW}" x2="${f1(w - labW)}" y1="${y + 15.5}" y2="${y + 15.5}"/>`;
+      if (r.ratio > 0) s += `<path class="ink" d="${barPath(nameW, y + 6, Math.max(MIN_MARK, x(r.ratio) - nameW), 9, 1.5)}"/>`;
+      s += `<text x="${w}" y="${y + 14}" text-anchor="end" class="lbl-b">${esc(`${r.ratio.toFixed(2)}×`)}</text>`;
+      y += rowH;
+    }
+  }
+  s += `<rect class="limit" x="${f1(x(1) - 1)}" y="${top}" width="2" height="${f1(y - top)}" rx="1"/>`;
+  s += `<text x="${nameW}" y="${h - 1}" class="tick" aria-hidden="true">0</text><text x="${f1(w - labW)}" y="${h - 1}" text-anchor="end" class="tick" aria-hidden="true">${esc(`${f1(max)}×`)}</text>`;
+  return `${s}</svg>`;
+}
+
+/**
  * A count bar from 0 that shows where it passes its usual range: ink to the range's top, a notch there standing out
  * above and below the bar, and the rows beyond it an outlined box (6 px at least), as the part bar draws trips beyond
  * usual. Within or under its range it is one bar. `cls` is the bar's own class ('ink-outline' for a rule that warns).
