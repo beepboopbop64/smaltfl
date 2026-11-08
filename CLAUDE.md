@@ -51,6 +51,11 @@ match smaltdb's `CLAUDE.md`.
   decision says; verify's *held* check and `src/core/audit.ts` check both; `src/core/decision.ts` and
   `src/app/viz.ts` `decisionRow` draw and word the decision. The days `wrong` and `short` hold on the history are a
   test vector (`test/hold-real.test.ts`): a story change that moves them is a decision, not a fix.
+- Any dataset (ADR 0010): `src/core/calendar.ts` takes the flow's calendar (`us-nyc/1`, `us/1`, `none`); format 3 and
+  plan/2 say how a watched source is judged (`WatchDef`, `WatchPlan`); `judgeOf` and `flowNames` (news.ts) read the
+  watch's settings, the ontology's marks (`bad`, `newValues`, `after`) and its nouns; a day with nothing to compare
+  against is `unlearned` (◌, published, marked). `test/fixtures/security.ts` is the sign-in log every phase asserts on
+  (`test/security.test.ts`). No new string on screen writes "trips": counts go through `names.noun`.
 
 ## Rules for this repository
 

@@ -177,6 +177,19 @@ plan/1. Where its run would have thrown, it holds (`src/plugin/runtime.ts`, with
 4. In the run's transaction, only the outputs nothing holds are pointed. A held run keeps its manifest and its
    versions, *staged*, and a `_smaltfl_holds` row says what held it and the claims it was judged by.
 
+**Judging any dataset** ([ADR 0010](adr/0010-any-dataset.md), phase 1). A watch can be given as an object of its
+settings (`history`, `period`, `every`, `pattern`, `donor`, `time`, `zone`, `calendar`, `scale`, `holds`, `count`,
+`follow`), the flow can name its calendar (`calendar: { base: none | us | us-nyc, zone }`), and the ontology can mark
+the values that are always bad (`bad`), the columns whose new values alert (`newValues: "alert"`) and a time that runs
+`after` another; it names a row (`nouns`), a part (`name: "Vendor {code}"`) and a sender (`role`), which are display.
+A document that says how a day is judged is format 3, and its plan plan/2, with every setting filled in; a watch given
+as a file name keeps the settings every flow had (the `us-nyc/1` calendar, fixed floors), so its verdicts don't move.
+`judgeOf` (news.ts) reads the settings and `flowStory` judges by them. A day whose rows have nothing to compare
+against is *not judged yet* (`unlearned`, ◌), published, marked, unless `hold` lists `unlearned`; a day under a tenth
+of its last seven days' rows is something wrong, judged or not. A bad value above its range at twice its usual rows
+is something wrong, never marked as expected; a serious column's new value too. Every count says the source's noun.
+This build refuses a flow's own calendar days, any pattern but weekly and any `every` but day.
+
 **Releasing** (`src/plugin/release.ts`). A person decides what becomes of a held day: wait (nothing to do), publish
 it as is, or don't publish it, for that day or until a day publishes (`smaltfl:decide`, a rule in the flow's policies;
 the owner may always decide). The decision is recorded first, by the day's inputs and every held output's staged key.
@@ -196,7 +209,7 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
 | What | Hash of | Notes |
 | --- | --- | --- |
 | Flow | The canonical JSON of the document, without display fields | Canonical JSON: sorted keys, no insignificant whitespace, numbers in shortest form |
-| Flow plan | The canonical JSON of the plan a run executed, tagged `plan/0`, or `plan/1` when it carries a `publish` block (ADR 0009 E10) | Stored with the run, so a re-run replays exactly what ran. A plan without the block hashes as before, byte for byte |
+| Flow plan | The canonical JSON of the plan a run executed, tagged `plan/0`, `plan/1` when it carries a `publish` block (ADR 0009 E10), or `plan/2` when that block also says how its watched sources are judged (ADR 0010 E13) | Stored with the run, so a re-run replays exactly what ran. A plan without the block hashes as before, byte for byte, and a legacy watch's plan/1 too |
 | Step key | Its plan node in canonical form, its inputs' keys, the engine and plugin versions | Merkle-style: a change upstream changes every key downstream. Names and display fields are not in it |
 | Source file | The exact bytes the engine reads: plain SHA-256, so it equals `sha256sum` and the data branch's MANIFEST.json (ADR 0006 E1) | Checked by the page against the data's list, then hashed again in the engine as the plugin pins it (`smaltfl:<file>`); a run records the file each snapshot read |
 | Snapshot | A source's rows, as a dataset version | Its key is its content, so the same rows from another file are the same snapshot |
