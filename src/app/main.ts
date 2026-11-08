@@ -65,6 +65,8 @@ const state = {
   engine: null as Engine | null,
   runs: [] as RunRecord[],
   running: false,
+  /** A decision on its way, from its record entry to its release's: no other is taken meanwhile (ADR 0009 §9). */
+  deciding: false,
   selected: null as string | null,
   identity: null as Identity | null,
   failed: null as { origin?: string; message: string; file?: FileCheck } | null,
@@ -354,11 +356,17 @@ function noteShown(r: RunRecord, names: readonly string[]): void {
   for (const n of names) state.names.set(n, r);
 }
 
-/** The tab's title (ADR 0009 §12): ‖ before it while any day waits for a decision, in this visit or an earlier one. */
+/**
+ * The tab's title (ADR 0009 §12): ‖ before it while any day of the flow on screen waits for a decision, in this visit or
+ * an earlier one, each day by what it shows now (its newest run, else the record's latest pause of it under this
+ * flow), as the strip and the Runs view's ribbon read it. A pause under an earlier flow, or under a file since
+ * republished, that nothing can run again doesn't keep it.
+ */
 let baseTitle = '';
 function syncTitle(): void {
   baseTitle ||= document.title.replace(/^‖ /, '');
-  document.title = `${pauses().some((p) => p.state === 'open') ? '‖ ' : ''}${baseTitle}`;
+  const waits = pauseOf(latest())?.state === 'waiting' || pausedDays().some((d) => d.state === 'waiting');
+  document.title = `${waits ? '‖ ' : ''}${baseTitle}`;
 }
 const nodeOf = (id: string): ManifestNode | undefined => latest()?.result.manifest.nodes.find((n) => n.origin === id);
 
@@ -6077,9 +6085,13 @@ const PAUSE_SAID: Record<PauseState, string> = { waiting: ', paused, waiting on 
 function dayPause(day: string): PauseState | null {
   const r = state.runs.find((x) => dayOfRun(x) === day);
   if (r) return pauseOf(r)?.state ?? null;
-  const flow = state.runs[0]?.result.manifest.flow.hash;
-  const p = flow ? pauses().filter((x) => x.day === day && x.inputs.flow === flow).at(-1) : undefined;
-  return pauseState(null, p ?? null);
+  return pauseState(null, latestPause(day));
+}
+
+/** The record's latest pause of a day under the flow on screen, if any. */
+function latestPause(day: string): Pause | null {
+  const flow = flowOnScreen();
+  return flow ? (pauses().filter((x) => x.day === day && x.inputs.flow === flow).at(-1) ?? null) : null;
 }
 
 /** Run the flow on a load. */
@@ -6457,13 +6469,13 @@ let ribbonPick: string | null = null;
 
 /** Every day the flow on screen held, in this visit or an earlier one, with what became of it. */
 function pausedDays(): { day: string; state: PauseState }[] {
-  const flow = state.runs[0]?.result.manifest.flow.hash;
+  const flow = flowOnScreen();
   const days = new Set<string>();
   for (const r of state.runs) {
     const d = dayOfRun(r);
     if (d && pauseOf(r)) days.add(d);
   }
-  for (const p of pauses()) if (p.day && (!flow || p.inputs.flow === flow)) days.add(p.day);
+  for (const p of pauses()) if (p.day && flow && p.inputs.flow === flow) days.add(p.day);
   return [...days].map((day) => ({ day, state: dayPause(day) })).filter((x): x is { day: string; state: PauseState } => x.state !== null);
 }
 
@@ -6495,8 +6507,7 @@ function renderRibbon(): void {
 function decidedCard(day: string): HTMLElement {
   const st = dayPause(day) ?? 'waiting';
   const run = state.runs.find((x) => dayOfRun(x) === day);
-  const flow = state.runs[0]?.result.manifest.flow.hash;
-  const p = (run ? pauseByInputs(run.inputs) : null) ?? pauses().filter((x) => x.day === day && (!flow || x.inputs.flow === flow)).at(-1) ?? null;
+  const p = (run ? pauseByInputs(run.inputs) : null) ?? latestPause(day);
   const d = p?.decision ?? null;
   const opened = p ? ledger?.entries[p.opened] : undefined;
   const underDay = d?.about.under !== undefined ? (ledger?.entries[d.about.under]?.about as { day?: string } | undefined)?.day : undefined;
@@ -6827,6 +6838,22 @@ async function applyDecided(r: RunRecord): Promise<void> {
  */
 async function decide(target: RunRecord | string, option: DecideOption, scope: 'day' | 'untilPass', reason: string | null): Promise<RecordEntry | null> {
   if (!ledger || !state.engine || state.running) return null;
+  // One decision at a time: a second, taken while the first's release is on its way, would amend a decision the engine
+  // is about to apply, and the record would cite one that no longer stands.
+  if (state.deciding) {
+    setStatus('A decision is on its way: wait for it to be applied.', true);
+    return null;
+  }
+  state.deciding = true;
+  try {
+    return await decideNow(target, option, scope, reason);
+  } finally {
+    state.deciding = false;
+  }
+}
+
+async function decideNow(target: RunRecord | string, option: DecideOption, scope: 'day' | 'untilPass', reason: string | null): Promise<RecordEntry | null> {
+  if (!ledger || !state.engine) return null;
   const may = checkDecision(policies(), state.viewer, option);
   if (!may.allowed) {
     setStatus(`${may.reason.replace(/^./, (c) => c.toUpperCase())}.`, true);
@@ -6840,7 +6867,7 @@ async function decide(target: RunRecord | string, option: DecideOption, scope: '
   if (!r && typeof target === 'string') {
     // The engine lost the day (a reload, or another flow ran it since): run it again, and decide on that run, if it
     // made the keys the day's pause names.
-    const before = pauses().filter((p) => p.day === target && p.state !== 'passed').at(-1) ?? null;
+    const before = latestPause(target);
     const k = loads.list.findIndex((l) => l.day === target);
     if (k < 0) {
       setStatus(`${dayMid(target)} isn't one of the loads here: it can't be run again to decide it.`, true);
@@ -6855,6 +6882,11 @@ async function decide(target: RunRecord | string, option: DecideOption, scope: '
     }
   }
   if (!r) return null;
+  // Readers have a day published as is: no decision takes it back.
+  if (pauseOf(r)?.state === 'asis') {
+    setStatus(`${dayOfRun(r) ? dayMid(dayOfRun(r)!) : 'This run'} is published as is: readers have it, and no decision takes it back.`, true);
+    return null;
+  }
   const day = await periodDay(r);
   const keys = await keysOf(r);
   const p = pauseByInputs(r.inputs);
@@ -6965,19 +6997,32 @@ function sealOf(card: string): 'ok' | 'bad' | 'amber' | null {
   return levelOf(r) === 3 ? (state.engine?.mode === 'page' ? 'amber' : 'ok') : null;
 }
 
-/** Whether the flow on screen is no longer the one the run ran. */
+/** The document's flow hash, once hashed ('' until then): hashing it is asynchronous, and everything that reads it is
+ * drawn again when it is known. */
 const flowHashNow = { doc: null as FlowDocument | null, hash: '' };
-function flowChanged(r: RunRecord): boolean {
+function docHash(): string {
   if (flowHashNow.doc !== state.doc) {
-    flowHashNow.doc = state.doc;
+    const doc = (flowHashNow.doc = state.doc);
     flowHashNow.hash = '';
-    void flowHash(state.doc).then((h) => {
+    void flowHash(doc).then((h) => {
+      if (flowHashNow.doc !== doc) return;
       flowHashNow.hash = h;
       requestCanvas();
+      syncTitle();
+      if (location.hash === '#runs') renderRibbon();
     });
   }
-  return flowHashNow.hash !== '' && flowHashNow.hash !== r.result.manifest.flow.hash;
+  return flowHashNow.hash;
 }
+
+/** Whether the flow on screen is no longer the one the run ran. */
+function flowChanged(r: RunRecord): boolean {
+  const h = docHash();
+  return h !== '' && h !== r.result.manifest.flow.hash;
+}
+
+/** The flow on screen, by its hash: the newest run's, or before any run the document's, once hashed. */
+const flowOnScreen = (): string | undefined => state.runs[0]?.result.manifest.flow.hash ?? (docHash() || undefined);
 
 async function integrityTab(card: string, id: string, who: string): Promise<HTMLElement> {
   void who;

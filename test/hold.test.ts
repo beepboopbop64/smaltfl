@@ -339,6 +339,16 @@ describe('what became of a held day (ADR 0009 §6, §12)', () => {
     expect(pauseState(run(1, 0), pause([held('2023-09-21', 41), asis]))).toBe('asis');
   });
 
+  it('stays published as is once released, whatever is decided after: a release is never taken back', () => {
+    const asis = decide('2023-09-21', 41, 'asis');
+    const log = [held('2023-09-21', 41), asis, release(asis.seq), decide('2023-09-21', 41, 'dont', 'day', {}, { amends: asis.seq })];
+    expect(pause(log)).toMatchObject({ state: 'decided', released: true, decision: { about: { option: 'dont' } } });
+    expect(pauseState(null, pause(log))).toBe('asis');
+    expect(pauseState(run(1, 0), pause(log))).toBe('asis');
+    // A release of other keys (another build's) isn't this run's: the day waits again.
+    expect(pause([...log, held('2023-09-21', 1, { ...KEYS, zone_hour: 'other' })]).released).toBe(false);
+  });
+
   it('has nothing to decide when every held output shows its versions already, and waits again under another build', () => {
     expect(pauseState(run(1, 0), null)).toBeNull();
     const log = [held('2023-09-21', 41), decide('2023-09-21', 41, 'dont'), held('2023-09-21', 1, { ...KEYS, zone_hour: 'other' })];
@@ -348,7 +358,12 @@ describe('what became of a held day (ADR 0009 §6, §12)', () => {
   it('is read from the record alone for a day held in an earlier visit', () => {
     expect(pauseState(null, null)).toBeNull();
     expect(pauseState(null, pause([held('2023-09-21', 41)]))).toBe('waiting');
-    expect(pauseState(null, pause([held('2023-09-21', 41), decide('2023-09-21', 41, 'asis')]))).toBe('asis');
+    // Published as is needs its release: decided, with none applied (the tab closed in between, or it was refused), the
+    // day still waits, though no run of it is here to say so.
+    const asis = decide('2023-09-21', 41, 'asis');
+    expect(pauseState(null, pause([held('2023-09-21', 41), asis]))).toBe('waiting');
+    expect(pauseState(null, pause([held('2023-09-21', 41), asis, release(asis.seq, 'refused')]))).toBe('waiting');
+    expect(pauseState(null, pause([held('2023-09-21', 41), asis, release(asis.seq)]))).toBe('asis');
     expect(pauseState(null, pause([held('2023-09-21', 41), decide('2023-09-21', 41, 'dont', 'untilPass')]))).toBe('dont');
     expect(pauseState(null, pause([held('2023-09-21', 41), ok('2023-09-21', 42)]))).toBeNull();
   });

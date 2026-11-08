@@ -369,8 +369,11 @@ export interface Pause {
   /** The decision names other keys than the latest held run's (made under another build): shown, applied only by a
    * person, as an amendment. */
   otherBuild: boolean;
-  /** For a decision to publish as is: whether an applied release cites it (a crash between the two leaves it to be
-   * applied the next time the day runs). Null for any other decision, or none. */
+  /**
+   * Whether readers got the day: an applied release cites a decision of these inputs to publish as is, naming the
+   * pause's keys (a crash between the two leaves the decision to be applied the next time the day runs). It stands
+   * whatever was decided after it: a release is never taken back. Null when no decision of these inputs publishes.
+   */
   released: boolean | null;
 }
 
@@ -408,6 +411,8 @@ const decided = (e: EntryLike, about: DecideAbout): Decided => ({ seq: e.seq, at
 export function pausesOf(entries: readonly EntryLike[], period?: string | null): Pause[] {
   const pauses = new Map<string, Pause>();
   const releases = new Map<number, ReleaseAbout['outcome']>();
+  // Each pause's decisions to publish as is, by their seq, with the keys each names.
+  const asis = new Map<string, Map<number, Record<string, string>>>();
   for (const e of entries) {
     const a = e.about as JSONValue;
     if (!isRecord(a)) continue;
@@ -432,12 +437,16 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
       p.otherBuild = !sameKeys(a.outputs, p.keys);
       p.state = p.otherBuild ? 'open' : 'decided';
       pauses.set(key, p);
+      if (a.option === 'asis') asis.set(key, (asis.get(key) ?? new Map()).set(e.seq, a.outputs));
     } else if (e.kind === 'release' && Number.isInteger(a.decision) && (a.outcome === 'applied' || a.outcome === 'refused')) {
       if (releases.get(a.decision as number) !== 'applied') releases.set(a.decision as number, a.outcome);
     }
   }
   const out = [...pauses.values()].sort((x, y) => x.opened - y.opened);
-  for (const p of out) p.released = p.decision?.about.option === 'asis' ? releases.get(p.decision.seq) === 'applied' : null;
+  for (const p of out) {
+    const mine = asis.get(p.key);
+    p.released = mine ? [...mine].some(([seq, keys]) => releases.get(seq) === 'applied' && sameKeys(keys, p.keys)) : null;
+  }
   return out;
 }
 
@@ -492,18 +501,21 @@ export function decisionFor(entries: readonly EntryLike[], inputs: Inputs, keys:
  * What became of a held day (ADR 0009 §6, §12): `waiting` for a decision, `asis` published as is, `dont` not published.
  * From a held run in this engine (how many holds and waiting outputs it has, and whether a release of it applied here)
  * and the record's pause of its inputs; or, with no run here (a day held in an earlier visit), from the pause alone.
- * Published as is needs the release applied (here, or in the record before the engine was lost) or nothing left
- * waiting; until then the day still waits. Null for a run that published, a pause a passing run closed, and a held run
+ * Published as is needs the release applied (here, or in the record before the engine was lost) or, with a run here,
+ * nothing left waiting; until then the day still waits, decided or not. An applied release stands over any decision
+ * after it, since readers have the day. Null for a run that published, a pause a passing run closed, and a held run
  * with nothing waiting and nothing decided (each name already shows its versions: there is nothing to decide).
  */
 export function pauseState(run: { holds: number; waiting: number; released: boolean } | null, pause: Pick<Pause, 'state' | 'decision' | 'released'> | null): PauseState | null {
   if (!run) {
     if (!pause || pause.state === 'passed') return null;
-    return pause.state === 'open' ? 'waiting' : pause.decision?.about.option === 'asis' ? 'asis' : 'dont';
+    if (pause.released === true) return 'asis';
+    return pause.state === 'decided' && pause.decision?.about.option === 'dont' ? 'dont' : 'waiting';
   }
   if (run.holds === 0) return null;
+  if (run.released || pause?.released === true) return 'asis';
   const d = pause?.state === 'decided' ? pause.decision : null;
   if (d?.about.option === 'dont') return 'dont';
-  if (d?.about.option === 'asis' && (run.released || run.waiting === 0 || pause?.released === true)) return 'asis';
+  if (d?.about.option === 'asis' && run.waiting === 0) return 'asis';
   return run.waiting === 0 ? null : 'waiting';
 }
