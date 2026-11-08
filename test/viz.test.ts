@@ -3,7 +3,7 @@
  * broken numbers, and escapes what it is given.
  */
 import { describe, expect, it } from 'vitest';
-import { amountLine, bandSpan, bulletTrack, composition, contextBars, dayStrip, dumbbellRows, episodeBars, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
+import { amountLine, bandSpan, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -318,5 +318,105 @@ describe('the news’s charts', () => {
     const holiday = learnStrip({ weeks: [], weeksLabel: '', year: [70_000], yearLabel: ['last year', 'Jan 1'], today: { v: 81_013, low: 49_000, high: 108_000 }, bandLabel: 'usual 49k–108k', aria: 'Learned from' });
     expect(holiday).not.toContain('learn-dot');
     expect(holiday).not.toContain('sev-');
+  });
+});
+
+describe('a held day’s options, drawn as what readers get (ADR 0009 §12)', () => {
+  // Thu Sep 21, 2023: the trips fall at 13:00 to a trickle; Wed 20 is what readers keep.
+  const thu = Array.from({ length: 24 }, (_, h) => (h < 13 ? 4000 + h * 100 : 30));
+  const usualThu = Array.from({ length: 24 }, () => 5200);
+  const wed = Array.from({ length: 24 }, (_, h) => 3000 + h * 120);
+  const scale = Math.max(...usualThu, ...thu, ...wed);
+  const asis = decisionRow({ mark: 'flag', label: 'Publish as is', number: '41,939', cause: 'hours', rows: { cause: 'hours', hours: thu }, usual: { cause: 'hours', hours: usualThu }, short: [13, 23], scale, aria: 'Publish as is: readers get Thu Sep 21 as it came, 41,939 trips, Trips fall 95% from 13:00' });
+  const dont = decisionRow({ mark: 'closed', label: 'Don’t publish', number: 'Wed 20 · 108,434', cause: 'hours', rows: { cause: 'hours', hours: wed }, other: true, scale, ticks: [[0, '0h'], [13, '13h'], [24, '24h']], aria: 'Don’t publish: readers keep Wed Sep 20, 108,434 trips, and this day is never published' });
+  // Each bar's height, by its hour.
+  const heights = (svg: string, cls: string) => new Map([...svg.matchAll(new RegExp(`<path class="${cls}" d="M[\\d.]+ ([\\d.]+)V([\\d.]+)Q[^"]*" data-k="(\\d+)"`, 'g'))].map((m) => [Number(m[3]), Number(m[1]) - Number(m[2]) + 1.5]));
+
+  it('says its option with its numbers, as a chart, its mark beside four words at most and one number', () => {
+    for (const svg of [asis, dont]) {
+      expect(svg).toMatch(/^<svg class="viz decide-row" [^>]*role="img" aria-label="[^"]{20,}"/);
+      expect(svg).not.toMatch(/NaN|undefined|Infinity|null/);
+      expect(svg).toContain('data-y0="0"');
+    }
+    expect(asis).toContain('aria-label="Publish as is: readers get Thu Sep 21 as it came, 41,939 trips');
+    expect(dont).toContain('108,434 trips');
+    expect(asis).toContain('g-flag');
+    expect(dont).toContain('g-closed');
+    for (const [svg, label, n] of [[asis, 'Publish as is', '41,939'], [dont, 'Don’t publish', 'Wed 20 · 108,434']] as const) {
+      expect(svg).toContain(`class="opt-l">${esc(label)}</text>`);
+      expect(svg).toContain(`class="opt-n">${esc(n)}</text>`);
+      expect(label.split(' ').length).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it('draws every row on one scale: the same count is the same height on each, and heights go as the counts', () => {
+    const a = heights(asis, 'ink-strong');
+    const b = heights(dont, 'hatch-col');
+    expect(a.size).toBe(24);
+    expect(b.size).toBe(24);
+    // Hour 5: Thu 4,500 and Wed 3,600, drawn in that ratio; the tallest hour of either fills the drawing's height.
+    expect(a.get(5)! / b.get(5)!).toBeCloseTo(thu[5]! / wed[5]!, 1);
+    expect(Math.max(...a.values(), ...b.values())).toBeLessThanOrEqual(34 + 1e-9);
+  });
+
+  it('hatches another day’s rows only, dashes only the hours the day’s own rows lack, and never draws a trickle under 3 px', () => {
+    expect(asis).not.toContain('hatch-col');
+    expect(dont).not.toMatch(/class="ink-strong"/);
+    // One absent area over the short hours, on the day's own rows; none on another day's.
+    expect(asis.match(/class="absent"/g)).toHaveLength(1);
+    expect(dont).not.toContain('absent');
+    const d = /<path class="absent" d="M([\d.]+) [\d.]+(.*?)V[\d.]+Z"/.exec(asis)!;
+    expect(Number(d[1])).toBeCloseTo((13 * 300) / 24 + 0.75, 0);
+    // Without a short span, nothing is absent.
+    expect(decisionRow({ mark: 'flag', label: 'Publish as is', number: '1', cause: 'hours', rows: { cause: 'hours', hours: thu }, usual: { cause: 'hours', hours: usualThu }, scale, aria: 'Publish as is: 1 trip' })).not.toContain('absent');
+    // 30 trips of 5,200 is under 1 px, drawn at 3.
+    for (const [hr, ht] of heights(asis, 'ink-strong')) if (hr >= 13) expect(ht).toBeGreaterThanOrEqual(3 - 1e-9);
+  });
+
+  it('prints the shared axis once, under the row that carries it, hidden from screen readers', () => {
+    expect(asis).not.toContain('class="tick"');
+    for (const t of ['0h', '13h', '24h']) expect(dont).toMatch(new RegExp(`class="tick" aria-hidden="true">${t}</text>`));
+  });
+
+  it('draws a split as the part and the rest on one count bar, the part named, its missing trips absent; another day split too, hatched', () => {
+    // Mon Nov 14, 2022: Vendor 1 sent 2 trips where ~33.8k are usual; the rest as usual. Sun 13 is what readers keep.
+    const sc = 33_842 + 82_544;
+    const own = decisionRow({ mark: 'flag', label: 'Publish as is', number: '82,278', cause: 'split', rows: { cause: 'split', part: 2, rest: 82_276 }, usual: { cause: 'split', part: 33_842, rest: 82_544 }, part: 'Vendor 1 · 2', scale: sc, aria: 'Publish as is: 82,278 trips' });
+    const sun = decisionRow({ mark: 'closed', label: 'Don’t publish', number: 'Sun 13 · 100,000', cause: 'split', rows: { cause: 'split', part: 30_000, rest: 70_000 }, other: true, part: 'Vendor 1 · 2', scale: sc, ticks: [[0, '0'], [sc, '116k']], aria: 'Don’t publish: readers keep Sun Nov 13, 100,000 trips' });
+    const part = /<rect class="ink-strong" x="0" y="[\d.]+" width="([\d.]+)"[^>]*data-part="part"/.exec(own)!;
+    expect(Number(part[1])).toBe(3);
+    expect(own).toContain('>Vendor 1 · 2</text>');
+    expect(own.match(/class="absent"/g)).toHaveLength(1);
+    expect(sun.match(/class="hatch-col"/g)).toHaveLength(2);
+    expect(sun).not.toContain('absent');
+    expect(sun).not.toContain('Vendor 1 · 2');
+    // One scale: the rest's 82,276 against Sun's 70,000, in that ratio.
+    const w = (svg: string, p: string) => Number(new RegExp(`width="([\\d.]+)" height="16" rx="2" data-part="${p}"`).exec(svg)![1]);
+    expect(w(own, 'rest') / w(sun, 'rest')).toBeCloseTo(82_276 / 70_000, 2);
+  });
+
+  it('draws anything else as a strip of the week, the day last: its own rows below their range lacking, another day’s hatched', () => {
+    const week = [96_000, 101_000, 99_000, 104_000, 98_000, 102_000];
+    const own = decisionRow({ mark: 'flag', label: 'Publish as is', number: '74,592', cause: 'amount', rows: { cause: 'amount', days: [...week, 74_592] }, usual: { cause: 'amount', days: [...week, 118_000] }, scale: 118_000, aria: 'Publish as is: 74,592 trips' });
+    const kept = decisionRow({ mark: 'closed', label: 'Don’t publish', number: 'Tue 4 · 74,562', cause: 'amount', rows: { cause: 'amount', days: [...week, 74_562] }, other: true, scale: 118_000, ticks: [[0, 'Thu 30'], [6, 'Wed 5']], aria: 'Don’t publish: readers keep Tue Jan 4' });
+    expect(own.match(/class="ink"/g)).toHaveLength(6);
+    expect(own.match(/data-k="day"/g)).toHaveLength(1);
+    expect(own.match(/class="absent"/g)).toHaveLength(1);
+    expect(kept.match(/class="hatch-col"/g)).toHaveLength(1);
+    expect(kept).not.toContain('absent');
+    expect(kept).toContain('>Wed 5</text>');
+  });
+
+  it('draws nothing published as one absent frame, and greys a row that can’t be chosen', () => {
+    const none = decisionRow({ mark: 'closed', label: 'Don’t publish', number: 'nothing shown', cause: 'hours', rows: null, other: true, scale: 10, aria: 'Don’t publish: readers get nothing, nothing is published yet' });
+    expect(none.match(/class="absent"/g)).toHaveLength(1);
+    expect(none).not.toContain('hatch-col');
+    const off = decisionRow({ mark: 'flag', label: 'Publish as is', number: 'Mon 25 is published', cause: 'hours', rows: { cause: 'hours', hours: thu }, scale, off: true, aria: 'Publish as is: not possible' });
+    expect(off).toMatch(/^<svg class="viz decide-row off"/);
+    expect(off).toContain('data-off="true"');
+  });
+
+  it('marks a decided day at 14 px by shape: ⚑ a flag on its pole, ✕ a box crossed out', () => {
+    for (const g of ['held', 'flag', 'closed'] as const) expect(glyph(g, 14)).toMatch(/^<svg width="14" height="14" viewBox="0 0 16 16"/);
   });
 });

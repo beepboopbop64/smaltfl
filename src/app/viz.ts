@@ -10,6 +10,8 @@
  * set by class in page.html under `.viz`, so light and dark both work.
  */
 
+import type { DrawCause, ReaderRows } from '../core/decision.js';
+
 export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack';
 
 export const esc = (s: unknown): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1053,6 +1055,90 @@ export function stripBar({ v, low, high, ymax, sev }: { v: number; low: number |
   if (low !== null && high !== null) s += `<rect class="ghost" x="3" y="${f1(y(high))}" width="${W - 6}" height="${f1(Math.max(1, y(low) - y(high)))}" rx="2"/>`;
   if (v > 0) s += `<path class="${sev ? `sev-${sev}-fill` : 'ink'}" d="${colPath(7, H, W - 14, Math.max(MIN_MARK, H - y(v)), 1.5)}"/>`;
   s += `<line class="base" x1="0" x2="${W}" y1="${H + 0.5}" y2="${H + 0.5}"/>`;
+  return `${s}</svg>`;
+}
+
+/**
+ * One option of a held day's decision (ADR 0009 §12), as what readers would get: its mark, its words (four at most)
+ * and one number on a line, and under them the rows, drawn by the day's cause on the scale every row of the sheet
+ * shares, so a short day reads short beside a whole one. 24 hour bars for a day that falls at an hour; the part and the
+ * rest end to end on one count bar for a split, the part named; a strip of the week's days, the day last, for anything
+ * else. Another day's rows (`other`) are hatched. What the day's own rows lack against its usual (`usual`: in the short
+ * hours, a part's or the rest's missing trips, the day below its range) is absent, a wash with a dashed edge, and
+ * nothing else is dashed; no rows at all (nothing published) is one dashed frame. A count that isn't zero is never under
+ * 3 px. `ticks` draws the shared axis under the rows, on the sheet's last row only; `off` greys a row that can't be
+ * chosen.
+ */
+export function decisionRow(o: { mark: Mark; label: string; number: string; cause: DrawCause; rows: ReaderRows | null; usual?: ReaderRows | null; short?: readonly [number, number] | null; other?: boolean; scale: number; part?: string | null; ticks?: readonly (readonly [number, string])[]; off?: boolean; aria: string; w?: number }): string {
+  const w = o.w ?? 300;
+  const partH = o.cause === 'split' && o.part && !o.other ? 14 : 0;
+  const top = 28 + partH;
+  const drawH = o.cause === 'split' ? 16 : 34;
+  const base = top + drawH;
+  const ticks = o.ticks ?? [];
+  const h = base + (ticks.length ? 17 : 3);
+  const scale = Math.max(1, o.scale);
+  const fill = o.other ? 'hatch-col' : 'ink-strong';
+  let s = open(w, h, o.aria, `data-y0="0" data-cause="${o.cause}"${o.off ? ' data-off="true"' : ''}`).replace('class="viz"', `class="viz decide-row${o.off ? ' off' : ''}"`);
+  s += `<g transform="translate(0 2)">${glyph(o.mark, 16)}</g>`;
+  s += `<text x="24" y="15" class="opt-l">${esc(o.label)}</text>`;
+  s += `<text x="${w}" y="15" text-anchor="end" class="opt-n">${esc(o.number)}</text>`;
+  if (!o.rows) {
+    // Nothing for readers: the whole day absent.
+    s += `<rect class="absent" x="0.75" y="${top}" width="${f1(w - 1.5)}" height="${drawH}" rx="3"/>`;
+  } else if (o.rows.cause === 'hours') {
+    const cw = w / 24;
+    const bw = cw - 2.5;
+    const y = (v: number) => (v / scale) * drawH;
+    const got = o.rows.hours;
+    const usual = !o.other && o.usual?.cause === 'hours' ? o.usual.hours : null;
+    const sh = o.short ?? null;
+    // The trips the short hours lack, under the usual hours' skyline: one area, its edge dashed.
+    if (usual && sh) {
+      let d = `M${f1(sh[0] * cw + 0.75)} ${base}`;
+      for (let i = sh[0]; i <= sh[1]; i++) d += `V${f1(base - y(Math.max(usual[i] ?? 0, got[i] ?? 0)))}H${f1((i + 1) * cw - (i === sh[1] ? 0.75 : 0))}`;
+      s += `<path class="absent" d="${d}V${base}Z"/>`;
+    }
+    for (let i = 0; i < 24; i++) {
+      const v = got[i] ?? 0;
+      if (v > 0) s += `<path class="${fill}" d="${colPath(i * cw + 1.25, base, bw, Math.max(MIN_MARK, y(v)), 1.5)}" data-k="${i}"/>`;
+    }
+  } else if (o.rows.cause === 'split') {
+    const gap = 3;
+    const x = (v: number) => (v / scale) * (w - gap);
+    const by = top;
+    const u = !o.other && o.usual?.cause === 'split' ? o.usual : null;
+    const pw = o.rows.part > 0 ? Math.max(MIN_MARK, x(o.rows.part)) : 0;
+    const slot = Math.max(pw, u ? x(u.part) : 0);
+    if (pw) s += `<rect class="${fill}" x="0" y="${by}" width="${f1(pw)}" height="${drawH}" rx="2" data-part="part"/>`;
+    if (u && x(u.part) - pw > 3) s += `<rect class="absent" x="${f1(pw + 1)}" y="${by + 1}" width="${f1(x(u.part) - pw - 2)}" height="${drawH - 2}" rx="2"/>`;
+    const r0 = slot + gap;
+    const rw = o.rows.rest > 0 ? Math.max(MIN_MARK, x(o.rows.rest)) : 0;
+    if (rw) s += `<rect class="${o.other ? fill : 'ink'}" x="${f1(r0)}" y="${by}" width="${f1(rw)}" height="${drawH}" rx="2" data-part="rest"/>`;
+    if (u && x(u.rest) - rw > 3) s += `<rect class="absent" x="${f1(r0 + rw + 1)}" y="${by + 1}" width="${f1(x(u.rest) - rw - 2)}" height="${drawH - 2}" rx="2"/>`;
+    if (partH) s += `<text x="0" y="${top - 4}" class="lbl-b part-l">${esc(o.part!)}</text>`;
+  } else {
+    const days = o.rows.days;
+    const n = days.length;
+    const cw = w / Math.max(1, n);
+    const bw = Math.min(22, cw - 6);
+    const y = (v: number) => (v / scale) * drawH;
+    const u = !o.other && o.usual?.cause === 'amount' ? o.usual.days : null;
+    days.forEach((v, i) => {
+      const last = i === n - 1;
+      const x0 = i * cw + (cw - bw) / 2;
+      const want = last && u ? (u[i] ?? 0) : 0;
+      if (want - v > 0 && y(want) - y(v) > 3) s += `<path class="absent" d="M${f1(x0 + 0.75)} ${f1(base - Math.max(MIN_MARK, y(v)))}V${f1(base - y(want))}H${f1(x0 + bw - 0.75)}V${f1(base - Math.max(MIN_MARK, y(v)))}"/>`;
+      if (v > 0) s += `<path class="${last ? fill : 'ink'}" d="${colPath(x0, base, bw, Math.max(MIN_MARK, y(v)), 1.5)}"${last ? ' data-k="day"' : ''}/>`;
+    });
+  }
+  s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
+  // The shared axis: hours across 24 columns, a count from 0, or a strip's first and last day under their columns.
+  const tx = (t: number) => (o.cause === 'hours' ? (t / 24) * w : o.cause === 'split' ? (t / scale) * w : o.rows?.cause === 'amount' ? (t + 0.5) * (w / Math.max(1, o.rows.days.length)) : 0);
+  for (const [t, label] of ticks) {
+    const x = tx(t);
+    s += `<text x="${f1(x)}" y="${base + 14}" text-anchor="${x < 14 ? 'start' : x > w - 14 ? 'end' : 'middle'}" class="tick" aria-hidden="true">${esc(label)}</text>`;
+  }
   return `${s}</svg>`;
 }
 

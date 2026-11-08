@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
 import { newsOf, type Names } from '../src/core/news.js';
 import { lacked, reachLabel, shortfall, type EpisodeDay } from '../src/core/days.js';
+import { afterLine, decisionDrawing, pauseLines, sheetText, sheetWords } from '../src/core/decision.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
 import { CELL_KINDS, countRange, gateHead, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, splitSteps, storyOf, wordsIn } from '../src/core/story.js';
 
@@ -357,6 +358,46 @@ describe.skipIf(!has)('the story on the real history', () => {
       expect(glanceStrings(s).reduce((t, x) => t + wordsIn(x), 0), `${d}: ${glanceStrings(s).join(' | ')}`).toBeLessThanOrEqual(budget[s.state]!);
     }
     expect(noted).toBeGreaterThan(10);
+  }, 60_000);
+
+  it('keeps a paused day’s card within 60 words and its decision sheet within 45, on every day the flow holds (ADR 0009 §12)', () => {
+    // The 28 days `wrong` holds (test/hold-real.test.ts), each told as a viewer sees it.
+    const WRONG = ['2022-01-04', '2022-01-05', '2022-01-06', '2022-01-07', '2022-01-08', '2022-01-09', '2022-01-29', '2022-08-10', '2022-09-17', '2022-09-18',
+      '2022-11-08', '2022-11-14', '2022-11-15', '2022-11-16', '2022-11-17', '2022-11-18', '2022-11-19', '2022-11-20', '2022-12-19', '2022-12-20', '2022-12-21', '2022-12-22',
+      '2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24', '2023-11-07', '2023-11-14'];
+    const rows = (d: string) => file!.rows[file!.days.indexOf(d)]!;
+    const plus = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+    for (const d of WRONG) {
+      const s = story(d);
+      expect(s.state, d).toBe('wrong');
+      // The card: its glance without the story's verb (behind ⋯), and the pause row with its verb, in each of its states:
+      // waiting with Decide, waiting on the owner for someone who may not decide, and each receipt.
+      const base = glanceStrings(s).filter((x) => x !== s.labels.primary);
+      const words = (xs: readonly string[]) => xs.reduce((t, x) => t + wordsIn(x), 0);
+      for (const [state, may, under] of [['waiting', true, null], ['waiting', false, null], ['asis', true, null], ['dont', true, null], ['dont', true, 'Wed']] as const) {
+        const l = pauseLines({ state, outputs: 3, who: 'Owner', at: '23:59', under, may, deciders: 'Owner' });
+        const said = [...base, l.reach, l.verb ?? ''];
+        expect(words(said), `${d} ${state}${may ? '' : ' (may not decide)'}: ${said.join(' | ')}`).toBeLessThanOrEqual(60);
+      }
+      // The sheet, drawn as the page draws it, the day before what readers keep; at its wordiest, the day after already
+      // published and another build's decision said.
+      const draw = decisionDrawing(h, s, d, plus(d, -1), { day: rows(d), readers: rows(plus(d, -1)) });
+      expect(draw.cause, d).toBe(s.hero === 'hours' ? 'hours' : s.split ? 'split' : 'amount');
+      expect(draw.dont, d).not.toBeNull();
+      const t = sheetText({ day: d, waited: 3000, otherBuild: true, outputs: 3, rows: rows(d), readers: { day: plus(d, -1), rows: rows(plus(d, -1)) }, later: plus(d, 4), part: draw.part, ticks: draw.ticks.map(([, x]) => x), unjudged: false, hash: 'a'.repeat(64), may: true, deciders: 'Owner', head: s.head });
+      expect(sheetWords(t), `${d}: ${JSON.stringify(t)}`).toBeLessThanOrEqual(45);
+    }
+    // Thu Sep 21: its hours, Wed 20 kept, on one scale; Mon Nov 14, 2022: Vendor 1's 2 trips beside 82,276.
+    const thu = decisionDrawing(h, story('2023-09-21'), '2023-09-21', '2023-09-20', { day: 41_939, readers: rows('2023-09-20') });
+    expect(thu).toMatchObject({ cause: 'hours', short: [13, 23], ticks: [[0, '0h'], [13, '13h'], [24, '24h']] });
+    expect(rows('2023-09-20')).toBe(108_434);
+    const nov = decisionDrawing(h, story('2022-11-14'), '2022-11-14', '2022-11-13', { day: rows('2022-11-14'), readers: rows('2022-11-13') });
+    expect(nov).toMatchObject({ cause: 'split', part: 'Vendor 1 · 2', asis: { part: 2, rest: 82_276 } });
+    // The day after an episode says what became of its days, in fewer words than "Nothing to do · …" did.
+    const after = afterLine([{ day: '2023-09-21', state: 'asis' }, { day: '2023-09-22', state: 'dont' }, { day: '2023-09-23', state: 'dont' }, { day: '2023-09-24', state: 'dont' }])!;
+    const mon = story('2023-09-25');
+    expect(mon.labels.after).toBe('Nothing to do · Thu published short, Fri–Sun held');
+    expect(glanceStrings(mon).filter((x) => x !== mon.labels.after).reduce((t, x) => t + wordsIn(x), 0) + wordsIn(after)).toBeLessThanOrEqual(24);
   }, 60_000);
 
   it('accounts for every finding in one tier: the grouped rows add up to what the old view counted', () => {

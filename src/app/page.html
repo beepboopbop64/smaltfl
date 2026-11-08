@@ -857,6 +857,13 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .edge-t { fill: none; stroke: var(--bad); stroke-width: 1.6; } .viz .edge-t.dash { stroke-dasharray: 3 3; }
 .viz .hatch-box { fill: url(#viz-hatch); stroke: var(--muted); stroke-width: 1.2; }
 .hatch-bg { fill: var(--surface); } .hatch-line { stroke: var(--muted); stroke-width: 1.2; }
+/* A held day's options (ADR 0009 §12): each drawn as what readers get; another day's rows hatched, absent ones dashed. */
+.viz .hatch-col { fill: url(#viz-hatch); stroke: var(--ink-2); stroke-width: 1; }
+.viz text.opt-l { font-size: 15px; font-weight: 600; fill: var(--ink); }
+.viz text.opt-n { font-size: 13.5px; font-variant-numeric: tabular-nums; fill: var(--ink-2); }
+.viz text.part-l { font-size: 11.5px; }
+.viz.off text, .viz.off text.opt-l { fill: var(--muted); }
+.viz.off .ink-strong, .viz.off .ink, .viz.off .g-wall { fill: var(--muted); } .viz.off .absent { fill: none; stroke: var(--muted); }
 .ld-bar { margin: 2px auto 0; }
 /* the cause card, the health row, stories and rows */
 .news-tab:has(.vf-card) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
