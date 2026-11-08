@@ -4,8 +4,9 @@ The design interview for smaltfl. Each question records the decision needed, the
 Decided questions are recorded in ADRs: round 1 in [adr/0001-initial-decisions.md](adr/0001-initial-decisions.md), round
 2 in [adr/0002-second-round-decisions.md](adr/0002-second-round-decisions.md), round 3 in
 [adr/0003-third-round-decisions.md](adr/0003-third-round-decisions.md), the flow plan in
-[adr/0004-the-flow-plan.md](adr/0004-the-flow-plan.md), the licence in [adr/0005-licence.md](adr/0005-licence.md). The
-research behind the proposals is in [research/ecosystem-survey.md](research/ecosystem-survey.md).
+[adr/0004-the-flow-plan.md](adr/0004-the-flow-plan.md), the licence in [adr/0005-licence.md](adr/0005-licence.md), pausing
+a day that is off in [adr/0009-paused-not-published.md](adr/0009-paused-not-published.md). The research behind the
+proposals is in [research/ecosystem-survey.md](research/ecosystem-survey.md).
 
 **Who decides:** the maintainers, together (ADR 0001 §1).
 
@@ -13,7 +14,11 @@ research behind the proposals is in [research/ecosystem-survey.md](research/ecos
 
 | ID | Question | Proposal | Status |
 | --- | --- | --- | --- |
-| Q-45 | Should the flow hold outputs built from a day with something wrong, not only a day its checks drop too much of? Today the only gate is the share of rows the checks drop (ADR 0008 §4), so a short day is published: Sat Sep 17, 2022 (trips fall 96% from 15:00), Thu Sep 21, 2023 (95% from 13:00) and Mon–Sun Nov 14–20, 2022 (vendor 1 almost gone) all went out, and Sun Sep 18, 2022 was held only by 0.45 points. After a held day the outputs keep the last day that passed, which can itself be short (Thu 21 under Fri 22–Sun 24, Sat 17 under Sun 18) | **A completeness gate**, beside the checks: hold the outputs when the day's trips are below the low end of their range by a set share (say under half the guess), when hours after a cut-off are missing (three hours or more under a tenth of usual), or when a coded value with a usual share of 5% or more is gone (a vendor, a payment type); name the hold by its cause ("Held: only 4% of usual trips arrived"); each threshold set on the flow, off by default for a flow without a history. **Never fall back to a day with something wrong:** after a held day, outputs keep the last day that passed with nothing wrong, or say that the day kept was itself short. Either changes what the flow publishes (the gate reads the history, a plan change), so it needs an ADR. Until then the app says it: "Outputs built from a short day", each output's news "Built from a load missing 13:00–24:00" (ADR 0008 §10) | open |
+| Q-52 | Should the rule that judges a day (the story's verdict that `wrong` and `short` read) be frozen as a versioned copy, or tied to the build? The story code changes often (ADR 0009 §3) | **Tied to the build**, with the history as its test vector: over 2022 to January 2024 `wrong` holds 28 days and `short` 22, and a change to the story that moves one fails the tests until it is accepted on purpose. Each claim records the build that judged it | open |
+| Q-51 | Should a passing run of a day earlier than the one published move the dataset names back, as it does now, or stay behind, as a release must (ADR 0009 §5)? | **Unchanged for now:** a passing run moves the names, a release never moves them past a later day, and the decision sheet says when a day has been passed over. Ordering runs by their period comes with outputs partitioned by day | open |
+| Q-50 | Who decides what happens to a held day by default, the owner only or stewards? Is Publish as is owner-only, and may it stand for later days? | **The owner only**, as proposed: a `smaltfl:decide` action rule names others, and its `may` the options they may take (ADR 0009 §8). Publish as is covers one day at a time; Don't publish may stand until a day passes | open |
+| Q-49 | Are filled rows allowed in published data, and how are they marked? Which donor day? Do filled and unpublished days feed the ranges later days are judged by? | **Allowed, marked twice:** a `filled_from` column on the rows and the count filled on the release. The donor is the latest same weekday within four weeks that the history says nothing wrong of (ADR 0009 §7). The ranges: to decide with slice 2 | open |
+| Q-47 | plan/1 and document format 2, or optional fields under plan/0 and format 1? | **plan/1 and format 2** (ADR 0009, E10): an older build refuses a flow that holds, where optional fields would fail open and publish what the flow holds. Kept to two functions (`documentFormat`, `planKind`), so switching is two lines | open |
 | Q-38 | The builder (design canvas "smaltfl app concepts"): does it match what data engineering needs? What is missing or in the way? | Liked; made open after feedback (A3): a grid canvas where steps go anywhere, groups that hold any number of steps and collapse, zoom, fit, tidy and a map; every step opens into sub-steps, settings, its SQL, a preview and its schema with column lineage | in review |
 | Q-29 | The mark: round 3 leans into waves (M12–M18), all curved | Pick a wave, and whether teal is a small chip (M12–M15) or a whole wave (M16–M18). Round 3 goes to stenhoor first (ADR 0003 §3) | on hold |
 | Q-40 | The runs and policies screens (A6, A7): the right shape? | **Runs:** each run with its status and verification; what ran and why (each step reused or rebuilt, and the reason); its checks; its signed manifest, to download, verify again, re-run or compare. **Policies:** people (identity cards) and groups; row, column and action rules, each showing what it reaches; who sees what, by district; a preview as one person, with their share and the policy checks | in review |
@@ -24,6 +29,14 @@ research behind the proposals is in [research/ecosystem-survey.md](research/ecos
 | Q-2 | Who is the first user? | Data engineers build; analysts use and extend. The canvas must stay readable for both | open |
 | Q-15 | Lineage granularity in v1? | Dataset-level and run-level from the start; column-level when the plan API lands | open |
 | Q-18 | Data quality in v1? | Row expectations (warn, drop, fail) and dataset checks (freshness, row count, uniqueness, schema) | open |
+
+## Pausing a day that is off: decided (ADR 0009)
+
+| ID | Question | Decision | Status |
+| --- | --- | --- | --- |
+| Q-48 | Does "forward or backfill" mean filling a held day's missing part from the days before and after, re-running a corrected file, or both? | The owner, 2026-11-08: "impute the data if it's bad until it's good, just don't publish a change, then forward or backfill". **Both:** fill the missing part from the same weekday before (forward) or after (backfill), publish only the complete part, or re-run the day when its file is corrected (slices 2 and 3); "impute until it's good" is the standing setting `"meanwhile": "fill", "until": "normal"` | decided |
+| Q-46 | Which days should hold by default: those the story says something wrong of and whose trips are below their range (`short`, 22 days in 2022 to January 2024), or every day it says something wrong of (`wrong`, 28)? | The owner, 2026-11-08: "if something is off then let's not publish the data". **`wrong` by default** (`"hold": ["checks", "wrong"]`); a flow may narrow it to `short` | decided |
+| Q-45 | Should the flow hold outputs built from a day with something wrong, not only a day its checks drop too much of? | The owner: "If something is off then let's not publish the data … pause the data and then wait to get confirmation on what to do there." **A day that is off is paused, not published:** a flow's `publish` block says what holds it; a held run is built, checked, hashed and recorded with its versions staged, nothing it made is published, and readers keep the last published day until a person decides (wait, publish as is, don't publish; later fill from before or after, publish the complete part, re-run when corrected) | decided |
 
 ## The licence: decided (ADR 0005)
 

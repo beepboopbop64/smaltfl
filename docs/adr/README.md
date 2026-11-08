@@ -13,3 +13,4 @@ records start from the answers to the questions in [../OPEN_QUESTIONS.md](../OPE
 | [0006](0006-integrity.md) | Integrity from source bytes to the record | accepted |
 | [0007](0007-repository-home.md) | The repository moves to stenhoor/smaltfl | accepted |
 | [0008](0008-visual-first-news.md) | The day's news, drawn | accepted |
+| [0009](0009-paused-not-published.md) | A day that is off is paused, not published | accepted (Q-47, Q-49–Q-52 open) |

@@ -4,6 +4,8 @@
 - **Date:** 2026-11-07
 - **Builds on:** the news and normal ranges (src/core/news.ts, src/core/normal.ts; docs/SCENARIO.md §8), ADR 0006 §9
   (the integrity seal kept apart from the health marks)
+- **Amended by:** [ADR 0009](0009-paused-not-published.md) §12: a held day waits for a decision, and a day shows its
+  own run, published or staged
 
 ## Context
 
