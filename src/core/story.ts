@@ -50,6 +50,8 @@ export interface Gate {
   share: number;
   limit: number | null;
   held: boolean;
+  /** Not held, but within a point of its limit: shown, as a near miss is worth seeing. */
+  near: boolean;
   usual: { expected: number; low: number; high: number } | null;
   rules: { name: string; warns: boolean; rows: number; share: number; usual: { low: number; high: number } | null }[];
 }
@@ -92,10 +94,10 @@ export interface Story {
   /** Weather worth knowing on the day: context, never a reason. */
   context: Told | null;
   episode: { days: number; since: string; hour: number | null } | null;
-  health: { cell: Cell; severity: Severity | null; explained: boolean }[];
+  health: { cell: Cell; severity: Severity | null; explained: boolean; follows: number; sameDay: number }[];
   primary: Act | null;
   /** Labels the screen shows at a glance, so their words can be counted: rows, chips, the hero's marks. */
-  labels: { hero: string[]; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[] };
+  labels: { amount: string[]; hero: string[]; follows: string | null; sameDay: string | null; notes: string | null; more: string | null; primary: string | null; kinds: string[] };
   findings: Told[];
 }
 
@@ -248,6 +250,7 @@ export function gateOf(h: HistoryRanges, day: string, step: string, limit: numbe
   return {
     step, rows, dropped, share, limit,
     held: limit !== null && share > limit,
+    near: limit !== null && share <= limit && share >= limit - 0.01,
     usual: usual ? { expected: usual.expected, low: usual.low, high: usual.high } : null,
     rules: file.rules.map((r, i) => {
       const u = h.of({ of: 'ruleRows', name: r.name })?.at(day);
@@ -322,7 +325,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const valueStories = live.filter((f) => VALUE_KINDS.has(f.kind) && loud(f)).length;
   const split = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden) : null;
   const gate = k >= 0 && o.step ? gateOf(h, day, o.step, o.limit ?? null) : null;
-  if (gate && o.held !== undefined) gate.held = o.held;
+  if (gate && o.held !== undefined) (gate.held = o.held), gate.held && (gate.near = false);
   const blankDay = !!volume && volume.value !== undefined && !!volume.range && volume.value < MATERIAL.blank * volume.range.expected;
 
   // The rows the cause moved: what a finding folded as "same day" may be no bigger than.
@@ -455,7 +458,10 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   // A share just past its limit keeps the decimals that show it is past: "10.45% dropped", limit 10%.
   const pastLimit = (x: number, limit: number | null) => {
     if (limit === null) return pctShort(x);
-    for (let d = 0; d <= 3; d++) if ((x > limit) === (Number((x * 100).toFixed(d)) > limit * 100)) return `${(x * 100).toFixed(d)}%`;
+    for (let d = 0; d <= 3; d++) {
+      const shown = Number((x * 100).toFixed(d));
+      if ((x > limit) === (shown > limit * 100) && shown !== limit * 100) return `${(x * 100).toFixed(d)}%`;
+    }
     return `${(x * 100).toFixed(3)}%`;
   };
   let head: string;
@@ -464,7 +470,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   else if (hero === 'split' && split) {
     const restRatio = split.rest.today / Math.max(1, split.rest.usual);
     const partRatio = split.part.today / Math.max(1, split.part.usual);
-    const part = split.trips ? `${split.name} trips` : split.name;
+    const part = split.trips ? `${split.name} records` : split.name;
     head = split.kind === 'held'
       ? restRatio < 0.1 ? `Only ${part} arrived` : `Trips ${pctShort(1 - restRatio)} short; ${split.name} held`
       : split.kind === 'vanished'
@@ -476,12 +482,18 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   else if (recovery) head = 'Back to normal';
   else head = calmHead;
 
+  // Snow names its day ("❄ 7.2 cm Sat"): today's, or the day before's when today's trips are the news.
+  const snowOn = (d: string) => {
+    const j = file.days.indexOf(d);
+    const cm = j >= 0 ? (file.weather?.snow[j] ?? 0) : 0;
+    return cm >= 1 ? `❄ ${cm.toFixed(1)} cm ${weekdayOf(d).slice(0, 3)}` : null;
+  };
+  const snowChip = k >= 0 && (hero === 'amount' || severity === 'ok' || severity === 'note') ? (snowOn(day) ?? (hero === 'amount' ? snowOn(plusDays(day, -1)) : null)) : null;
   const span = (a: string, b: string) => (a === b ? weekdayOf(a).slice(0, 3) : `${weekdayOf(a).slice(0, 3)}–${weekdayOf(b).slice(0, 3)}`);
   const chip = episode
     ? `Day ${episode.days} · since ${weekdayOf(episode.since).slice(0, 3)}${episode.hour !== null ? ` ${clock(episode.hour)}` : ''}`
     : recovery ? `after ${span(recovery.from, recovery.to)}`
-    : weather && (hero === 'amount' || severity === 'ok' || severity === 'note') ? weather.title.replace(/ in Manhattan$/, '')
-    : null;
+    : snowChip;
 
   const state: Story['state'] = o.refused ? 'refused' : severity === 'alert' ? 'wrong' : severity === 'warn' ? 'unusual' : recovery ? 'recovery' : notes.length ? 'notes' : 'calm';
   const shownHero: Hero = state === 'calm' || state === 'notes' || state === 'recovery' ? 'calm' : hero;
@@ -500,8 +512,12 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     const mine = told.filter((f) => kinds.includes(f.kind) && f.severity !== 'ok');
     const loudOnes = mine.filter((f) => f.tier === 'cause' || f.tier === 'standalone');
     const folded = mine.filter((f) => f.tier === 'absorbed' || f.tier === 'follows' || f.tier === 'sameDay');
-    const explained = (folded.length > 0 && loudOnes.length === 0) || (cell === 'hours' && blankDay) || (cell === 'amount' && !!split && !!volume);
-    return { cell, severity: loudOnes.length ? worst(loudOnes.map((f) => f.severity)) : mine.length && !explained ? 'note' as Severity : null, explained };
+    // The cell holding the cause's own measure carries the cause's mark: the amount on a split day with a volume
+    // finding, the hours on a day they fall, the values on a surge with no volume finding.
+    const causeCell = hero === 'hours' ? 'hours' : hero === 'split' ? (volume ? 'amount' : 'values') : hero === 'amount' ? 'amount' : null;
+    if (cell === causeCell && (causeSeverity === 'alert' || causeSeverity === 'warn')) return { cell, severity: causeSeverity, explained: false, follows: mine.filter((f) => f.tier === 'follows' || f.tier === 'absorbed').length, sameDay: mine.filter((f) => f.tier === 'sameDay').length };
+    const explained = (folded.length > 0 && loudOnes.length === 0) || (cell === 'hours' && blankDay);
+    return { cell, severity: loudOnes.length ? worst(loudOnes.map((f) => f.severity)) : mine.length && !explained ? 'note' as Severity : null, explained, follows: mine.filter((f) => f.tier === 'follows' || f.tier === 'absorbed').length, sameDay: mine.filter((f) => f.tier === 'sameDay').length };
   });
 
   // The labels at a glance.
@@ -511,14 +527,15 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     const after = hoursF.hours.got.slice(hoursF.hours.from, hoursF.hours.to + 1);
     heroLabels.push(clock(hoursF.hours.from), `~${compact(after.reduce((a, b) => a + b, 0) / Math.max(1, after.length))}/h after`, `usual ${weekdayOf(day)}`);
   }
-  if ((shownHero === 'amount' || shownHero === 'calm') && amount) heroLabels.push(...(shownHero === 'calm' ? [fmtInt(amount.value)] : []), `usual ${compact(amount.low)}–${compact(amount.high)}`);
-  if (gate?.held) heroLabels.push('Checks held the run', `${pastLimit(gate.share, gate.limit)} dropped`, ...(gate.limit !== null ? [`limit ${pctShort(gate.limit)}`] : []), `${fmtInt(gate.dropped)} rows${gate.usual ? ` · usual ${compact(gate.usual.low)}–${compact(gate.usual.high)}` : ''}`);
+  // The amount line carries the day's count and its usual range on every day; a strip of days adds no words.
+  if (gate?.held || gate?.near) heroLabels.push(gate.held ? 'Checks held' : 'Checks near the limit', `${pastLimit(gate.share, gate.limit)} dropped`, ...(gate.limit !== null ? [`limit ${pctShort(gate.limit)}`] : []), `${fmtInt(gate.dropped)} rows`, ...(gate.usual ? [`usual ${compact(gate.usual.low)}–${compact(gate.usual.high)}`] : []));
   const kindWord: Partial<Record<Finding['kind'], string>> = { share: 'Shares', gone: 'Gone', missing: 'Blanks', shape: 'Shapes', dropped: 'Checks', rule: 'Checks', new: 'New', pair: 'Pairs' };
+  const wordOf = (f: Finding) => (f.kind === 'shape' && f.columns?.[0] && file.kinds[file.columns.indexOf(f.columns[0])] === 'time' ? 'Times' : (kindWord[f.kind] ?? 'Other'));
   const kinds = new Map<string, number>();
-  for (const f of follows) kinds.set(kindWord[f.kind] ?? 'Other', (kinds.get(kindWord[f.kind] ?? 'Other') ?? 0) + 1);
+  for (const f of follows) kinds.set(wordOf(f), (kinds.get(wordOf(f)) ?? 0) + 1);
   const kindChips = [...kinds].sort((a, b) => b[1] - a[1]).map(([w, c]) => `${w} ${c}`);
-  // At most two kind chips: the largest, and the rest counted, so the row fits a phone.
-  const shownKinds = kindChips.length > 2 ? [kindChips[0]!, `+${kindChips.slice(1).reduce((t, x) => t + Number(x.split(' ')[1]), 0)}`] : kindChips;
+  // At most two kind chips, then the rest counted, so the row fits a phone.
+  const shownKinds = kindChips.length > 2 ? [kindChips[0]!, kindChips[1]!, `+${kindChips.slice(2).reduce((t, x) => t + Number(x.split(' ')[1]), 0)}`] : kindChips;
   const stories = standalone.filter((f) => f !== cause).slice(0, 2);
   const more = standalone.filter((f) => f !== cause && !stories.includes(f));
 
@@ -527,6 +544,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     cause, stories, more, follows, sameDay, absorbed, notes, context: weather,
     episode, health, primary,
     labels: {
+      amount: amount ? [`${fmtInt(amount.value)} trips`, `usual ${compact(amount.low)}–${compact(amount.high)}`] : [],
       hero: heroLabels,
       follows: follows.length ? `+${follows.length} follow from this` : null,
       sameDay: sameDay.length ? `${sameDay.length} more this day` : null,
@@ -541,7 +559,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
 
 /** Every string a story shows at a glance (head, chip, the hero's labels, rows, the verb), for its word budget. */
 export function glanceStrings(s: Story): string[] {
-  return [s.head, s.chip ?? '', ...s.labels.hero, s.labels.follows ?? '', ...s.labels.kinds, s.labels.sameDay ?? '', s.labels.more ?? '', s.labels.notes ?? '', s.labels.primary ?? '', ...s.stories.map((f) => f.title)].filter(Boolean);
+  return [s.head, s.chip ?? '', ...s.labels.amount, ...s.labels.hero, s.labels.follows ?? '', ...s.labels.kinds, s.labels.sameDay ?? '', s.labels.more ?? '', s.labels.notes ?? '', s.labels.primary ?? '', ...s.stories.map((f) => f.title)].filter(Boolean);
 }
 
 export { shareWords };

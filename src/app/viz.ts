@@ -122,8 +122,8 @@ export function hourBars(o: { got: readonly number[]; usual: readonly number[]; 
   s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
   if (o.cut !== undefined) {
     const cx = o.cut * cw;
-    s += `<line class="cut" x1="${f1(cx)}" x2="${f1(cx)}" y1="${top - 3}" y2="${base}"/>`;
-    if (o.cutLabel) s += `<text x="${f1(cx - 4)}" y="${top - 5}" text-anchor="end" class="lbl-b">${esc(o.cutLabel)}</text>`;
+    s += `<line class="cut-bad" x1="${f1(cx)}" x2="${f1(cx)}" y1="${top - 3}" y2="${base}"/>`;
+    if (o.cutLabel) s += `<text x="${f1(cx - 4)}" y="${top - 5}" text-anchor="end" class="lbl-bad">${esc(o.cutLabel)}</text>`;
     if (o.floorLabel) {
       const after = o.got.slice(o.cut + 1);
       const fy = base - y(Math.max(0, ...after)) - 5;
@@ -147,48 +147,198 @@ export interface GateRule {
 }
 
 /**
- * The checks: a share bar (0-100%: kept rows grey, a segment per drop rule, a tick at the limit, a wall cap when the run
- * was held) and under it a count bar (rows dropped today over the usual range of rows dropped), which shows whether more
- * bad rows came or the kept rows went missing.
+ * The checks: a share bar (0-100%: the dropped rows as one segment, a ‖ wall when the run was held, the kept rows in a
+ * ghost; the limit a cut through the ink with stubs above and below) and under it a count bar (rows dropped today from 0,
+ * over the usual range of rows dropped), which shows whether more bad rows came or the kept rows went missing. Both
+ * scales' ends are printed.
  */
-export function gateBars(o: { rows: number; dropped: number; rules: readonly GateRule[]; limit: number | null; usual: { low: number; high: number } | null; held: boolean; shareLabel: string; limitLabel?: string; countLabel: [string, string]; aria: string; w?: number; big?: boolean }): string {
+export function gateBars(o: { rows: number; dropped: number; rules?: readonly GateRule[]; limit: number | null; usual: { low: number; high: number } | null; held: boolean; shareLabel: string; limitLabel?: string; countLabel: [string, string]; aria: string; w?: number; big?: boolean }): string {
   const w = o.w ?? 334;
   const share = o.rows ? o.dropped / o.rows : 0;
-  const sbH = o.big ? 20 : 14;
-  const cbH = o.big ? 12 : 10;
-  const sy = 16;
-  const cy = sy + sbH + 22;
-  const h = cy + cbH + 20;
+  const sbH = o.big ? 18 : 12;
+  const cbH = o.big ? 14 : 10;
+  const sy = 18;
+  const cy = sy + sbH + 40;
+  const h = cy + cbH + 16;
   const x = (p: number) => p * w;
   let s = open(w, h, o.aria, 'data-y0="0"');
   const total = Math.max(2, x(share));
-  const keptX = total + (o.held ? 12 : 2);
-  s += `<rect class="ghost" x="${f1(keptX)}" y="${sy}" width="${f1(Math.max(0, w - keptX))}" height="${sbH}" rx="2"/>`;
-  const drops = o.rules.filter((r) => !r.warns && r.rows > 0).sort((a, b) => a.rows - b.rows);
-  if (drops.length) {
-    const tot = sum(drops.map((r) => r.rows));
-    const widths = drops.map((r) => Math.max(3, (r.rows / tot) * (total - 2 * (drops.length - 1))));
-    const over = sum(widths) + 2 * (drops.length - 1) - total;
-    widths[widths.indexOf(Math.max(...widths))]! -= over;
-    let cx = 0;
-    drops.forEach((r, i) => {
-      s += `<rect class="ink seg${i % 2}" x="${f1(cx)}" y="${sy}" width="${f1(Math.max(1, widths[i]!))}" height="${sbH}" data-rule="${esc(r.name)}"/>`;
-      cx += widths[i]! + 2;
-    });
-  } else s += `<path class="ink" d="${barPath(0, sy, total, sbH, 2)}"/>`;
-  if (o.limit !== null) {
-    s += `<rect class="limit-gap" x="${f1(x(o.limit) - 2.5)}" y="${sy}" width="5" height="${sbH}"/><rect class="limit" x="${f1(x(o.limit) - 1)}" y="${sy - 4}" width="2" height="${sbH + 8}"/>`;
-    if (o.limitLabel) s += `<text x="${f1(x(o.limit) - 1)}" y="${sy + sbH + 15}" class="lbl-m">${esc(o.limitLabel)}</text>`;
-  }
+  const keptX = total + (o.held ? 11 : 2);
+  s += `<rect class="ghost edge" x="${f1(keptX)}" y="${sy}" width="${f1(Math.max(0, w - keptX))}" height="${sbH}" rx="2"/>`;
+  s += `<path class="ink-strong" d="${barPath(0, sy, total, sbH, 2)}"/>`;
   if (o.held) s += `<g transform="translate(${f1(total + 2)} ${sy - 3})"><rect class="wall" x="0" y="0" width="3" height="${sbH + 6}" rx="1"/><rect class="wall" x="5" y="0" width="3" height="${sbH + 6}" rx="1"/></g>`;
-  s += `<text x="${f1(Math.max(total, 96))}" y="${sy - 5}" text-anchor="end" class="lbl-b">${esc(o.shareLabel)}</text>`;
-  if (o.usual) {
-    const cmax = Math.max(o.usual.high, o.dropped, 1) * 1.1;
-    const c = (v: number) => (v / cmax) * w;
-    s += `<rect class="ghost" x="${f1(c(o.usual.low))}" y="${cy}" width="${f1(Math.max(2, c(o.usual.high) - c(o.usual.low)))}" height="${cbH}" rx="2"/>`;
-    s += `<path class="ink" d="${barPath(0, cy + 1.5, Math.max(2, c(o.dropped)), cbH - 3, 1.5)}"/>`;
+  if (o.limit !== null) {
+    const lx = x(o.limit);
+    s += `<rect class="limit-gap" x="${f1(lx - 1)}" y="${sy}" width="2" height="${sbH}"/><rect class="limit" x="${f1(lx - 1)}" y="${sy - 5}" width="2" height="4"/><rect class="limit" x="${f1(lx - 1)}" y="${sy + sbH + 1}" width="2" height="4"/>`;
+    if (o.limitLabel) s += `<text x="${f1(lx)}" y="${sy + sbH + 17}" text-anchor="${lx < 40 ? 'start' : 'middle'}" class="lbl-m">${esc(o.limitLabel)}</text>`;
   }
-  s += `<text x="0" y="${cy + cbH + 15}" class="lbl-m"><tspan class="lbl-b">${esc(o.countLabel[0])}</tspan>${esc(o.countLabel[1])}</text>`;
+  s += `<text x="${f1(Math.min(w - 40, Math.max(total, 76)))}" y="${sy - 6}" text-anchor="end" class="lbl-b">${esc(o.shareLabel)}</text>`;
+  s += `<text x="${w}" y="${sy + sbH + 17}" text-anchor="end" class="tick" aria-hidden="true">100%</text>`;
+  if (o.usual) {
+    const raw = Math.max(o.usual.high, o.dropped, 1) * 1.08;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    const cmax = Math.ceil(raw / mag) * mag;
+    const c = (v: number) => (v / cmax) * w;
+    s += `<rect class="ghost-2 edge" x="${f1(c(o.usual.low))}" y="${cy}" width="${f1(Math.max(2, c(o.usual.high) - c(o.usual.low)))}" height="${cbH}" rx="2"/>`;
+    s += `<path class="ink-strong" d="${barPath(0, cy + 2, Math.max(2, c(o.dropped)), cbH - 4, 1.5)}"/>`;
+    s += `<text x="0" y="${cy - 6}" class="lbl-b">${esc(o.countLabel[0])}</text>`;
+    if (o.countLabel[1]) s += `<text x="${f1(Math.min(w, Math.max(c(o.usual.high), 150)))}" y="${cy - 6}" text-anchor="end" class="lbl-m">${esc(o.countLabel[1])}</text>`;
+    const fmt = (v: number) => (v >= 1000 ? `${Math.round(v / 100) / 10}k`.replace('.0k', 'k') : String(v));
+    s += `<text x="0" y="${cy + cbH + 13}" class="tick" aria-hidden="true">0</text><text x="${w}" y="${cy + cbH + 13}" text-anchor="end" class="tick" aria-hidden="true">${fmt(cmax)}</text>`;
+  } else s += `<text x="0" y="${cy - 6}" class="lbl-b">${esc(o.countLabel[0])}</text>`;
+  return `${s}</svg>`;
+}
+
+/**
+ * The day's count on a track from 0: the number large, in its severity when the amount is the news; its usual range as
+ * a band with an edge; today a dot. One chart, so the first numbers on the screen are drawn, not said.
+ */
+export function amountLine(o: { value: number; low: number; high: number; valueLabel: string; bandLabel: string; sev?: 'alert' | 'warn' | null; aria: string; w?: number }): string {
+  const w = o.w ?? 334;
+  const h = 62;
+  const ty = 46;
+  const raw = Math.max(o.high, o.value) * 1.05;
+  const max = Math.ceil(raw / 10_000) * 10_000 || 1;
+  const x = (v: number) => (v / max) * (w - 8) + 4;
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  s += `<text x="0" y="30" class="count${o.sev === 'alert' ? ' count-bad' : ''}">${esc(o.valueLabel)}<tspan class="count-unit" dx="6">trips</tspan></text>`;
+  s += `<text x="${w - 30}" y="30" text-anchor="end" class="lbl-m">${esc(o.bandLabel)}</text>`;
+  s += `<line class="base" x1="4" x2="${w - 4}" y1="${ty}" y2="${ty}"/>`;
+  s += `<rect class="ghost-2 edge" x="${f1(x(o.low))}" y="${ty - 5}" width="${f1(Math.max(3, x(o.high) - x(o.low)))}" height="10" rx="3"/>`;
+  s += `<circle class="dot${o.sev ? ` dot-${o.sev}` : ''}" cx="${f1(x(o.value))}" cy="${ty}" r="5.5"/>`;
+  const k = (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v));
+  s += `<text x="4" y="${h - 1}" class="tick" aria-hidden="true">0</text><text x="${w - 4}" y="${h - 1}" text-anchor="end" class="tick" aria-hidden="true">${k(max)}</text>`;
+  return `${s}</svg>`;
+}
+
+export interface Part {
+  name: string;
+  today: number;
+  usual: number;
+  label: string;
+  sev?: 'alert' | 'warn' | null;
+}
+
+/**
+ * The split on one count scale: the named part on the left, everything else on the right, end to end. Each part's slot
+ * is its usual or today's count, whichever is more, outlined; today fills it from its start (2 px at least). Rows missing
+ * today are a dashed outline on a wash; a surge runs past a usual-end tick in a solid grey, never dashed.
+ */
+export function partBar({ left, right, w = 334, aria }: { left: Part; right: Part; w?: number; aria: string }): string {
+  const h = 58;
+  const by = 32;
+  const bh = 20;
+  const gap = 4;
+  const slot = (p: Part) => Math.max(p.today, p.usual, 1);
+  const total = slot(left) + slot(right);
+  const scale = (w - gap) / total;
+  let s = open(w, h, aria, 'data-y0="0"');
+  const draw = (p: Part, x0: number) => {
+    const sw = slot(p) * scale;
+    const today = p.today > 0 ? Math.max(2, p.today * scale) : 0;
+    const usual = p.usual * scale;
+    s += `<rect class="slot" x="${f1(x0)}" y="${by}" width="${f1(sw)}" height="${bh}" rx="2"/>`;
+    if (p.today < p.usual) {
+      if (today) s += `<rect class="ink-strong" x="${f1(x0)}" y="${by}" width="${f1(today)}" height="${bh}" rx="2"/>`;
+      if (usual - today > 3) s += `<rect class="absent" x="${f1(x0 + today + 1)}" y="${by + 1}" width="${f1(usual - today - 2)}" height="${bh - 2}" rx="2"/>`;
+    } else {
+      s += `<rect class="ink-strong" x="${f1(x0)}" y="${by}" width="${f1(Math.max(2, usual))}" height="${bh}" rx="2"/>`;
+      if (today - usual > 1) {
+        s += `<rect class="over" x="${f1(x0 + usual + 2)}" y="${by}" width="${f1(today - usual - 2)}" height="${bh}" rx="2"/>`;
+        s += `<line class="usual-end" x1="${f1(x0 + usual + 1)}" x2="${f1(x0 + usual + 1)}" y1="${by - 3}" y2="${by + bh + 3}"/>`;
+      }
+    }
+    return sw;
+  };
+  const lw = draw(left, 0);
+  draw(right, lw + gap);
+  const name = (p: Part, x: number, anchor: 'start' | 'end') =>
+    `<text x="${f1(x + (p.sev && anchor === 'start' ? 16 : 0))}" y="12" text-anchor="${anchor}" class="lbl-b">${esc(p.name)}</text>` +
+    (p.sev ? `<g transform="translate(${f1(anchor === 'start' ? x : x - p.name.length * 6.9 - 16)} 1)">${glyph(p.sev, 13)}</g>` : '') +
+    `<text x="${f1(x)}" y="26" text-anchor="${anchor}" class="lbl-m">${esc(p.label)}</text>`;
+  s += name(left, 0, 'start') + name(right, w, 'end');
+  return `${s}</svg>`;
+}
+
+/** The reach as an icon: the source, the checks, the outputs; hatched (not built) when the run was held, double-ringed
+ * when they were published from a day with something wrong. aria-hidden: the row's words say it. */
+export function reachIcon({ n, state }: { n: number; state: 'held' | 'alert' }): string {
+  const boxes = Math.min(3, Math.max(1, n));
+  const w = 9 + 6 + 22 + 6 + 22 + 6 + boxes * 25;
+  let s = `<svg class="viz reach" width="${w}" height="28" viewBox="0 0 ${w} 28" aria-hidden="true" focusable="false">`;
+  s += `<circle class="port" cx="4.5" cy="14" r="4.5"/><line class="base" x1="9" x2="15" y1="14" y2="14"/>`;
+  s += `<rect class="node" x="15" y="2" width="22" height="24" rx="4"/><line class="base" x1="37" x2="43" y1="14" y2="14"/>`;
+  s += `<rect class="node" x="43" y="2" width="22" height="24" rx="4"/>`;
+  if (state === 'held') s += `<rect class="wall" x="50" y="8" width="2.5" height="12" rx="1"/><rect class="wall" x="55.5" y="8" width="2.5" height="12" rx="1"/>`;
+  s += `<line class="${state === 'held' ? 'joint' : 'base'}" x1="65" x2="71" y1="14" y2="14"/>`;
+  for (let i = 0; i < boxes; i++) {
+    const x = 71 + i * 25;
+    s += state === 'held' ? `<rect class="hatch-box" x="${x}" y="2" width="21" height="24" rx="4"/>` : `<rect class="ring-bad" x="${x - 2}" y="0" width="25" height="28" rx="6"/><rect class="node" x="${x}" y="2" width="21" height="24" rx="4"/>`;
+  }
+  return `${s}</svg>`;
+}
+
+/**
+ * Every hour of an episode as a bar from 0 over the usual hour's ghost: days divided, a rule at the first short hour,
+ * a bracket over the short span carrying the shortfall, the floor labelled, and each day's mark under its name. Each
+ * bar carries its hour (data-k) for a readout.
+ */
+export function episodeBars(o: { days: readonly { label: string; got: readonly number[]; usual: readonly number[]; mark?: string }[]; cut?: number; cutLabel?: string; bracket?: { from: number; to: number; label: string }; floorLabel?: string; aria: string; w?: number; h?: number }): string {
+  const w = o.w ?? 334;
+  const h = o.h ?? 170;
+  const top = 30;
+  const base = h - 34;
+  const hours = o.days.length * 24;
+  const xw = w / Math.max(1, hours);
+  const usual = o.days.flatMap((d) => [...d.usual]);
+  const got = o.days.flatMap((d) => [...d.got]);
+  const ymax = Math.max(1, ...usual, ...got) * 1.05;
+  const y = (v: number) => base - (v / ymax) * (base - top);
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  for (let i = 0; i < hours; i++) {
+    const x0 = i * xw;
+    s += `<rect class="ghost" x="${f1(x0)}" y="${f1(y(usual[i] ?? 0))}" width="${f1(Math.max(0.6, xw - 0.6))}" height="${f1(base - y(usual[i] ?? 0))}"/>`;
+    const g = got[i] ?? 0;
+    if (g > 0) s += `<rect class="ink-strong" x="${f1(x0 + 0.3)}" y="${f1(Math.min(y(g), base - 1))}" width="${f1(Math.max(0.6, xw - 1.2))}" height="${f1(Math.max(1, base - y(g)))}" data-k="${i}"/>`;
+  }
+  o.days.forEach((d, i) => {
+    if (i) s += `<line class="hair dotted" x1="${f1(i * 24 * xw)}" x2="${f1(i * 24 * xw)}" y1="${top - 4}" y2="${base}"/>`;
+    s += `<text x="${f1((i * 24 + 12) * xw)}" y="${base + 13}" text-anchor="middle" class="tick" aria-hidden="true">${esc(d.label)}</text>`;
+    if (d.mark) s += `<g transform="translate(${f1((i * 24 + 12) * xw - (d.mark.includes('held') ? 13 : 6))} ${base + 18})">${d.mark.split(' ').filter(Boolean).map((m, j) => `<g transform="translate(${j * 13} 0)">${glyph(m as Mark, 12)}</g>`).join('')}</g>`;
+  });
+  s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
+  if (o.cut !== undefined) {
+    const cx = o.cut * xw;
+    s += `<line class="cut-bad" x1="${f1(cx)}" x2="${f1(cx)}" y1="${top - 8}" y2="${base}"/>`;
+    if (o.cutLabel) s += `<text x="${f1(cx + 4)}" y="${top - 10}" class="lbl-bad">${esc(o.cutLabel)}</text>`;
+  }
+  if (o.bracket) {
+    const x1 = o.bracket.from * xw;
+    const x2 = o.bracket.to * xw;
+    s += `<path class="bracket" d="M${f1(x1)} ${top - 2}v-5H${f1(x2)}v5"/><text x="${f1((x1 + x2) / 2)}" y="${top - 10}" text-anchor="middle" class="lbl-bad">${esc(o.bracket.label)}</text>`;
+  }
+  if (o.floorLabel) s += `<text x="${f1(w * 0.62)}" y="${base - 10}" text-anchor="middle" class="lbl-m lbl-halo">${esc(o.floorLabel)}</text>`;
+  return `${s}</svg>`;
+}
+
+/**
+ * What a held run didn't build, on the plan's real chain: the source and the checks with their wall, then a dashed spine
+ * through the steps not built (consecutive ones as a pill) and the outputs, hatched.
+ */
+export function heldLineage({ source, rows, step, chain, w = 334, aria }: { source: string; rows: string; step: string; chain: readonly { kind: 'steps' | 'output'; label: string }[]; w?: number; aria: string }): string {
+  const rowH = 36;
+  const h = 34 + chain.length * rowH + 6;
+  let s = open(w, h, aria);
+  s += `<rect class="node" x="0" y="0" width="150" height="30" rx="6"/><text x="10" y="19" class="mono">${esc(source)} · ${esc(rows)}</text>`;
+  s += `<line class="edge-t" x1="150" x2="172" y1="15" y2="15"/>`;
+  s += `<rect class="node" x="172" y="0" width="${w - 172}" height="30" rx="6"/><text x="182" y="19" class="mono">${esc(step)}</text>`;
+  s += `<g transform="translate(${w - 22} 7)"><rect class="wall" x="0" y="0" width="3" height="16" rx="1"/><rect class="wall" x="6" y="0" width="3" height="16" rx="1"/></g>`;
+  s += `<path class="edge-t dash" d="M${w - 80} 30V${f1(34 + (chain.length - 1) * rowH + 15)}"/>`;
+  chain.forEach((c, i) => {
+    const y0 = 34 + i * rowH + 3;
+    if (c.kind === 'steps') s += `<rect class="pill" x="${w - 170}" y="${y0 + 4}" width="180" height="22" rx="11" transform="translate(-10 0)"/><text x="${w - 90}" y="${y0 + 19}" text-anchor="middle" class="lbl-m">${esc(c.label)}</text>`;
+    else s += `<rect class="hatch-box" x="${w - 180}" y="${y0}" width="180" height="30" rx="6"/><text x="${w - 90}" y="${y0 + 19}" text-anchor="middle" class="mono">${esc(c.label)}</text>`;
+  });
   return `${s}</svg>`;
 }
 
@@ -288,9 +438,9 @@ export function waterfall({ steps, w = 334, h = 172, aria }: { steps: readonly S
     const cx = i * cw + cw / 2;
     const yt = y(Math.max(b.from, b.to));
     const yb = y(Math.min(b.from, b.to));
-    s += `<rect class="${b.kind === 'total' ? 'ink-strong' : b.kind === 'down' ? 'wf-down' : 'wf-up'}" x="${f1(cx - bw / 2)}" y="${f1(yt)}" width="${f1(bw)}" height="${f1(Math.max(2, yb - yt))}" rx="2"/>`;
+    s += `<rect class="${i === 0 && b.kind === 'total' ? 'ghost-2 edge' : b.kind === 'total' ? 'ink-strong' : b.kind === 'down' ? 'absent' : 'ink'}" x="${f1(cx - bw / 2)}" y="${f1(yt)}" width="${f1(bw)}" height="${f1(Math.max(2, yb - yt))}" rx="2"/>`;
     if (i < n - 1) s += `<line class="joint" x1="${f1(cx + bw / 2)}" x2="${f1(cx + cw - bw / 2)}" y1="${f1(y(b.to))}" y2="${f1(y(b.to))}"/>`;
-    s += `<text x="${f1(cx)}" y="${f1(yt - 6)}" text-anchor="middle" class="lbl-b">${esc(b.label)}</text>`;
+    s += `<text x="${f1(cx)}" y="${f1(yt - 6)}" text-anchor="middle" class="${b.kind === 'down' ? 'lbl-bad' : 'lbl-b'}">${esc(b.label)}</text>`;
     s += `<text x="${f1(cx)}" y="${h - 6}" text-anchor="middle" class="tick" aria-hidden="true">${esc(b.name)}</text>`;
     if (b.sev) s += `<g transform="translate(${f1(cx + bw / 2 + 3)} ${f1(yb - 16)})">${glyph(b.sev, 14)}</g>`;
   });

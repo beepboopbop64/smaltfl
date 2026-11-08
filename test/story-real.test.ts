@@ -35,7 +35,7 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('tells Fri Sep 22, 2023 as the Flex Fare trips alone arriving, the run held with fewer rows dropped than usual', () => {
     const s = story('2023-09-22');
-    expect(s.head).toBe('Only Flex Fare trips arrived');
+    expect(s.head).toBe('Only Flex Fare records arrived');
     expect(s.chip).toBe('Day 2 · since Thu 13:00');
     expect(s.split!.part.today).toBe(4613);
     expect(s.split!.rest.today).toBe(20);
@@ -56,8 +56,59 @@ describe.skipIf(!has)('the story on the real history', () => {
 
   it('tells New Year’s Day 2024 as a Flex Fare surge, unusual and nothing more', () => {
     const s = story('2024-01-01');
-    expect(s.head).toBe('Flex Fare trips 2.3× usual');
+    expect(s.head).toBe('Flex Fare records 2.3× usual');
     expect(s.state).toBe('unusual');
+  });
+
+  it('prints every number on a label as the value it shows: rounded, or within 5% after a ~', () => {
+    // Each number in a label, in order, against the value it claims to show.
+    const said = (label: string, ...values: number[]) => {
+      const text = label.replace(/,/g, '');
+      [...text.matchAll(/(\d+(?:\.\d+)?)(k?)/g)].forEach((m, i) => {
+        const v = values[i];
+        if (v === undefined) return;
+        const dec = (m[1]!.split('.')[1] ?? '').length;
+        const unit = 10 ** -dec * (m[2] ? 1000 : 1);
+        const shown = Number(m[1]) * (m[2] ? 1000 : 1);
+        const loose = /~$/.test(text.slice(0, m.index));
+        expect(Math.abs(shown - v), `${label}: ${shown} for ${v}`).toBeLessThanOrEqual(Math.max(unit / 2, loose ? 0.05 * v : 0) + 1e-9);
+      });
+    };
+    for (const day of ['2023-09-22', '2022-11-15', '2024-01-01', '2023-09-21']) {
+      const s = story(day);
+      const [part, partNum, , restNum] = s.split ? s.labels.hero : [];
+      if (s.split && s.hero === 'split') {
+        expect(part).toBe(s.split.name);
+        said(partNum!, s.split.part.today, s.split.part.usual);
+        said(restNum!, s.split.rest.today, s.split.rest.usual);
+      }
+      said(s.labels.amount[0]!, s.amount!.value);
+      said(s.labels.amount[1]!, s.amount!.low, s.amount!.high);
+      if (s.gate?.held) {
+        const at = s.labels.hero.indexOf('Checks held');
+        said(s.labels.hero[at + 1]!, s.gate.share * 100);
+        said(s.labels.hero[at + 3]!, s.gate.dropped);
+        said(s.labels.hero[at + 4]!, s.gate.usual!.low, s.gate.usual!.high);
+      }
+    }
+  });
+
+  it('draws count bands only where they hold: 90% of ordinary days inside, for the counts the visuals draw', async () => {
+    const { isSpecial } = await import('../src/core/calendar.js');
+    for (const m of [{ of: 'count', column: 'payment_type', value: '0' }, { of: 'count', column: 'VendorID', value: '1' }, { of: 'droppedRows' }, { of: 'ruleRows', name: 'distance' }] as const) {
+      const r = h!.of(m)!;
+      let n = 0;
+      let inside = 0;
+      for (const day of file!.days) {
+        if (day < '2023-01-01' || isSpecial(day)) continue;
+        const at = r.at(day);
+        const v = r.value(day);
+        if (!at || v === null) continue;
+        n++;
+        if (r.place(at, v) === 'within') inside++;
+      }
+      expect(inside / n, JSON.stringify(m)).toBeGreaterThanOrEqual(0.9);
+    }
   });
 
   it('tells calm days and the day after an episode calmly', () => {

@@ -21,7 +21,7 @@ describe('the cause, as a population', () => {
   it('names the part that arrived as usual when everything else almost stopped', () => {
     const s = story({ [DAY]: { onlyVendor1: true, dropShare: 0.105 } });
     expect(s.state).toBe('wrong');
-    expect(s.head).toBe('Only Vendor 1 trips arrived');
+    expect(s.head).toBe('Only Vendor 1 records arrived');
     expect(s.hero).toBe('split');
     expect(s.split).toMatchObject({ kind: 'held', name: 'Vendor 1' });
     expect(s.split!.part.today / s.split!.part.usual).toBeGreaterThan(0.67);
@@ -37,7 +37,7 @@ describe('the cause, as a population', () => {
     expect(s.gate).toMatchObject({ step: 'trips_valid', held: true, limit: 0.1 });
     // 10.5% of a near-blank day’s rows is fewer rows than a day like it drops.
     expect(s.gate!.dropped).toBeLessThan(s.gate!.usual!.low);
-    expect(s.labels.hero).toContain('Checks held the run');
+    expect(s.labels.hero).toContain('Checks held');
     expect(s.labels.hero).toContain('limit 10%');
     // The dropped share follows from the cause (its count is not past usual): folded, not a story of its own.
     expect(s.follows.map((f) => f.kind)).toContain('dropped');
@@ -55,7 +55,7 @@ describe('the cause, as a population', () => {
   it('names a part that surged, as unusual, with OK this day as its verb', () => {
     const s = story({ [DAY]: { vendorSurge: 2.3 } });
     expect(s.split).toMatchObject({ kind: 'surged', name: 'Vendor 1' });
-    expect(s.head).toMatch(/^Vendor 1 trips 2\.\d× usual$/);
+    expect(s.head).toMatch(/^Vendor 1 records 2\.\d× usual$/);
     expect(s.primary).toBe('expected');
   });
 
