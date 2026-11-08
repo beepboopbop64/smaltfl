@@ -9,6 +9,7 @@ import { missingSql, nodeSelect, shiftSql } from '../src/core/emit.js';
 import { planHash, planKind } from '../src/core/manifest.js';
 import { canonicalJSON } from '../src/core/canonical.js';
 import { visualFlow } from './fixtures/taxi.js';
+import { exampleDoc, exampleFilled } from './helpers/example.js';
 
 const env = { smaltdb: '0.9.0', smaltfl: '0.0.0' };
 
@@ -696,6 +697,24 @@ describe('the fills’ content vectors (ADR 0009 amendment 1, Encodings)', () =>
     expect(await flowHash(doc)).toBe('34bb7cfbb4bfad9a86d0c587be865295c6d7e17de87604a36be21614455dce95');
     expect(await planHash(plan)).toBe('1f0dccb414035422fe9db464ce2167bf65d181ac0cecbfa32959a6818198869a');
     expect(await fillKey(plan)).toBe('8e220625656cb762a7731c4ba01d4bede329ee79a9722fa2ff5da57e51bf67d5');
+  });
+
+  it('4: the example with its fill step, for Thu Sep 21, 2023; its zones and weather keep their keys', async () => {
+    const values = { month: '2023-09', day: '2023-09-21' };
+    expect(validateDocument(exampleFilled())).toEqual([]);
+    const plan = await translate(exampleFilled(), values);
+    expect(plan.publish).toEqual({ hold: ['checks', 'wrong'], watch: [[0, 'history.json']], period: 'day', together: true, donor: 'weekday' });
+    // On the example with its ontology's nouns and the vendor's name and role (ADR 0010 §8); d145cfde… without them.
+    expect(await planHash(plan)).toBe('0749ab06d7d6e78fff14b5ff23d4f8641ac315b70764b16881b367ed13074170');
+    // The example as it ships, with its publish block: the same plan/1 vector as before the fills (7d7236ea…, which is
+    // ccbc4d7b… with those marks).
+    const before = await translate(exampleDoc(), values);
+    expect(await planHash(before)).toBe('7d7236ead520908b210b879a16815f4d3a727b6320f620d2821d3f87195fd252');
+    const keyed = async (p: FlowPlan) => Object.fromEntries((await keysOf(p)).map((k, i) => [p.nodes[i]!.origin, k]));
+    const [now, then] = [await keyed(plan), await keyed(before)];
+    const same = Object.keys(now).filter((o) => then[o] === now[o]).sort();
+    expect(same).toEqual(['districts', 'trips', 'weather', 'weather_hourly', 'zone_list', 'zones']);
+    expect(Object.keys(now).filter((o) => !(o in then))).toEqual(['trips_filled']);
   });
 
   it('5: the plans without a fill step hash as they did (fc700fdf…, 32609b0f…, 292c423f…)', async () => {

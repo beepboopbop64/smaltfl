@@ -5,6 +5,7 @@
  * shapes (percentiles, histogram, common values) come from an even sample of the rows. No engine, no DOM: emit.ts
  * writes the SQL that gathers the inputs.
  */
+import { FILLED_FROM } from './document.js';
 import type { FailAction, FlowPlan, PlanNode } from './plan.js';
 import { identifiers, quoteIdent, tokens } from './sqltext.js';
 
@@ -711,7 +712,8 @@ export function selectsStar(sql: string, input: string): boolean {
 
 /**
  * The columns a node sets on rows it keeps, lowercased, or null when it makes rows of its own (a source, an
- * aggregate, SQL other than a plain select of its input): a check across it judges other values.
+ * aggregate, SQL other than a plain select of its input, a fill that fills a day): a check across it judges other
+ * values.
  */
 function keeps(plan: FlowPlan, n: PlanNode, columnsOf: (j: number) => readonly string[]): Set<string> | null {
   const lc = (c: string) => c.toLowerCase();
@@ -729,6 +731,10 @@ function keeps(plan: FlowPlan, n: PlanNode, columnsOf: (j: number) => readonly s
     }
     case 'sql':
       return n.inputs.length === 1 && n.names.length === 1 && selectsStar(n.sql, n.names[0]!) ? new Set() : null;
+    case 'fill':
+      // A fill step that fills nothing passes its source's rows through and adds its mark (ADR 0009 amendment 1 S1);
+      // one that fills a day brings another day's rows in.
+      return n.missing === null ? new Set([FILLED_FROM]) : null;
     default:
       return null;
   }

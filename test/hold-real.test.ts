@@ -8,7 +8,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { FlowDocument } from '../src/core/document.js';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
-import { claimHolds, dayClaim, type StoryClaim } from '../src/core/hold.js';
+import { claimHolds, countedChecks, dayClaim, type StoryClaim } from '../src/core/hold.js';
+import { exampleFilled } from './helpers/example.js';
 
 const DATA = new URL('../dist/app/data/', import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, DATA), 'utf8')) as unknown;
@@ -57,6 +58,14 @@ describe.skipIf(!has)('the flow’s verdict on the real history (ADR 0009 §3)',
     // No day of the span falls under the floor that needs no range.
     expect(claims.filter((c) => /^Almost no /.test(c.head))).toEqual([]);
   }, 120_000);
+
+  it('holds the same days with the example’s fill step: the checks are still counted on the trips (A6)', () => {
+    // A claim depends on the document only through whether the history counts its checks: with the fill step, the
+    // checks read the trips through it, and still count them, so every verdict above stands.
+    expect(countedChecks(doc, h!, 'trips')).toBe(true);
+    expect(countedChecks(exampleFilled(), h!, 'trips')).toBe(true);
+    for (const day of ['2023-09-21', '2022-11-15', '2023-09-20']) expect(dayClaim(h!, exampleFilled(), ref, day, 'trips', 'dev')).toEqual(dayClaim(h!, doc, ref, day, 'trips', 'dev'));
+  });
 
   it('tells the owner’s examples by their cause', () => {
     expect(dayClaim(h!, doc, ref, '2023-09-21', 'trips', 'dev')).toMatchObject({ state: 'wrong', below: true, head: 'Trips fall to trickle from 13:00', rows: 41_939 });

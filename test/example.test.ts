@@ -14,7 +14,7 @@ import smaltfl from '../src/plugin/index.js';
 import { runFlow, verifyRun, type FlowDocument } from '../src/index.js';
 import { EXAMPLE_SOURCES } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
-import { exampleDoc, examplePublishing } from './helpers/example.js';
+import { exampleDoc, exampleFilled, examplePublishing } from './helpers/example.js';
 
 const doc = examplePublishing();
 const fixture = (name: string) => new Uint8Array(readFileSync(new URL(`../fixtures/xs/${name}`, import.meta.url)));
@@ -106,6 +106,22 @@ describe('the example flow on real data (tier XS)', () => {
     expect(published.manifest.nodes.filter((x) => x.status === 'built').map((x) => x.origin)).toEqual([]);
     expect(Object.fromEntries(Object.entries(published.manifest.outputs).map(([k, o]) => [k, o.key]))).toEqual(Object.fromEntries(Object.entries(held.manifest.outputs).map(([k, o]) => [k, o.key])));
     expect(published.published).toEqual(Object.keys(published.manifest.outputs).sort());
+  });
+
+  it('with its fill step, computes the same and marks every output it reaches; the zones and the weather keep their keys (A6)', async () => {
+    const db = await engine();
+    const plain = await runFlow(db, doc, { smaltdb: SMALTDB });
+    const { publish: _p, ...rest } = exampleFilled();
+    const filled = await runFlow(db, { ...rest, smaltfl: 1, parameters: (rest.parameters ?? []).filter((p) => p.name !== 'day') }, { smaltdb: SMALTDB });
+    const key = (r: typeof plain, name: string) => r.manifest.outputs[name]!.key;
+    for (const name of ['districts', 'weather_hourly', 'zone_list']) expect(key(filled, name), name).toBe(key(plain, name));
+    for (const name of ['borough_hour', 'weather_effect', 'zone_hour']) expect(key(filled, name), name).not.toBe(key(plain, name));
+    // A day nothing fills: every row as it arrived, the same counts and totals, the mark empty.
+    expect(filled.manifest.nodes.find((x) => x.origin === 'trips_valid')!.expectations).toEqual(plain.manifest.nodes.find((x) => x.origin === 'trips_valid')!.expectations);
+    expect(db.query('SELECT count(*), sum(filled), max(filled_from) FROM borough_hour').rows).toEqual([[plain.manifest.outputs.borough_hour!.rows, 0, null]]);
+    expect(db.query('SELECT sum(filled), max(filled_from) FROM weather_effect').rows).toEqual([[0, null]]);
+    expect(filled.manifest.outputs.zone_hour!.rows).toBe(plain.manifest.outputs.zone_hour!.rows);
+    expect((await verifyRun(db, filled.run, { smaltdb: SMALTDB })).ok).toBe(true);
   });
 
   it('reuses everything on a second run, and verifies', async () => {
