@@ -3108,7 +3108,7 @@ function actionsOf(f: Finding, card: string, primary: Act | null): HTMLElement {
   main?.classList.remove('small', 'quiet');
   const others = [...new Set([...f.acts, 'export' as Act])].filter((a) => a !== primary);
   const menu = h('div', { class: 'vf-menu', hidden: true }, ...others.map((a) => actButton(a, f, card)).filter((x): x is HTMLElement => !!x));
-  const more = menu.childElementCount ? h('button', { type: 'button', class: 'vf-more', 'aria-label': 'More actions', 'aria-expanded': 'false', onclick: (e: Event) => { menu.hidden = !menu.hidden; (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!menu.hidden)); } }, glyphEl('more', 16)) : null;
+  const more = menu.childElementCount ? h('button', { type: 'button', class: 'vf-more', 'aria-label': `More actions: ${Array.from(menu.children).map((b) => b.textContent).join(', ')}`, title: Array.from(menu.children).map((b) => b.textContent).join(' · '), 'aria-expanded': 'false', onclick: (e: Event) => { menu.hidden = !menu.hidden; (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!menu.hidden)); } }, glyphEl('more', 16)) : null;
   const done = findingLog(f);
   return h('div', { class: 'vf-acts' }, main, more, menu, done.length ? h('ul', { class: 'f-log' }, ...done.map((e) => h('li', {}, logText(e)))) : null);
 }
@@ -3291,7 +3291,8 @@ function healthDetail(story: Story, cell: Cell, card: string): void {
     }
   }
   if (mine.length) body.push(h('div', { class: 'vf-list' }, ...shownRows(mine, card, 6, true)));
-  else body.push(oneLine(cell === 'file' ? null : { amount: 'A normal amount for the day.', hours: 'Trips every hour.', values: 'Values as usual.', shape: 'Spreads and times as usual.' }[cell]));
+  // Nothing found: said in words only where no visual above says it.
+  else body.push(oneLine(cell === 'file' || cell === 'amount' ? null : { hours: 'Trips every hour.', values: 'Values as usual.', shape: 'Spreads and times as usual.' }[cell]));
   const sev: Severity = c.explained ? 'ok' : c.severity ?? 'ok';
   openDetail(CELL_NAMES[cell], sev, body);
 }

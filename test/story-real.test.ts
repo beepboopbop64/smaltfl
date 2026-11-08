@@ -269,7 +269,18 @@ describe.skipIf(!has)('the story on the real history', () => {
     expect(glanceStrings(sat).reduce((t, x) => t + wordsIn(x), 0)).toBeLessThanOrEqual(16);
     // Sat Sep 23, 2023 had 33 mm of rain: its cause is told, its weather left to the weather's card.
     expect(story('2023-09-23').labels.context).toBeNull();
-  });
+    // Every day the note shows on (a snowy day, or the day after one) stays within its budget, the note counted.
+    const budget: Record<string, number> = { unusual: 45, calm: 16, notes: 16, recovery: 24 };
+    let noted = 0;
+    for (const [k, d] of file!.days.entries()) {
+      if (!((file!.weather!.snow[k] ?? 0) >= 1 || (file!.weather!.snow[k - 1] ?? 0) >= 1)) continue;
+      const s = story(d);
+      if (!s.labels.context) continue;
+      noted++;
+      expect(glanceStrings(s).reduce((t, x) => t + wordsIn(x), 0), `${d}: ${glanceStrings(s).join(' | ')}`).toBeLessThanOrEqual(budget[s.state]!);
+    }
+    expect(noted).toBeGreaterThan(10);
+  }, 60_000);
 
   it('accounts for every finding in one tier: the grouped rows add up to what the old view counted', () => {
     // The old view counted every finding; the story groups them. Thu Sep 21: 1 cause + 2 absorbed + 6 + 8 = 17.
