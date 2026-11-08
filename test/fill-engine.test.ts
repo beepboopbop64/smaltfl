@@ -241,7 +241,7 @@ describe('releasing a fill (amendment 1 S10)', () => {
   it('publishes the part that arrived alone, with no donor', async () => {
     const t = await heldDay();
     const r = await derive(t, repairFrom(null));
-    expect(r.derived).toEqual({ holds: [expect.objectContaining({ by: 'derived', said: 'keeps what arrived outside 13:00–23:59' })], filled: null });
+    expect(r.derived).toEqual({ holds: [expect.objectContaining({ by: 'derived', said: 'keeps all but 13:00–23:59' })], filled: null });
     const out = await releaseRun(t.db, releaseOf(t, r, repairFrom(null)));
     expect(out).toMatchObject({ outcome: 'applied', filled: null });
     expect(total(t.db)!.slice(1)).toEqual([0, null]);

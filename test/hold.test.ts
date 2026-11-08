@@ -619,7 +619,7 @@ describe('what holds a derived run (amendment 1 S4, S10)', () => {
     expect(holdsOf(plan, m, judged, { derived: true, donors: [{ node: donor, unjudged: 'no claim for trips_donor' }] }).map((h) => [h.by, h.origin, h.said])[1]).toEqual(['donor', 'trips_donor', 'no claim for trips_donor']);
     // The complete part: no donor, the same hold.
     const part = await derivedPlan(null);
-    expect(holdsOf(part, manifestOf(part), judged, { derived: true }).at(-1)).toMatchObject({ by: 'derived', said: 'keeps what arrived outside 13:00–23:59' });
+    expect(holdsOf(part, manifestOf(part), judged, { derived: true }).at(-1)).toMatchObject({ by: 'derived', said: 'keeps all but 13:00–23:59' });
     // Not asked to be derived: the plan's own holds only, as before.
     expect(holdsOf(plan, m, judged)).toEqual([holdsOf(plan, m, judged, { derived: true })[0]]);
   });

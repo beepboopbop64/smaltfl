@@ -30,7 +30,8 @@ export type Direction = 'before' | 'after';
 export const DONOR_WINDOW = 28;
 
 /** A donor as the page found it: its day by a rule and a direction, the file the data's list gives for that day, and
- * the flow's verdict on it, told from the same pinned history as the held day's claim. */
+ * the flow's verdict on it, told from the same pinned history as the held day's claim and named for the donor source
+ * (`trips_donor`), as the derived run judges it. */
 export interface DonorPick {
   rule: DonorRule;
   direction: Direction;
@@ -146,7 +147,8 @@ export function donorFor(q: DonorQuery): DonorPick | NoDonor {
     if (!file) continue;
     const claim = dayClaim(q.h, q.doc, q.history, d, q.source, q.build);
     if (!claim || claim.state === 'wrong' || claim.state === 'refused') continue;
-    return { rule: q.rule, direction: q.direction, day: d, file, claim };
+    // The run judges it as the donor source's claim (judgeDonors): the flow's verdict on the day, named for the donor.
+    return { rule: q.rule, direction: q.direction, day: d, file, claim: { ...claim, source: donorIdOf(q.source) } };
   }
   return { rule: q.rule, direction: q.direction, none: waiting ? 'not arrived' : 'no good day within four weeks' };
 }
@@ -177,8 +179,10 @@ export const donorRuleOf = (doc: Pick<FlowDocument, 'publish'>): DonorRule => do
 
 // ------------------------------------------------------------------ the derived document
 
+/** The id a source's donor takes in a derived document. */
+export const donorIdOf = (source: string): string => `${source}_donor`;
 /** The id a source's donor takes in a derived document, and the table it reads (S3: until loads.json format 2). */
-export const donorSourceOf = (source: { id: string; table: string }) => ({ id: `${source.id}_donor`, table: `${source.table}_donor` });
+export const donorSourceOf = (source: { id: string; table: string }) => ({ id: donorIdOf(source.id), table: `${source.table}_donor` });
 
 /**
  * The derived document a remedy makes (S4): the fill step gets the missing part, and either the donor's day with the

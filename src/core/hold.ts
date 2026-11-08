@@ -279,11 +279,16 @@ export interface Derived {
   donors?: readonly Judged[];
 }
 
-/** What a fill node takes from another day, said: "fills 13:00–23:59 from 2023-09-14", "keeps what arrived outside VendorID 1". */
+/**
+ * What a fill node does, said: "fills 13:00–23:59 from 2023-09-14", "fills all but payment_type 0 from 2023-09-15";
+ * for the part that arrived, "keeps all but 13:00–23:59", "keeps all but VendorID 1", "keeps only payment_type 0".
+ */
 function fillSaid(n: Extract<FlowPlan['nodes'][number], { op: 'fill' }>): string {
   const m = n.missing!;
-  const part = 'hours' in m ? `${String(m.hours[0]).padStart(2, '0')}:00–${String(m.hours[1]).padStart(2, '0')}:59` : `${m.rest ? 'all but ' : ''}${m.column} ${JSON.stringify(m.value)}`;
-  return n.from === null ? `keeps what arrived outside ${part}` : `fills ${part} from ${n.from}`;
+  const part = 'hours' in m ? `${String(m.hours[0]).padStart(2, '0')}:00–${String(m.hours[1]).padStart(2, '0')}:59` : `${m.column} ${JSON.stringify(m.value)}`;
+  const rest = !('hours' in m) && m.rest === true;
+  if (n.from !== null) return `fills ${rest ? 'all but ' : ''}${part} from ${n.from}`;
+  return rest ? `keeps only ${part}` : `keeps all but ${part}`;
 }
 
 /**

@@ -74,7 +74,7 @@ export { dayState, decisionFor, inputsKey, inputsOf, pausesOf, pauseState, sameK
 export type { ClaimAt, ClaimFacts, Derived, FillHold, FlowFor, HistoryRef, Hold, Judged, RunHold, StoryClaim } from './core/hold.js';
 export type { DecideAbout, Decided, DerivedAbout, HeldAbout, Inputs, Pause, ReleaseAbout, RunRef } from './core/hold.js';
 // Filling a paused day (ADR 0009 amendment 1).
-export { DONOR_WINDOW, dayVersions, donorChoices, donorFor, donorRuleOf, donorSourceOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument } from './core/fill.js';
+export { DONOR_WINDOW, dayVersions, donorChoices, donorFor, donorIdOf, donorRuleOf, donorSourceOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument } from './core/fill.js';
 export type { Direction, DonorPick, DonorQuery, FillCounts, NoDonor, Offer, OfferInput, Repair, Version } from './core/fill.js';
 export { PLUGIN_NAME } from './core/protocol.js';
 export type { PluginCaller, ReleaseInput, ReleaseResult, RunContext, RunOptions, RunResult, VerifyCheck, VerifyLevel, VerifyOptions, VerifyResult } from './core/protocol.js';

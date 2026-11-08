@@ -86,7 +86,7 @@ describe('the donor (S3)', () => {
   it('is the first good day by the rule and direction, within four weeks, with the flow’s verdict on it', () => {
     const h = new HistoryRanges(historyWith({ [DAY]: { stopAt: 13 } }));
     const wd = donorFor(query(h, DAY));
-    expect(wd).toMatchObject({ rule: 'weekday', direction: 'before', day: '2023-10-04', file: listedAll('2023-10-04'), claim: { source: 'trips', day: '2023-10-04', state: 'calm', history: HISTORY } });
+    expect(wd).toMatchObject({ rule: 'weekday', direction: 'before', day: '2023-10-04', file: listedAll('2023-10-04'), claim: { source: 'trips_donor', day: '2023-10-04', state: 'calm', history: HISTORY } });
     expect(donorFor(query(h, DAY, { rule: 'nearest' }))).toMatchObject({ day: '2023-10-10' });
     expect(donorFor(query(h, DAY, { direction: 'after' }))).toMatchObject({ day: '2023-10-18' });
     expect(donorFor(query(h, DAY, { rule: 'nearest', direction: 'after' }))).toMatchObject({ day: '2023-10-12' });
