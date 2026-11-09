@@ -33,6 +33,11 @@ describe('what readers would get, drawn by the day’s cause (ADR 0009 §12)', (
     expect(d.scale).toBe(Math.max(...s.hours!.usual, ...s.hours!.got, ...(d.dont as { hours: readonly number[] }).hours));
     // Nothing published yet: nothing to keep.
     expect(decisionDrawing(h, s, '2023-09-21', null, { day: 1, readers: null }).dont).toBeNull();
+    // A day kept filled (S12): its missing hours its donor's, stippled, never its own short hours.
+    const kept = decisionDrawing(h, s, '2023-09-22', '2023-09-21', { day: 1, readers: 1 }, null, { missing: { time: 'tpep_pickup_datetime', hours: [13, 23] }, donor: '2023-09-14' });
+    const donor = h.file.hours[h.file.days.indexOf('2023-09-14')]!;
+    expect((kept.dont as { hours: readonly number[] }).hours.slice(13)).toEqual(donor.slice(13));
+    expect(kept.dontFilled).toEqual([13, 23]);
   });
 
   it('draws a split as the part and the rest, the part named with its trips, and the day kept split by the same value', () => {
@@ -100,6 +105,8 @@ describe('the decision sheet’s words (ADR 0009 §12: 45 at a glance)', () => {
     expect([t.missing, t.cut]).toEqual(['~77k missing', '13h']);
     // Nothing published yet: nothing to keep.
     expect(sheetText({ ...thu, readers: null }).options[1]).toMatchObject({ label: 'Don’t publish', number: 'nothing shown' });
+    // A day readers keep filled: its rows as filled, marked ◧ beside its date (S12).
+    expect(sheetText({ ...thu, readers: { day: '2023-09-21', rows: 121_931, mark: 'fill' } }).options[1]).toMatchObject({ label: 'Keep Thu 21 ◧', number: '121,931 trips' });
     // A day kept that is stale says its age under it.
     expect(sheetText({ ...thu, readers: { day: '2023-09-18', rows: 89_571 } }).options[1]!.sub).toBe('3 days old');
     // How long it has waited, said by the clock it was held at when that was today: "Paused since 10:31", never
@@ -550,8 +557,9 @@ describe('Accept the new level on the sheet and after it (amendment 1 S6, S12, X
   it('says the new level once decided, and a later day published under it', () => {
     expect(receiptLines({ state: 'accepted', day: '2022-11-14', readers: '2022-11-14', released: 3, who: 'Owner', at: '09:40', seq: 24, under: null, standing: false, level: '2022-11-14' })).toEqual({ head: 'New level from Mon 14 · readers now see Mon 14', sub: 'learns from Mon 14 · 3 outputs released · Owner · 09:40 · record #24', change: null });
     expect(receiptLines({ state: 'accepted', day: '2022-11-15', readers: '2022-11-15', released: 3, who: 'Owner', at: '09:41', seq: 27, under: 'Mon', standing: false, level: '2022-11-14' }).head).toBe('By Mon’s new level · readers now see Tue 15');
-    expect(dayPausedLine({ state: 'accepted', readers: null, may: true, standing: false, day: '2022-11-14', level: '2022-11-14' }).text).toBe('⚑ New level from Mon 14');
-    expect(dayPausedLine({ state: 'accepted', readers: null, may: true, standing: false, day: '2022-11-15', level: '2022-11-14', under: 'Mon' }).text).toBe('⚑ By Mon’s new level');
+    expect(dayPausedLine({ state: 'accepted', readers: null, may: true, standing: false, day: '2022-11-14', level: '2022-11-14' }).text).toBe('New level from Mon 14');
+    expect(dayPausedLine({ state: 'waiting', readers: '2023-09-21', may: true, standing: false, day: '2023-09-22', readersMark: 'fill' }).text).toBe('Paused · readers see Thu 21 ◧');
+    expect(dayPausedLine({ state: 'accepted', readers: null, may: true, standing: false, day: '2022-11-15', level: '2022-11-14', under: 'Mon' }).text).toBe('By Mon’s new level');
     expect(daySentence({ day: '2022-11-14', head: 'Vendor 1 sent almost nothing', wrong: true, pause: { state: 'accepted', readers: null, standing: false, may: true, deciders: 'Owner', level: '2022-11-14' } })).toBe('Mon Nov 14: new level from Mon 14');
     expect(outputPausedLine({ state: 'accepted', may: true, deciders: 'Owner', standing: false }).text).toBe('Published as a new level');
     expect(decidedLines({ day: '2022-11-14', state: 'accepted', who: 'Owner', minutes: 30, reason: 'Planned change', run: '#13', seq: 24, release: 25, under: null }).head).toBe('Mon Nov 14 · new level');

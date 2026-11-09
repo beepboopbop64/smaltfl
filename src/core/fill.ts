@@ -125,6 +125,9 @@ export interface DonorQuery {
   /** The history file the claims are told from, as pinned in the engine, and the build that tells them. */
   history: HistoryRef;
   build: string;
+  /** Whether a day after the held one has arrived and been judged where the decision is made (run in the record or the
+   * visit): a later day that hasn't is no donor yet, however much of it the history holds (S3). Every day, without it. */
+  arrived?: (day: string) => boolean;
 }
 
 /** A day's donor candidates by a rule and direction, nearest first: 7, 14, 21, 28 days away, or 1 to 28. */
@@ -155,6 +158,11 @@ export function donorFor(q: DonorQuery): DonorPick | NoDonor {
       continue;
     }
     if (special(d) && !heldSpecial) continue;
+    // A later day that hasn't run and been judged here hasn't arrived for this decision: never shown before its time.
+    if (q.direction === 'after' && q.arrived && !q.arrived(d)) {
+      waiting = true;
+      continue;
+    }
     const file = q.listed(d);
     if (!file) continue;
     const claim = dayClaim(q.h, q.doc, q.history, d, q.source, q.build);

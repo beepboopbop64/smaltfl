@@ -172,6 +172,10 @@ describe('the donor (S3)', () => {
     const none2 = donorChoices(query(h, DAY, { listed: (d) => (d > DAY ? listedAll(d) : null) }), 'weekday');
     expect(none2.none).toEqual({ rule: 'weekday', direction: 'before', none: 'no good day within four weeks' });
     expect(none2.picks.map((p) => p.day)).toEqual(['2023-10-12', '2023-10-18']);
+    // A later day that hasn't run and been judged where the decision is made is no donor yet (S3), however much of it
+    // the history holds: the backfill waits.
+    expect(donorChoices(query(h, DAY, { arrived: (d) => d <= '2023-10-12' }), 'weekday').picks.map((p) => p.day)).toEqual(['2023-10-04', '2023-10-10', '2023-10-12']);
+    expect(donorFor({ ...query(h, DAY, { arrived: () => false }), rule: 'nearest', direction: 'after' })).toEqual({ rule: 'nearest', direction: 'after', none: 'not arrived' });
   });
 
   it('follows the watch’s rule, else its pattern’s; a legacy watch the flow’s, else the same weekday (C1, I5)', async () => {

@@ -695,8 +695,10 @@ describe('a filled day in the record (amendment 1 S5, S7, S9)', () => {
     // With a later day current, the names can't go back: the withdrawal is recorded, and the day is not published.
     const refused = entry('release', { run: 41, manifest: SHA('1'), outputs: {}, decision: withdraw.seq, leaf: SHA('d'), outcome: 'refused', why: '2023-09-25 is current', withdraws: rel2.seq } satisfies ReleaseAbout);
     const q = pausesOf([...log, withdraw, refused])[0]!;
-    expect(q.repaired).toMatchObject({ decision: refill.seq });
+    expect(q).toMatchObject({ repaired: null, withdrawn: withdraw.seq });
     expect(dayState(null, q)).toBe('dont');
+    // Or with no release at all, as the page records it once a later day is current (S5): withdrawn all the same.
+    expect(pausesOf([...log, withdraw])[0]).toMatchObject({ repaired: null, withdrawn: withdraw.seq });
   });
 
   it('says readers see the day before again once a fill is withdrawn', () => {

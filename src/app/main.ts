@@ -71,7 +71,7 @@ interface RunRecord {
    * decision released it here. Its `inputs` are its held run's, so it finds the same pause; it is never one of
    * `state.runs`, and the day's views show it only while readers have its versions (`filledOf`).
    */
-  derived?: { from: RunRecord; repair: Repair; doc: FlowDocument; seq: number | null; release?: ReleaseResult; releaseSeq?: number };
+  derived?: { from: RunRecord; repair: Repair; doc: FlowDocument; seq: number | null; release?: ReleaseResult; releaseSeq?: number; refused?: ReleaseResult; withdrawn?: boolean };
   verified?: VerifyResult;
   signed?: SignedManifest;
   signatureOk?: boolean;
@@ -252,9 +252,9 @@ const pct = (x: number) => (x > 0 && x < 0.0005 ? '<0.1%' : x < 1 && x >= 0.9995
 /** Short counts for cards: 9,555 · 12.3k · 456k · 1.2M. */
 const fmtCompact = (n: number) => (Math.abs(n) < 10000 ? fmtInt(n) : Math.abs(n) < 1e6 ? `${(n / 1000).toFixed(Math.abs(n) < 1e5 ? 1 : 0)}k` : `${(n / 1e6).toFixed(1)}M`);
 
-/** A held day's mark (ADR 0009 §12, amendment 1 S12): ‖ paused, ⚑ published as is (and accepted as a new level:
- * readers got the day as it came), ✕ not published, ◧ filled, ◐ the part that arrived alone. */
-const PAUSE_MARK: Record<DayState, VizMark> = { waiting: 'held', asis: 'flag', dont: 'closed', fill: 'fill', complete: 'part', accepted: 'flag' };
+/** A held day's mark (ADR 0009 §12, amendment 1 S12): ‖ paused, ⚑ published as is, the level's step for a day accepted
+ * as a new level (S6), ✕ not published, ◧ filled, ◐ the part that arrived alone. */
+const PAUSE_MARK: Record<DayState, VizMark> = { waiting: 'held', asis: 'flag', dont: 'closed', fill: 'fill', complete: 'part', accepted: 'level' };
 /** What a held day's mark says, for its accessible name. */
 const PAUSE_WORD: Record<DayState, string> = { waiting: 'paused', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only', accepted: 'new level' };
 /** What a card's mark says to a screen reader, before its line. */
@@ -375,6 +375,14 @@ function filledOf(r: RunRecord): RunRecord | undefined {
   for (const x of derivedRuns.values()) if (x.derived!.from.inputs === r.inputs && x.load === r.load && shown.has(x)) return x;
   return undefined;
 }
+/** On a day whose fill (or part alone) was released in this engine and not withdrawn, its derived run, whatever the
+ * names show now (a later day current): what a withdrawal takes back (Q-61). */
+function releasedFillOf(r: RunRecord): RunRecord | undefined {
+  if (r.derived) return undefined;
+  let found: RunRecord | undefined;
+  for (const x of derivedRuns.values()) if (x.derived!.from.inputs === r.inputs && x.load === r.load && x.derived!.release?.outcome === 'applied' && !x.derived!.withdrawn) found = x;
+  return found;
+}
 /** The day of the run on screen, where runs are by day. */
 const shownDay = (): string | undefined => dayOfRun(latest());
 /** The day the outputs keep while the day on screen is held: under a flow that holds, the day readers see (the held
@@ -479,12 +487,25 @@ const showsDay = (name: string): string | null => dayOfRun(state.names.get(name)
 /** The last day before `day` whose run was published in this visit: what readers kept while `day` waited, as it stood
  * then, for a day a later one has passed since (days.stagedBar). */
 function keptThen(day: string): string | null {
+  // From the record, as readersAsOf reads a decision's: the last day published before the day's first held run, which a
+  // reload keeps (the runs of this visit alone would fall back to the first day the page ran).
+  const held = ledger?.entries.find((e) => e.kind === 'run' && (e.about as { outcome?: string; day?: string } | null)?.outcome === 'held' && (e.about as { day?: string }).day === day);
+  if (held && ledger) {
+    const then = lastPublished(ledger.entries.slice(0, held.seq), periodOfFlow());
+    if (then && then < day) return then;
+  }
   let best: string | null = null;
   for (const x of state.runs) {
     const d = dayOfRun(x);
     if (d && d < day && (isPublished(x) || isOut(pauseOf(x)?.state)) && (!best || d > best)) best = d;
   }
   return best;
+}
+
+/** How readers have the day they see in place of a run's (S12): filled (◧) or the part alone (◐), else as it came. */
+function readersMarkOf(r: RunRecord): RemedyMark | null {
+  const name = r.result.waiting[0] ?? Object.keys(r.result.manifest.outputs)[0];
+  return (name ? state.names.get(name)?.derived?.repair.kind : undefined) ?? null;
 }
 
 /** The day readers see in place of a run's: what the first output it holds back shows. */
@@ -4084,7 +4105,7 @@ function pauseRow(r: RunRecord, story: Story | null): { reach: HTMLElement; verb
   const underDay = (under?.about as { day?: string } | undefined)?.day;
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
   const kept = readersAsOf(r);
-  const l = pauseLines({ state: now.state, names, by: pauseReasons(r.result.holds, open), readers: kept.day, past: kept.past, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, may, deciders: deciders(), standing: standsOn(d), remedy: now.remedy, withdrawn: now.withdrawn });
+  const l = pauseLines({ state: now.state, names, by: pauseReasons(r.result.holds, open), readers: kept.day, past: kept.past, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, may, deciders: deciders(), standing: standsOn(d), remedy: now.remedy, withdrawn: now.withdrawn, readersMark: kept.past ? null : readersMarkOf(r) });
   const box = isOut(now.state) ? 'pub' : 'held';
   const reach = h('div', { class: 'vf-pause' },
     h('button', { type: 'button', class: `vf-reach vf-paused ${now.state}`, 'aria-label': `${l.reach}${l.see ? `; ${l.see}` : ''}${names.length ? `; ${names.join(', ')}` : ''}. Open the list.`, onclick: () => waitingDetail(r, l.reach, !may && now.state === 'waiting' ? () => decisionSheet(r, story) : null) },
@@ -4285,11 +4306,12 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
   // A refill readers have went out over an earlier fill of the same day: withdrawing it would bring that fill back, so
   // Keep is off until the plugin's withdrawals of a chain of fills are recorded as one (left for later).
   if (withdraws && back?.day === day) can.dont = { allowed: false, reason: 'a refill is replaced by another fill, not withdrawn' };
-  const readers = withdraws ? (back?.day === day ? null : back) : readersOn(r, shown);
+  // With a later day current, a withdrawal moves no name back: readers keep that day (S5), and the Keep row says so.
+  const readers = withdraws && !later ? (back?.day === day ? null : back) : readersOn(r, shown);
   const rem = remediesFor(r);
   const accept = acceptFor(r);
   const donors = rem ? rem.picks.map((p) => ({ day: p.day, counts: rem.counts.get(p.day)! })) : [];
-  const draw = decisionDrawing(history, story, day ?? '', readers?.day ?? null, { day: rows, readers: readers?.rows ?? null }, rem ? { missing: rem.missing, donors: rem.picks.map((p) => p.day) } : null);
+  const draw = decisionDrawing(history, story, day ?? '', readers?.day ?? null, { day: rows, readers: readers?.rows ?? null }, rem ? { missing: rem.missing, donors: rem.picks.map((p) => p.day) } : null, readers?.repair ? { missing: readers.repair.missing, donor: readers.repair.donor?.day ?? null } : null);
   // The staged run of the remedy picked, once made (S4): whether it passes its checks, and the hash of what goes out.
   let staged: { option: RemedyMark; donor: string | null; fails: boolean } | null = null;
   let stagedRun: RunRecord | null = null;
@@ -4316,7 +4338,7 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     // Accept the new level (amendment 1 S6, X6): the day's own rows as they came, with nothing drawn absent, so they read
     // as what is usual now; marked by the step. The part is named once, on Publish as is's row.
     if (o.option === 'accept') return { mark: 'level' as VizMark, rows: draw.asis, usual: null, short: null, other: false, missing: null, cut: null, part: null, filled: null };
-    return { mark: (readers ? 'keep' : 'closed') as VizMark, rows: draw.dont, usual: null, short: draw.short, other: true, missing: null, cut: null, part: null, filled: null };
+    return { mark: (readers ? 'keep' : 'closed') as VizMark, rows: draw.dont, usual: null, short: draw.short, other: true, missing: null, cut: null, part: null, filled: draw.dontFilled ?? null };
   };
   const rowOf = (o: SheetText['options'][number], last: boolean, still = false) => {
     const off = o.off || !can[o.option].allowed;
@@ -4425,21 +4447,33 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
 }
 
 /** The day readers see in place of a held run's, with its trips as they arrived: null when nothing is published. */
-function readersOn(r: RunRecord, shown: string | null): { day: string; rows: number } | null {
+function readersOn(r: RunRecord, shown: string | null): Kept | null {
   const theirs = shown ? state.names.get(r.result.waiting[0] ?? Object.keys(r.result.manifest.outputs)[0] ?? '') : undefined;
-  const arrived = theirs ? (tripsOf(theirs.derived?.from ?? theirs) ?? null) : null;
-  return shown && arrived !== null ? { day: shown, rows: arrived } : null;
+  return shown && theirs ? keptOf(theirs, shown) : null;
+}
+
+/** A day readers keep, as they have it (S12): a filled day's rows as filled, marked ◧ (◐ the part alone), with the
+ * repair it was made by, so the Keep row draws the filled day with its stipple; else its rows as they arrived. */
+interface Kept {
+  day: string;
+  rows: number;
+  mark?: RemedyMark;
+  repair?: Repair;
+}
+function keptOf(theirs: RunRecord, day: string): Kept | null {
+  const d = theirs.derived;
+  const rows = d ? (filledRows(theirs.result, d.repair.step) ?? tripsOf(d.from)) : tripsOf(theirs);
+  return rows === undefined ? null : { day, rows, ...(d ? { mark: d.repair.kind, repair: d.repair } : {}) };
 }
 
 /** On a day readers have the fill of, the day they had before it (Q-61): what a withdrawal sends them back to. */
-function keptBefore(r: RunRecord): { day: string; rows: number } | null {
-  const d = filledOf(r)?.derived?.release;
+function keptBefore(r: RunRecord): Kept | null {
+  const d = (filledOf(r) ?? releasedFillOf(r))?.derived?.release;
   const was = d ? shownBefore.get(d.release) : undefined;
   const name = was ? [...was.keys()][0] : undefined;
   const back = name ? was!.get(name) : undefined;
   const day = back ? dayOfRun(back) : undefined;
-  const rows = back ? tripsOf(back.derived?.from ?? back) : undefined;
-  return day && rows !== undefined ? { day, rows } : null;
+  return back && day ? keptOf(back, day) : null;
 }
 
 /** A held run's receipt once decided, on the canvas: as the decision sheet collapses to it. */
@@ -4452,7 +4486,9 @@ function receiptOf(r: RunRecord, may: boolean): HTMLElement | null {
   const day = dayOfRun(r) ?? null;
   const kept = readersAsOf(r);
   const out = isOut(now.state);
-  const l = receiptLines({ state: now.state, day, readers: out ? day : kept.day, past: !out && kept.past, released: out ? (now.pause?.waiting ?? r.result.waiting).length : 0, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, seq: d?.seq ?? null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, standing: standsOn(d), remedy: now.remedy ? { ...now.remedy, ...remedyCounts(now.pause) } : null, withdrawn: now.withdrawn, level: d?.about.level?.from ?? null });
+  // A fill or the part alone readers have is cited by the decision whose release applied, never a later one refused.
+  const cites = (now.state === 'fill' || now.state === 'complete') && now.pause?.repaired?.decision !== undefined ? now.pause.repaired.decision : (d?.seq ?? null);
+  const l = receiptLines({ state: now.state, day, readers: out ? day : kept.day, past: !out && kept.past, released: out ? (now.pause?.waiting ?? r.result.waiting).length : 0, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, seq: cites, under: underDay ? dayShort(underDay).split(' ')[0]! : null, standing: standsOn(d), remedy: now.remedy ? { ...now.remedy, ...remedyCounts(now.pause) } : null, withdrawn: now.withdrawn, level: d?.about.level?.from ?? null });
   const box = receiptBox(l, now.state, d?.seq ?? null, null, l.change && may ? () => decisionSheet(r, day ? storyFor(day) : null) : null, day, l.versions && day ? () => versionsSheet(day) : null);
   box.classList.add('loads-receipt');
   // Under the loads strip, its links are the canvas's: the sheet's and the card's keep their own names.
@@ -7050,7 +7086,7 @@ function renderLoads(): void {
   const held = own ? pauseOf(own) : null;
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
   const kept = own && held ? readersAsOf(own) : null;
-  const pl = own && held ? dayPausedLine({ state: held.state, readers: kept!.day, past: kept!.past, may, standing: standsOn(held.pause?.decision), day: now!.day, remedy: held.remedy, withdrawn: held.withdrawn, level: held.pause?.decision?.about.level?.from ?? null, under: levelUnder(held.pause?.decision) }) : null;
+  const pl = own && held ? dayPausedLine({ state: held.state, readers: kept!.day, past: kept!.past, may, standing: standsOn(held.pause?.decision), day: now!.day, remedy: held.remedy, withdrawn: held.withdrawn, level: held.pause?.decision?.about.level?.from ?? null, under: levelUnder(held.pause?.decision), readersMark: kept!.past ? null : readersMarkOf(own) }) : null;
   // The status line just above says the day by its pause where the viewer's story doesn't head it (core/decision.ts
   // daySentence, as sayRun says it): its date and, with no Decide to go with it, its pause aren't said again here.
   const statusPause = !!held && (!isOut(held.state) ? !(top?.title && top.severity === 'alert') : !top?.title);
@@ -7440,11 +7476,11 @@ const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep
 /** "Dec 18". */
 const shortDay = (day: string) => dateOf(day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const pct0 = (x: number) => `${Math.round(x * 100)}%`;
-/** What the loads strip's marks and lines mean, only those it draws: wrong, unusual, held ‖, as is ⚑, not published ✕,
- * a holiday, a day of a holiday's season, a day not run. */
+/** What the loads strip's marks and lines mean, only those it draws: wrong, unusual, held ‖, as is ⚑, a new level, filled
+ * ◧, part only ◐, not published ✕, a holiday, a day of a holiday's season, a day not run. */
 function keyOf(chips: readonly HTMLElement[], list: readonly number[], notRun: (k: number) => boolean): HTMLElement | '' {
   const drawn = new Set(chips.flatMap((c) => Array.from(c.querySelectorAll('.ld-marks svg.g'), (g) => Array.from(g.classList).find((x) => x.startsWith('g-'))?.slice(2) ?? '')));
-  const words: [VizMark, string][] = [['alert', 'wrong'], ['warn', 'unusual'], ['held', 'paused'], ['flag', 'as is'], ['closed', 'not published']];
+  const words: [VizMark, string][] = [['alert', 'wrong'], ['warn', 'unusual'], ['held', 'paused'], ['flag', 'as is'], ['level', 'new level'], ['fill', 'filled'], ['part', 'part only'], ['closed', 'not published']];
   const marks = words.filter(([m]) => drawn.has(m)).map(([m, w]) => h('span', { class: 'lk' }, glyphEl(m, 13), w));
   const day = (k: number) => loads.list[k]!;
   const holiday = list.some((k) => holidayOf(day(k).day, calendarNow()));
@@ -7927,6 +7963,9 @@ async function run(): Promise<void> {
     // What is shown is what ran: after a refused day, a run on the day still pinned shows that day.
     if (loads.pinned >= 0) loads.at = loads.pinned;
     await recordRun(rec, null);
+    // The day just measured (and the record's new days left out) in the ranges before anything is said or drawn of it:
+    // a day past the base history has its story, its head and its News on its first run, not only on its second.
+    refreshRanges();
     // A day decided before (in this visit, or an earlier one) is decided again by the same keys (ADR 0009 §10).
     if (result.holds.length) await applyDecided(rec);
     await learnColumns();
@@ -8173,8 +8212,11 @@ async function decideNow(target: RunRecord | string, option: DecisionOption, sco
     setStatus(`${option === 'fill' ? 'A fill' : 'The part that arrived'} is decided on its staged run: pick it on the sheet again.`, true);
     return null;
   }
-  const fillShown = remedy.withdraw ? filledOf(r) : undefined;
-  if (remedy.withdraw && !fillShown?.derived?.release) {
+  const fillShown = remedy.withdraw ? (filledOf(r) ?? releasedFillOf(r)) : undefined;
+  // With a later day current, a withdrawal moves no name back (ADR 0009 amendment 1 S5): it is recorded, the day is not
+  // published, and readers keep the later day; nothing goes to the engine.
+  const keepLater = !!remedy.withdraw && passed;
+  if (remedy.withdraw && !keepLater && !fillShown?.derived?.release) {
     setStatus('The fill readers have wasn’t released in this engine: run its day again, then withdraw it.', true);
     return null;
   }
@@ -8199,10 +8241,10 @@ async function decideNow(target: RunRecord | string, option: DecisionOption, sco
   } else if (derived && dkeys) {
     const out = await releaseDerived(derived, entry, dkeys);
     if (out?.outcome === 'refused') refused = out.why;
-  } else if (fillShown) {
+  } else if (fillShown && !keepLater) {
     const out = await withdrawFill(fillShown, entry);
     if (out?.outcome === 'refused') refused = out.why;
-  }
+  } else if (fillShown && keepLater) fillShown.derived!.withdrawn = true;
   const now = pauseOf(r);
   if (refused) setStatus(`The decision is recorded; the engine refused to ${fillShown ? 'withdraw the fill of' : 'publish'} ${day ? dayShort(day) : 'the run'}: ${refused}.`, true, { n: attempts, state: now && !isOut(now.state) ? 'held' : 'done', mark: now?.state ?? null });
   else {
@@ -8272,7 +8314,9 @@ function remediesFor(r: RunRecord): Remedies | null {
   const claim = claimsFor(day)?.find((c) => c.source === src) ?? null;
   const now = pauseOf(r);
   const shown = readersDay(r);
-  const rem = donorsOf({ h: flowHistory, doc: state.doc, day, source: src, story, claim, listed: listedFile, history: historyPin, build: BUILD_COMMIT, later: shown && shown > day ? shown : null, readers: now?.state === 'fill' || now?.state === 'complete' ? now.state : null, partFails: r.result.holds.some((x) => x.by === 'checks') });
+  // A backfill donor is a day that has arrived and been judged here (S3): run in this visit or in the record.
+  const arrived = (d: string) => state.runs.some((x) => dayOfRun(x) === d) || !!ledger?.entries.some((e) => e.kind === 'run' && (e.about as { day?: string } | null)?.day === d && ['ok', 'held'].includes(String((e.about as { outcome?: string }).outcome)));
+  const rem = donorsOf({ h: flowHistory, doc: state.doc, day, source: src, story, claim, listed: listedFile, history: historyPin, build: BUILD_COMMIT, later: shown && shown > day ? shown : null, readers: now?.state === 'fill' || now?.state === 'complete' ? now.state : null, partFails: r.result.holds.some((x) => x.by === 'checks'), arrived, current: now?.state === 'fill' ? (now.remedy?.donor ?? null) : null });
   // The part alone is named as the viewer's story names its part ("Flex Fare only"), not by the raw code.
   const name = storyFor(day)?.split?.name;
   return rem ? { ...rem, offers: rem.offers.map((o) => (o.option === 'complete' ? { ...o, label: remedyPart(rem.missing, name) } : o)) } : null;
@@ -8395,8 +8439,11 @@ async function releaseDerived(d: RunRecord, decision: RecordEntry, keys: Record<
   const before = new Map(Object.keys(keys).map((n) => [n, state.names.get(n)]));
   const from = { run: held.result.run, manifest: held.result.hash };
   const out = await releaseRun(state.engine, { run: d.result.run, manifest: d.result.hash, keys, option: repair.kind, actor: decision.by.as, reason: decision.reason, decision: leaf, from, repair });
-  d.derived.release = out;
+  // A refusal never hides the release that applied before it: kept apart, as the receipt cites the decision that applied.
+  if (out.outcome === 'applied' || d.derived.release?.outcome !== 'applied') d.derived.release = out;
+  else d.derived.refused = out;
   if (out.outcome === 'applied') {
+    d.derived.withdrawn = false;
     shownBefore.set(out.release, before);
     noteShown(d, out.published);
   }
@@ -8426,6 +8473,7 @@ async function withdrawFill(d: RunRecord, decision: RecordEntry): Promise<Releas
     }
     const names = out.published.map((n) => literal(n, 'text')).join(', ');
     if (names) back = Object.fromEntries((await state.engine.query(`SELECT name, key FROM _smaltfl_datasets WHERE name IN (${names})`)).rows.map(([n, k]) => [String(n), String(k)]));
+    d.derived.withdrawn = true;
   }
   const about: ReleaseAbout = { run: d.result.run, manifest: d.result.hash, outputs: back, decision: decision.seq, leaf, outcome: out.outcome, why: out.why, ...(d.derived.releaseSeq !== undefined ? { withdraws: d.derived.releaseSeq } : {}) };
   await ledger.append('release', decision.by.as, about as unknown as JSONValue);

@@ -51,14 +51,15 @@ export interface Remedies {
  * the watch's own rule first), each with the counts its drawing and row show (fillCounts, S4: the same number the
  * derived run counts).
  */
-export function donorsOf(o: { h: HistoryRanges; doc: FlowDocument; day: string; source: string; story: Pick<Story, 'hero' | 'hours' | 'split'>; claim: Claim | null; listed: (day: string) => HistoryRef | null; history: HistoryRef; build: string; later: string | null; readers: 'fill' | 'complete' | null; partFails: boolean }): Remedies | null {
+export function donorsOf(o: { h: HistoryRanges; doc: FlowDocument; day: string; source: string; story: Pick<Story, 'hero' | 'hours' | 'split'>; claim: Claim | null; listed: (day: string) => HistoryRef | null; history: HistoryRef; build: string; later: string | null; readers: 'fill' | 'complete' | null; partFails: boolean; arrived?: (day: string) => boolean; current?: string | null }): Remedies | null {
   const step = fillStepOf(o.doc, o.source);
   if (!step) return null;
   const missing = missingOf(o.story, step.time);
   if (!missing) return null;
-  const { picks, none } = donorChoices({ h: o.h, doc: o.doc, day: o.day, source: o.source, listed: o.listed, history: o.history, build: o.build }, donorRuleOf(o.doc, o.source));
+  const { picks, none } = donorChoices({ h: o.h, doc: o.doc, day: o.day, source: o.source, listed: o.listed, history: o.history, build: o.build, ...(o.arrived ? { arrived: o.arrived } : {}) }, donorRuleOf(o.doc, o.source));
   const counts = new Map<string, FillCounts>();
-  for (const p of picks) {
+  // On a day readers have filled, the donor they have is no option: the sheet offers the other donors (S7).
+  for (const p of picks.filter((x) => x.day !== o.current)) {
     const c = fillCounts(o.h, o.day, missing, p.day);
     if (c) counts.set(p.day, c);
   }

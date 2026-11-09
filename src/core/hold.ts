@@ -1101,6 +1101,12 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
     p.repaired = { option, release: seq, decision: a.decision as number, donor: repair?.donor?.day ?? null, meanwhile };
     p.withdrawn = null;
   }
+  // A withdrawal made once a later day was current moves no name back, so the engine has no release of it (amendment 1
+  // S5): the decision not to publish, made after the fill went out, withdraws it in the record all the same, and the day
+  // is not published; readers keep the later day.
+  for (const p of out) {
+    if (p.repaired && p.decision && p.decision.about.option === 'dont' && p.decision.amends !== null && p.decision.seq > p.repaired.release) (p.repaired = null), (p.withdrawn = p.decision.seq);
+  }
   return out;
 }
 

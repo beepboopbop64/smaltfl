@@ -67,6 +67,8 @@ export interface Drawing {
   fills: readonly { day: string; rows: ReaderRows; filled: readonly [number, number] | 'part' | 'rest' }[];
   /** The part that arrived alone: the day's own rows, what it leaves out absent at its usual. */
   complete: { rows: ReaderRows; usual: ReaderRows; short: readonly [number, number] | null } | null;
+  /** The day readers keep, when they have it filled (S12): which of its rows came from another day, stippled. */
+  dontFilled?: readonly [number, number] | 'part' | 'rest' | null;
 }
 
 /** A day's trips by hour, and by a coded value, from the history file: null for a day it doesn't have. */
@@ -79,13 +81,18 @@ function historyDay(h: HistoryRanges | null, day: string): number {
  * a strip of the week. `rows` are the trips the runs counted (the held run's, and the run readers see), which the
  * history equals on every load; `readers` is the day readers see now, or null when nothing is published.
  */
-export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'hero' | 'hours' | 'split'> | null, day: string, readers: string | null, rows: { day: number; readers: number | null }, remedy: { missing: Missing; donors: readonly string[] } | null = null): Drawing {
+export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'hero' | 'hours' | 'split'> | null, day: string, readers: string | null, rows: { day: number; readers: number | null }, remedy: { missing: Missing; donors: readonly string[] } | null = null, kept: { missing: Missing; donor: string | null } | null = null): Drawing {
   const k = historyDay(h, day);
   const kr = readers ? historyDay(h, readers) : -1;
   const file = h?.file;
-  // A day that falls at an hour: 24 bars, the short hours' missing trips absent; the day kept, its own 24, hatched.
+  // A day that falls at an hour: 24 bars, the short hours' missing trips absent; the day kept, its own 24, hatched. A day
+  // kept filled (S12) has its missing hours from its donor, stippled; kept with the part alone, those hours absent.
   const hr = story?.hero === 'hours' ? story.hours : null;
-  const theirs = kr >= 0 ? file!.hours?.[kr] : undefined;
+  const keptHours = kept && 'hours' in kept.missing ? kept.missing.hours : null;
+  const donorHours = keptHours && kept!.donor ? file?.hours?.[historyDay(h, kept!.donor)] : undefined;
+  const arrivedHours = kr >= 0 ? file!.hours?.[kr] : undefined;
+  const theirs = arrivedHours && keptHours ? arrivedHours.map((v, i) => (i >= keptHours[0] && i <= keptHours[1] ? (kept!.donor ? (donorHours?.[i] ?? 0) : 0) : v)) : arrivedHours;
+  const dontFilled = keptHours && kept!.donor ? keptHours : null;
   if (hr && (!readers || theirs)) {
     // A fill takes the missing hours from each donor's own; the part alone leaves them absent at their usual.
     const m = remedy && 'hours' in remedy.missing ? remedy.missing.hours : null;
@@ -98,7 +105,7 @@ export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'her
     return {
       cause: 'hours', scale, short: [hr.from, hr.to], part: null,
       asis: { cause: 'hours', hours: hr.got }, usual: { cause: 'hours', hours: hr.usual },
-      dont: theirs ? { cause: 'hours', hours: theirs } : null,
+      dont: theirs ? { cause: 'hours', hours: theirs } : null, dontFilled,
       // The cut marked where the day falls, on its own row; the hours themselves need no axis under the day kept.
       ticks: [], cut: [hr.from, `${hr.from}h`],
       fills, complete: m ? { rows: { cause: 'hours', hours: hr.got.map((v, i) => (inside(i) ? 0 : v)) }, usual: { cause: 'hours', hours: hr.usual }, short: m } : null,
@@ -108,7 +115,10 @@ export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'her
   const sp = story?.split;
   const vh = sp && file ? file.values?.[sp.column] : undefined;
   const at = vh ? vh.values.indexOf(sp!.value) : -1;
-  const theirPart = kr >= 0 && vh?.counts && at >= 0 ? vh.counts[kr]?.[at] : undefined;
+  // A day kept filled by its part (S12): the part as its donor had it, stippled; the rest as it arrived.
+  const keptPart = !!kept && 'column' in kept.missing && kept.missing.column === sp?.column && !kept.missing.rest;
+  const donorK = keptPart && kept!.donor ? historyDay(h, kept!.donor) : -1;
+  const theirPart = keptPart && vh?.counts && at >= 0 ? (donorK >= 0 ? vh.counts[donorK]?.[at] : 0) : kr >= 0 && vh?.counts && at >= 0 ? vh.counts[kr]?.[at] : undefined;
   if (sp && (!readers || (theirPart !== undefined && rows.readers !== null))) {
     const dont = readers && theirPart !== undefined ? { cause: 'split' as const, part: theirPart, rest: Math.max(0, rows.readers! - theirPart) } : null;
     // A fill takes the part that vanished from each donor (or, where the part held, the rest); the part alone leaves
@@ -126,7 +136,7 @@ export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'her
     return {
       cause: 'split', scale, short: null, part: `${sp.name} · ${fmtInt(sp.part.today)}`,
       asis: { cause: 'split', part: sp.part.today, rest: sp.rest.today }, usual: { cause: 'split', part: sp.part.usual, rest: sp.rest.usual },
-      dont, ticks: [[0, '0'], [scale, compact(scale)]], cut: null,
+      dont, dontFilled: keptPart && kept!.donor ? 'part' : null, ticks: [[0, '0'], [scale, compact(scale)]], cut: null,
       fills,
       complete: m ? rest
         ? { rows: { cause: 'split', part: sp.part.today, rest: 0 }, usual: { cause: 'split', part: sp.part.today, rest: sp.rest.usual }, short: null }
@@ -183,7 +193,8 @@ export interface SheetIn {
   reach: number | null;
   /** What readers see now, its trips as they arrived (what its hatched drawing shows), or null when nothing is
    * published. Where readers have the day's own fill (`withdraws`), the day they would see again. */
-  readers: { day: string; rows: number } | null;
+  /** The day readers keep, its rows as they have it, and its mark when they have it filled (◧) or the part alone (◐). */
+  readers: { day: string; rows: number; mark?: RemedyMark } | null;
   /** A later day readers see already: the day can no longer be shown (Q-51). */
   later: string | null;
   /** The checks held the day too: publishing as is overrides them, and the sheet says so with their share and limit. */
@@ -334,7 +345,8 @@ export function sheetText(o: SheetIn): SheetText {
   const bare = (n: number) => (wordsIn(o.noun.many) > 1 ? fmtInt(n) : trips(n));
   const past = o.reach !== null && o.reach !== o.rows ? `${fmtInt(o.reach)} after checks` : null;
   const age = o.readers && o.day ? Math.round((Date.parse(`${o.day}T12:00:00Z`) - Date.parse(`${o.readers.day}T12:00:00Z`)) / 864e5) : 0;
-  const see = o.readers ? readersSee(o.readers.day, null) : 'nothing published yet';
+  const see = o.readers ? readersSee(o.readers.day, null, false, o.readers.mark) : 'nothing published yet';
+  const keptMark = o.readers?.mark ? ` ${MARK[o.readers.mark]}` : '';
   const figures = o.checks ? checksSaid(o.checks) : null;
   const withdraws = o.withdraws ?? null;
   const options: SheetOption[] = [
@@ -343,9 +355,9 @@ export function sheetText(o: SheetIn): SheetText {
       aria: o.later ? `Publish as is: not possible, ${dayMid(o.later)} is what readers see now` : `Publish as is: readers get ${name} as it came, ${trips(o.rows)}${past ? `, ${fmtInt(o.reach!)} of them past its checks` : ''}${o.head ? `, ${o.head}` : ''}${o.checks ? `; this overrides its checks, which held it: ${figures}` : ''}`,
     },
     {
-      option: 'dont', label: o.readers ? `Keep ${dayShort(o.readers.day)}` : 'Don’t publish', number: o.readers ? bare(o.readers.rows) : 'nothing shown', sub: age >= 2 ? `${age} days old` : null, warn: null, off: false, ...(withdraws ? { withdraws: true } : {}),
+      option: 'dont', label: o.readers ? `Keep ${dayShort(o.readers.day)}${keptMark}` : 'Don’t publish', number: o.readers ? bare(o.readers.rows) : 'nothing shown', sub: age >= 2 ? `${age} days old` : null, warn: null, off: false, ...(withdraws ? { withdraws: true } : {}),
       aria: withdraws
-        ? `Withdraw the ${withdraws === 'fill' ? 'fill' : 'part'}: readers see ${o.readers ? `${dayMid(o.readers.day)} again, ${trips(o.readers.rows)}` : 'nothing'}, and this day is not published`
+        ? `Withdraw the ${withdraws === 'fill' ? 'fill' : 'part'}: readers ${o.later && o.readers ? `keep ${dayMid(o.readers.day)}, ${trips(o.readers.rows)}` : `see ${o.readers ? `${dayMid(o.readers.day)} again, ${trips(o.readers.rows)}` : 'nothing'}`}, and this day is not published`
         : o.readers ? `Don’t publish: readers keep ${dayMid(o.readers.day)}, ${trips(o.readers.rows)}${age >= 2 ? `, ${age} days old` : ''}, and this day is never published` : 'Don’t publish: readers get nothing, nothing is published yet',
     },
   ];
@@ -594,11 +606,11 @@ export interface PauseRow {
  * glance, so readers' day goes without its age here: the day line under the strip, the staged bar and the list of
  * outputs a tap away carry it.
  */
-export function pauseLines(o: { state: DayState; names: readonly string[]; by?: readonly string[]; readers?: string | null; past?: boolean; who: string | null; at: string | null; under: string | null; may: boolean; deciders: string; standing?: boolean; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null }): PauseRow {
+export function pauseLines(o: { state: DayState; names: readonly string[]; by?: readonly string[]; readers?: string | null; past?: boolean; who: string | null; at: string | null; under: string | null; may: boolean; deciders: string; standing?: boolean; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null; readersMark?: RemedyMark | null }): PauseRow {
   const by = o.who ? ` · ${o.who}${o.at ? ` · ${o.at}` : ''}` : '';
   const reasons = o.by ?? [];
   // Once a later day has published, readers' day as it stood then (days.readersOf): "readers kept Mon 18".
-  const see = o.readers === undefined ? null : readersSee(o.readers, null, o.past) || null;
+  const see = o.readers === undefined ? null : readersSee(o.readers, null, o.past, o.readersMark) || null;
   if (o.state === 'waiting') {
     return { reach: reasons.length ? `Paused by ${reasons.join(', ')}` : 'Paused', see, names: o.names, verb: o.may ? 'Decide' : null, waits: o.may ? null : `${o.deciders} decides` };
   }
@@ -653,13 +665,15 @@ export function pausedGlance(s: Story, row: PauseRow, decided = false): string[]
  * readers see meanwhile, its age when it is stale ("readers see Mon 18 · 3 days old", `day` being the day held), with
  * Decide for someone who may decide; once decided, what became of the day.
  */
-export function dayPausedLine(o: { state: DayState; readers: string | null; past?: boolean; may: boolean; standing: boolean; day?: string | null; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null; level?: string | null; under?: string | null }): { text: string; verb: string | null } {
+export function dayPausedLine(o: { state: DayState; readers: string | null; past?: boolean; may: boolean; standing: boolean; day?: string | null; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null; level?: string | null; under?: string | null; readersMark?: RemedyMark | null }): { text: string; verb: string | null } {
   // Its age while it waits, when what readers see is stale (two days or more before it); once decided, the line keeps
-  // to its ten words. Once a later day has published, the day readers kept then, naming no later day.
-  const see = readersSee(o.readers, o.state === 'waiting' ? o.day : null, o.past);
+  // to its ten words. Once a later day has published, the day readers kept then, naming no later day. A day readers
+  // have filled is marked ◧ beside its date (◐ the part alone, S12).
+  const see = readersSee(o.readers, o.state === 'waiting' ? o.day : null, o.past, o.readersMark);
   if (o.state === 'waiting') return { text: see ? `Paused · ${see}` : 'Paused', verb: o.may ? 'Decide' : null };
   if (o.state === 'asis') return { text: 'Published as is', verb: null };
-  if (o.state === 'accepted') return { text: o.under ? `⚑ By ${o.under}’s new level` : `⚑ New level from ${dayShort(o.level ?? o.day ?? '')}`.replace(/ from $/, ''), verb: null };
+  // The level's step mark is drawn beside it (viz glyph 'level', amendment 1 S6 as built), never ⚑, which is as is.
+  if (o.state === 'accepted') return { text: o.under ? `By ${o.under}’s new level` : `New level from ${dayShort(o.level ?? o.day ?? '')}`.replace(/ from $/, ''), verb: null };
   if ((o.state === 'fill' || o.state === 'complete') && o.remedy) return { text: `${MARK[o.state]} ${remedyHead(o.remedy)}`, verb: null };
   if (o.withdrawn) return { text: `${o.withdrawn === 'fill' ? 'Fill' : 'Part'} withdrawn${see ? ` · ${keeps(see)}` : ''}`, verb: null };
   return { text: `Not published${o.standing ? ' until a day passes' : ''}${see ? ` · ${keeps(see)}` : ''}`, verb: null };
