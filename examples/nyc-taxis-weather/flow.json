@@ -1,0 +1,943 @@
+{
+  "smaltfl": 4,
+  "id": "nyc-taxis-weather",
+  "name": "NYC taxis and weather",
+  "description": "How weather changes taxi demand by borough: January 2024 yellow taxi trips, a day at a time, cleaned and enriched, against hourly weather.",
+  "parameters": [
+    {
+      "name": "month",
+      "type": "text",
+      "default": "2024-01",
+      "description": "The month the trips belong to"
+    },
+    {
+      "name": "day",
+      "type": "text",
+      "default": null,
+      "description": "The day the trips are from"
+    }
+  ],
+  "sources": [
+    {
+      "id": "trips",
+      "table": "trips_file",
+      "description": "NYC TLC yellow taxi trip records"
+    },
+    {
+      "id": "zones",
+      "table": "zones_file",
+      "description": "The TLC taxi zone lookup"
+    },
+    {
+      "id": "weather",
+      "table": "weather_file",
+      "description": "Open-Meteo hourly weather, one point per district"
+    }
+  ],
+  "notebooks": [
+    "trips.nb.ts",
+    "places.nb.ts",
+    "weather.nb.ts"
+  ],
+  "ontology": {
+    "objectTypes": [
+      {
+        "id": "District",
+        "name": "District",
+        "dataset": "districts",
+        "key": [
+          "borough"
+        ],
+        "title": "borough",
+        "description": "A borough, or Newark airport"
+      },
+      {
+        "id": "Zone",
+        "name": "Zone",
+        "dataset": "zone_list",
+        "key": [
+          "location_id"
+        ],
+        "title": "zone",
+        "description": "A TLC taxi zone"
+      },
+      {
+        "id": "ZoneHour",
+        "name": "Zone hour",
+        "dataset": "zone_hour",
+        "key": [
+          "pu_zone",
+          "pu_hour"
+        ],
+        "title": "pu_zone",
+        "description": "One pickup zone in one hour"
+      },
+      {
+        "id": "WeatherHour",
+        "name": "Weather hour",
+        "dataset": "weather_hourly",
+        "key": [
+          "borough",
+          "hour"
+        ],
+        "title": "hour",
+        "description": "One district's weather in one hour"
+      }
+    ],
+    "linkTypes": [
+      {
+        "id": "zone_district",
+        "name": "in",
+        "from": "Zone",
+        "to": "District",
+        "on": [
+          [
+            "borough",
+            "borough"
+          ]
+        ],
+        "cardinality": "many-to-one"
+      },
+      {
+        "id": "hour_zone",
+        "name": "of",
+        "from": "ZoneHour",
+        "to": "Zone",
+        "on": [
+          [
+            "pu_zone",
+            "zone"
+          ]
+        ],
+        "cardinality": "many-to-one"
+      },
+      {
+        "id": "weather_district",
+        "name": "over",
+        "from": "WeatherHour",
+        "to": "District",
+        "on": [
+          [
+            "borough",
+            "borough"
+          ]
+        ],
+        "cardinality": "many-to-one"
+      }
+    ],
+    "actionTypes": [
+      {
+        "id": "set_zone_target",
+        "name": "Set zone target",
+        "on": "ZoneHour",
+        "description": "A district lead sets how many trips a zone should see in an hour",
+        "params": [
+          {
+            "name": "target_trips",
+            "label": "Target trips in this hour",
+            "type": "integer"
+          }
+        ]
+      },
+      {
+        "id": "annotate_weather",
+        "name": "Annotate weather event",
+        "on": "WeatherHour",
+        "description": "Label an hour with an event, such as a snowstorm",
+        "params": [
+          {
+            "name": "label",
+            "label": "Event",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "nouns": {
+      "trips": {
+        "one": "trip",
+        "many": "trips"
+      }
+    },
+    "properties": [
+      {
+        "column": "VendorID",
+        "title": "Vendor",
+        "description": "A code for the TPEP provider that provided the record: the technology company, authorized under the TLC’s Taxicab Passenger Enhancement Program, whose system in the cab recorded the trip.",
+        "values": {
+          "1": "Creative Mobile Technologies, LLC",
+          "2": "Curb Mobility, LLC",
+          "6": "Myle Technologies Inc",
+          "7": "Helix"
+        },
+        "name": "Vendor {code}",
+        "role": "sender",
+        "note": "January 2024 is almost all 1 and 2: 260 of its 2,964,624 trips come from 6, all of them Flex Fare trips. Dictionaries before 2025 name 2 VeriFone Inc. Vendors 1 and 2 fill extra differently.",
+        "sources": [
+          "tlc-yellow",
+          "tlc-trips"
+        ]
+      },
+      {
+        "column": "tpep_pickup_datetime",
+        "title": "Pickup time",
+        "description": "The date and time when the meter was engaged, in New York local time.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "tpep_dropoff_datetime",
+        "title": "Drop-off time",
+        "description": "The date and time when the meter was disengaged, in New York local time.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "passenger_count",
+        "title": "Passengers",
+        "description": "The number of passengers in the vehicle, as the driver enters it.",
+        "note": "Empty on Flex Fare trips (payment type 0). 0 on about 1% of trips.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "trip_distance",
+        "title": "Distance",
+        "description": "The elapsed trip distance in miles reported by the taximeter.",
+        "unit": "miles",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "RatecodeID",
+        "title": "Rate code",
+        "description": "The final rate code in effect at the end of the trip.",
+        "values": {
+          "1": "Standard rate",
+          "2": "JFK",
+          "3": "Newark",
+          "4": "Nassau or Westchester",
+          "5": "Negotiated fare",
+          "6": "Group ride",
+          "99": "Null/unknown"
+        },
+        "note": "JFK (2) is the airport’s flat fare: almost every rate-2 meter fare in January 2024 is $70.00, or −$70.00 where reversed. Empty on Flex Fare trips (payment type 0).",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "store_and_fwd_flag",
+        "title": "Stored and forwarded",
+        "description": "Whether the trip record was held in vehicle memory before sending to the vendor, “store and forward”, because the vehicle had no connection to the server.",
+        "values": {
+          "Y": "Store and forward trip",
+          "N": "Not a store and forward trip"
+        },
+        "note": "Empty on Flex Fare trips (payment type 0).",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "PULocationID",
+        "title": "Pickup zone",
+        "description": "The TLC taxi zone in which the taximeter was engaged: a LocationID of the zone lookup, where 264 is Unknown and 265 is Outside of NYC.",
+        "sources": [
+          "tlc-yellow",
+          "tlc-zones"
+        ],
+        "lookup": {
+          "dataset": "zones",
+          "key": "LocationID",
+          "label": "Zone"
+        }
+      },
+      {
+        "column": "DOLocationID",
+        "title": "Drop-off zone",
+        "description": "The TLC taxi zone in which the taximeter was disengaged: a LocationID of the zone lookup, where 264 is Unknown and 265 is Outside of NYC.",
+        "sources": [
+          "tlc-yellow",
+          "tlc-zones"
+        ],
+        "lookup": {
+          "dataset": "zones",
+          "key": "LocationID",
+          "label": "Zone"
+        }
+      },
+      {
+        "column": "payment_type",
+        "title": "Payment type",
+        "description": "A numeric code signifying how the passenger paid for the trip.",
+        "values": {
+          "0": "Flex Fare trip",
+          "1": "Credit card",
+          "2": "Cash",
+          "3": "No charge",
+          "4": "Dispute",
+          "5": "Unknown",
+          "6": "Voided trip"
+        },
+        "note": "A Flex Fare trip is booked in an app at a price set up front, not by the meter: in January 2024 its record has no passenger count, rate code, store-and-forward flag, congestion surcharge or airport fee.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "fare_amount",
+        "title": "Meter fare",
+        "description": "The time-and-distance fare calculated by the meter.",
+        "unit": "USD",
+        "note": "Negative where a charge is reversed: on disputes, no-charge trips and some cash trips, with the other amounts negative too.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "extra",
+        "title": "Extras",
+        "description": "Miscellaneous extras and surcharges.",
+        "unit": "USD",
+        "note": "In January 2024: $1.00 overnight (8 pm to 6 am), $2.50 on weekdays from 4 to 8 pm, and $5.00 on trips to or from LaGuardia. Vendor 1 also counts the $2.50 congestion surcharge here, as well as in its own column; vendor 2 doesn’t, so extras don’t compare across vendors.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "mta_tax",
+        "title": "MTA tax",
+        "description": "Tax that is automatically triggered based on the metered rate in use.",
+        "unit": "USD",
+        "note": "$0.50 on almost every trip in January 2024.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "tip_amount",
+        "title": "Tip",
+        "description": "Tip amount: automatically populated for credit card tips. Cash tips are not included.",
+        "unit": "USD",
+        "note": "Practically always 0 on cash trips (128 of January 2024’s 439,191 have one), so a tip rate means something only for card trips.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "tolls_amount",
+        "title": "Tolls",
+        "description": "Total amount of all tolls paid in trip.",
+        "unit": "USD",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "improvement_surcharge",
+        "title": "Improvement surcharge",
+        "description": "Improvement surcharge assessed on trips at the flag drop. The improvement surcharge began being levied in 2015.",
+        "unit": "USD",
+        "note": "$1.00 in January 2024; dictionaries from 2022 give $0.30.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "total_amount",
+        "title": "Total charged",
+        "description": "The total amount charged to passengers. Does not include cash tips.",
+        "unit": "USD",
+        "note": "On most trips in January 2024: the meter fare, extras, MTA tax, tip, tolls, improvement surcharge, congestion surcharge and airport fee added up, with vendor 1’s congestion surcharge counted once, in extras.",
+        "sources": [
+          "tlc-yellow"
+        ]
+      },
+      {
+        "column": "congestion_surcharge",
+        "title": "Congestion surcharge",
+        "description": "Total amount collected in trip for the New York State congestion surcharge: $2.50 on yellow cab trips that begin, end or pass through Manhattan south of 96th Street.",
+        "unit": "USD",
+        "note": "Negative when reversed. Empty on Flex Fare trips (payment type 0).",
+        "sources": [
+          "tlc-yellow",
+          "tlc-fares"
+        ]
+      },
+      {
+        "column": "Airport_fee",
+        "title": "Airport fee",
+        "description": "For pick up only at LaGuardia and John F. Kennedy airports: $1.75.",
+        "unit": "USD",
+        "note": "$1.75 on most airport pickups in January 2024, and on a few trips that don’t start at one. Empty on Flex Fare trips (payment type 0).",
+        "sources": [
+          "tlc-yellow",
+          "tlc-fares"
+        ]
+      },
+      {
+        "column": "cbd_congestion_fee",
+        "title": "CBD congestion fee",
+        "description": "Per-trip charge for the MTA’s Congestion Relief Zone, starting January 5, 2025.",
+        "unit": "USD",
+        "note": "Not in records before 2025.",
+        "sources": [
+          "tlc-yellow",
+          "tlc-trips"
+        ]
+      },
+      {
+        "column": "LocationID",
+        "title": "Zone ID",
+        "description": "A taxi zone’s number, as trips’ PULocationID and DOLocationID give it.",
+        "sources": [
+          "tlc-zones"
+        ]
+      },
+      {
+        "column": "Borough",
+        "title": "Borough",
+        "description": "The district: one of New York City’s five boroughs, or EWR for Newark airport in New Jersey. The zone lookup also has Unknown and N/A, for its two zones that aren’t places.",
+        "sources": [
+          "tlc-zones"
+        ]
+      },
+      {
+        "column": "Zone",
+        "title": "Zone",
+        "description": "The taxi zone’s name, such as Alphabet City or JFK Airport.",
+        "sources": [
+          "tlc-zones"
+        ]
+      },
+      {
+        "column": "service_zone",
+        "title": "Service zone",
+        "description": "Which taxis may pick up street hails in the zone.",
+        "values": {
+          "Yellow Zone": "Manhattan south of E 96th St and W 110th St: only yellow cabs take street hails",
+          "Boro Zone": "Upper Manhattan and the outer boroughs: green boro taxis take street hails too",
+          "Airports": "JFK and LaGuardia: boro taxis take only pre-arranged pickups",
+          "EWR": "Newark airport",
+          "N/A": "Not a place: Unknown, or Outside of NYC"
+        },
+        "sources": [
+          "tlc-zones",
+          "boro-taxi"
+        ]
+      },
+      {
+        "column": "location_id",
+        "title": "Zone ID",
+        "description": "A taxi zone’s number: LocationID in the zone lookup."
+      },
+      {
+        "column": "time",
+        "title": "Time",
+        "description": "The time the values are for, in New York local time. Temperature, wind speed, snow depth and the weather code are measured at it; precipitation, rain and snowfall are summed over the hour before it.",
+        "sources": [
+          "open-meteo"
+        ]
+      },
+      {
+        "column": "temperature_2m",
+        "title": "Temperature",
+        "description": "Air temperature at 2 meters above ground.",
+        "unit": "°C",
+        "sources": [
+          "open-meteo"
+        ]
+      },
+      {
+        "column": "precipitation",
+        "title": "Precipitation",
+        "description": "Total precipitation (rain, showers, snow): the sum over the preceding hour.",
+        "unit": "mm",
+        "sources": [
+          "open-meteo"
+        ]
+      },
+      {
+        "column": "rain",
+        "title": "Rain",
+        "description": "Only liquid precipitation of the preceding hour, including local showers and rain from large scale systems.",
+        "unit": "mm",
+        "sources": [
+          "open-meteo"
+        ]
+      },
+      {
+        "column": "snowfall",
+        "title": "Snowfall",
+        "description": "Snowfall amount of the preceding hour. For the water equivalent in millimeters, divide by 7.",
+        "unit": "cm",
+        "sources": [
+          "open-meteo"
+        ]
+      },
+      {
+        "column": "snow_depth",
+        "title": "Snow depth",
+        "description": "Snow depth on the ground.",
+        "unit": "m",
+        "note": "Open-Meteo warns that the model behind it tends to overestimate snow depth.",
+        "sources": [
+          "open-meteo"
+        ]
+      },
+      {
+        "column": "wind_speed_10m",
+        "title": "Wind speed",
+        "description": "Wind speed at 10 meters above ground, the standard level.",
+        "unit": "km/h",
+        "sources": [
+          "open-meteo"
+        ]
+      },
+      {
+        "column": "weather_code",
+        "title": "Weather code",
+        "description": "Weather condition as a numeric code, following the WMO weather interpretation codes. Open-Meteo derives it from cloud cover, precipitation and snowfall.",
+        "values": {
+          "0": "Clear sky",
+          "1": "Mainly clear",
+          "2": "Partly cloudy",
+          "3": "Overcast",
+          "45": "Fog",
+          "48": "Depositing rime fog",
+          "51": "Light drizzle",
+          "53": "Moderate drizzle",
+          "55": "Dense drizzle",
+          "56": "Light freezing drizzle",
+          "57": "Dense freezing drizzle",
+          "61": "Slight rain",
+          "63": "Moderate rain",
+          "65": "Heavy rain",
+          "66": "Light freezing rain",
+          "67": "Heavy freezing rain",
+          "71": "Slight snowfall",
+          "73": "Moderate snowfall",
+          "75": "Heavy snowfall",
+          "77": "Snow grains",
+          "80": "Slight rain showers",
+          "81": "Moderate rain showers",
+          "82": "Violent rain showers",
+          "85": "Slight snow showers",
+          "86": "Heavy snow showers",
+          "95": "Thunderstorm",
+          "96": "Thunderstorm with slight hail",
+          "97": "Heavy thunderstorm",
+          "99": "Thunderstorm with heavy hail"
+        },
+        "sources": [
+          "open-meteo"
+        ]
+      },
+      {
+        "column": "pu_borough",
+        "title": "Pickup borough",
+        "description": "The borough of the trip’s pickup zone, from the zone lookup."
+      },
+      {
+        "column": "pu_zone",
+        "title": "Pickup zone name",
+        "description": "The name of the trip’s pickup zone, from the zone lookup."
+      },
+      {
+        "column": "duration_min",
+        "title": "Duration",
+        "description": "Time from pickup to drop-off.",
+        "unit": "minutes"
+      },
+      {
+        "column": "pu_hour",
+        "title": "Pickup hour",
+        "description": "The hour the trip was picked up in, in New York local time: 2024-01-05 14:00 is 14:00 to 14:59."
+      },
+      {
+        "column": "speed_mph",
+        "title": "Average speed",
+        "description": "The trip’s distance over its duration.",
+        "unit": "mph"
+      },
+      {
+        "column": "card_tip_rate",
+        "title": "Card tip rate",
+        "description": "The tip as a share of the meter fare, for trips paid by credit card; empty for the rest, since cash tips aren’t recorded.",
+        "datasets": [
+          "trips_enriched"
+        ]
+      },
+      {
+        "column": "card_tip_rate",
+        "title": "Card tip rate",
+        "description": "The average card tip rate of the zone hour’s trips paid by credit card.",
+        "datasets": [
+          "zone_hour"
+        ]
+      },
+      {
+        "column": "trips",
+        "title": "Trips",
+        "description": "How many trips were picked up there in that hour."
+      },
+      {
+        "column": "avg_duration_min",
+        "title": "Average duration",
+        "description": "The average time from pickup to drop-off of the hour’s trips.",
+        "unit": "minutes"
+      },
+      {
+        "column": "avg_speed_mph",
+        "title": "Average speed",
+        "description": "The average of the hour’s trips’ speeds.",
+        "unit": "mph"
+      },
+      {
+        "column": "avg_fare",
+        "title": "Average meter fare",
+        "description": "The average meter fare of the hour’s trips.",
+        "unit": "USD"
+      },
+      {
+        "column": "zones",
+        "title": "Zones",
+        "description": "How many taxi zones the district has."
+      },
+      {
+        "column": "hour",
+        "title": "Hour",
+        "description": "The hour the weather is for, in New York local time: 2024-01-05 14:00 is 14:00 to 14:59, as a pickup hour is. Its precipitation, rain and snowfall fell during that hour; its temperature, wind and weather code are from the hour’s end."
+      },
+      {
+        "column": "condition",
+        "title": "Condition",
+        "description": "The hour’s weather in a word, from the precipitation and snowfall that fell during it.",
+        "values": {
+          "dry": "No precipitation",
+          "rain": "Precipitation under 2.5 mm, no snow",
+          "heavy rain": "2.5 mm of precipitation or more, no snow",
+          "snow": "Some snowfall"
+        }
+      },
+      {
+        "column": "temp_c",
+        "title": "Temperature",
+        "description": "Air temperature at 2 m, at the end of the hour.",
+        "unit": "°C"
+      },
+      {
+        "column": "precip_mm",
+        "title": "Precipitation",
+        "description": "The precipitation that fell during the hour.",
+        "unit": "mm"
+      },
+      {
+        "column": "hours",
+        "title": "Hours",
+        "description": "How many of the borough’s hours had that condition."
+      },
+      {
+        "column": "trips_per_hour",
+        "title": "Trips per hour",
+        "description": "The average number of trips picked up per hour in that condition."
+      },
+      {
+        "column": "vs_dry",
+        "title": "Against dry hours",
+        "description": "Trips in an hour of that condition against a dry hour at the same time of day, on average: 1.2 is 20% more."
+      },
+      {
+        "column": "filled_from",
+        "title": "Filled from",
+        "description": "The day a row came from, when its own day was filled from another day (ADR 0009 amendment 1): empty for a row that arrived. In a row that sums others up, the latest such day among them."
+      },
+      {
+        "column": "filled",
+        "title": "Filled",
+        "description": "How many of the trips it counts came from another day: 0 when nothing was filled."
+      }
+    ],
+    "references": [
+      {
+        "id": "tlc-yellow",
+        "title": "Data Dictionary – Yellow Taxi Trip Records",
+        "url": "https://www.nyc.gov/assets/tlc/downloads/pdf/data_dictionary_trip_records_yellow.pdf",
+        "publisher": "NYC Taxi & Limousine Commission",
+        "version": "March 18, 2025"
+      },
+      {
+        "id": "tlc-trips",
+        "title": "TLC Trip Record Data",
+        "url": "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page",
+        "publisher": "NYC Taxi & Limousine Commission"
+      },
+      {
+        "id": "tlc-fares",
+        "title": "Taxi Fare",
+        "url": "https://www.nyc.gov/site/tlc/passengers/taxi-fare.page",
+        "publisher": "NYC Taxi & Limousine Commission"
+      },
+      {
+        "id": "tlc-zones",
+        "title": "Taxi Zone Lookup Table",
+        "url": "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv",
+        "publisher": "NYC Taxi & Limousine Commission"
+      },
+      {
+        "id": "boro-taxi",
+        "title": "Boro taxi",
+        "url": "https://en.wikipedia.org/wiki/Boro_taxi",
+        "publisher": "Wikipedia"
+      },
+      {
+        "id": "open-meteo",
+        "title": "Historical Weather API",
+        "url": "https://open-meteo.com/en/docs/historical-weather-api",
+        "publisher": "Open-Meteo",
+        "version": "read November 5, 2026"
+      }
+    ]
+  },
+  "policies": {
+    "principals": [
+      {
+        "id": "owner",
+        "name": "Owner",
+        "role": "Owns the flow",
+        "owner": true
+      },
+      {
+        "id": "ana",
+        "name": "Ana",
+        "role": "Manhattan lead",
+        "attributes": {
+          "districts": [
+            "Manhattan"
+          ]
+        }
+      },
+      {
+        "id": "ben",
+        "name": "Ben",
+        "role": "Brooklyn and Queens planner",
+        "attributes": {
+          "districts": [
+            "Brooklyn",
+            "Queens"
+          ]
+        }
+      },
+      {
+        "id": "cara",
+        "name": "Cara",
+        "role": "Airport operations",
+        "attributes": {
+          "zones": [
+            "JFK Airport",
+            "LaGuardia Airport",
+            "Newark Airport"
+          ]
+        }
+      },
+      {
+        "id": "dev",
+        "name": "Dev",
+        "role": "City analyst",
+        "attributes": {}
+      }
+    ],
+    "groups": [
+      {
+        "id": "leads",
+        "name": "District leads",
+        "members": [
+          "ana",
+          "ben"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "id": "district",
+        "kind": "row",
+        "name": "District rule",
+        "for": [
+          "leads"
+        ],
+        "columns": [
+          "pu_borough",
+          "borough"
+        ],
+        "attribute": "districts"
+      },
+      {
+        "id": "airports",
+        "kind": "row",
+        "name": "Airports only",
+        "for": [
+          "cara"
+        ],
+        "columns": [
+          "pu_zone",
+          "zone"
+        ],
+        "attribute": "zones"
+      },
+      {
+        "id": "no_fares",
+        "kind": "column",
+        "name": "No fares",
+        "for": [
+          "dev"
+        ],
+        "remove": [
+          "fare_amount",
+          "tip_amount",
+          "tolls_amount",
+          "total_amount",
+          "extra",
+          "mta_tax",
+          "improvement_surcharge",
+          "congestion_surcharge",
+          "Airport_fee",
+          "avg_fare",
+          "card_tip_rate"
+        ]
+      },
+      {
+        "id": "targets",
+        "kind": "action",
+        "name": "Zone targets",
+        "action": "set_zone_target",
+        "for": [
+          "leads"
+        ],
+        "scope": {
+          "columns": [
+            "pu_borough"
+          ],
+          "attribute": "districts"
+        }
+      },
+      {
+        "id": "annotate",
+        "kind": "action",
+        "name": "Weather notes",
+        "action": "annotate_weather",
+        "for": [
+          "*"
+        ]
+      }
+    ]
+  },
+  "groups": [
+    {
+      "id": "clean",
+      "name": "Clean trips",
+      "color": "amber",
+      "steps": [
+        "trips",
+        "trips_filled",
+        "trips_valid",
+        "trips_dedup"
+      ]
+    },
+    {
+      "id": "places",
+      "name": "Places",
+      "color": "smalt",
+      "steps": [
+        "zones",
+        "zone_list",
+        "districts"
+      ]
+    },
+    {
+      "id": "enrich",
+      "name": "Enrich",
+      "color": "teal",
+      "steps": [
+        "trips_zoned",
+        "trips_enriched"
+      ]
+    },
+    {
+      "id": "demand",
+      "name": "Demand",
+      "color": "green",
+      "steps": [
+        "zone_hour",
+        "borough_hour"
+      ]
+    },
+    {
+      "id": "weather_group",
+      "name": "Weather and demand",
+      "color": "violet",
+      "steps": [
+        "weather",
+        "weather_hourly",
+        "borough_hour_weather",
+        "weather_effect"
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "id": "trips_profile",
+      "of": "trips",
+      "description": "What each load of trips holds, and whether it is a normal day: its news against the history (the amount, the hours, the values and combinations, what the checks drop), each column's distribution, the rows an isolation forest finds odd, and checks worth adding. It only looks: no data changes here. A day with nothing to compare against (a holiday the history has no last year of) is not judged yet: it is published, marked ◌."
+    },
+    {
+      "id": "zones_profile",
+      "of": "zones",
+      "description": "What the zone lookup holds: each zone's id once, the zones that are placeholders, and the trips that find no zone. It only looks: no data changes here."
+    },
+    {
+      "id": "weather_profile",
+      "of": "weather",
+      "description": "What the weather holds: each district's hours on record, and the day's rain, snow and temperatures in the city's history. It only looks: no data changes here."
+    }
+  ],
+  "calendar": {
+    "base": "us-nyc",
+    "zone": "America/New_York",
+    "days": [
+      {
+        "name": "Election Day",
+        "weekday": "tue",
+        "between": [
+          2,
+          8
+        ],
+        "month": [
+          11
+        ]
+      }
+    ]
+  },
+  "publish": {
+    "hold": [
+      "checks",
+      "wrong"
+    ],
+    "watch": {
+      "trips": {
+        "history": "history.json",
+        "pattern": "weekly",
+        "donor": "weekday",
+        "scale": "fixed",
+        "time": "tpep_pickup_datetime"
+      }
+    },
+    "period": "day",
+    "together": true
+  },
+  "layout": {}
+}

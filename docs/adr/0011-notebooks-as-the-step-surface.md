@@ -75,6 +75,10 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
 8. **Pins.** (Q-95) smaltnb (its format and graph) and smaltkit (smaltty, which the parser needs) are pinned in
    `packed.json` in the first notebook PR, said plainly in its description for stenhoor's review; smaltdb's pin moves
    to the commit smaltnb pins, so one engine serves both. Nothing of smaltnb's is copied into this repository.
+   *As built:* the smaltdb pin stayed at `a0906b7`. Tried on 2026-11-09, smaltnb's `062b248` is past smaltdb's
+   ADR 0017 (no SQL in the engine): every `db.query(sql)` in smaltfl's tests, plugin and app fails with "this is
+   written in sql, which is not registered" until smaltql is pinned and registered in the tests, the worker and the
+   page. That move is its own slice (0b below), not a pin change.
 9. **The move.** (Q-87) The fork `beepboopbop64/smaltfl_fork` of `stenhoor/smaltfl` is the route ADR 0007 needed:
    Steve's initial commit is the root of this history, so the fork's `main` fast-forwards to it with no merge and no
    hash changed, and the `data` branch goes across as it is. The pull request to `stenhoor/smaltfl` is opened from the
@@ -117,7 +121,9 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
 - **Needs from stenhoor's repositories** (ADR 0001 §12, asked, never changed from here): smaltnb's `expect` cell shape
   and a stable `check` option; one shared smaltdb pin; smaltts Gate C and its re-base on 0.9.0 (milestone 1) before
   anything is built on it; smaltdf's `explain()` as a stable way to a frame's statement, or a plan when it has one.
-- **The slices**, one PR each in the fork, from `main`:
+- **The slices**, one PR each in the fork, from `main` (0b: smaltfl on smaltdb's head, with `@smaltworks/smaltql`
+  pinned and registered wherever SQL runs, so smaltfl, smaltnb and smaltdf share one engine commit; measured on
+  2026-11-09 as the pin move's only failure mode, §8):
   1. this record, Q-87 to Q-95, format 4 and plan/3 named, the pins asked for (done with this record's PR, except the
      pins);
   2. `src/core/notebook.ts` and the pins: parse, graph order, exported cells to plan nodes, check cells, the notebook
@@ -129,7 +135,15 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
      (`queryPlan`), the step ADR 0004 already names; until then a df cell in a flow is refused, named. The older
      smaltdf that compiled to SQL (`explain()`) is not used: the notebook page runs the pinned one, and a flow and the
      page must take the statement from the same code;
-  3. the taxi example as notebooks (`sql` and `df` cells, the fill step as a cell), the hold and donor tables unmoved;
+  3. the taxi example as notebooks (`sql` and `df` cells, the fill step as a cell), the hold and donor tables unmoved.
+     Built 2026-11-09: `examples/nyc-taxis-weather/` is three notebooks, one a stage (`trips.nb.ts`: the fill, the
+     checks, deduplication, zones, enrichment and the two counts; `places.nb.ts`; `weather.nb.ts`), all its cells
+     `sql` (a df cell waits on the plan node, slice 2's note). Since an exported cell is a dataset and a notebook
+     imports only exports, the trips' chain is one notebook, where the JSON form drew three sections: the
+     intermediates stay unexported and fold as before. `test/notebook-taxi.test.ts` shows the two forms share their
+     fill and expect nodes, outputs and publish block, and give the same rows on the XS fixtures. The hold and donor
+     vectors run on the JSON form, which stays `examples/nyc-taxis-weather.smaltfl.json` until the app reads folders
+     (slice 4);
   4. the app: notebook groups, the cell sheet with smaltkit's editor, everything else as it is;
   5. a headless run (`node scripts/run.mjs --flow DIR --day D`) on the in-process engine, ahead of `smaltnb run`;
   6. the smaltts seam, when its milestone 7 lands: publish through `flow()`, the plugin's tables through specs.

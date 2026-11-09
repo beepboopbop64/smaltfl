@@ -80,8 +80,9 @@ match smaltdb's `CLAUDE.md`.
   `src/core/notebook.ts` derives them (`loadNotebooks`, `expandNotebooks`, `stepsOfNotebooks`) with smaltnb's parser
   and graph on smaltty (`smaltkit/typescript`, passed in); `src/notebook.ts` is `smaltfl/notebook`, what a notebook
   imports (`source`, `check`, `fill`); its plan is plan/3 (E14, `test/notebook.test.ts`). A flow is a folder:
-  `examples/security-signins/` (`flow.json` and `*.nb.ts`, typechecked with the repository). `packed.json` pins
-  smaltnb and smaltkit beside smaltdb.
+  `examples/security-signins/` and `examples/nyc-taxis-weather/` (`flow.json` and `*.nb.ts`, typechecked with the
+  repository; `test/notebook-taxi.test.ts` holds them to the JSON forms, which the app still reads). `packed.json`
+  pins smaltnb and smaltkit beside smaltdb.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
