@@ -138,6 +138,9 @@ export interface Hold {
   load?: Load;
   /** The run that first held the load, when an earlier run did: a carried hold, decided once (ADR 0010 §7). */
   carried?: number;
+  /** A check that reads several watched loads (a join of two sources), held once for each of them: which one is off its
+   * failing doesn't say, so each is held and decided by its load (`spare` keeps those new in the run). */
+  shared?: true;
 }
 
 /**
@@ -176,6 +179,21 @@ export function loadsOf(plan: Pick<FlowPlan, 'nodes' | 'publish'>, manifest: Pic
     if (typeof slot === 'string' && sha256) out.set(w.node, { source: plan.nodes[w.node]!.origin, slot, sha256 });
   }
   return out;
+}
+
+/**
+ * A check over several watched loads, held once for each (`shared`), kept for the loads new in the run (ADR 0010 §7,
+ * Q-55): a load an earlier run of the flow read while the same check passed (`readBefore`) isn't what made it fail, so
+ * its hold is dropped, unless every load the check reads was read so before (a run again: then each stays held).
+ */
+export function spare<H extends Pick<Hold, 'by' | 'node' | 'load' | 'shared'>>(holds: readonly H[], readBefore: (load: Load, node: number) => boolean): H[] {
+  const drop = new Set<H>();
+  for (const node of new Set(holds.filter((h) => h.shared).map((h) => h.node))) {
+    const mine = holds.filter((h) => h.shared && h.node === node && h.by === 'checks' && h.load);
+    const old = mine.filter((h) => readBefore(h.load!, node));
+    if (old.length && old.length < mine.length) for (const h of old) drop.add(h);
+  }
+  return holds.filter((h) => !drop.has(h));
 }
 
 /**
@@ -674,6 +692,20 @@ export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, m
         const read = [...upstream(plan, h.node)].filter((i) => watched.has(i));
         if (read.length === 1) h.load = { ...loads.get(read[0]!)! };
       }
+    }
+    // A check that reads several watched loads (a join of both sources) is held once for each of them, each reaching
+    // only the outputs that read its source: every hold is about a load, so every hold can be decided, and outputs that
+    // read neither publish (Q-55).
+    for (let k = out.length - 1; k >= 0; k--) {
+      const h = out[k]!;
+      if (h.by !== 'checks' || h.load) continue;
+      const read = [...upstream(plan, h.node)].filter((i) => watched.has(i)).sort((a, b) => a - b);
+      if (read.length < 2) continue;
+      const split = read.map((i): Hold => {
+        const reach = new Set(reachOf(plan, i));
+        return { ...(h as Hold), reaches: h.reaches.filter((n) => reach.has(n)), load: { ...loads.get(i)! }, shared: true };
+      });
+      out.splice(k, 1, ...split);
     }
   }
   if (derived.derived) {

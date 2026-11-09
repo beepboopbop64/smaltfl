@@ -32,7 +32,7 @@ import type { FlowDocument } from './document.js';
 import { sha256Hex } from './hash.js';
 import { daysBetween } from './calendar.js';
 import { DONOR_WINDOW, levelStray, levelWays, repairDocument, type Repair } from './fill.js';
-import { carry, claimBase, claimHolds, donorGood, factsFromClaims, heldOutputs, holdsOf, inputsKey, isLoad, loadKey, type Load, isClaim2, isLevel, judgeClaims, lastPublished, sameKeys, standingFor, standingForLoad, type Claim, type DecideAbout, type DerivedAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type RunHold } from './hold.js';
+import { carry, spare, loadsOf, claimBase, claimHolds, donorGood, factsFromClaims, heldOutputs, holdsOf, inputsKey, isLoad, loadKey, type Load, isClaim2, isLevel, judgeClaims, lastPublished, sameKeys, standingFor, standingForLoad, type Claim, type DecideAbout, type DerivedAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type RunHold } from './hold.js';
 import { canonicalJSON } from './canonical.js';
 import { consistencyProof, entryLeaf, parseCheckpoint, rootOf, verifyCheckpoint, verifyConsistency, verifyInclusion, verifyRecord, type JSONValue, type LogEntry, type SignedCheckpoint } from './log.js';
 import { manifestHash, planHash, policiesHash, type IdentityCard, type RunManifest } from './manifest.js';
@@ -372,8 +372,15 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     const kept = engineHolds.get(a.manifest);
     if (kept && typed) {
       // A load an earlier run of the flow held is carried, citing it (ADR 0010 §7): from what the engine kept of them.
-      const earlier = (l: Load) => [...engineHolds.values()].filter((x) => x.run < kept.run && runs.get(x.manifest)?.manifest?.flow.id === m.flow.id).sort((x, y) => x.run - y.run).find((x) => Array.isArray(x.holds) && x.holds.some((h) => h.load && loadKey(h.load) === loadKey(l)))?.run;
-      problems.push(...engineHoldsProblems(kept, e.about, typed, m, a.outcome === 'derived' ? 'derived' : a.outcome, engineRepairs?.derived.find((d) => d.manifest === a.manifest), earlier));
+      const before = [...engineHolds.values()].filter((x) => x.run < kept.run && runs.get(x.manifest)?.manifest?.flow.id === m.flow.id).sort((x, y) => x.run - y.run);
+      const earlier = (l: Load) => before.find((x) => Array.isArray(x.holds) && x.holds.some((h) => h.load && loadKey(h.load) === loadKey(l)))?.run;
+      // A check over several loads blames only those new in the run (spare): read by an earlier run it passed in.
+      const readBefore = (l: Load, node: number) => before.some((x) => {
+        const r = runs.get(x.manifest);
+        const read = r?.manifest && r.plan ? [...loadsOf(r.plan, r.manifest).values()].some((y) => loadKey(y) === loadKey(l)) : false;
+        return read && Array.isArray(x.holds) && !x.holds.some((h) => h.by === 'checks' && h.node === node && h.load && loadKey(h.load) === loadKey(l));
+      });
+      problems.push(...engineHoldsProblems(kept, e.about, typed, m, a.outcome === 'derived' ? 'derived' : a.outcome, engineRepairs?.derived.find((d) => d.manifest === a.manifest), earlier, readBefore));
       // The claims its entry keeps (ADR 0010 §6) include each one the engine judged it by: what --history tells again.
       const keptClaims = (e.about as { claims?: unknown }).claims;
       if (Array.isArray(keptClaims) && Array.isArray(kept.judged)) {
@@ -764,7 +771,7 @@ function flowOf(flows: Map<string, BagFile>, hash: string): FlowDocument | null 
  * sources hold (each claim judged again against the manifest), and what the record says of the run: held by the same
  * holds, or, recorded as published, held by none.
  */
-function engineHoldsProblems(kept: EngineHolds, about: unknown, plan: FlowPlan, m: RunManifest, outcome: 'ok' | 'held' | 'derived', derived: EngineRepairs['derived'][number] | undefined, earlier: (l: Load) => number | undefined): string[] {
+function engineHoldsProblems(kept: EngineHolds, about: unknown, plan: FlowPlan, m: RunManifest, outcome: 'ok' | 'held' | 'derived', derived: EngineRepairs['derived'][number] | undefined, earlier: (l: Load) => number | undefined, readBefore: (l: Load, node: number) => boolean): string[] {
   const problems: string[] = [];
   const holds = Array.isArray(kept.holds) ? kept.holds : [];
   const judged = Array.isArray(kept.judged) ? kept.judged.filter(isRecord) as Judged[] : [];
@@ -774,7 +781,7 @@ function engineHoldsProblems(kept: EngineHolds, about: unknown, plan: FlowPlan, 
     const again = judgeClaims(plan, claims, factsFromClaims(claims, { rows: (node) => m.nodes.find((n) => n.node === node)?.rows, flow: claimsFlow(claims, m), origin: (node) => plan.nodes[node]?.origin }));
     const same = (x: unknown, y: unknown) => x !== undefined && y !== undefined && canonicalJSON(x as JSONValue) === canonicalJSON(y as JSONValue);
     if (judged.some((j) => 'claim' in j && !same(again.find((k) => k.node === j.node), j))) problems.push("the claims the engine judged it by don't match it");
-    if (!same(carry(holdsOf(plan, m, judged), earlier), holds)) problems.push("the engine's holds for it aren't what its manifest and its judged sources hold");
+    if (!same(carry(spare(holdsOf(plan, m, judged), readBefore), earlier), holds)) problems.push("the engine's holds for it aren't what its manifest and its judged sources hold");
     if (outcome === 'held' && !same((about as Partial<HeldAbout>).holds ?? [], holds)) problems.push("the holds the record names aren't the ones the engine kept");
     // A derived run: what holds it besides, computed again from its plan and its donors as the engine judged them.
     if (outcome === 'derived' && derived) {

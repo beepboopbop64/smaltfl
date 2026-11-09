@@ -33,8 +33,9 @@ import type { Database } from 'smaltdb/engine';
 import { canonicalJSON } from '../core/canonical.js';
 import type { Repair } from '../core/fill.js';
 import type { MeasureSettings, Measures } from '../core/measures.js';
-import { loadKey, type FillHold, type Hold, type Judged, type Load, type RunRef } from '../core/hold.js';
-import type { ExpectationResult } from '../core/manifest.js';
+import { loadKey, loadsOf, type FillHold, type Hold, type Judged, type Load, type RunRef } from '../core/hold.js';
+import type { ExpectationResult, RunManifest } from '../core/manifest.js';
+import type { FlowPlan } from '../core/plan.js';
 import type { DecisionOption } from '../core/policy.js';
 import { quoteIdent as q } from '../core/sqltext.js';
 
@@ -168,6 +169,24 @@ export function carriedFrom(db: Database, flow: string, load: Load, before?: num
   const rows = db.query('SELECT h.run, h.holds FROM _smaltfl_holds h JOIN _smaltfl_runs r ON r.id = h.run WHERE r.flow = ? AND h.run < ? ORDER BY h.run', [flow, before ?? Number.MAX_SAFE_INTEGER]).rows;
   for (const row of rows) if ((JSON.parse(String(row[1])) as Hold[]).some((h) => h.load && loadKey(h.load) === key)) return Number(row[0]);
   return undefined;
+}
+
+/**
+ * Whether an earlier run of a flow (before `before`, any without it) read a load while a check at `node` passed: it read
+ * the load (its plan's watched sources, its manifest's files and slots) and its stored holds name no checks at that node
+ * about that load. What `spare` keeps a check over several loads from blaming.
+ */
+export function readBefore(db: Database, flow: string, load: Load, node: number, before?: number): boolean {
+  const key = loadKey(load);
+  const rows = db.query('SELECT h.holds, r.manifest FROM _smaltfl_holds h JOIN _smaltfl_runs r ON r.id = h.run WHERE r.flow = ? AND h.run < ? ORDER BY h.run', [flow, before ?? Number.MAX_SAFE_INTEGER]).rows;
+  for (const [holds, manifestText] of rows) {
+    const manifest = JSON.parse(String(manifestText)) as RunManifest;
+    const plan = db.query('SELECT plan FROM _smaltfl_plans WHERE hash = ?', [manifest.plan]).rows[0];
+    if (!plan) continue;
+    const read = [...loadsOf(JSON.parse(String(plan[0])) as FlowPlan, manifest).values()].some((l) => loadKey(l) === key);
+    if (read && !(JSON.parse(String(holds)) as Hold[]).some((h) => h.by === 'checks' && h.node === node && h.load && loadKey(h.load) === key)) return true;
+  }
+  return false;
 }
 
 /** A run's stored holds and judged sources, or null for a run with no row (a plan without a publish block). */

@@ -8,8 +8,9 @@
 import { describe, expect, it } from 'vitest';
 import { pauseLines, pauseReasons } from '../src/core/decision.js';
 import { offersOf, missingOf } from '../src/core/fill.js';
-import { byLoad, carry, dayState, decisionForLoad, holdsOf, judgeClaims, loadKey, loadsOf, pausesOf, skipOf, standingForLoad, type DecideAbout, type HeldAbout, type Hold, type Inputs, type Load, type ReleaseAbout, type StoryClaim2 } from '../src/core/hold.js';
+import { byLoad, carry, dayState, heldOutputs, spare, decisionForLoad, holdsOf, judgeClaims, loadKey, loadsOf, pausesOf, skipOf, standingForLoad, type DecideAbout, type HeldAbout, type Hold, type Inputs, type Load, type ReleaseAbout, type StoryClaim2 } from '../src/core/hold.js';
 import type { LogEntry } from '../src/core/log.js';
+import type { FlowDocument } from '../src/core/document.js';
 import type { RunManifest } from '../src/core/manifest.js';
 import { translate, type FlowPlan } from '../src/core/plan.js';
 import { twoSourceDoc } from './fixtures/security.js';
@@ -62,6 +63,31 @@ describe('a run of two watched sources: its loads and what holds it', () => {
     const auth: Load = { source: 'auth', slot: '2024-09-10', sha256: SHA('1') };
     expect(carry(holds, (l) => (loadKey(l) === loadKey(auth) ? 7 : undefined))[0]).toMatchObject({ carried: 7 });
     expect(carry(holds, () => undefined)[0]!.carried).toBeUndefined();
+  });
+});
+
+describe('a check over both watched sources (Q-55, ADR 0010 §7)', () => {
+  it('holds each load it reads, each reaching its own source\'s outputs, and spares a load an earlier run read while it passed', async () => {
+    const joined: FlowDocument = { ...doc, steps: [...doc.steps, { id: 'both_checked', kind: 'expectations', inputs: ['edr_hosts_signing_in'], rules: [{ name: 'events', check: 'events > 0', onFail: 'fail' }], dataset: {} }] };
+    const plan = await translate(joined, { day: '2024-09-10', slot: '2024-09-10T06' });
+    const m = manifestOf(plan, { auth: SHA('1'), edr: SHA('2') });
+    const check = plan.nodes.findIndex((n) => n.origin === 'both_checked');
+    const node = m.nodes.find((n) => n.node === check)!;
+    node.expectations = { rows: 1, dropped: 0, rules: [{ name: 'events', onFail: 'fail', failed: 1 }] };
+    const judged = judgeClaims(plan, [claim2('auth', '2024-09-10', { flow: plan.flow.hash }), claim2('edr', '2024-09-10T06', { flow: plan.flow.hash })], factsOf(plan));
+    const holds = holdsOf(plan, m, judged).filter((h) => h.origin === 'both_checked');
+    // Its failing doesn't say which file is off: a hold for each, every hold about a load, so each can be decided.
+    expect(holds.map((h) => [h.load?.source, h.shared, h.reaches])).toEqual([
+      ['auth', true, ['auth_results', 'auth_valid', 'both_checked', 'edr_hosts_signing_in']],
+      ['edr', true, ['both_checked', 'edr_actions', 'edr_hosts_signing_in']],
+    ]);
+    // The sign-ins' load was read by an earlier run while the check passed: only edr's new slot is held, and what reads
+    // the sign-ins alone publishes.
+    const spared = spare(holds, (l) => l.source === 'auth');
+    expect(spared.map((h) => h.load?.source)).toEqual(['edr']);
+    expect(heldOutputs(plan, spared)).toEqual(['both_checked', 'edr_actions', 'edr_hosts_signing_in']);
+    // Both read before (the same loads run again): each stays held.
+    expect(spare(holds, () => true)).toHaveLength(2);
   });
 });
 
