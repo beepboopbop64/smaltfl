@@ -1,15 +1,19 @@
 // Builds the app into dist/app: page.html (the page's content; the artifact host adds the document skeleton),
 // app.js (the page), worker.js (the engine worker), inline.js (the engine in the page, for browsers without the
-// worker), and data/ (the example's files: from the data branch when it has been fetched, the month's daily loads, the
-// days of a few real incidents and the days a paused one may be filled from, listed in data/loads.json, and the history
-// each day's normal range and news come from, data/history.json; else the XS fixtures, as one load).
+// worker), and data/ (a flow's files, listed in data/loads.json, format 2: each source's binding with its file or its
+// daily loads and the days a paused one may be filled from, and each watched source's history, ADR 0010 §9).
 //
-//   node scripts/build-app.mjs            the daily loads from origin/data, or the 10k fixtures
-//   node scripts/build-app.mjs --xs       the 10k fixtures
+//   node scripts/build-app.mjs            the example: the daily loads from origin/data, or the 10k fixtures
+//   node scripts/build-app.mjs --xs       the example on the 10k fixtures
+//   node scripts/build-app.mjs --flow examples/security-signins.smaltfl.json
+//                                         another example: its data list's generator writes its daily files, the
+//                                         general builder its history; the document ships as data/flow.json
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 
 const out = 'dist/app';
 rmSync(out, { recursive: true, force: true });
@@ -40,12 +44,16 @@ const common = {
 // The artifact host serves text but not Parquet: a Parquet file goes base64-encoded as <name>.txt (src/app/main.ts).
 const put = (name, bytes) => (name.endsWith('.parquet') ? writeFileSync(`${out}/data/${name}.txt`, bytes.toString('base64')) : writeFileSync(`${out}/data/${name}`, bytes));
 const xs = process.argv.includes('--xs');
+const flowAt = process.argv.indexOf('--flow');
+const flowPath = flowAt >= 0 ? process.argv[flowAt + 1] : null;
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// The example's bindings (ADR 0010 §9): each source's table, format and file name, which loads.json carries on.
+const bindingsOf = (doc) => JSON.parse(readFileSync(doc.replace(/\.smaltfl\.json$/, '.data.json'), 'utf8'));
 // The data branch at one commit, read by it for every file, so the list and the files can't come from two builds.
 let data = null;
 let manifestBytes = null;
 let manifest = null;
-if (!xs) {
+if (!xs && !flowPath) {
   try {
     data = git('rev-parse', 'origin/data').toString().trim();
   } catch {
@@ -94,7 +102,7 @@ if (days.length) {
     const entry = listed(path, bytes);
     put(path, bytes);
     // The app names the holidays itself (src/core/calendar.ts).
-    return { day, file: path, rows: entry.rows, sha256: entry.sha256, bytes: entry.bytes };
+    return { slot: day, file: path, rows: entry.rows, sha256: entry.sha256, bytes: entry.bytes };
   };
   const list = days.map(entryOf);
   // Real incidents in the records, a few days each, to step through as the month is.
@@ -103,19 +111,52 @@ if (days.length) {
   // list like every file, pinned by the page only when a fill needs one. Not loads: the strip doesn't step through them.
   const donors = (manifest.loads.donors ?? []).map(entryOf);
   // Each day's numbers, for each load's normal range: a data branch built before the history has none.
-  if (manifest.history) files.history = file('history.json', 'history.json');
-  const index = { month: manifest.month, built: manifest.built, data: { commit: data, manifest: sha256(manifestBytes), bytes: manifestBytes.length }, files, loads: list, episodes, donors, ...(files.history ? { history: 'history.json' } : {}) };
+  const history = manifest.history ? file('history.json', 'history.json') : null;
+  const b = bindingsOf('examples/nyc-taxis-weather.smaltfl.json').sources;
+  const source = manifest.loads.source ?? 'trips';
+  const index = {
+    format: 2, month: manifest.month, built: manifest.built, data: { commit: data, manifest: sha256(manifestBytes), bytes: manifestBytes.length }, flow: null,
+    sources: { [source]: { ...b[source], loads: list, donors }, zones: { ...b.zones, entry: files.zones }, weather: { ...b.weather, entry: files.weather } },
+    histories: history ? { [source]: history } : {},
+    episodes,
+  };
   writeFileSync(`${out}/data/loads.json`, JSON.stringify(index, null, 2) + '\n');
   const trips = (ls) => ls.reduce((n, l) => n + l.rows, 0).toLocaleString('en-US');
-  console.log(`built ${out} (${commit.slice(0, 12)}) with ${list.length} daily loads from data ${data.slice(0, 12)} (${trips(list)} trips), ${episodes.map((e) => `${e.loads.length} of ${e.name}`).join(', ') || 'no episodes'}, ${donors.length} donor days${files.history ? `, and the history from ${manifest.history.from} to ${manifest.history.to}` : ''}; every file checked against MANIFEST.json`);
+  console.log(`built ${out} (${commit.slice(0, 12)}) with ${list.length} daily loads from data ${data.slice(0, 12)} (${trips(list)} trips), ${episodes.map((e) => `${e.loads.length} of ${e.name}`).join(', ') || 'no episodes'}, ${donors.length} donor days${history ? `, and the history from ${manifest.history.from} to ${manifest.history.to}` : ''}; every file checked against MANIFEST.json`);
+} else if (flowPath) {
+  // Another example (ADR 0010 §9): its data list's generator writes its daily files (generated, never fetched), the
+  // general builder measures the history from the days before the loads, and the document ships beside them. The
+  // build's own list: hashed here, never the data branch's.
+  const bind = bindingsOf(flowPath);
+  if (!bind.generate) throw new Error(`${flowPath}'s data list names no generator for its files`);
+  const work = mkdtempSync(join(tmpdir(), 'smaltfl-data-'));
+  execFileSync('node', [bind.generate, work], { stdio: 'inherit' });
+  const [source, b] = Object.entries(bind.sources)[0];
+  execFileSync('node', ['scripts/data/history.mjs', '--flow', flowPath, '--watch', source, '--files', join(work, 'base.json'), join(work, 'history.json')], { stdio: 'inherit' });
+  mkdirSync(`${out}/data/loads`, { recursive: true });
+  const entry = (name, bytes, from) => {
+    writeFileSync(`${out}/data/${name}`, bytes);
+    return { path: name, from, sha256: sha256(bytes), bytes: bytes.length };
+  };
+  const flowEntry = entry('flow.json', readFileSync(flowPath), flowPath);
+  const history = entry('history.json', readFileSync(join(work, 'history.json')), `${bind.generate}, scripts/data/history.mjs`);
+  const list = JSON.parse(readFileSync(join(work, 'loads.json'), 'utf8')).map((l) => {
+    const e = entry(`loads/${basename(l.file)}`, readFileSync(l.file), bind.generate);
+    return { slot: l.slot, file: e.path, rows: l.rows, sha256: e.sha256, bytes: e.bytes };
+  });
+  rmSync(work, { recursive: true, force: true });
+  const index = { format: 2, month: list[0]?.slot.slice(0, 7), built: new Date().toISOString().slice(0, 19) + 'Z', data: null, flow: flowEntry, sources: { [source]: { ...b, loads: list, donors: [] } }, histories: { [source]: history }, episodes: [] };
+  writeFileSync(`${out}/data/loads.json`, JSON.stringify(index, null, 2) + '\n');
+  console.log(`built ${out} (${commit.slice(0, 12)}) with ${flowPath}: ${list.length} daily loads of ${source} and its history, generated by ${bind.generate}`);
 } else {
   // The fixtures: hashed here, as this build's own list, never as the data branch's.
-  const files = {};
-  for (const name of ['trips.parquet', 'zones.csv', 'weather.csv']) {
-    const bytes = readFileSync(`fixtures/xs/${name}`);
-    put(name, bytes);
-    files[name.split('.')[0]] = { path: name, from: `fixtures/xs/${name}`, sha256: sha256(bytes), bytes: bytes.length };
+  const b = bindingsOf('examples/nyc-taxis-weather.smaltfl.json').sources;
+  const sources = {};
+  for (const [id, binding] of Object.entries(b)) {
+    const bytes = readFileSync(`fixtures/xs/${binding.file}`);
+    put(binding.file, bytes);
+    sources[id] = { ...binding, entry: { path: binding.file, from: `fixtures/xs/${binding.file}`, sha256: sha256(bytes), bytes: bytes.length } };
   }
-  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ data: null, files, loads: [], donors: [] }, null, 2) + '\n');
+  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ format: 2, data: null, flow: null, sources, histories: {}, episodes: [] }, null, 2) + '\n');
   console.log(`built ${out} (${commit.slice(0, 12)}) with data from fixtures/xs (10,000 trips)`);
 }

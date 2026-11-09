@@ -7,7 +7,8 @@
  * Plain DOM and SVG, as the family's apps are. Everything a person typed or a dataset holds is set with textContent.
  */
 import exampleDoc from '../../examples/nyc-taxis-weather.smaltfl.json';
-import { EXAMPLE_SOURCES, pinnedDdl } from '../../examples/sources.js';
+import { EXAMPLE_DATA, EXAMPLE_SOURCES, pinnedDdl, type Binding } from '../../examples/sources.js';
+import { namedFiles, readDataList, type DataList } from './datalist.js';
 import { holidayOf, seasonOf } from '../core/calendar.js';
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
@@ -17,10 +18,10 @@ import { effectOf, type Effect } from '../core/effect.js';
 import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, type HistoryFile, type Metric } from '../core/history.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
-import { isPlaceholder, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
+import { isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type PauseState, type RemedyMark } from '../core/days.js';
 import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, type AfterPart, type RemedySaid, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
-import { countedChecks, dayClaim, dayState, flowStory, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
+import { calendarFor, countedChecks, dayClaim, dayState, flowStory, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { dayVersions, fillCounts, partLabel as remedyPart, type Repair, type Version } from '../core/fill.js';
 import { derivedAbout, derivedFails, derivedKeys, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
 import { ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type Story, type Told } from '../core/story.js';
@@ -30,11 +31,13 @@ import { glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, type Edit, type
 import { DECIDE, DECIDE_OPTIONS, checkDecision, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
-import { flowHash, planPeriod, type Column, type FlowPlan, type PlanNode } from '../core/plan.js';
+import { flowHash, isPublish2, planPeriod, translate, type Column, type FlowPlan, type PlanNode } from '../core/plan.js';
 import { checksOver, clockText, columnSql, fillGaps, growForest, isolationPath, madsOf, minuteOfDay, needOf, needWords, pathLength, principalComponents, profileColumn, quantile, renamesOf, scoreOf, secondsText, suggestChecks, unusual, type Cut, type Drift, type Forest, type Judge, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
 import type { ReleaseResult, RunResult, VerifyLevel, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
-import { pinFile, releaseRun, runFlow, verifyRun } from '../index.js';
+import { measureLoad, pinFile, releaseRun, runFlow, verifyRun } from '../index.js';
+import { appendPeriods, settingsFor, tailBefore, type Measures } from '../core/measures.js';
+import { utf8 } from '../core/hash.js';
 import { describe as describeFile, severityOf as fileSeverity, type FileCheck } from '../core/integrity.js';
 import { fetchChecked, IntegrityError, type Expected } from './fetch-checked.js';
 import { FlowRecord } from './record.js';
@@ -67,6 +70,14 @@ interface RunRecord {
   signed?: SignedManifest;
   signatureOk?: boolean;
 }
+
+/**
+ * The flow the page runs as shipped: the built example, or the document its data list names (ADR 0010 §9, a build's
+ * `--flow`), read before anything else.
+ */
+let shippedDoc = exampleDoc as unknown as FlowDocument;
+/** The data list the page opened (loads.json, either format): each source's binding and files, each watch's history. */
+let dataList: DataList | null = null;
 
 const state = {
   doc: structuredClone(exampleDoc) as unknown as FlowDocument,
@@ -517,11 +528,15 @@ const nodeOf = (id: string): ManifestNode | undefined => latest()?.result.manife
 
 const KIND: Record<string, string> = { sql: 'SQL', filter: 'FILTER', formula: 'FORMULAS', select: 'SELECT', join: 'JOIN', aggregate: 'AGGREGATE', expectations: 'CHECKS' };
 
-/** The file an input reads, where the app knows it (the example's sources). */
-const inputFile = (id: string) => {
+/** A source's binding (ADR 0010 §9): from the data list the page opened, else the example's. */
+const bindingOf = (id: string): Binding | undefined => {
   const src = state.doc.sources.find((x) => x.id === id);
-  return src ? EXAMPLE_SOURCES.find((e) => e.table === src.table) : undefined;
+  if (!src) return undefined;
+  const all = dataList?.sources ?? EXAMPLE_DATA.sources;
+  return all[src.id] ?? Object.values(all).find((b) => b.table === src.table);
 };
+/** The file an input reads, where the app knows it: its binding's. */
+const inputFile = (id: string) => bindingOf(id);
 const FORMATS: Record<string, string> = { parquet: 'Parquet', csv: 'CSV', json: 'JSON', ndjson: 'NDJSON', arrow: 'Arrow' };
 /** A file's format, by its extension: Parquet, CSV… */
 const formatOf = (file: string) => {
@@ -1430,8 +1445,8 @@ function loadArrangement(): void {
 }
 
 function resetArrangement(): void {
-  const edited = canonicalJSON(state.doc.steps as unknown as Parameters<typeof canonicalJSON>[0]) !== canonicalJSON(exampleDoc.steps as unknown as Parameters<typeof canonicalJSON>[0]);
-  state.doc = { ...state.doc, steps: structuredClone(exampleDoc.steps) as StepDef[], groups: structuredClone(exampleDoc.groups) as FlowDocument['groups'], layout: {} };
+  const edited = canonicalJSON(state.doc.steps as unknown as Parameters<typeof canonicalJSON>[0]) !== canonicalJSON(shippedDoc.steps as unknown as Parameters<typeof canonicalJSON>[0]);
+  state.doc = { ...state.doc, steps: structuredClone(shippedDoc.steps) as StepDef[], groups: structuredClone(shippedDoc.groups) as FlowDocument['groups'], layout: {} };
   state.collapsed = new Set();
   try {
     localStorage.removeItem(arrangementKey());
@@ -2276,17 +2291,17 @@ function removeStep(id: string): void {
 // ------------------------------------------------------------------ the flow's edits, kept in this browser
 
 const flowKey = () => `smaltfl:flow:${state.doc.id}`;
-/** A fingerprint of the example's own steps: edits kept against another version of them aren't used. */
-const FLOW_BASE = (() => {
+/** A fingerprint of the shipped flow's own steps: edits kept against another version of them aren't used. */
+const flowBase = (): string => {
   let hash = 0x811c9dc5;
-  for (const ch of canonicalJSON(exampleDoc.steps as unknown as Parameters<typeof canonicalJSON>[0])) hash = Math.imul(hash ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  for (const ch of canonicalJSON(shippedDoc.steps as unknown as Parameters<typeof canonicalJSON>[0])) hash = Math.imul(hash ^ ch.charCodeAt(0), 0x01000193) >>> 0;
   return hash.toString(16);
-})();
+};
 
 /** The flow's steps as edited here (settings applied, check boxes added or taken out), kept in this browser. */
 function saveFlow(): void {
   try {
-    localStorage.setItem(flowKey(), JSON.stringify({ v: 1, base: FLOW_BASE, steps: state.doc.steps }));
+    localStorage.setItem(flowKey(), JSON.stringify({ v: 1, base: flowBase(), steps: state.doc.steps }));
   } catch {
     // Storage can be off: the edits then last as long as the page.
   }
@@ -2295,7 +2310,7 @@ function saveFlow(): void {
 function loadFlow(): void {
   try {
     const saved = JSON.parse(localStorage.getItem(flowKey()) ?? 'null') as { v?: number; base?: string; steps?: unknown } | null;
-    if (!saved || saved.v !== 1 || saved.base !== FLOW_BASE || !Array.isArray(saved.steps)) return;
+    if (!saved || saved.v !== 1 || saved.base !== flowBase() || !Array.isArray(saved.steps)) return;
     const next = { ...state.doc, steps: saved.steps } as FlowDocument;
     if (validateDocument(next).length === 0) state.doc = next;
   } catch {
@@ -2326,11 +2341,8 @@ const drill = {
 
 /** The data a card's sheet is about: a profile box's step, or the card's own. */
 const dataOf = (card: string) => profileOf(card)?.of ?? card;
-/** The weather input: the source the example reads the weather file into. */
-const weatherSource = (): string | undefined => {
-  const table = EXAMPLE_SOURCES.find((x) => x.file === 'weather.csv')?.table;
-  return state.doc.sources.find((x) => x.table === table)?.id;
-};
+/** The weather input: the source its binding marks as the weather, the context the news tells (ADR 0010 §9). */
+const weatherSource = (): string | undefined => state.doc.sources.find((x) => bindingOf(x.id)?.context === 'weather')?.id;
 /** The steps whose numbers the history keeps, day by day: the trips, their checks, and the weather. */
 const historyOf = (id: string): 'trips' | 'checks' | 'weather' | null =>
   !history ? null : id === loadSource() ? 'trips' : id === history.file.step && checksAsCounted() ? 'checks' : id === weatherSource() && history.file.weather ? 'weather' : null;
@@ -2987,9 +2999,12 @@ function storyFor(day: string): Story | null {
   const key = `${day}|${checksAsCounted()}|${dataLog.version}|${[...hidden].sort().join(',')}|${held ?? ''}|${refused}`;
   let told = storyCache.get(key);
   if (!told) {
-    const found = newsOf(history, day, NEWS_NAMES, { checks: checksAsCounted() });
+    // Judged as the document says (ADR 0010 §10): the watch's settings and the marks on its source; a legacy watch's are
+    // the settings every flow had.
+    const judge = judgeOf(state.doc, loadSource() ?? '');
+    const found = newsOf(history, day, NEWS_NAMES, { checks: checksAsCounted(), judge });
     const acknowledged = new Set(found.filter((f) => logOf(day, f.key).some((e) => e.act === 'expected')).map((f) => f.key));
-    told = storyOf(history, day, found, { names: NEWS_NAMES, step: gate?.step, limit: gate?.limit ?? null, held, refused, acknowledged, hidden });
+    told = storyOf(history, day, found, { names: NEWS_NAMES, step: gate?.step, limit: gate?.limit ?? null, held, refused, acknowledged, hidden, judge });
     storyCache.set(key, told);
     for (const old of [...storyCache.keys()].slice(0, Math.max(0, storyCache.size - 60))) storyCache.delete(old);
   }
@@ -5334,7 +5349,7 @@ function incidentDays(): Set<string> {
 /** The ranges learn again, without the incidents' days. */
 function relearn(): void {
   if (!history) return;
-  history = new HistoryRanges(history.file, { skip: incidentDays() });
+  history = new HistoryRanges(history.file, { skip: incidentDays(), calendar: history.calendar, recorded: new Set(recordedSkips()) });
   storyCache.clear();
   alerts = null;
   backtests.clear();
@@ -6828,11 +6843,20 @@ const spanOf = (id: string): string => {
   const src = loadSource();
   return loads.list.length && src && (id === src || downstreamOf(src).includes(id)) ? 'today' : 'in this file';
 };
-/** The source the loads feed: the one the example reads trips.parquet into. */
+/**
+ * The source the loads feed (ADR 0010 §9): the one the data list gives loads, by id; else the flow's watched source;
+ * else the example's trips.
+ */
 const loadSource = (): string | undefined => {
+  const listed = dataList?.loadSource;
+  if (listed && state.doc.sources.some((x) => x.id === listed)) return listed;
+  const watched = Object.keys(state.doc.publish?.watch ?? {}).find((id) => state.doc.sources.some((x) => x.id === id));
+  if (watched) return watched;
   const table = EXAMPLE_SOURCES.find((x) => x.file === 'trips.parquet')?.table;
   return state.doc.sources.find((x) => x.table === table)?.id;
 };
+/** The name the loads' files are pinned under: their source's binding's file. */
+const loadFile = (): string => bindingOf(loadSource() ?? '')?.file ?? 'trips.parquet';
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dateOf = (day: string) => new Date(`${day}T12:00:00Z`);
 const weekday = (day: string) => WEEKDAYS[dateOf(day).getUTCDay()]!;
@@ -7120,7 +7144,7 @@ async function runLoad(k: number): Promise<void> {
       for (const old of [...loads.bytes.keys()].slice(0, Math.max(0, loads.bytes.size - 3))) loads.bytes.delete(old);
     }
     // The engine hashes the bytes again as it pins them, kept ones included, and refuses them if they don't match.
-    await pinFile(engine, 'trips.parquet', bytes, l.sha256);
+    await pinFile(engine, loadFile(), bytes, l.sha256);
   } catch (e) {
     loads.bytes.delete(k);
     refuse(k, e);
@@ -7228,29 +7252,113 @@ function healthOf(card: string): Severity | undefined {
 
 let history: HistoryRanges | null = null;
 /**
- * The history as the flow judges a day by it (ADR 0009 §3): every day in its ranges, none left out by this browser's
- * marks (`history` leaves an incident's days out once someone marks one), and the file as the engine pinned it, by the
- * name a flow's watch gives it.
+ * The history as the flow judges a day by it (ADR 0009 §3): every day in its ranges but those the record leaves out
+ * (ADR 0010 §5, Q-80: held and not published as is), none left out by this browser's marks (`history` leaves an
+ * incident's days out once someone marks one), and the file as the engine pinned it, by the name a flow's watch gives it.
  */
 let flowHistory: HistoryRanges | null = null;
 let historyPin: HistoryRef | null = null;
+/** The watched source's base history, as the data's list gave it (ADR 0010 §6). */
+let baseHistory: HistoryFile | null = null;
+/**
+ * Each watched source's tail (ADR 0010 §6, C5): the measures of its loads the base lacks, from their own runs in this
+ * browser, one a slot (the first to arrive), rebuilt from the record when the page opens. A derived run adds none.
+ */
+const tails = new Map<string, Measures[]>();
+/** Add a load's measures to its source's tail: only a slot the base lacks, the first time it runs. */
+function addToTail(m: Measures): boolean {
+  if (baseHistory?.days.includes(m.slot)) return false;
+  const tail = tails.get(m.source) ?? [];
+  if (tail.some((x) => x.slot === m.slot)) return false;
+  tails.set(m.source, [...tail, m]);
+  return true;
+}
+/** The tails again, from the record's run entries (their `measures`), as they arrived. */
+function rebuildTails(): void {
+  tails.clear();
+  for (const e of ledger?.entries ?? []) {
+    const a = e.about as { outcome?: string; measures?: Measures[] } | null;
+    if (e.kind === 'run' && (a?.outcome === 'ok' || a?.outcome === 'held') && Array.isArray(a.measures)) for (const m of a.measures) addToTail(m);
+  }
+}
+/** The days the record leaves out of learning (ADR 0010 §5, C5, Q-80): held and not published as is. */
+const recordedSkips = (): string[] => skipOf(ledger?.entries ?? [], periodOfFlow());
+let rangesKey = '';
+/**
+ * The ranges again when the tail or the days the record leaves out changed: the base with the tail folded in, the flow's
+ * (leaving out the record's days) and this browser's (its incident marks too), each by the flow's calendar.
+ */
+function refreshRanges(): void {
+  const source = loadSource();
+  if (!baseHistory || !source) return;
+  const tail = tailBefore(tails.get(source) ?? [], '\uffff');
+  const skips = recordedSkips();
+  const key = JSON.stringify([tail.map((m) => m.slot), skips]);
+  if (key === rangesKey && flowHistory) return;
+  rangesKey = key;
+  const file = tail.length ? appendPeriods(baseHistory, tail) : baseHistory;
+  const calendar = calendarFor(state.doc, source);
+  flowHistory = new HistoryRanges(file, { calendar, recorded: new Set(skips) });
+  history = new HistoryRanges(file, { calendar, skip: incidentDays(), recorded: new Set(skips) });
+  claims.clear();
+  storyCache.clear();
+  alerts = null;
+  backtests.clear();
+}
 
 /**
  * What the flow's story says of each watched source's day (ADR 0009 §3): the claims a run is given, told from the
  * history the engine pinned. None for a day the history doesn't have, or a watch of another file: the run holds that
- * source as not judged, and a person decides.
+ * source as not judged, and a person decides. Under plan/2 the claim is claim/2, told before the run from the load's own
+ * measures (`claimsForRun`), and kept here.
  */
-const claims = new Map<string, StoryClaim | null>();
-function claimsFor(day: string | undefined): StoryClaim[] | undefined {
+const claims = new Map<string, Claim | null>();
+function claimsFor(day: string | undefined): Claim[] | undefined {
   const watch = state.doc.publish?.watch;
   if (!watch) return undefined;
-  const out: StoryClaim[] = [];
+  const out: Claim[] = [];
   for (const [source, w] of Object.entries(watch)) {
     if (!day || !flowHistory || !historyPin || historyPin.path !== watchHistory(w)) continue;
     const key = `${day}|${source}|${countedChecks(state.doc, flowHistory, source)}`;
-    if (!claims.has(key)) claims.set(key, dayClaim(flowHistory, state.doc, historyPin, day, source, BUILD_COMMIT));
+    if (!claims.has(key) && !generalForm()) claims.set(key, dayClaim(flowHistory, state.doc, historyPin, day, source, BUILD_COMMIT));
     const c = claims.get(key);
     if (c) out.push(c);
+  }
+  return out;
+}
+/** Whether the flow says how its source is judged (ADR 0010 §11): its plan is plan/2, and its claims claim/2. */
+const generalForm = (): boolean => planKindCache.doc === state.doc ? planKindCache.v2 : false;
+const planKindCache = { doc: null as FlowDocument | null, v2: false };
+/** The measures of the load a run is about to read, for the run's record (ADR 0010 §6). */
+let measuring: Measures[] = [];
+
+/**
+ * The claims a run is given (ADR 0009 §3, ADR 0010 §6): claim/1 from the history, as `claimsFor` tells them; under plan/2,
+ * claim/2 for each watched source, told from its base, its tail before the day and the load's own measures, which the
+ * plugin measures in the engine first; its tail pinned beside its base, as the claim names it.
+ */
+async function claimsForRun(engine: Engine, day: string | undefined, parameters: Record<string, string>): Promise<Claim[] | undefined> {
+  measuring = [];
+  const plan = await translate(state.doc, parameters);
+  planKindCache.doc = state.doc;
+  planKindCache.v2 = !!plan.publish && isPublish2(plan.publish);
+  if (!planKindCache.v2) return claimsFor(day);
+  const out: Claim[] = [];
+  for (const [source, w] of Object.entries(state.doc.publish?.watch ?? {})) {
+    const node = plan.nodes.findIndex((n) => n.op === 'table' && n.origin === source);
+    const b = bindingOf(source);
+    if (!day || node < 0 || !b) continue;
+    const base = source === loadSource() ? baseHistory : null;
+    const ref = base && historyPin && historyPin.path === watchHistory(w) ? historyPin : null;
+    const settings = settingsFor(plan, node, ref ? base : null, state.doc.steps);
+    if (!settings) continue;
+    const m = await measureLoad(engine, b.table, settings);
+    measuring.push(m);
+    const told = await loadClaim({ doc: state.doc, source, flow: plan.flow.hash, base: ref ? base : null, baseRef: ref, tail: tails.get(source) ?? [], measures: m, settings, skip: recordedSkips(), build: BUILD_COMMIT });
+    await pinFile(engine, tailPath(source), told?.tail.length ? utf8(canonicalJSON(told.tail as unknown as Parameters<typeof canonicalJSON>[0])) : null);
+    const key = `${day}|${source}|${flowHistory ? countedChecks(state.doc, flowHistory, source) : false}`;
+    claims.set(key, told?.claim ?? null);
+    if (told) out.push(told.claim);
   }
   return out;
 }
@@ -7714,15 +7822,15 @@ async function verify(r: RunRecord, level: VerifyLevel = 'rerun'): Promise<void>
   setStatus(`Verifying run ${runName(r)}${level === 'rederive' ? ', decoding its files again' : ''}…`);
   // A run re-derives from its own bytes: when another day is pinned now, the run's day is fetched, checked and pinned
   // again for it, and the day pinned now is put back after.
-  const trips = r.result.manifest.nodes.find((n) => n.file?.location === 'smaltfl:trips.parquet')?.file;
+  const trips = r.result.manifest.nodes.find((n) => n.file?.location === `smaltfl:${loadFile()}`)?.file;
   const runDay = trips ? loads.list.findIndex((l) => l.sha256 === trips.sha256) : -1;
   const swap = level === 'rederive' && runDay >= 0 && runDay !== loads.pinned;
   try {
-    if (swap) await pinFile(state.engine, 'trips.parquet', loads.bytes.get(runDay) ?? (await checked(loads.list[runDay]!.file, { sha256: loads.list[runDay]!.sha256, bytes: loads.list[runDay]!.bytes ?? -1 })), loads.list[runDay]!.sha256);
+    if (swap) await pinFile(state.engine, loadFile(), loads.bytes.get(runDay) ?? (await checked(loads.list[runDay]!.file, { sha256: loads.list[runDay]!.sha256, bytes: loads.list[runDay]!.bytes ?? -1 })), loads.list[runDay]!.sha256);
     r.verified = await verifyRun(state.engine, r.result.run, { smaltdb: SMALTDB, level, manifest: r.result.hash });
     if (swap && loads.pinned >= 0) {
       const now = loads.list[loads.pinned]!;
-      await pinFile(state.engine, 'trips.parquet', loads.bytes.get(loads.pinned) ?? (await checked(now.file, { sha256: now.sha256, bytes: now.bytes ?? -1 })), now.sha256);
+      await pinFile(state.engine, loadFile(), loads.bytes.get(loads.pinned) ?? (await checked(now.file, { sha256: now.sha256, bytes: now.bytes ?? -1 })), now.sha256);
     }
     const failed = r.verified.checks.filter((c) => !c.ok).map((c) => `${c.origin}:${c.check}`);
     if (ledger) await ledger.append('verify', state.viewer, { run: r.result.run, manifest: r.result.hash, level, ok: r.verified.ok, failed, smaltdb: SMALTDB });
@@ -7768,13 +7876,16 @@ async function run(): Promise<void> {
     // The day the trips are from: the period that orders the days a flow holds, and the day its claims name (ADR 0009).
     const period = periodOfFlow();
     if (period && has(period) && loadDay) parameters[period] = loadDay;
-    const told = claimsFor(loadDay);
+    refreshRanges();
+    const told = await claimsForRun(engine, loadDay, parameters);
     const data = integrity.data ? { commit: integrity.data.commit, manifest: integrity.data.manifest } : null;
     const result = await runFlow(engine, state.doc, { smaltdb: SMALTDB, parameters, data, log: recordHead(), ...(told ? { claims: told } : {}) });
     const ms = performance.now() - t;
     // A held run returns, built, checked and recorded, its versions staged: only `published` names show it.
     const rec: RunRecord = { result, ms, at: new Date(), inputs: inputsKey(inputsOf(result.manifest)), ...(loads.pinned >= 0 && loads.list.length > 1 ? { load: loads.pinned } : {}) };
     state.runs.unshift(rec);
+    // Each watched load's measures to its source's tail, the first time its slot runs (C5).
+    for (const m of result.measures ?? []) addToTail(m);
     noteShown(rec, result.published);
     // What is shown is what ran: after a refused day, a run on the day still pinned shows that day.
     if (loads.pinned >= 0) loads.at = loads.pinned;
@@ -7842,6 +7953,8 @@ async function recordRun(rec: RunRecord | null, error: string | null): Promise<v
         run: result.run, manifest: result.hash, blob, plan, load, outcome: held ? 'held' : 'ok', files: files as unknown as JSONValue, data: result.manifest.data ?? null,
         day, inputs: inputsOf(result.manifest) as unknown as JSONValue,
         ...(held ? { holds: result.holds as unknown as JSONValue, waiting: result.waiting, keys } : {}),
+        // Its watched loads' measures (ADR 0010 §6): the tail is rebuilt from them when the page opens.
+        ...(result.measures?.length ? { measures: result.measures as unknown as JSONValue } : {}),
       });
     } else await ledger.append('run', state.viewer, { run: null, load, outcome: 'failed', error });
   } catch (e) {
@@ -8107,7 +8220,7 @@ async function stage(r: RunRecord, repair: Repair, inRun = false): Promise<RunRe
   const go = async (): Promise<RunRecord | null> => {
     const again = stagedRuns.get(key);
     if (again) return again;
-    if (repair.donor) await pinDonor(engine, repair.donor.file, checked);
+    if (repair.donor) await pinDonor(engine, repair.source, bindingOf(repair.source)!, repair.donor.file, checked);
     const day = dayOfRun(r);
     const data = integrity.data ? { commit: integrity.data.commit, manifest: integrity.data.manifest } : null;
     const { doc, result } = await stageRepair(engine, { doc: state.doc, held: r.result, repair, claims: claimsFor(day) ?? [], smaltdb: SMALTDB, data, log: recordHead() });
@@ -8301,11 +8414,9 @@ function afterDecision(): void {
 
 /** The file a source reads now: the day's load for the trips, else the one the data's list names for it. */
 function fileOf(source: string): string | undefined {
-  const src = state.doc.sources.find((x) => x.id === source);
-  const ex = src && EXAMPLE_SOURCES.find((e) => e.table === src.table);
-  if (!ex) return undefined;
-  if (ex.file === 'trips.parquet') return loads.list[loads.at]?.file ?? integrity.files.trips?.path;
-  return integrity.files[ex.file.split('.')[0]!]?.path;
+  if (!bindingOf(source)) return undefined;
+  if (source === loadSource()) return loads.list[loads.at]?.file ?? integrity.files[source]?.path;
+  return integrity.files[source]?.path;
 }
 
 /** A source's file check, as news: refused bytes first of all, a republished file worth knowing. */
@@ -8805,6 +8916,24 @@ const VIEWS = ['flow', 'ontology', 'policies', 'results', 'runs'];
 async function start(): Promise<void> {
   // The hatch the 'not today's run' marks use, once for the page.
   if (!document.getElementById('viz-defs')) document.body.insertAdjacentHTML('beforeend', VIZ_DEFS.replace('<svg ', '<svg id="viz-defs" '));
+  // The data list first (ADR 0010 §9): it binds each source by id, and names the flow when the page runs another than
+  // the built example, which is checked against the list before it is read.
+  const index = (await fetch('data/loads.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)) as unknown;
+  dataList = readDataList(index, EXAMPLE_DATA);
+  let opening: unknown = null;
+  if (dataList.flow) {
+    try {
+      const bytes = await fetchChecked(dataList.flow.path, dataList.flow, { commit: dataList.data?.commit ?? null, onCheck: noteCheck });
+      const doc = JSON.parse(new TextDecoder().decode(bytes)) as FlowDocument;
+      const issues = validateDocument(doc);
+      if (issues.length) throw new Error(`${dataList.flow.path} isn't a flow this version runs: ${issues[0]!.path}: ${issues[0]!.message}`);
+      shippedDoc = doc;
+      state.doc = structuredClone(doc);
+      document.title = `smaltfl: ${doc.name}`;
+    } catch (e) {
+      opening = e;
+    }
+  }
   loadFlow();
   loadArrangement();
   state.collapsed = new Set((state.doc.groups ?? []).filter((g) => g.collapsed).map((g) => g.id));
@@ -8836,49 +8965,52 @@ async function start(): Promise<void> {
     await loadLog();
     // A day held in an earlier visit still waits (ADR 0009 §10): the tab says so before anything runs.
     syncTitle();
+    if (opening) throw opening;
     const engine = await connect();
     // The daily loads the data has, if any: the flow starts on the first.
-    type Listed = Omit<Load, 'episode' | 'note'> & { note?: string };
-    type Files = Record<string, Expected & { path: string }>;
-    const index = (await fetch('data/loads.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)) as { month?: string; data?: typeof integrity.data; files?: Files; loads?: Listed[]; episodes?: { name: string; about?: string; loads: Listed[] }[]; donors?: Listed[]; history?: string } | null;
-    integrity.data = index?.data ?? null;
-    integrity.files = index?.files ?? {};
+    const list = dataList;
+    integrity.data = list.data;
+    integrity.files = list.files;
     // The list this app was built with: loads.json must name it. Only an auditor's check against the data branch
     // proves it is the data branch's; this stops a list, its files and loads.json being swapped together.
-    if (BUILT_DATA && (index?.data?.commit !== BUILT_DATA.commit || index.data.manifest !== BUILT_DATA.manifest)) {
-      throw new IntegrityError({ path: 'MANIFEST.json', class: 'list', expected: BUILT_DATA.manifest, actual: index?.data?.manifest ?? null, commit: BUILT_DATA.commit, at: new Date().toISOString() });
+    if (BUILT_DATA && (list.data?.commit !== BUILT_DATA.commit || list.data.manifest !== BUILT_DATA.manifest)) {
+      throw new IntegrityError({ path: 'MANIFEST.json', class: 'list', expected: BUILT_DATA.manifest, actual: list.data?.manifest ?? null, commit: BUILT_DATA.commit, at: new Date().toISOString() });
     }
     // The month, then each incident: an episode of days each. The app names the holidays itself.
-    const month = index?.month ? dateOf(`${index.month}-01`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'The loads';
-    const tag = (ls: readonly Listed[], episode: string): Load[] => ls.map(({ note: _, ...l }) => {
+    const month = list.month ? dateOf(`${list.month}-01`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'The loads';
+    const tag = (ls: readonly Listed[], episode: string): Load[] => ls.map((l) => {
       const note = holidayOf(l.day) ?? seasonOf(l.day);
       return { ...l, episode, ...(note ? { note } : {}) };
     });
-    loads.list = [...tag(index?.loads ?? [], month), ...(index?.episodes ?? []).flatMap((e) => tag(e.loads, e.name))];
-    loads.episodes = [{ name: month }, ...(index?.episodes ?? []).map((e) => ({ name: e.name, about: e.about }))];
+    loads.list = [...tag(list.loads, month), ...list.episodes.flatMap((e) => tag(e.loads, e.name))];
+    loads.episodes = [{ name: month }, ...list.episodes.map((e) => ({ name: e.name, about: e.about }))];
     loads.episode = month;
-    loads.donors = (index?.donors ?? []).map(({ note: _, ...l }) => l);
+    loads.donors = list.donors.map((l) => ({ ...l }));
     // The data's list first: it must be the one this app was built with, and say what loads.json says of each file.
-    if (integrity.data) await checkList(index!);
-    // Each day's numbers for two years and a quarter, for each load's normal range, when the data has them.
-    const hf = integrity.files.history;
-    const pastBytes = index?.history && hf ? await checked(hf.path, hf) : null;
+    if (integrity.data) await checkList(list);
+    // Each watched source's history (ADR 0010 §9): its base, for each load's normal range, when the data has one.
+    const watched = loadSource();
+    const hf = watched ? list.histories[watched] : undefined;
+    const pastBytes = hf ? await checked(hf.path, hf) : null;
     const past = pastBytes ? (JSON.parse(new TextDecoder().decode(pastBytes)) as HistoryFile) : null;
     if (isHistory(past) && past.days.length) {
-      history = new HistoryRanges(past);
-      flowHistory = new HistoryRanges(past);
+      baseHistory = past;
+      rebuildTails();
+      refreshRanges();
     }
     const first = loads.list[0];
-    setStatus(first ? `Loading ${dayLabel(first.day)}: ${fmtInt(first.rows)} trips, the zones and the weather, each checked against the data's list…` : 'Loading the trips, the zones and the weather…');
-    // Each source's file, checked here and pinned in the engine, which hashes it again and reads it as smaltfl:<file>.
-    for (const src of EXAMPLE_SOURCES) {
-      const key = src.file.split('.')[0]!;
-      const want: (Expected & { path: string }) | undefined = src.file === 'trips.parquet' && first ? { path: first.file, sha256: first.sha256, bytes: first.bytes ?? -1, from: first.file } : integrity.files[key];
-      if (!want) throw new Error(`no hash for ${src.file} in the data's list: it can't be checked, so it isn't used`);
+    const noun = rowNoun(watched ?? '');
+    setStatus(first ? `Loading ${dayLabel(first.day)}: ${fmtInt(first.rows)} ${noun}, and the other sources, each checked against the data's list…` : `Loading the ${noun} and the other sources…`);
+    // Each source's file, by its binding, checked here and pinned in the engine, which hashes it again and reads it as
+    // smaltfl:<file>: the loads' source its first load.
+    for (const [id, b] of Object.entries(list.sources)) {
+      if (!state.doc.sources.some((x) => x.id === id)) continue;
+      const want: (Expected & { path: string }) | undefined = id === list.loadSource && first ? { path: first.file, sha256: first.sha256, bytes: first.bytes ?? -1, from: first.file } : b.entry;
+      if (!want) throw new Error(`no hash for ${b.file} in the data's list: it can't be checked, so it isn't used`);
       const bytes = await checked(want.path, want);
-      await pinFile(engine, src.file, bytes, want.sha256);
-      await engine.exec(pinnedDdl(src));
-      if (src.file === 'trips.parquet' && first) loads.bytes.set(0, bytes);
+      await pinFile(engine, b.file, bytes, want.sha256);
+      await engine.exec(pinnedDdl(b));
+      if (id === list.loadSource && first) loads.bytes.set(0, bytes);
     }
     // The history pinned in the engine as the flow's watch names it (ADR 0009 §3): a claim told from it is checked against
     // the bytes the engine hashed, and a run whose claim was told from other bytes holds its day as not judged.
@@ -8907,7 +9039,7 @@ async function start(): Promise<void> {
  * The data's list (MANIFEST.json), checked: its bytes hash to what loads.json says, and every file loads.json names is
  * in it with the same sha256 and size. Anything else refuses every file, since none could be checked.
  */
-async function checkList(index: { loads?: { file: string; sha256: string; bytes?: number }[]; episodes?: { loads: { file: string; sha256: string; bytes?: number }[] }[]; donors?: { file: string; sha256: string; bytes?: number }[] }): Promise<void> {
+async function checkList(index: DataList): Promise<void> {
   const d = integrity.data!;
   const bytes = await fetchChecked('MANIFEST.json', { sha256: d.manifest, bytes: d.bytes ?? -1 }, { commit: d.commit, onCheck: (c) => noteCheck(c.class === 'corrupt' ? { ...c, class: 'list' } : c) }).catch((e: unknown) => {
     if (e instanceof IntegrityError && e.check.class === 'corrupt') throw new IntegrityError({ ...e.check, class: 'list' });
@@ -8916,11 +9048,9 @@ async function checkList(index: { loads?: { file: string; sha256: string; bytes?
   integrity.manifestBytes = bytes;
   const list = JSON.parse(new TextDecoder().decode(bytes)) as { files: { path: string; sha256: string; bytes: number }[] };
   const byPath = new Map(list.files.map((f) => [f.path, f]));
-  const named = [
-    ...Object.values(integrity.files).map((f) => ({ path: f.from ?? f.path, sha256: f.sha256, bytes: f.bytes })),
-    // The donor days too (ADR 0009 amendment 1 S13): a fill reads one only if the list has it, by the same sha256.
-    ...[...(index.loads ?? []), ...(index.episodes ?? []).flatMap((e) => e.loads), ...(index.donors ?? [])].map((l) => ({ path: l.file, sha256: l.sha256, bytes: l.bytes ?? -1 })),
-  ];
+  // Every fixed file, every load and the donor days too (ADR 0009 amendment 1 S13): a fill reads one only if the list
+  // has it, by the same sha256.
+  const named = namedFiles(index);
   const off = named.find((f) => byPath.get(f.path)?.sha256 !== f.sha256 || byPath.get(f.path)?.bytes !== f.bytes);
   if (off) {
     const check: FileCheck = { path: off.path, class: 'list', expected: off.sha256, actual: byPath.get(off.path)?.sha256 ?? null, commit: d.commit, at: new Date().toISOString() };

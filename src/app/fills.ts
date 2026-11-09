@@ -9,11 +9,11 @@
  * Every word on screen comes from core/decision.ts; every judgement from core/fill.ts and core/hold.ts. Nothing here
  * decides what a day may be filled from: the flow's verdict does (donorChoices), and the plugin checks the release.
  */
-import { DONOR_SOURCE, pinnedDdl } from '../../examples/sources.js';
+import { donorBinding, pinnedDdl, type Binding } from '../../examples/sources.js';
 import { fillStepOf, type FlowDocument } from '../core/document.js';
 import { donorChoices, donorRuleOf, fillCounts, missingOf, offersOf, repairDocument, type DonorPick, type FillCounts, type Missing, type NoDonor, type Offer, type Repair } from '../core/fill.js';
 import type { HistoryRanges } from '../core/history.js';
-import { heldOutputs, inputsOf, stagedKeys, type DerivedAbout, type HistoryRef, type StoryClaim } from '../core/hold.js';
+import { heldOutputs, inputsOf, stagedKeys, type Claim, type DerivedAbout, type HistoryRef } from '../core/hold.js';
 import type { FlowPlan } from '../core/plan.js';
 import type { RunResult } from '../core/protocol.js';
 import type { Story } from '../core/story.js';
@@ -51,7 +51,7 @@ export interface Remedies {
  * the watch's own rule first), each with the counts its drawing and row show (fillCounts, S4: the same number the
  * derived run counts).
  */
-export function donorsOf(o: { h: HistoryRanges; doc: FlowDocument; day: string; source: string; story: Pick<Story, 'hero' | 'hours' | 'split'>; claim: StoryClaim | null; listed: (day: string) => HistoryRef | null; history: HistoryRef; build: string; later: string | null; readers: 'fill' | 'complete' | null; partFails: boolean }): Remedies | null {
+export function donorsOf(o: { h: HistoryRanges; doc: FlowDocument; day: string; source: string; story: Pick<Story, 'hero' | 'hours' | 'split'>; claim: Claim | null; listed: (day: string) => HistoryRef | null; history: HistoryRef; build: string; later: string | null; readers: 'fill' | 'complete' | null; partFails: boolean }): Remedies | null {
   const step = fillStepOf(o.doc, o.source);
   if (!step) return null;
   const missing = missingOf(o.story, step.time);
@@ -73,20 +73,24 @@ export function repairOf(r: Pick<Remedies, 'step' | 'source' | 'missing'>, pick:
   return { kind: pick ? 'fill' : 'complete', step: r.step, source: r.source, missing: structuredClone(r.missing), donor: pick ? { rule: pick.rule, direction: pick.direction, day: pick.day, file: { ...pick.file }, claim: pick.claim } : null };
 }
 
-/** The engines whose donor table exists: it reads whatever file is pinned under the donor's name now. */
-const tables = new WeakSet<Engine>();
+/** The donor tables each engine has: each reads whatever file is pinned under its donor's name now. */
+const tables = new WeakMap<Engine, Set<string>>();
 
 /**
- * Pin a donor's file in the engine (S3): fetched, checked against the data's list (its sha256 and size), hashed again
- * by the engine as it pins it under the donor's name, and read through the donor's own external table. Pinned only when
- * a fill needs it; a later fill from another day pins that day's file in its place.
+ * Pin a donor's file in the engine (S3, C8): fetched, checked against the data's list (its sha256 and size), hashed
+ * again by the engine as it pins it under the donor's name, and read through the donor's own table, made from its
+ * source's binding (`<table>_donor` over `<source>_donor.<format>`). Pinned only when a fill needs it; a later fill from
+ * another day pins that day's file in its place.
  */
-export async function pinDonor(engine: Engine, file: HistoryRef, fetch: (path: string, expected: Expected) => Promise<Uint8Array>): Promise<void> {
+export async function pinDonor(engine: Engine, source: string, binding: Binding, file: HistoryRef, fetch: (path: string, expected: Expected) => Promise<Uint8Array>): Promise<void> {
+  const donor = donorBinding(source, binding);
   const bytes = await fetch(file.path, { sha256: file.sha256, bytes: file.bytes, from: file.path });
-  await pinFile(engine, DONOR_SOURCE.file, bytes, file.sha256);
-  if (!tables.has(engine)) {
-    await engine.exec(pinnedDdl(DONOR_SOURCE));
-    tables.add(engine);
+  await pinFile(engine, donor.file, bytes, file.sha256);
+  const made = tables.get(engine) ?? new Set<string>();
+  if (!made.has(donor.table)) {
+    await engine.exec(pinnedDdl(donor));
+    made.add(donor.table);
+    tables.set(engine, made);
   }
 }
 
@@ -95,7 +99,7 @@ export async function pinDonor(engine: Engine, file: HistoryRef, fetch: (path: s
  * run's parameters, with the day's claim and the donor's, every output held whatever else holds, naming the held run it
  * repairs. Its versions are kept and hashed like any run's, and go out only by a decision's release.
  */
-export async function stageRepair(engine: Engine, o: { doc: FlowDocument; held: RunResult; repair: Repair; claims: readonly StoryClaim[]; smaltdb: string; data: { commit: string; manifest: string } | null; log: { origin: string; size: number; root: string } | null }): Promise<{ doc: FlowDocument; result: RunResult }> {
+export async function stageRepair(engine: Engine, o: { doc: FlowDocument; held: RunResult; repair: Repair; claims: readonly Claim[]; smaltdb: string; data: { commit: string; manifest: string } | null; log: { origin: string; size: number; root: string } | null }): Promise<{ doc: FlowDocument; result: RunResult }> {
   const doc = repairDocument(o.doc, o.repair);
   const claims = [...o.claims, ...(o.repair.donor ? [o.repair.donor.claim] : [])];
   const result = await runFlow(engine, doc, { smaltdb: o.smaltdb, parameters: { ...o.held.manifest.parameters } as Record<string, string>, data: o.data, log: o.log, claims, stage: true, from: { run: o.held.run, manifest: o.held.hash } });
