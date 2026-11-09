@@ -22,3 +22,6 @@ comes across as it is, so the data commits that runs and audit bags name (`Data-
   work.
 - Audit bags made before the move name commits that are in both repositories, so an auditor checks them from a
   checkout of either.
+- **The route (2026-11-09, ADR 0011 §9):** `beepboopbop64/smaltfl_fork`, a fork of `stenhoor/smaltfl`, carries the
+  history: Steve's initial commit is its root, so the fork's `main` fast-forwarded to `5bdb1b4` with no merge, and the
+  `data` branch went across as it was (`0ca4dd1`). The pull request to `stenhoor/smaltfl` is opened from the fork.

@@ -80,7 +80,8 @@ match smaltdb's `CLAUDE.md`.
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
 - **State of the work:** [docs/HANDOFF.md](docs/HANDOFF.md) says what is built, how to check it and what is left, in
-  priority order. Read it before starting.
+  priority order. Read it before starting. **What comes next:** [ADR 0011](docs/adr/0011-notebooks-as-the-step-surface.md),
+  notebooks (smaltnb's `.nb.ts`) as the only step surface, in slices; its §"The slices" is the order of work.
 
 ## Rules for this repository
 

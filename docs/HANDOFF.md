@@ -66,7 +66,7 @@ Results on 2026-11-09, at `e42d9ec` on data `0ca4dd1`:
 
 ## What is not done
 
-In priority order:
+Parked behind the notebook surface by the maintainer's decision of 2026-11-09 (Q-87, ADR 0011 §9). In priority order:
 
 1. **The owner's answer of 2026-11-09 isn't built yet** (Q-86): a deliberate (lasting) change that nobody accepts must
    **keep pausing until accepted**.
@@ -169,6 +169,10 @@ The tools are in [tools/](../tools/README.md):
 - **Workflow scripts:** the judge round and the fix round, run with Claude Code's Workflow tool.
 
 ## Moving the repository
+
+> **Done on 2026-11-09** (ADR 0011 §9): `beepboopbop64/smaltfl_fork`, a fork of `stenhoor/smaltfl`, has the code on
+> `main` (a fast-forward to `5bdb1b4`: Steve's initial commit is the history's root) and the `data` branch at `0ca4dd1`.
+> The pull request to `stenhoor/smaltfl` is opened from the fork. What follows is the account as it was written.
 
 - **What has to move:**
   - **The code branch:** `claude/elegant-knuth-r8364a` has the full history.

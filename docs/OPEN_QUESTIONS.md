@@ -6,7 +6,8 @@ Decided questions are recorded in ADRs: round 1 in [adr/0001-initial-decisions.m
 [adr/0003-third-round-decisions.md](adr/0003-third-round-decisions.md), the flow plan in
 [adr/0004-the-flow-plan.md](adr/0004-the-flow-plan.md), the licence in [adr/0005-licence.md](adr/0005-licence.md), pausing
 a day that is off in [adr/0009-paused-not-published.md](adr/0009-paused-not-published.md) and filling one in its
-amendment 1, the news and the pause for any dataset in [adr/0010-any-dataset.md](adr/0010-any-dataset.md). The research
+amendment 1, the news and the pause for any dataset in [adr/0010-any-dataset.md](adr/0010-any-dataset.md), notebooks as
+the step surface in [adr/0011-notebooks-as-the-step-surface.md](adr/0011-notebooks-as-the-step-surface.md). The research
 behind the proposals is in [research/ecosystem-survey.md](research/ecosystem-survey.md).
 
 **Who decides:** the maintainers, together (ADR 0001 §1).
@@ -48,6 +49,23 @@ behind the proposals is in [research/ecosystem-survey.md](research/ecosystem-sur
 | Q-2 | Who is the first user? | Data engineers build; analysts use and extend. The canvas must stay readable for both | open |
 | Q-15 | Lineage granularity in v1? | Dataset-level and run-level from the start; column-level when the plan API lands | open |
 | Q-18 | Data quality in v1? | Row expectations (warn, drop, fail) and dataset checks (freshness, row count, uniqueness, schema) | open |
+
+## Notebooks as the step surface: the maintainer's answers (ADR 0011)
+
+Asked through the question prompt on 2026-11-09, after a survey of smaltnb, smaltdb, smaltdf and smaltts as checked
+out that day. The ADR that records them is proposed; nothing in it is built.
+
+| ID | Question | Decision | Status |
+| --- | --- | --- | --- |
+| Q-87 | How does the work reach `stenhoor/smaltfl` (ADR 0007), and does the handoff's unfinished work (Q-86, the round-3 findings, judge round 4) come before or after the notebook surface? | The maintainer: through the fork `beepboopbop64/smaltfl_fork`, whose `main` fast-forwards to the history (Steve's initial commit is its root); the pull request upstream is opened from the fork by the maintainer. "Move, then notebooks; park the leftovers": Q-86 and the view findings stay listed in docs/HANDOFF.md as later PRs (ADR 0011 §9) | decided |
+| Q-88 | What is a notebook in a flow: the only step surface, a step kind beside the visual tools and SQL steps, or an editor whose save writes today's document? | The maintainer: "The only step surface": every transform is an exported cell; the visual tools and SQL steps go; the examples are rewritten; format 4 and plan/3, with format 3 and every pinned vector unmoved (ADR 0011 §1) | decided |
+| Q-89 | Who writes during a run: smaltfl's runtime (versions by key, hashed, held or pointed), a notebook's `action()` cells, or both by step? | The maintainer: "smaltfl's runtime only": exported cells are read-only queries; action cells never run in a flow run, as smaltnb's imports never run them (ADR 0011 §2) | decided |
+| Q-90 | How is a check written: a cell carrying smaltfl's warn/drop/fail rules and `maxDropped`, a plain cell that must be empty or in bounds (smaltts's shape), or checks kept in the flow document? | The maintainer: "Check cells with smaltfl's rules": a `check` cell option, the plan's expect node unchanged, the shape offered to smaltnb as its `expect` cell (ADR 0011 §3) | decided |
+| Q-91 | `df` cells in the first slice, after `sql` cells, or never? smaltdf has no write path | The maintainer: "Both from the start": a `df` cell's statement comes from smaltdf's `explain()`; the runtime materialises it as any step; the taxi example mixes the two (ADR 0011 §4) | decided |
+| Q-92 | Notebooks and flows on disk: one folder a flow with several notebooks, one notebook a flow, or the notebook as the flow (no JSON)? | The maintainer: "One folder per flow, several notebooks": `examples/<flow>/flow.json` names them by path and hash, each a stage, later ones importing earlier ones' exports (ADR 0011 §5) | decided |
+| Q-93 | What does the app become: the canvas with a cell opening in smaltnb's editor, two apps linked, or a pipeline view inside smaltnb's page? | The maintainer: "Canvas stays; a cell opens in smaltnb's editor": a notebook is a group of cards, a card's sheet is smaltkit's editor with the preview and statement; strip, news, pause and decisions as built (ADR 0011 §6) | decided |
+| Q-94 | smaltts names smaltfl as the pipeline product built on it and plans `flow()` (no code yet, its prototype off the current engine). Target it and build on plans now, build on it now, or ignore it? | The maintainer: "Target it, build on plans now": publish and bookkeeping through plans and the plugin today, an ADR drawing the seam (`load` with `swap`, interface views, change sets), Gate C raised with stenhoor (ADR 0011 §7) | decided |
+| Q-95 | Pinning smaltnb and smaltkit (for smaltty) in `packed.json`, which the family rule says to ask the owner about first: ask first behind an interface, pin now and say so in the PR, or copy the parser in? | The maintainer: "Pin now, tell him in the PR": the pins land in the first notebook PR, said plainly in its description; smaltdb's pin moves to smaltnb's (ADR 0011 §8) | decided |
 
 ## Filling a paused day and any dataset: the owner's answers (ADR 0009 amendment 1, ADR 0010)
 
