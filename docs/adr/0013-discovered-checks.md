@@ -159,6 +159,32 @@ The other days of March publish.
   it tripped: "New status: ERROR · 159 apps", with "Checks dropped 40%" following from it. And a value first seen on
   a day is told as new, never also as a share against a history of none.
 
+### 8. The control estate: the dataset for the next step
+
+On the maintainer's request (2026-11-09), a richer stand-in for the controls data they work with, built before any
+judge is pointed at it: `examples/control-estate/`, from `test/fixtures/estate.ts` (`scripts/data/estate.ts` writes
+it). Six hundred applications, typed (internet-facing, criticality, data classification, datastore, hosting,
+lifecycle); twelve controls, each its own daily file with its own columns, each covering only the applications it
+applies to by type (`appliesTo`): TLS, WAF and penetration tests for internet-facing applications; encryption at rest
+and backup for datastores; key rotation for regulated data at rest; DR exercises for critical applications; access
+reviews for regulated data; privileged access for high and critical; vulnerability SLAs, MFA and logging for the rest.
+Statuses in four words (pass, fail, exception, not_assessed). Seven controls are scans, a standing that holds; five run
+on SLAs, a status from dates: fail from the due date until the completion, about one in ten late (pentests one in
+five), with due dates that cluster as they do at work (pentests and DR exercises on fiscal dates, access reviews at
+quarter ends, vulnerabilities thirty days after each Patch Tuesday). One dependency holds every day: key rotation
+cannot pass where encryption at rest fails.
+
+Planted in March 2024, in three layers (`ESTATE_TROUBLE`): the obvious (MFA's file with no rows, Mon 4; logging's
+`retention_days` missing, Thu 7; WAF's pass rate collapsing for real, Tue 12; a backup scanner outage, 45% not
+assessed, Tue 19; TLS rows twice, Thu 21); contradictions and scope (key rotation passing where encryption fails, as
+many failures as ever, Fri 8; WAF rows for 40 applications that aren't internet-facing, Wed 13; no TLS rows for one
+business unit, Tue 26); and the look-alikes (vulnerability due dates cluster Thu 14, half the pentests are due Fri 15,
+the quarter's access reviews Fri 29, each with the usual share late, so the pass rate flips the day after) beside the
+one SLA day that is a real problem (six in ten DR exercises due Fri 22 run late). `test/estate.test.ts` holds the
+dataset to these facts; it asserts no judge. The files carry the dates and counts a judge would need to tell a cluster
+of due dates from a wave of lateness (`next_due`, `overdue`, `oldest_overdue_days`), without saying which it is. What
+the flow should say of each day, and how, is the maintainer's plan, to come.
+
 ## As built (2026-11-09)
 
 Everything above, in one day's work on the fork: `src/core/combos.ts` (both judges, read in `newsOf`), the `combo`

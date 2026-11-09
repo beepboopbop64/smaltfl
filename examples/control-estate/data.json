@@ -1,0 +1,388 @@
+{
+  "smaltflData": 1,
+  "flow": "estate",
+  "generate": "scripts/data/estate.mjs",
+  "judged": "posture",
+  "sources": {
+    "apps": {
+      "table": "apps_file",
+      "format": "csv",
+      "file": "apps.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "name",
+          "TEXT"
+        ],
+        [
+          "business_unit",
+          "TEXT"
+        ],
+        [
+          "criticality",
+          "TEXT"
+        ],
+        [
+          "internet_facing",
+          "TEXT"
+        ],
+        [
+          "data_class",
+          "TEXT"
+        ],
+        [
+          "datastore",
+          "TEXT"
+        ],
+        [
+          "hosting",
+          "TEXT"
+        ],
+        [
+          "lifecycle",
+          "TEXT"
+        ]
+      ]
+    },
+    "tls": {
+      "table": "tls_file",
+      "format": "csv",
+      "file": "tls.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "hostname",
+          "TEXT"
+        ],
+        [
+          "protocol",
+          "TEXT"
+        ],
+        [
+          "cert_days_left",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "waf": {
+      "table": "waf_file",
+      "format": "csv",
+      "file": "waf.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "provider",
+          "TEXT"
+        ],
+        [
+          "mode",
+          "TEXT"
+        ],
+        [
+          "ruleset_age_days",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "pentest": {
+      "table": "pentest_file",
+      "format": "csv",
+      "file": "pentest.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "last_test",
+          "TEXT"
+        ],
+        [
+          "next_due",
+          "TEXT"
+        ],
+        [
+          "open_highs",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "encryption": {
+      "table": "encryption_file",
+      "format": "csv",
+      "file": "encryption.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "store_type",
+          "TEXT"
+        ],
+        [
+          "kms_managed",
+          "TEXT"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "key_rotation": {
+      "table": "key_rotation_file",
+      "format": "csv",
+      "file": "key_rotation.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "last_rotated",
+          "TEXT"
+        ],
+        [
+          "next_due",
+          "TEXT"
+        ],
+        [
+          "key_age_days",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "backup": {
+      "table": "backup_file",
+      "format": "csv",
+      "file": "backup.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "last_success_hours",
+          "INTEGER"
+        ],
+        [
+          "rpo_hours",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "dr_exercise": {
+      "table": "dr_exercise_file",
+      "format": "csv",
+      "file": "dr_exercise.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "last_exercise",
+          "TEXT"
+        ],
+        [
+          "next_due",
+          "TEXT"
+        ],
+        [
+          "rto_met",
+          "TEXT"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "vuln_sla": {
+      "table": "vuln_sla_file",
+      "format": "csv",
+      "file": "vuln_sla.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "open_critical",
+          "INTEGER"
+        ],
+        [
+          "open_high",
+          "INTEGER"
+        ],
+        [
+          "overdue",
+          "INTEGER"
+        ],
+        [
+          "next_due",
+          "TEXT"
+        ],
+        [
+          "oldest_overdue_days",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "mfa": {
+      "table": "mfa_file",
+      "format": "csv",
+      "file": "mfa.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "idp",
+          "TEXT"
+        ],
+        [
+          "enforced",
+          "TEXT"
+        ],
+        [
+          "exceptions",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "access_review": {
+      "table": "access_review_file",
+      "format": "csv",
+      "file": "access_review.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "last_review",
+          "TEXT"
+        ],
+        [
+          "next_due",
+          "TEXT"
+        ],
+        [
+          "reviewers",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "logging": {
+      "table": "logging_file",
+      "format": "csv",
+      "file": "logging.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "sink",
+          "TEXT"
+        ],
+        [
+          "coverage_pct",
+          "REAL"
+        ],
+        [
+          "retention_days",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "privileged_access": {
+      "table": "privileged_access_file",
+      "format": "csv",
+      "file": "privileged_access.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "vault",
+          "TEXT"
+        ],
+        [
+          "accounts",
+          "INTEGER"
+        ],
+        [
+          "unvaulted",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    }
+  }
+}

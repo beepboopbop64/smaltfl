@@ -100,7 +100,9 @@ match smaltdb's `CLAUDE.md`.
   `scripts/data/controls.ts`, `test/controls.test.ts`; `test/controls-anyday.test.ts` plants the fixture's `Trouble`
   on other days and another seed through `test/helpers/controls-world.ts`); `npm run build:app -- --flow examples/controls/flow.json --out
   dist/app-controls` builds it; loads.json may list several daily sources (read as days) and name the dataset the
-  views follow (`judged`).
+  views follow (`judged`). `examples/control-estate/` is the richer dataset (ADR 0013 §8: a typed inventory, twelve
+  controls by applicability, five on SLA dates, three layers of planted days; `test/fixtures/estate.ts`,
+  `scripts/data/estate.ts`, `test/estate.test.ts` asserts the data's facts, no judge yet).
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).

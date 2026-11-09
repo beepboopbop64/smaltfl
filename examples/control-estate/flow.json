@@ -1,0 +1,858 @@
+{
+  "smaltfl": 4,
+  "id": "estate",
+  "name": "Control estate",
+  "description": "Six hundred applications, typed, and twelve security controls, each its own daily file covering only the applications it applies to, with statuses in four words; five of the controls run on SLAs with due dates that cluster, so a pass rate can flip for a day without anything being wrong. A synthetic feed from a fixed seed (scripts/data/estate.ts) with three layers of trouble planted in March 2024: the obvious (a file with no rows, a column missing, a pass rate that collapses, a scanner outage, rows twice), the contradictions and scope (key rotation passing where encryption at rest fails; WAF rows for applications that aren't internet-facing; TLS rows missing for one business unit) and the look-alikes (due dates that cluster, with the usual share running late) beside one SLA day that is a real problem (six in ten DR exercises late). What the flow says of each is the next ADR's question.",
+  "parameters": [
+    {
+      "name": "day",
+      "type": "text",
+      "default": null
+    }
+  ],
+  "sources": [
+    {
+      "id": "apps",
+      "table": "apps_file",
+      "description": "The application inventory: unit, criticality, exposure, data classification, datastore, hosting and lifecycle"
+    },
+    {
+      "id": "tls",
+      "table": "tls_file",
+      "description": "Transport encryption on internet-facing applications: the protocol offered and the certificate's days left. One row an application it applies to (internet-facing applications)."
+    },
+    {
+      "id": "waf",
+      "table": "waf_file",
+      "description": "A web application firewall in front of internet-facing applications, in blocking mode, with a current ruleset. One row an application it applies to (internet-facing applications)."
+    },
+    {
+      "id": "pentest",
+      "table": "pentest_file",
+      "description": "A penetration test within the year, for internet-facing applications of high or critical criticality. One row an application it applies to (internet-facing applications of high or critical criticality)."
+    },
+    {
+      "id": "encryption",
+      "table": "encryption_file",
+      "description": "Encryption of data at rest, for applications with a datastore. One row an application it applies to (applications with a datastore)."
+    },
+    {
+      "id": "key_rotation",
+      "table": "key_rotation_file",
+      "description": "Encryption keys rotated within the year, for regulated data at rest; it needs encryption at rest. One row an application it applies to (applications with regulated data in a datastore)."
+    },
+    {
+      "id": "backup",
+      "table": "backup_file",
+      "description": "Backups taken within the recovery point objective, for applications with a datastore. One row an application it applies to (applications with a datastore)."
+    },
+    {
+      "id": "dr_exercise",
+      "table": "dr_exercise_file",
+      "description": "A disaster-recovery exercise within the year, for critical applications. One row an application it applies to (critical applications)."
+    },
+    {
+      "id": "vuln_sla",
+      "table": "vuln_sla_file",
+      "description": "Vulnerabilities remediated within thirty days of Patch Tuesday; failing while any is overdue. One row an application it applies to (active applications)."
+    },
+    {
+      "id": "mfa",
+      "table": "mfa_file",
+      "description": "Multi-factor authentication enforced for the application's users. One row an application it applies to (every application)."
+    },
+    {
+      "id": "access_review",
+      "table": "access_review_file",
+      "description": "Access recertified every quarter, for applications with regulated data. One row an application it applies to (applications with regulated data)."
+    },
+    {
+      "id": "logging",
+      "table": "logging_file",
+      "description": "Logs shipped to the central sink, covering the application, kept long enough. One row an application it applies to (active applications)."
+    },
+    {
+      "id": "privileged_access",
+      "table": "privileged_access_file",
+      "description": "Privileged accounts vaulted, for applications of high or critical criticality. One row an application it applies to (applications of high or critical criticality)."
+    }
+  ],
+  "notebooks": [
+    "controls.nb.ts",
+    "posture.nb.ts",
+    "summary.nb.ts"
+  ],
+  "ontology": {
+    "objectTypes": [],
+    "linkTypes": [],
+    "actionTypes": [],
+    "nouns": {
+      "posture": {
+        "one": "app",
+        "many": "apps"
+      },
+      "by_unit": {
+        "one": "unit",
+        "many": "units"
+      },
+      "by_control": {
+        "one": "control",
+        "many": "controls"
+      },
+      "by_type": {
+        "one": "type",
+        "many": "types"
+      },
+      "tls": {
+        "one": "app",
+        "many": "apps"
+      },
+      "waf": {
+        "one": "app",
+        "many": "apps"
+      },
+      "pentest": {
+        "one": "app",
+        "many": "apps"
+      },
+      "encryption": {
+        "one": "app",
+        "many": "apps"
+      },
+      "key_rotation": {
+        "one": "app",
+        "many": "apps"
+      },
+      "backup": {
+        "one": "app",
+        "many": "apps"
+      },
+      "dr_exercise": {
+        "one": "app",
+        "many": "apps"
+      },
+      "vuln_sla": {
+        "one": "app",
+        "many": "apps"
+      },
+      "mfa": {
+        "one": "app",
+        "many": "apps"
+      },
+      "access_review": {
+        "one": "app",
+        "many": "apps"
+      },
+      "logging": {
+        "one": "app",
+        "many": "apps"
+      },
+      "privileged_access": {
+        "one": "app",
+        "many": "apps"
+      }
+    },
+    "properties": [
+      {
+        "column": "app_id",
+        "title": "Application",
+        "description": "The application's id in the inventory"
+      },
+      {
+        "column": "name",
+        "title": "Name",
+        "description": "The application's name"
+      },
+      {
+        "column": "business_unit",
+        "title": "Business unit",
+        "description": "The business unit that owns the application",
+        "values": {
+          "Retail": "Retail",
+          "Payments": "Payments",
+          "Corporate": "Corporate",
+          "Platform": "Platform",
+          "Data": "Data",
+          "Claims": "Claims"
+        }
+      },
+      {
+        "column": "criticality",
+        "title": "Criticality",
+        "description": "How critical the application is to the business",
+        "values": {
+          "critical": "Critical",
+          "high": "High",
+          "standard": "Standard"
+        }
+      },
+      {
+        "column": "internet_facing",
+        "title": "Internet-facing",
+        "description": "Whether the application is reachable from the internet",
+        "values": {
+          "yes": "Yes",
+          "no": "No"
+        }
+      },
+      {
+        "column": "data_class",
+        "title": "Data class",
+        "description": "The most sensitive data the application holds",
+        "values": {
+          "pci": "Card data",
+          "pii": "Personal data",
+          "internal": "Internal",
+          "public": "Public"
+        }
+      },
+      {
+        "column": "datastore",
+        "title": "Datastore",
+        "description": "Whether the application keeps data of its own",
+        "values": {
+          "yes": "Yes",
+          "no": "No"
+        }
+      },
+      {
+        "column": "hosting",
+        "title": "Hosting",
+        "description": "Where the application runs",
+        "values": {
+          "cloud": "Cloud",
+          "onprem": "On premises",
+          "saas": "SaaS"
+        }
+      },
+      {
+        "column": "lifecycle",
+        "title": "Lifecycle",
+        "description": "Whether the application is active or being retired",
+        "values": {
+          "active": "Active",
+          "retiring": "Retiring"
+        }
+      },
+      {
+        "column": "status",
+        "title": "Status",
+        "description": "Whether the application passes the control, holds an exception, or wasn't assessed",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert"
+      },
+      {
+        "column": "tls",
+        "title": "TLS",
+        "description": "The application's standing on TLS; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "waf",
+        "title": "WAF",
+        "description": "The application's standing on WAF; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "pentest",
+        "title": "Penetration test",
+        "description": "The application's standing on penetration test; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "encryption",
+        "title": "Encryption at rest",
+        "description": "The application's standing on encryption at rest; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "key_rotation",
+        "title": "Key rotation",
+        "description": "The application's standing on key rotation; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "backup",
+        "title": "Backup",
+        "description": "The application's standing on backup; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "dr_exercise",
+        "title": "DR exercise",
+        "description": "The application's standing on dr exercise; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "vuln_sla",
+        "title": "Vulnerability SLA",
+        "description": "The application's standing on vulnerability sla; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "mfa",
+        "title": "MFA",
+        "description": "The application's standing on MFA; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "access_review",
+        "title": "Access review",
+        "description": "The application's standing on access review; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "logging",
+        "title": "Central logging",
+        "description": "The application's standing on central logging; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "privileged_access",
+        "title": "Privileged access",
+        "description": "The application's standing on privileged access; blank where the control doesn't apply or its file had no row",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing",
+          "exception": "Exception",
+          "not_assessed": "Not assessed"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control",
+          "by_type"
+        ]
+      },
+      {
+        "column": "hostname",
+        "title": "Host",
+        "description": "The host the control was checked on"
+      },
+      {
+        "column": "protocol",
+        "title": "Protocol",
+        "description": "The TLS protocol the host offers",
+        "values": {
+          "TLS1.0": "TLS 1.0",
+          "TLS1.2": "TLS 1.2",
+          "TLS1.3": "TLS 1.3"
+        },
+        "newValues": "alert"
+      },
+      {
+        "column": "cert_days_left",
+        "title": "Certificate days left",
+        "description": "Days until the certificate expires (negative: expired)",
+        "unit": "days"
+      },
+      {
+        "column": "provider",
+        "title": "WAF provider",
+        "description": "Who runs the firewall",
+        "values": {
+          "akamai": "Akamai",
+          "cloudflare": "Cloudflare",
+          "f5": "F5",
+          "aws": "AWS"
+        }
+      },
+      {
+        "column": "mode",
+        "title": "WAF mode",
+        "description": "Blocking, monitoring only, or off",
+        "values": {
+          "block": "Blocking",
+          "monitor": "Monitor only",
+          "off": "Off"
+        },
+        "bad": [
+          "off"
+        ]
+      },
+      {
+        "column": "ruleset_age_days",
+        "title": "Ruleset age",
+        "description": "Days since the ruleset was updated",
+        "unit": "days"
+      },
+      {
+        "column": "last_test",
+        "title": "Last test",
+        "description": "The day of the last penetration test"
+      },
+      {
+        "column": "next_due",
+        "title": "Next due",
+        "description": "The day the next completion is due"
+      },
+      {
+        "column": "open_highs",
+        "title": "Open highs",
+        "description": "High findings from the test still open"
+      },
+      {
+        "column": "store_type",
+        "title": "Datastore type",
+        "description": "Where the application keeps its data",
+        "values": {
+          "postgres": "PostgreSQL",
+          "s3": "S3",
+          "mysql": "MySQL",
+          "mongo": "MongoDB",
+          "files": "Files",
+          "oracle": "Oracle"
+        }
+      },
+      {
+        "column": "kms_managed",
+        "title": "Keys managed",
+        "description": "Whether the keys are managed by the key service",
+        "values": {
+          "yes": "Yes",
+          "no": "No"
+        }
+      },
+      {
+        "column": "last_rotated",
+        "title": "Last rotated",
+        "description": "The day the keys were last rotated"
+      },
+      {
+        "column": "key_age_days",
+        "title": "Key age",
+        "description": "Days since the keys were rotated",
+        "unit": "days"
+      },
+      {
+        "column": "last_success_hours",
+        "title": "Last backup",
+        "description": "Hours since the last good backup",
+        "unit": "hours"
+      },
+      {
+        "column": "rpo_hours",
+        "title": "Recovery point",
+        "description": "The recovery point objective",
+        "unit": "hours"
+      },
+      {
+        "column": "last_exercise",
+        "title": "Last exercise",
+        "description": "The day of the last disaster-recovery exercise"
+      },
+      {
+        "column": "rto_met",
+        "title": "Recovery time met",
+        "description": "Whether the exercise met the recovery time objective",
+        "values": {
+          "yes": "Yes",
+          "no": "No"
+        },
+        "bad": [
+          "no"
+        ]
+      },
+      {
+        "column": "open_critical",
+        "title": "Critical open",
+        "description": "Critical vulnerabilities open"
+      },
+      {
+        "column": "open_high",
+        "title": "High open",
+        "description": "High vulnerabilities open"
+      },
+      {
+        "column": "overdue",
+        "title": "Overdue",
+        "description": "Open vulnerabilities past their due date"
+      },
+      {
+        "column": "oldest_overdue_days",
+        "title": "Oldest overdue",
+        "description": "Days the oldest overdue vulnerability is past due",
+        "unit": "days"
+      },
+      {
+        "column": "idp",
+        "title": "Identity provider",
+        "description": "The identity provider the application signs in through",
+        "values": {
+          "okta": "Okta",
+          "entra": "Entra ID",
+          "local": "Local accounts"
+        }
+      },
+      {
+        "column": "enforced",
+        "title": "MFA enforced",
+        "description": "Whether every sign-in needs a second factor",
+        "values": {
+          "yes": "Yes",
+          "no": "No"
+        }
+      },
+      {
+        "column": "exceptions",
+        "title": "Exceptions",
+        "description": "Users excused from MFA"
+      },
+      {
+        "column": "last_review",
+        "title": "Last review",
+        "description": "The day access was last recertified"
+      },
+      {
+        "column": "reviewers",
+        "title": "Reviewers",
+        "description": "How many people reviewed"
+      },
+      {
+        "column": "sink",
+        "title": "Log sink",
+        "description": "Where the application's logs go",
+        "values": {
+          "splunk": "Splunk",
+          "cloudwatch": "CloudWatch",
+          "sentinel": "Sentinel",
+          "none": "None"
+        },
+        "bad": [
+          "none"
+        ]
+      },
+      {
+        "column": "coverage_pct",
+        "title": "Log coverage",
+        "description": "How much of the application the logs cover",
+        "unit": "%"
+      },
+      {
+        "column": "retention_days",
+        "title": "Retention",
+        "description": "How long the logs are kept",
+        "unit": "days"
+      },
+      {
+        "column": "vault",
+        "title": "Vault",
+        "description": "Where privileged accounts are vaulted",
+        "values": {
+          "cyberark": "CyberArk",
+          "hashicorp": "HashiCorp Vault",
+          "none": "None"
+        },
+        "bad": [
+          "none"
+        ]
+      },
+      {
+        "column": "accounts",
+        "title": "Privileged accounts",
+        "description": "Privileged accounts the application has"
+      },
+      {
+        "column": "unvaulted",
+        "title": "Unvaulted",
+        "description": "Privileged accounts outside the vault"
+      },
+      {
+        "column": "apps",
+        "title": "Applications",
+        "description": "Applications counted"
+      },
+      {
+        "column": "failing",
+        "title": "Failing",
+        "description": "Applications failing the control"
+      },
+      {
+        "column": "in_scope",
+        "title": "In scope",
+        "description": "Applications the control applies to, by the inventory"
+      },
+      {
+        "column": "assessed",
+        "title": "Assessed",
+        "description": "Applications with a row in the control's file"
+      },
+      {
+        "column": "control",
+        "title": "Control",
+        "description": "The control"
+      },
+      {
+        "column": "app_type",
+        "title": "Application type",
+        "description": "Internet-facing, critical, regulated, or none of these"
+      }
+    ]
+  },
+  "policies": {
+    "principals": [
+      {
+        "id": "owner",
+        "name": "Owner",
+        "role": "Owns the flow",
+        "owner": true
+      },
+      {
+        "id": "ciso",
+        "name": "Dana",
+        "role": "Security lead"
+      }
+    ],
+    "groups": [],
+    "rules": [
+      {
+        "id": "leads",
+        "kind": "action",
+        "name": "Dana may decide",
+        "action": "smaltfl:decide",
+        "for": [
+          "ciso"
+        ]
+      }
+    ]
+  },
+  "publish": {
+    "hold": [
+      "checks",
+      "wrong"
+    ],
+    "period": "day",
+    "together": false,
+    "watch": {
+      "tls": {
+        "history": "history.tls.json",
+        "pattern": "none"
+      },
+      "waf": {
+        "history": "history.waf.json",
+        "pattern": "none"
+      },
+      "pentest": {
+        "history": "history.pentest.json",
+        "pattern": "none"
+      },
+      "encryption": {
+        "history": "history.encryption.json",
+        "pattern": "none"
+      },
+      "key_rotation": {
+        "history": "history.key_rotation.json",
+        "pattern": "none"
+      },
+      "backup": {
+        "history": "history.backup.json",
+        "pattern": "none"
+      },
+      "dr_exercise": {
+        "history": "history.dr_exercise.json",
+        "pattern": "none"
+      },
+      "vuln_sla": {
+        "history": "history.vuln_sla.json",
+        "pattern": "none"
+      },
+      "mfa": {
+        "history": "history.mfa.json",
+        "pattern": "none"
+      },
+      "access_review": {
+        "history": "history.access_review.json",
+        "pattern": "none"
+      },
+      "logging": {
+        "history": "history.logging.json",
+        "pattern": "none"
+      },
+      "privileged_access": {
+        "history": "history.privileged_access.json",
+        "pattern": "none"
+      },
+      "posture": {
+        "history": "history.posture.json",
+        "pattern": "none"
+      }
+    }
+  }
+}

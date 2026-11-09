@@ -49,6 +49,13 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   app. What the planted days read as is ADR 0013 §6's table. `test/controls-anyday.test.ts` plants seven kinds of
   trouble on other days, other controls and another seed and finds each by the same code, with no false alarm on the
   other days: the judges know no date. Open: Q-104 to Q-109.
+- **The control estate** (ADR 0013 §8, 2026-11-09): the richer dataset the maintainer asked for before the next
+  round of judges: a typed inventory of 600 applications, twelve controls covering only the applications they apply
+  to, five on SLA dates with clustered due dates, four status words, one dependency rule, and three layers of planted
+  days (obvious, contradictions and scope, look-alikes beside one real SLA problem). `examples/control-estate/`,
+  built with `npm run build:app -- --flow examples/control-estate/flow.json --out dist/app-estate`. **What the flow
+  should say of each day is not decided**: the maintainer has a plan to explain. Until then `test/estate.test.ts`
+  asserts the data, and the app shows what today's judges make of it.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.
