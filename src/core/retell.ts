@@ -12,6 +12,7 @@ import { flowStory, rangesFor, isClaim2, levelsOf, skipOf, type Claim, type Stor
 import type { LogEntry } from './log.js';
 import { appendPeriods, emptyHistory, measuresHash, samePeriod, settingsFor, tailBefore, tailRef, type Measures } from './measures.js';
 import { translate } from './plan.js';
+import type { Story } from './story.js';
 
 /** A run whose claim is told again: its record entry's seq, its claim, and the flow document it ran. */
 export interface Retold {
@@ -34,8 +35,36 @@ export function tailFromRecord(entries: readonly EntryLike[], seq: number, sourc
   return out;
 }
 
-/** What is wrong with each claim/2 told again, one line a run: an empty `problems` when it holds. */
-export async function retellClaims(entries: readonly EntryLike[], runs: readonly Retold[], base: { file: HistoryFile; sha256: string } | null, period: string | null): Promise<{ seq: number; slot: string; problems: string[] }[]> {
+/**
+ * What `--history` tells again (ADR 0010 §6): for each run entry, published or held (a derived run's claims are its held
+ * run's, C4), the claim/2 of each source, one a source, from the claims it was judged by (`claims`, every run kept since
+ * they were recorded), its story holds' and those the engine judged it by (`judgedOf`, by its manifest); and each source
+ * a run measured with no claim/2 to tell (`untold`), unless the run was held as not judged for it: a verdict that
+ * published and can't be told again is said, never skipped.
+ */
+export function toTell(entries: readonly EntryLike[], judgedOf: (manifest: string) => readonly Claim[]): { told: { seq: number; manifest: string; claim: StoryClaim2 }[]; untold: { seq: number; source: string; slot: string }[] } {
+  const told: { seq: number; manifest: string; claim: StoryClaim2 }[] = [];
+  const untold: { seq: number; source: string; slot: string }[] = [];
+  for (const e of entries) {
+    const a = e.about as { outcome?: string; manifest?: unknown; claims?: unknown; holds?: unknown; measures?: unknown } | null;
+    if (e.kind !== 'run' || (a?.outcome !== 'ok' && a?.outcome !== 'held') || typeof a.manifest !== 'string') continue;
+    const holds = Array.isArray(a.holds) ? (a.holds as { by?: string; origin?: string; claim?: Claim }[]) : [];
+    const kept = Array.isArray(a.claims) ? (a.claims as Claim[]) : [];
+    const claims = [...kept, ...holds.flatMap((h) => (h.by === 'story' && h.claim ? [h.claim] : [])), ...judgedOf(a.manifest)].filter((c) => typeof c === 'object' && c !== null && isClaim2(c)) as StoryClaim2[];
+    const mine = claims.filter((c, i) => claims.findIndex((x) => x.source === c.source) === i);
+    for (const claim of mine) told.push({ seq: e.seq, manifest: a.manifest, claim });
+    for (const m of Array.isArray(a.measures) ? (a.measures as Measures[]) : []) {
+      if (mine.some((c) => c.source.toLowerCase() === m.source.toLowerCase())) continue;
+      if (holds.some((h) => h.by === 'unjudged' && h.origin?.toLowerCase() === m.source.toLowerCase())) continue;
+      untold.push({ seq: e.seq, source: m.source, slot: m.slot });
+    }
+  }
+  return { told, untold };
+}
+
+/** What is wrong with each claim/2 told again, one line a run: an empty `problems` when it holds. With `stories`, the
+ * story each was told again as, by its seq and source (what a day published under a standing level is checked by). */
+export async function retellClaims(entries: readonly EntryLike[], runs: readonly Retold[], base: { file: HistoryFile; sha256: string } | null, period: string | null, stories?: Map<string, Story>): Promise<{ seq: number; slot: string; problems: string[] }[]> {
   const out: { seq: number; slot: string; problems: string[] }[] = [];
   for (const r of runs) {
     if (!isClaim2(r.claim)) continue;
@@ -75,6 +104,7 @@ export async function retellClaims(entries: readonly EntryLike[], runs: readonly
         const story = flowStory(new HistoryRanges(file, { ...rangesFor(r.doc, c.source), recorded: new Set(c.skip), levels: c.levels }), c.slot, r.doc, c.source);
         const below = story.amount ? story.amount.value < story.amount.low : story.state === 'wrong' && story.hero === 'amount' && story.cause?.kind === 'volume';
         if (story.state !== c.state || story.head !== c.head || below !== c.below) problems.push(`told again, its story says ${story.state} "${story.head}", and the claim ${c.state} "${c.head}"`);
+        else stories?.set(`${r.seq}|${c.source.toLowerCase()}`, story);
       } catch (e) {
         problems.push((e as Error).message);
       }

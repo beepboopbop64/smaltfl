@@ -167,4 +167,29 @@ describe('the verdict told again from the record (audit --history)', () => {
     // A level the claim learned from must be one the record accepted before it (C6).
     expect((await again({ ...told.claim, levels: [{ from: tail[0]!.slot, metrics: ['auth'], decision: 2 }] }))[0]!.problems).toContain(`its claim learned from the levels ${tail[0]!.slot} (auth, #2), and the record before it accepted none`);
   });
+
+  it('tells every run’s claim, published or held, and names a run that measured a source with no claim to tell', async () => {
+    const { db, measures, told } = await setup();
+    db.close();
+    const { toTell } = await import('../src/core/retell.js');
+    const run = (seq: number, about: Record<string, unknown>) => ({ seq, kind: 'run', at: '', by: { as: 'owner' }, reason: null, amends: null, about: { manifest: String(seq).repeat(64).slice(0, 64), measures: [measures], ...about } });
+    const entries = [
+      // Published as it ran, its claim kept in its entry: told.
+      run(1, { outcome: 'ok', claims: [told.claim] }),
+      // Published as it ran before claims were kept, and not in this engine: named, never skipped.
+      run(2, { outcome: 'ok' }),
+      // Held by its story: its claim from its hold.
+      run(3, { outcome: 'held', holds: [{ by: 'story', origin: 'auth', claim: told.claim }] }),
+      // Held as not judged: nothing was told, so nothing to tell again.
+      run(4, { outcome: 'held', holds: [{ by: 'unjudged', origin: 'auth' }] }),
+      // A derived run: told at its held run's entry.
+      run(5, { outcome: 'derived' }),
+      // Published, its claim only in what the engine kept.
+      run(6, { outcome: 'ok' }),
+    ];
+    const judged = (m: string) => (m.startsWith('6') ? [told.claim] : []);
+    const { told: found, untold } = toTell(entries as never, judged);
+    expect(found.map((f) => f.seq)).toEqual([1, 3, 6]);
+    expect(untold).toEqual([{ seq: 2, source: 'auth', slot: DAY }]);
+  });
 });

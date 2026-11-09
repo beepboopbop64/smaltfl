@@ -634,6 +634,47 @@ describe('an audit bag with a day filled (amendment 1 S11, Q-61)', () => {
     expect(f).toContain(`release #${unamended.seq}: release #${s.rel.seq} withdrawn: 1 output back, citing decision #${loose.seq}: its decision, #${loose.seq}, doesn't amend the fill's decision, #${s.decision.seq}`);
   });
 
+  it('never applies a withdrawn fill’s decision again: the plugin refuses it, and the audit fails an engine release that did (Q-61, S5)', async () => {
+    const s = await filled();
+    const withdraw = await decide(s, s.thu.r, s.thu.keys, 'owner', { option: 'dont' }, null, s.decision.seq);
+    const back = await releaseRun(s.db, { run: s.r.run, manifest: s.r.hash, keys: s.keys, option: 'dont', actor: 'owner', reason: null, decision: LEAF(withdraw), withdraws: s.out.release });
+    expect(back.outcome).toBe('applied');
+    await s.rec.append('release', 'owner', { run: s.r.run, manifest: s.r.hash, outputs: { trip_hours: s.wed.r.manifest.outputs.trip_hours!.key }, decision: withdraw.seq, leaf: LEAF(withdraw), outcome: 'applied', why: null, withdraws: s.rel.seq } as unknown as JSONValue);
+    // The engine asked to put the same fill back by the withdrawn decision, with nothing new in the record: refused.
+    const again = await releaseRun(s.db, { run: s.r.run, manifest: s.r.hash, keys: s.keys, option: 'fill', actor: 'owner', reason: null, decision: LEAF(s.decision), from: { run: s.thu.r.run, manifest: s.thu.r.hash }, repair: s.repair });
+    expect(again).toMatchObject({ outcome: 'refused', why: `the decision it cites was withdrawn (release ${back.release} took release ${s.out.release} back): a new decision may apply it again, not that one` });
+    expect(failed(await auditBag(await withRepairs(s)))).toEqual([]);
+    // An engine that did apply it again (its releases as a forged engine would keep them): the audit says so.
+    const forged = await withRepairs(s, undefined, (payload) => {
+      const f = payload.find((x) => x.path === 'engine/releases.json')!;
+      const rels = JSON.parse(new TextDecoder().decode(f.bytes)) as EngineRelease[];
+      const first = rels.find((x) => x.id === s.out.release)!;
+      rels.push({ ...first, id: Math.max(...rels.map((x) => x.id)) + 1 });
+      f.bytes = enc.encode(JSON.stringify(rels));
+    });
+    const f = failed(await auditBag(forged));
+    expect(f).toContainEqual(expect.stringContaining(`it applies decision #${s.decision.seq} again after engine release ${back.release} withdrew it: only a new decision applies a withdrawn fill again; the engine applied decision #${s.decision.seq} 2 times, and the record keeps one applied release citing it`));
+  });
+
+  it('never fills a day readers have as is: the plugin refuses it, and the audit fails the decision and its release (§12, S5)', async () => {
+    const s = await filled();
+    const withdraw = await decide(s, s.thu.r, s.thu.keys, 'owner', { option: 'dont' }, null, s.decision.seq);
+    const back = await releaseRun(s.db, { run: s.r.run, manifest: s.r.hash, keys: s.keys, option: 'dont', actor: 'owner', reason: null, decision: LEAF(withdraw), withdraws: s.out.release });
+    await s.rec.append('release', 'owner', { run: s.r.run, manifest: s.r.hash, outputs: { trip_hours: s.wed.r.manifest.outputs.trip_hours!.key }, decision: withdraw.seq, leaf: LEAF(withdraw), outcome: back.outcome, why: back.why, withdraws: s.rel.seq } as unknown as JSONValue);
+    // Thu published as it arrived, then a fill of it decided and released.
+    const asis = await decide(s, s.thu.r, s.thu.keys, 'owner', { option: 'asis' }, 'Real change', withdraw.seq);
+    const out = await release(s, s.thu.r, asis, s.thu.keys);
+    expect(out.out.outcome).toBe('applied');
+    const refill = await decide(s, s.thu.r, s.thu.keys, 'owner', { option: 'fill', repair: s.repair, derived: { run: s.r.run, manifest: s.r.hash, keys: s.keys } }, null, asis.seq);
+    const after = await releaseRun(s.db, { run: s.r.run, manifest: s.r.hash, keys: s.keys, option: 'fill', actor: 'owner', reason: null, decision: LEAF(refill), from: { run: s.thu.r.run, manifest: s.thu.r.hash }, repair: s.repair });
+    expect(after).toMatchObject({ outcome: 'refused', why: `run ${s.thu.r.run}'s day was published as is by release ${out.out.release}, which can't be taken back` });
+    // A record that says it went out all the same.
+    const rel = await s.rec.append('release', 'owner', { run: s.r.run, manifest: s.r.hash, outputs: s.keys, decision: refill.seq, leaf: LEAF(refill), outcome: 'applied', why: null, from: { run: s.thu.r.run, manifest: s.thu.r.hash }, repair: s.repair, filled: 0 } as unknown as JSONValue);
+    const f = failed(await auditBag(await withRepairs(s)));
+    expect(f).toContain(`decision #${refill.seq}: fill from 2024-01-04 for 2024-01-11, by owner: readers have 2024-01-11 as is since release #${out.entry.seq}, which can't be taken back`);
+    expect(f).toContainEqual(expect.stringContaining(`release #${rel.seq}: 1 output of run ${s.r.run} released, citing decision #${refill.seq}: its decision, #${refill.seq}, doesn't hold; it took back 2024-01-11, published as is by release #${out.entry.seq}`));
+  });
+
   it('holds a fill applied again to its day run once more (a reload): the same inputs, the same keys (S9)', async () => {
     const s = await filled();
     // The day run again, and the decision's repair made again from that run: other runs, the same inputs and keys.

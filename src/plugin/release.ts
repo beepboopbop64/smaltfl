@@ -26,7 +26,7 @@
 import type { Database } from 'smaltdb/engine';
 import type { FlowDocument } from '../core/document.js';
 import { repairDocument, type Repair } from '../core/fill.js';
-import { byLoad, donorGood, heldOutputs, isLoad, loadKey, loadsOf, type Hold, type RunRef } from '../core/hold.js';
+import { byLoad, donorGood, heldOutputs, inputsKey, inputsOf, isLoad, loadKey, loadsOf, type Hold, type RunRef } from '../core/hold.js';
 import { manifestHash, policiesHash, type RunManifest } from '../core/manifest.js';
 import { flowHash, planPeriod, plannedDonor, watchesOf, type FlowPlan } from '../core/plan.js';
 import { checkDecision, DECIDE_OPTIONS, type DecisionOption } from '../core/policy.js';
@@ -153,6 +153,12 @@ export function donorRead(m: RunManifest, node: number): { sha256: string; bytes
   const n = m.nodes.find((x) => x.node === node);
   if (n?.file) return { sha256: n.file.sha256, bytes: n.file.bytes };
   return n?.content ? { sha256: n.content, bytes: null } : null;
+}
+
+/** Whether a stored run read the same inputs as a held run (its flow, parameters and sources): the same day's version. */
+function sameInputs(db: Database, run: number, held: Stored): boolean {
+  const row = db.query('SELECT manifest FROM _smaltfl_runs WHERE id = ?', [run]).rows[0];
+  return !!row && inputsKey(inputsOf(JSON.parse(String(row[0])) as RunManifest)) === inputsKey(inputsOf(held.manifest));
 }
 
 /** The value of a run's period parameter, read from its stored manifest; undefined when the run isn't stored. */
@@ -295,6 +301,17 @@ export async function release(db: Database, input: unknown): Promise<ReleaseResu
       for (const earlier of releasesOf(db, r.run)) {
         const twice = names.find((n) => earlier.outcome === 'applied' && Object.hasOwn(earlier.names, n) && !withdrawn.has(earlier.id) && !backs.has(earlier.id));
         if (twice) return `${twice} was already released, by release ${earlier.id}`;
+      }
+      // A withdrawn decision stays withdrawn (Q-61, S5): only a new decision applies the fill again, never the one a
+      // withdrawal took back, whichever run it is cited for.
+      const taken = releasesOf(db).find((x) => x.outcome === 'applied' && withdrawn.has(x.id) && x.decision === r.decision);
+      if (taken) return `the decision it cites was withdrawn (release ${withdrawals.find((w) => w.withdraws === taken.id)!.release} took release ${taken.id} back): a new decision may apply it again, not that one`;
+      // Publish as is can't be taken back (§12, S5): a day readers have as it arrived, or at its new level, is never
+      // filled or replaced with the part alone afterwards.
+      if (held) {
+        const sameDay = (run: number | null) => run !== null && (run === r.from!.run || sameInputs(db, run, held!));
+        const asis = releasesOf(db).find((x) => x.outcome === 'applied' && (x.option === 'asis' || x.option === 'accept') && sameDay(x.run));
+        if (asis) return `run ${r.from!.run}'s day was published ${asis.option === 'accept' ? 'at its new level' : 'as is'} by release ${asis.id}, which can't be taken back`;
       }
       // Together: what the decision leaves out must already show the run's version, or the outputs would show two days.
       // With several watched sources, only of the names its loads alone keep back: the rest wait for other loads.

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { isSpecial, NONE, US_1 } from '../src/core/calendar.js';
 import type { FlowDocument } from '../src/core/document.js';
 import { validateDocument } from '../src/core/document.js';
-import { acceptable, dayVersions, donorChoices, donorFor, donorRuleOf, fillable, fillCounts, levelMetrics, levelOf, levelWays, missingOf, offersOf, partLabel, partRows, repairDocument, type DonorQuery, type Repair } from '../src/core/fill.js';
+import { acceptable, dayVersions, donorChoices, donorFor, donorRuleOf, fillable, fillCounts, levelMetrics, levelOf, levelStray, levelWays, missingOf, offersOf, partLabel, partRows, repairDocument, type DonorQuery, type Repair } from '../src/core/fill.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { donorGood, flowStory, rangesFor, type HistoryRef } from '../src/core/hold.js';
 import type { LogEntry } from '../src/core/log.js';
@@ -404,5 +404,18 @@ describe('the way a level’s metrics were off (amendment 1 S6, Q-57b)', () => {
     expect(ways.get('value:VendorID=1')).toBe(false);
     expect(ways.get('count:VendorID=1')).toBe(false);
     expect([...ways.keys()].every((k) => levelMetrics(s).includes(k))).toBe(true);
+  });
+
+  it('says what is off on a later day besides the level, and a day back at the old level (the audit tells both again)', () => {
+    const level = flowStory(new HistoryRanges(historyWith({ '2023-10-11': { vendorGone: true } })), '2023-10-11', doc(), 'trips');
+    const then = levelWays(level);
+    const metrics = levelMetrics(level);
+    // The same part still gone: the level stands.
+    expect(levelStray(new Map([['value:VendorID=1', false]]), then, metrics)).toEqual([]);
+    // The part back (up), or another metric off: off besides the level.
+    expect(levelStray(new Map([['value:VendorID=1', true]]), then, metrics)).toEqual(["value:VendorID=1 up, down on the level's day"]);
+    expect(levelStray(new Map([['value:VendorID=1', false], ['share:store_and_fwd_flag=Y', true]]), then, metrics)).toEqual(["share:store_and_fwd_flag=Y up, which the level doesn't name"]);
+    // Nothing off at all: back to the old level.
+    expect(levelStray(new Map(), then, metrics)).toBeNull();
   });
 });

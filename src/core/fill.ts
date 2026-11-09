@@ -398,6 +398,17 @@ export function levelWays(story: Pick<Story, 'hero' | 'split' | 'cause' | 'absor
   return out;
 }
 
+/**
+ * What is off on a day besides an accepted level (Q-57b, `levelFor`'s rule, told again by the audit): each metric off on
+ * the day (`now`) the level doesn't name, or off another way than on the level's own day (`then`), said; null when
+ * nothing the level names is off on the day (it is back to the old level, a change again). Empty when the level stands.
+ */
+export function levelStray(now: ReadonlyMap<string, boolean>, then: ReadonlyMap<string, boolean>, metrics: readonly string[]): string[] | null {
+  if (now.size === 0) return null;
+  const way = (up: boolean | undefined) => (up === undefined ? 'not off' : up ? 'up' : 'down');
+  return [...now].filter(([m, up]) => !metrics.includes(m) || then.get(m) !== up).map(([m, up]) => `${m} ${way(up)}${metrics.includes(m) ? `, ${way(then.get(m))} on the level's day` : ", which the level doesn't name"}`);
+}
+
 /** The causes a level can be accepted for (X6): an amount, a split whose part vanished or surged, a share, a level (a
  * quantile or a blank share), or a new value that stayed. */
 const LEVEL_KINDS = new Set(['volume', 'share', 'gone', 'missing', 'shape', 'new']);

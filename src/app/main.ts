@@ -64,6 +64,8 @@ interface RunRecord {
   inputs: string;
   /** A held run's release, once a decision to publish it as is was applied (or refused) in this engine. */
   release?: ReleaseResult;
+  /** The claims it was judged by (ADR 0010 §6): kept in its record entry, held or not, so an audit tells each again. */
+  claims?: Claim[];
   /**
    * A derived run (ADR 0009 amendment 1 S4): the held run it repairs, the repair, its document, and its release once a
    * decision released it here. Its `inputs` are its held run's, so it finds the same pause; it is never one of
@@ -7912,7 +7914,7 @@ async function run(): Promise<void> {
     const result = await runFlow(engine, state.doc, { smaltdb: SMALTDB, parameters, data, log: recordHead(), ...(told ? { claims: told } : {}) });
     const ms = performance.now() - t;
     // A held run returns, built, checked and recorded, its versions staged: only `published` names show it.
-    const rec: RunRecord = { result, ms, at: new Date(), inputs: inputsKey(inputsOf(result.manifest)), ...(loads.pinned >= 0 && loads.list.length > 1 ? { load: loads.pinned } : {}) };
+    const rec: RunRecord = { result, ms, at: new Date(), inputs: inputsKey(inputsOf(result.manifest)), ...(loads.pinned >= 0 && loads.list.length > 1 ? { load: loads.pinned } : {}), ...(told?.length ? { claims: told } : {}) };
     state.runs.unshift(rec);
     // Each watched load's measures to its source's tail, the first time its slot runs (C5).
     for (const m of result.measures ?? []) addToTail(m);
@@ -7985,6 +7987,8 @@ async function recordRun(rec: RunRecord | null, error: string | null): Promise<v
         ...(held ? { holds: result.holds as unknown as JSONValue, waiting: result.waiting, keys } : {}),
         // Its watched loads' measures (ADR 0010 §6): the tail is rebuilt from them when the page opens.
         ...(result.measures?.length ? { measures: result.measures as unknown as JSONValue } : {}),
+        // The claims it was judged by, published or held: what `audit.mjs check --history` tells again (ADR 0010 §6).
+        ...(rec?.claims?.length ? { claims: rec.claims as unknown as JSONValue } : {}),
       });
     } else await ledger.append('run', state.viewer, { run: null, load, outcome: 'failed', error });
   } catch (e) {

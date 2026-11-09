@@ -282,6 +282,13 @@ describe('two watched sources, each with its own cadence (I16, Q-55)', () => {
       const bad = (await auditBag(await bagOf(db, rec))).lines.filter((l) => !l.ok).map((l) => l.what);
       expect(bad).toContainEqual(`decision #${wrong.seq}: publish as is for 2024-09-10, by owner: the load it is about isn't one that held the run`);
       expect(bad).toContainEqual(expect.stringMatching(new RegExp(`^release #${wrong.seq + 1}: 3 outputs of run ${d.run} released, citing decision #${wrong.seq}: its decision, #${wrong.seq}, doesn't hold; its decision, #${wrong.seq}, is about edr's 2024-09-10T12 load, which didn't hold run ${d.run}`)));
+      // A standing decision about edr's 06–12 load ends when its 12–18 load passes (run d read it and didn't hold it):
+      // a decision about the 18–24 load applied under it fails, though no day (the sign-ins' period) passed between.
+      const gap: Load = { ...calm, slot: '2024-09-10T06' };
+      const standing = await rec.append('decide', 'owner', { ...about, day: gap.slot, option: 'dont', scope: 'untilPass', load: gap } as unknown as JSONValue, null);
+      const late = await rec.append('decide', 'owner', { ...about, day: '2024-09-10T18', option: 'dont', scope: 'day', under: standing.seq, load: { ...calm, slot: '2024-09-10T18' } } as unknown as JSONValue, null);
+      const ended = (await auditBag(await bagOf(db, rec))).lines.filter((l) => !l.ok).map((l) => l.what);
+      expect(ended).toContainEqual(`decision #${late.seq}: don't publish for 2024-09-10T18, by owner, under #${standing.seq}: the load it is about isn't one that held the run; it applies decision #${standing.seq}, which doesn't stand for edr's 2024-09-10T18 load`);
     } finally {
       db.close();
     }

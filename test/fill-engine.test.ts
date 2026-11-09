@@ -323,8 +323,9 @@ describe('a better donor, and taking a fill back (amendment 1 S7, Q-61)', () => 
     expect(total(t.db)).toEqual([passing(NEAREST), 0, null]);
     expect(t.db.query('SELECT release, withdraws FROM _smaltfl_withdrawals ORDER BY release').rows.map((x) => x[1])).toEqual([b.release, a.release]);
     for (const r of [first, second, t.wed]) expect(fails(await verifyRun(t.db, r.run, { smaltdb: SMALTDB, level: 'stored' })), String(r.run)).toEqual([]);
-    // Applied again by a new decision: the withdrawn fill goes out again.
-    expect(await releaseRun(t.db, releaseOf(t, first, asRead(first, repairFrom(DONOR))))).toMatchObject({ why: null, outcome: 'applied' });
+    // Never by the decision a withdrawal took back (S5); by a new decision, the withdrawn fill goes out again.
+    expect((await releaseRun(t.db, releaseOf(t, first, asRead(first, repairFrom(DONOR))))).why).toMatch(new RegExp(`^the decision it cites was withdrawn \\(release \\d+ took release ${a.release} back\\): a new decision may apply it again, not that one$`));
+    expect(await releaseRun(t.db, releaseOf(t, first, asRead(first, repairFrom(DONOR)), { decision: 'e'.repeat(64) }))).toMatchObject({ why: null, outcome: 'applied' });
     expect(total(t.db)![2]).toBe(DONOR);
   });
 

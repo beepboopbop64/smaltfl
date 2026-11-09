@@ -31,15 +31,16 @@ import { checkBag, readBagInfo, type BagFile } from './bag.js';
 import type { FlowDocument } from './document.js';
 import { sha256Hex } from './hash.js';
 import { daysBetween } from './calendar.js';
-import { DONOR_WINDOW, repairDocument, type Repair } from './fill.js';
-import { carry, claimBase, claimHolds, donorGood, factsFromClaims, heldOutputs, holdsOf, inputsKey, isLoad, loadKey, type Load, isClaim2, isLevel, judgeClaims, lastPublished, sameKeys, standingFor, type Claim, type DecideAbout, type DerivedAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type RunHold } from './hold.js';
+import { DONOR_WINDOW, levelStray, levelWays, repairDocument, type Repair } from './fill.js';
+import { carry, claimBase, claimHolds, donorGood, factsFromClaims, heldOutputs, holdsOf, inputsKey, isLoad, loadKey, type Load, isClaim2, isLevel, judgeClaims, lastPublished, sameKeys, standingFor, standingForLoad, type Claim, type DecideAbout, type DerivedAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type RunHold } from './hold.js';
 import { canonicalJSON } from './canonical.js';
 import { consistencyProof, entryLeaf, parseCheckpoint, rootOf, verifyCheckpoint, verifyConsistency, verifyInclusion, verifyRecord, type JSONValue, type LogEntry, type SignedCheckpoint } from './log.js';
 import { manifestHash, planHash, policiesHash, type IdentityCard, type RunManifest } from './manifest.js';
 import { flowHash, planPeriod, watchesOf, type FlowPlan } from './plan.js';
 import { checkDecision, DECIDE_OPTIONS } from './policy.js';
 import { isHistory, type HistoryFile } from './history.js';
-import { retellClaims, type Retold } from './retell.js';
+import { retellClaims, toTell, type Retold } from './retell.js';
+import type { Story } from './story.js';
 
 export interface AuditLine {
   ok: boolean;
@@ -272,7 +273,28 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     const period = planPeriod(runs.get(decision.manifest)?.plan?.publish);
     const shown = lastPublished(entries.slice(0, e.seq), period);
     if (a.outcome === 'applied' && decision.day && shown && shown > decision.day) problems.push(`it moved the names back past ${shown}, published before it`);
+    const asis = a.outcome === 'applied' ? publishedAsIs(e.seq, decision) : undefined;
+    if (asis) problems.push(`it took back ${decision.day ?? 'its day'}, published ${asis.option === 'accept' ? 'at its new level' : 'as is'} by release #${asis.release}`);
     return problems;
+  };
+
+  /**
+   * The applied release, before entry `seq`, that published a decision's day (or its load) as is or at its new level, by
+   * a decision of the same inputs (or about the same load): what no remedy may take back afterwards (§12, S5).
+   */
+  const publishedAsIs = (seq: number, a: DecideAbout): { release: number; option: 'asis' | 'accept' } | undefined => {
+    for (const x of entries.slice(0, seq)) {
+      const r = x.about as Partial<ReleaseAbout> | null;
+      if (x.kind !== 'release' || !isRecord(r) || r.outcome !== 'applied' || Number.isInteger(r.withdraws)) continue;
+      for (const c of Array.isArray(r.decisions) ? r.decisions : [r.decision]) {
+        const d = Number.isInteger(c) ? entries[c as number] : undefined;
+        const da = d?.about as unknown as DecideAbout | undefined;
+        if (d?.kind !== 'decide' || !isRecord(da) || (da.option !== 'asis' && da.option !== 'accept')) continue;
+        const same = a.load !== undefined ? isLoad(da.load) && isLoad(a.load) && loadKey(da.load) === loadKey(a.load) : da.load === undefined && isInputs(da.inputs) && isInputs(a.inputs) && inputsKey(da.inputs) === inputsKey(a.inputs);
+        if (same) return { release: x.seq, option: da.option };
+      }
+    }
+    return undefined;
   };
 
   /** What is wrong with a withdrawal (Q-61): it takes back an applied release of a fill or a part, amends that fill's
@@ -352,6 +374,12 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       // A load an earlier run of the flow held is carried, citing it (ADR 0010 §7): from what the engine kept of them.
       const earlier = (l: Load) => [...engineHolds.values()].filter((x) => x.run < kept.run && runs.get(x.manifest)?.manifest?.flow.id === m.flow.id).sort((x, y) => x.run - y.run).find((x) => Array.isArray(x.holds) && x.holds.some((h) => h.load && loadKey(h.load) === loadKey(l)))?.run;
       problems.push(...engineHoldsProblems(kept, e.about, typed, m, a.outcome === 'derived' ? 'derived' : a.outcome, engineRepairs?.derived.find((d) => d.manifest === a.manifest), earlier));
+      // The claims its entry keeps (ADR 0010 §6) include each one the engine judged it by: what --history tells again.
+      const keptClaims = (e.about as { claims?: unknown }).claims;
+      if (Array.isArray(keptClaims) && Array.isArray(kept.judged)) {
+        const said = new Set(keptClaims.map((c) => canonicalJSON(c as JSONValue)));
+        if (kept.judged.some((j) => 'claim' in j && !said.has(canonicalJSON(j.claim as unknown as JSONValue)))) problems.push("the claims its entry keeps aren't the ones the engine judged it by");
+      }
     }
     const flow = flows.get(m.flow.hash);
     if (flow && (await flowHash(JSON.parse(text(flow.bytes)) as FlowDocument)) !== m.flow.hash) problems.push("its flow document doesn't hash to what the manifest says");
@@ -457,9 +485,13 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     if (remedy && (!isRecord(a.repair) || (a.repair as Repair).kind !== a.option)) problems.push(`it ${a.option === 'fill' ? 'fills' : 'publishes the part that arrived'} with no repair of that kind`);
     const period = planPeriod(held?.plan?.publish);
     if (a.under !== undefined && a.option !== 'accept') {
-      const stands = typeof a.day === 'string' ? standingFor(entries.slice(0, e.seq), a.day, period) : null;
-      if (a.option === 'asis' || stands?.seq !== a.under || stands.about.option !== a.option) problems.push(`it applies decision #${a.under}, which doesn't stand for ${a.day ?? 'a day with no date'}`);
+      // A decision about a load stands until a later load of its source passes (ADR 0010 §7), not until a day does.
+      const stands = a.load !== undefined ? (isLoad(a.load) ? standingForLoad(entries.slice(0, e.seq), a.load) : null) : typeof a.day === 'string' ? standingFor(entries.slice(0, e.seq), a.day, period) : null;
+      if (a.option === 'asis' || stands?.seq !== a.under || stands.about.option !== a.option) problems.push(`it applies decision #${a.under}, which doesn't stand for ${a.load !== undefined && isLoad(a.load) ? `${a.load.source}'s ${a.load.slot} load` : (a.day ?? 'a day with no date')}`);
     }
+    // Publish as is can't be taken back (ADR 0009 §12, amendment 1 S5): no fill or part alone after the day went out as is.
+    const asis = remedy ? publishedAsIs(e.seq, a) : undefined;
+    if (asis) problems.push(`readers have ${a.day ?? `run ${a.run}`} ${asis.option === 'accept' ? 'at its new level' : 'as is'} since release #${asis.release}, which can't be taken back`);
     if (e.amends !== null) {
       const amended = entries[e.amends];
       const was = amended?.about as unknown as DecideAbout | undefined;
@@ -468,7 +500,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     }
     allowed.set(e.seq, problems.length === 0);
     const option = a.option === 'accept' ? (a.under !== undefined ? `publish by #${a.under}'s new level` : `accept the new level from ${isLevel(a.level) ? a.level.from : 'the day'}`) : a.option === 'asis' ? 'publish as is' : a.option === 'fill' ? `fill from ${(a.repair as Repair | undefined)?.donor?.day ?? 'another day'}` : a.option === 'complete' ? 'publish the part that arrived' : e.amends !== null && remedyOf(entries[e.amends]) ? "don't publish (withdraws the fill)" : "don't publish";
-    say(problems.length === 0, `${where}: ${option}${a.scope === 'untilPass' ? ' until a later day passes' : ''} for ${a.day ?? `run ${a.run}`}, by ${e.by.as}${a.under !== undefined ? `, under #${a.under}` : ''}${problems.length ? `: ${problems.join('; ')}` : `${rule ? ` (rule ${rule})` : ''}, on run ${a.run}'s keys`}`);
+    say(problems.length === 0, `${where}: ${option}${a.scope === 'untilPass' ? ' until a later day passes' : ''} for ${a.day ?? `run ${a.run}`}, by ${e.by.as}${a.under !== undefined ? `, under #${a.under}` : ''}${problems.length ? `: ${problems.join('; ')}` : `${rule ? ` (rule ${rule})` : ''}, on run ${a.run}'s keys${a.option === 'accept' && a.under !== undefined && !trust.history ? "; not checked against the level's metrics: --history tells its day again to check it" : ''}`}`);
   }
 
   /**
@@ -585,6 +617,18 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
   if (names !== undefined) {
     const decided = new Map(entries.filter((e) => e.kind === 'decide').map((e) => [entryLeaf(e), e]));
     const backs = new Map((engineRepairs?.withdrawals ?? []).map((w) => [w.release, w.withdraws]));
+    // Each decision a withdrawal took back in the engine (Q-61), with the first engine release that withdrew it: no
+    // later engine release applies it again (a new decision does, S5).
+    const withdrawnAt = new Map<string, number>();
+    for (const [back, taken] of backs) {
+      const t = engineReleases.find((x) => x.id === taken);
+      if (t?.decision && back < (withdrawnAt.get(t.decision) ?? Infinity)) withdrawnAt.set(t.decision, back);
+    }
+    // Each engine release that publishes is one the record keeps: as many applied releases citing a decision in the
+    // engine as in the record, at most (the record holds those of earlier engines too).
+    const recordedCites = (seq: number) => entries.filter((e) => e.kind === 'release' && isRecord(e.about) && e.about.outcome === 'applied' && !Number.isInteger(e.about.withdraws) && (Array.isArray(e.about.decisions) ? e.about.decisions : [e.about.decision]).includes(seq)).length;
+    const engineCites = new Map<string, number>();
+    for (const r of engineReleases) if (r.outcome === 'applied' && !backs.has(r.id) && r.decision) engineCites.set(r.decision, (engineCites.get(r.decision) ?? 0) + 1);
     for (const r of engineReleases.filter((x) => x.outcome === 'applied')) {
       const d = r.decision ? decided.get(r.decision) : undefined;
       const run = r.manifest ? runs.get(r.manifest) : undefined;
@@ -604,6 +648,12 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
         const recorded = entries.some((e) => e.kind === 'release' && isRecord(e.about) && e.about.manifest === r.manifest && e.about.outcome === 'applied' && isKeys(e.about.outputs) && sameKeys(r.names, e.about.outputs) && (Array.isArray(e.about.decisions) ? e.about.decisions : [e.about.decision]).includes(d.seq));
         if (!recorded) problems.push(`its names aren't those a release of run ${r.run} citing decision #${d.seq} names, with its keys`);
       } else if (!sameKeys(r.names, about?.outputs ?? {})) problems.push(`its names aren't decision #${d.seq}'s, with its keys`);
+      if (d && !backs.has(r.id)) {
+        const w = withdrawnAt.get(r.decision!);
+        if (w !== undefined && w < r.id) problems.push(`it applies decision #${d.seq} again after engine release ${w} withdrew it: only a new decision applies a withdrawn fill again`);
+        const k = recordedCites(d.seq);
+        if ((engineCites.get(r.decision!) ?? 0) > k) problems.push(`the engine applied decision #${d.seq} ${engineCites.get(r.decision!)} times, and the record keeps ${k === 0 ? 'no applied release' : k === 1 ? 'one applied release' : `${k} applied releases`} citing it`);
+      }
       if (!run || (outcome !== 'held' && outcome !== 'derived')) problems.push("the run it released isn't held in the record");
       if (problems.length) say(false, `engine release ${r.id} (run ${r.run}): ${problems.join('; ')}`);
     }
@@ -643,21 +693,44 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     const baseFile = JSON.parse(text(trust.history)) as HistoryFile;
     const base = isHistory(baseFile) ? { file: baseFile, sha256: await sha256Hex(new Uint8Array(trust.history) as Uint8Array<ArrayBuffer>) } : null;
     if (!base) say(false, "the history you gave isn't a smaltfl history");
-    const told: Retold[] = [];
-    for (const [manifest, run] of runs) {
-      // A derived run's claims are its held run's (C4), told again at the held run's entry; that they are the same is
-      // checked with the derived run itself (its document, snapshot and claims against its held run's).
-      if ((run.entry.about as { outcome?: string }).outcome === 'derived') continue;
-      const judged = engineHolds.get(manifest)?.judged ?? [];
-      const fromHolds = ((run.entry.about as Partial<HeldAbout>).holds ?? []).flatMap((h) => (h.by === 'story' && h.claim ? [h.claim] : []));
-      for (const claim of [...fromHolds, ...judged.flatMap((j) => ('claim' in j ? [j.claim] : []))].filter(isClaim2).filter((c, i, all) => all.findIndex((x) => x.source === c.source) === i)) {
-        told.push({ seq: run.entry.seq, claim, doc: run.manifest ? flowOf(flows, run.manifest.flow.hash) : null });
-      }
-    }
+    // Every run's claim/2, published or held (its entry keeps the claims it was judged by; for an earlier record, its
+    // story holds' and the engine's), and every source a run measured with no claim/2 to tell: said, never skipped.
+    // A derived run's claims are its held run's (C4), told again at the held run's entry; that they are the same is
+    // checked with the derived run itself (its document, snapshot and claims against its held run's).
+    const { told: found, untold } = toTell(entries.filter((e) => runs.has(String((e.about as { manifest?: unknown } | null)?.manifest))), (manifest) => (engineHolds.get(manifest)?.judged ?? []).flatMap((j) => ('claim' in j ? [j.claim] : [])));
+    const told: Retold[] = found.map((f) => {
+      const m = runs.get(f.manifest)?.manifest;
+      return { seq: f.seq, claim: f.claim, doc: m ? flowOf(flows, m.flow.hash) : null };
+    });
     const period = [...runs.values()].map((x) => (x.plan ? planPeriod(x.plan.publish) : null)).find((x) => x !== null) ?? null;
-    const again = await retellClaims(entries, told.sort((a, b) => a.seq - b.seq), base, period);
+    const stories = new Map<string, Story>();
+    const again = await retellClaims(entries, told.sort((a, b) => a.seq - b.seq), base, period, stories);
     for (const a of again) say(a.problems.length === 0, a.problems.length ? `#${a.seq} (${a.slot}), told again: ${a.problems.join('; ')}` : `#${a.seq} (${a.slot}): its verdict told again from the base, the record's tail and its load's measures says what its claim said`);
-    if (!again.length) say(true, 'no claim/2 in the record to tell again');
+    for (const u of untold) say(false, `#${u.seq} (${u.slot}): its entry keeps ${u.source}'s measures and no claim/2 for ${u.source}: the verdict it was published or held by can't be told again`);
+    if (!again.length && !untold.length) say(true, 'no claim/2 in the record to tell again');
+    // A day published under a standing level (Q-57b, amendment 1 S6): every metric off on it is one the level names, off
+    // the way it was on the level's own day, as its story and the level's day's tell them again.
+    for (const e of entries.filter((x) => x.kind === 'decide')) {
+      const a = e.about as unknown as DecideAbout;
+      if (!isRecord(a) || a.option !== 'accept' || a.under === undefined || !isLevel(a.level)) continue;
+      const root = entries[a.under]?.about as unknown as DecideAbout | undefined;
+      if (!isRecord(root) || !isLevel(root.level)) continue;
+      const source = root.level.source.toLowerCase();
+      const at = (manifest: string) => {
+        const seq = runs.get(manifest)?.entry.seq;
+        return seq === undefined ? undefined : stories.get(`${seq}|${source}`);
+      };
+      const now = at(a.manifest);
+      const then = at(root.manifest);
+      const where = `decision #${e.seq} (${a.day ?? `run ${a.run}`}, under #${a.under}'s new level)`;
+      if (!now || !then) {
+        say(false, `${where}: ${!now ? 'its day' : `#${a.under}'s own day`} wasn't told again, so whether the level stands for it can't be checked`);
+        continue;
+      }
+      const stray = levelStray(levelWays(now), levelWays(then), root.level.metrics);
+      if (stray === null) say(false, `${where}: told again, nothing the level names is off on its day: it is back to the old level, a change again`);
+      else say(stray.length === 0, stray.length ? `${where}: told again, it is off besides the level: ${stray.join('; ')}` : `${where}: told again, every metric off on its day is one the level names, off the same way`);
+    }
   }
 
   // A checkpoint the auditor kept.
