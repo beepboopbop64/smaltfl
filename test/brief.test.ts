@@ -45,7 +45,7 @@ describe('the brief of a paused day (ADR 0012 §1)', () => {
   });
 
   it('keeps the order what, impact, cause, fix, within the glance budget and without the banned words', () => {
-    expect(b.impact[0]).toBe('3 of 3 published datasets wait: auth_valid, signins_by_hour, failures_by_country (readers see Mon 11)');
+    expect(b.impact[0]).toBe('3 of 3 published datasets wait: auth_valid, signins_by_hour, failures_by_country');
     expect(b.impact).toContain('Read by Sam');
     expect(b.cause.facts.some((f) => /fail/i.test(f))).toBe(true);
     expect(b.cause.facts.at(-1)).toBe('The file auth_2024-03-12.csv matches the source’s list (184k rows)');

@@ -107,8 +107,13 @@ What the survey found (sources in §7):
   day waits, a tap proposing another ("Your proposal.", kept in this browser); then *Copy as text*, *Copy as image*
   (the first screen drawn as SVG with the page's styles inlined, rasterised, to the clipboard, or shown to save from
   where the clipboard takes no images) and *Copy link* (`#brief-YYYY-MM-DD`, which loads the day and opens the
-  input's News). The day line's separate *Brief ›* is gone: *The news ›* is the way in. The two-minute test is
-  written (`tools/judges/two-minute.md`) and run once on this build (docs/HANDOFF.md).
+  input's News). The day line's separate *Brief ›* is gone: *The news ›* is the way in. **The two-minute test**
+  (`tools/judges/two-minute.md`) ran once on this build: two readers, an on-call engineer and a newcomer, four days
+  from the screen alone, 40 of 40 points (the day and what happened, the number or time, the impact, a fix the app
+  offers, nothing false); what they could not tell is docs/HANDOFF.md's list of nine, the first three fixed the same
+  day (the checks' figure said as their line says it; an hour fall with a kept part told as "everything but X
+  stopped at 13:00; X kept arriving", the part never a fact of its own; a sender's outage on its second day proposing
+  the part that arrived, not a fill). `test/brief-real.test.ts` holds the real days to it.
 
 ## Consequences
 

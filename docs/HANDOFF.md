@@ -127,6 +127,30 @@ Parked behind the notebook surface by the maintainer's decision of 2026-11-09 (Q
 - **Hashes and encodings** have ADRs and test vectors: plan/1 (ADR 0009 E10), plan/2 (ADR 0010 E13), measures/0,
   tail/0. A change to any of them needs a new tag version and an ADR (CLAUDE.md).
 
+### The two-minute test, round 1 (2026-11-09)
+
+Both readers got every day right from the screen alone (tools/judges/two-minute.md; the readers' reports in the session
+of that day). What they could not tell, or found confusing, in the order it should be fixed:
+
+1. "trips_valid dropped 10% of rows (limit 10%)" beside "Checks passed: 9.55% dropped": the brief rounded where the
+   checks' line didn't (round 3, #29). **Fixed the same day:** the brief says the checks' figure.
+2. "Flex Fare held to its usual count" under Cause read as blaming the part that survived. **Fixed:** on an hour-fall
+   day with a kept part the fact is "Everything but Flex Fare stopped at 13:00; Flex Fare kept arriving (4.7k today,
+   usually 2.8k–5.4k)", and the part gets no fact of its own; the trickle rate ("still ~330/h") stays on the chart.
+3. The app proposed *Fill from Tue 1* on day 2 of Vendor 1's outage; the engineer wanted *Without Vendor 1*. **Fixed:**
+   a sender that stopped, for the second day running, proposes the part that arrived first.
+4. "Paused by trips" (what paused what?), and "Day 2 · ~65k short" beside "−25%" (short over the episode, the day's
+   own change): the pause row's and the episode chip's words (ADR 0009 §12, ADR 0008 §6) need a reader who knows them.
+5. Who "Flex Fare" is: the gloss is a tap on the head, which a screenshot can't show; the brief's fact could carry the
+   ontology's meaning once.
+6. The day picker shows no year; the week strip's "not run" days (the days this browser hasn't run) read as outages
+   on a calm day (round 3, #16); "8 notes" on a calm day (#17).
+7. The Amount health cell not flagged on a day 65% short (the hours are the cause; the amount follows): say so, or
+   mark it.
+8. The folded value changes ("Extras $2.50 0.01%, usual 12–13%") read as a second problem to both readers: they are
+   the arithmetic of the cutoff, and the fold's head should say so.
+9. What "marked" means for readers, and whether a decision runs on tapping Decide: a line in the fix's option.
+
 ## A correction worth knowing: hour-fall days
 
 On Thu Sep 21, 2023 and Sat Sep 17, 2022 the trips by hour fall about 95% at 13:00 and 15:00. Three rounds of judges read
@@ -161,6 +185,7 @@ A grader merged the reports into a ranked fix list, and a fix workflow worked th
 | 1 (2026-11-08) | 21/26 | 24/24 | 10/10 | — | 32 |
 | 2 (pause added) | 19/26 | 25/26 | 9/10 | 2/4 | 43 |
 | 3 | 21/26 | state 26/26, shape 19/26 | 10/10 | 4/4 | 37 |
+| Two-minute test 1 (ADR 0012 §7, build `00a29d6`): the brief in the input's News, four days, two readers (an on-call engineer, a newcomer), graded on the day and what happened, the number or time, the impact, a fix the app offers, nothing false | 40/40 | | | | 9 below |
 
 In round 3, all five glance misses were hour-fall readings (corrected above) or Jan 7's snow read as the cause.
 

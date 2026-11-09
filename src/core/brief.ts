@@ -145,13 +145,16 @@ export function impactOf(o: Pick<BriefIn, 'outputs' | 'objects' | 'readers' | 'p
   const kept = o.outputs.filter((x) => x.fate === 'kept').map((x) => x.name);
   const out = o.outputs.filter((x) => x.fate === 'published').map((x) => x.name);
   const named = (xs: string[]) => (xs.length <= 3 ? xs.join(', ') : `${xs.slice(0, 2).join(', ')} and ${xs.length - 2} more`);
-  if (waits.length) lines.push(`${waits.length} of ${o.outputs.length} published datasets wait: ${named(waits)}${o.pause?.readers ? ` (readers see ${dayShort(o.pause.readers)})` : ''}`);
+  // The day readers see is in the sentence already (stakeOf): said once.
+  if (waits.length) lines.push(`${waits.length} of ${o.outputs.length} published datasets wait: ${named(waits)}`);
   if (kept.length) lines.push(`Readers keep an earlier day of ${named(kept)}`);
   if (out.length && (waits.length || kept.length)) lines.push(`Up to date: ${named(out)}`);
   if (!waits.length && !kept.length && out.length) lines.push(`All ${o.outputs.length} published datasets went out`);
-  if (o.objects.length) lines.push(`Built on them: ${named(o.objects)}`);
-  if (o.readers.length) lines.push(`Read by ${named(o.readers)}`);
-  return lines.slice(0, 4);
+  // The objects built on them and who reads them, one line, so the first screen keeps its budget.
+  if (o.objects.length && o.readers.length) lines.push(`Built on them: ${named(o.objects)}; read by ${named(o.readers)}`);
+  else if (o.objects.length) lines.push(`Built on them: ${named(o.objects)}`);
+  else if (o.readers.length) lines.push(`Read by ${named(o.readers)}`);
+  return lines.slice(0, 3);
 }
 
 /** Cause: the facts the day's own rows and file show, then a theory only when the story links a finding to one. */
@@ -159,20 +162,25 @@ export function causeOf(o: Pick<BriefIn, 'story' | 'file' | 'noun'>): { facts: s
   const facts: string[] = [];
   const theories: string[] = [];
   const s = o.story;
+  const sp = s?.split ?? null;
+  const range = sp && sp.part.low !== null && sp.part.high !== null ? `${compact(sp.part.today)} today, usually ${compact(sp.part.low)}–${compact(sp.part.high)}` : sp ? `${compact(sp.part.today)} today` : '';
   if (s?.hours && s.hoursLabels) {
     const l = s.hoursLabels;
-    facts.push(`${o.noun(2).replace(/^./, (c) => c.toUpperCase())} fell ${Math.round(s.hours.fall)}% from ${l.cut}${l.floor ? ` (${l.floor})` : ''}${l.missing ? `, ${l.missing}` : ''}${l.kept ? `; ${l.kept} kept arriving` : ''}`);
+    // An hour fall with a part that kept arriving (hour-fall-truth.md): everything else stopped, the part went on; the
+    // part is the survivor, never the cause, so it is said in the same fact and not again under its own.
+    if (l.kept && sp?.kind === 'held') facts.push(`Everything but ${l.kept} stopped at ${l.cut}${l.missing ? ` (${l.missing})` : ''}; ${l.kept} kept arriving${range ? ` (${range})` : ''}`);
+    else facts.push(`${o.noun(2).replace(/^./, (c) => c.toUpperCase())} fell ${Math.round(s.hours.fall)}% from ${l.cut}${l.missing ? ` (${l.missing})` : ''}`);
   }
-  if (s?.split) {
-    const sp = s.split;
+  if (sp && !(s?.hours && s.hoursLabels?.kept && sp.kind === 'held')) {
     const verb = sp.kind === 'held' ? 'held to its usual count while the rest moved' : sp.kind === 'vanished' ? 'all but vanished' : 'surged';
-    const share = sp.part.low !== null && sp.part.high !== null ? ` (${compact(sp.part.today)} today, usually ${compact(sp.part.low)}–${compact(sp.part.high)})` : '';
-    facts.push(`${sp.name}${sp.who ? ` (${sp.who})` : ''} ${verb}${share}`);
+    facts.push(`${sp.name}${sp.who ? ` (${sp.who})` : ''} ${verb}${range ? ` (${range})` : ''}`);
   }
   if (s?.amount && s.amount.change !== null && !s.hours) facts.push(`${compact(s.amount.value)} ${o.noun(s.amount.value)}, ${changeLabel(s.amount.change)} against a usual day`);
   if (s?.gate) {
     const g = s.gate;
-    facts.push(`${g.step} dropped ${Math.round(g.share * 100)}% of rows${g.limit !== null ? ` (limit ${Math.round(g.limit * 100)}%)` : ''}${g.held ? ', which held the day' : ''}`);
+    // Said as the checks' own line says it (9.55%, not 10% beside a 10% limit; round 3 #29).
+    const pct = (x: number) => `${Number((x * 100).toFixed(2))}%`;
+    facts.push(`The checks (${g.step}) dropped ${pct(g.share)} of rows${g.limit !== null ? ` (limit ${pct(g.limit)})` : ''}${g.held ? ', which held the day' : ''}`);
   }
   if (s?.episode && s.episode.days > 1) facts.push(`Day ${s.episode.days} of an episode since ${dayShort(s.episode.since)}`);
   if (o.file) {
@@ -189,11 +197,14 @@ export function causeOf(o: Pick<BriefIn, 'story' | 'file' | 'noun'>): { facts: s
  * is wrong; else publish as is), and the one picked once a decision was taken. */
 export function fixOf(o: Pick<BriefIn, 'options' | 'picked' | 'story' | 'pause' | 'prefer'>, status: BriefStatus): Brief['fix'] {
   const open = o.options.filter((x) => !x.off);
-  const prefer: DecisionOption[] = o.story?.state === 'wrong' || o.story?.state === 'refused' ? ['fill', 'complete', 'dont', 'accept', 'asis'] : ['asis', 'accept', 'fill', 'complete', 'dont'];
+  // Something wrong: a remedy first. A sender that stopped, for the second day running, is an outage in progress: the
+  // part that arrived goes out as it is (two-minute test, round 1), where a single short day is filled from a good one.
+  const outage = o.story?.split?.kind === 'vanished' && (o.story.episode?.days ?? 1) > 1;
+  const prefer: DecisionOption[] = o.story?.state === 'wrong' || o.story?.state === 'refused' ? (outage ? ['complete', 'fill', 'dont', 'accept', 'asis'] : ['fill', 'complete', 'dont', 'accept', 'asis']) : ['asis', 'accept', 'fill', 'complete', 'dont'];
   // A person's own proposal first, when it can go; else the app's.
   const own = o.prefer && open.some((x) => x.option === o.prefer) ? o.prefer : null;
   const proposed = o.picked ?? own ?? prefer.find((p) => open.some((x) => x.option === p)) ?? null;
-  const why = o.picked ? null : own ? 'Your proposal.' : proposed === 'fill' ? 'A good day near it fills what is missing; readers get a whole day, marked.' : proposed === 'complete' ? 'The part that arrived goes out alone, marked as partial.' : proposed === 'dont' ? 'Something is wrong in the rows: readers keep the last good day until a corrected file arrives.' : proposed === 'accept' ? 'The change has lasted: accept it, and later days are judged at the new level.' : proposed === 'asis' ? 'Unusual, not wrong: publish it, marked.' : status === 'no action' ? 'Nothing to decide.' : null;
+  const why = o.picked ? null : own ? 'Your proposal.' : proposed === 'fill' ? 'A good day near it fills what is missing; readers get a whole day, marked.' : proposed === 'complete' ? (outage ? 'The outage is still running: what arrived goes out, marked as partial, rather than another day’s rows.' : 'The part that arrived goes out alone, marked as partial.') : proposed === 'dont' ? 'Something is wrong in the rows: readers keep the last good day until a corrected file arrives.' : proposed === 'accept' ? 'The change has lasted: accept it, and later days are judged at the new level.' : proposed === 'asis' ? 'Unusual, not wrong: publish it, marked.' : status === 'no action' ? 'Nothing to decide.' : null;
   return { options: o.options, proposed, picked: o.picked, why };
 }
 
