@@ -2,13 +2,13 @@
  * Telling a flow's verdicts again from the record (ADR 0010 §6, `audit.mjs check --history`): for each run whose watched
  * source was judged by a claim/2, the tail rebuilt from the record's run entries before it (their `measures`, one a
  * slot, the first to arrive, never a derived run's), the days the record left out of learning before it (`skipOf`),
- * the load's own measures as its entry keeps them, and the base history the auditor brings; the claim must name that
- * base, that tail, those measures and those days, and the flow's story told again from them must say what the claim
- * said. Pure: no engine, no DOM.
+ * the levels it accepted before it (`levelsOf`), the load's own measures as its entry keeps them, and the base history
+ * the auditor brings; the claim must name that base, that tail, those measures, those days and those levels, and the
+ * flow's story told again from them must say what the claim said. Pure: no engine, no DOM.
  */
 import type { FlowDocument } from './document.js';
 import { HistoryRanges, type HistoryFile } from './history.js';
-import { flowStory, rangesFor, isClaim2, skipOf, type Claim, type StoryClaim2 } from './hold.js';
+import { flowStory, rangesFor, isClaim2, levelsOf, skipOf, type Claim, type StoryClaim2 } from './hold.js';
 import type { LogEntry } from './log.js';
 import { appendPeriods, emptyHistory, measuresHash, samePeriod, settingsFor, tailBefore, tailRef, type Measures } from './measures.js';
 import { translate } from './plan.js';
@@ -51,6 +51,9 @@ export async function retellClaims(entries: readonly EntryLike[], runs: readonly
     if ((ref?.size ?? 0) !== (c.history.tail?.size ?? 0) || (ref?.root ?? null) !== (c.history.tail?.root ?? null)) problems.push(`its claim names a tail of ${c.history.tail?.size ?? 0}, and the record's before it is ${ref?.size ?? 0}${ref && c.history.tail && ref.size === c.history.tail.size ? ' with another root' : ''}`);
     const skips = skipOf(entries.filter((e) => e.seq < r.seq), period).filter((d) => d < c.slot);
     if (JSON.stringify(skips) !== JSON.stringify(c.skip)) problems.push(`its claim leaves out ${c.skip.join(', ') || 'no days'}, and the record before it ${skips.join(', ') || 'none'}`);
+    const levels = levelsOf(entries.filter((e) => e.seq < r.seq), c.source).filter((l) => l.from < c.slot);
+    const said = (ls: readonly { from: string; metrics: readonly string[]; decision: number }[]) => ls.map((l) => `${l.from} (${l.metrics.join(', ')}, #${l.decision})`).join('; ');
+    if (said(levels) !== said(c.levels)) problems.push(`its claim learned from the levels ${said(c.levels) || 'none'}, and the record before it accepted ${said(levels) || 'none'}`);
     if (!r.doc) problems.push("its flow document isn't in the bag, so its verdict can't be told again");
     if (own && r.doc && !problems.length) {
       try {

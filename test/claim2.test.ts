@@ -164,5 +164,7 @@ describe('the verdict told again from the record (audit --history)', () => {
     expect((await again({ ...told.claim, head: 'Something else' }))[0]!.problems[0]).toMatch(/^told again, its story says unlearned "Not judged yet", and the claim unlearned "Something else"$/);
     expect((await again(told.claim, entries.slice(1)))[0]!.problems).toContain('its claim names a tail of 3, and the record\'s before it is 2');
     expect((await again(told.claim, [...entries.slice(0, 5), entry(6, { ...measures, rows: 299 })]))[0]!.problems).toContain('its claim was told from other measures of auth than its entry keeps');
+    // A level the claim learned from must be one the record accepted before it (C6).
+    expect((await again({ ...told.claim, levels: [{ from: tail[0]!.slot, metrics: ['auth'], decision: 2 }] }))[0]!.problems).toContain(`its claim learned from the levels ${tail[0]!.slot} (auth, #2), and the record before it accepted none`);
   });
 });
