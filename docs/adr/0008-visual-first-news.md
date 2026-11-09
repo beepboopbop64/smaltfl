@@ -342,3 +342,14 @@ right about everything but Flex Fare; "trips fall to a trickle" was true of all 
 4. **A finding's day by day** sits on a printed scale from 0 (a share's top in percent, a count's as a count: a labelled
    zoom, §7), and when today ran with the 14 days before and its band sits apart from them, says where they ran ("14 days
    before: 0%, as today"), so the strip and the note agree on what was usual lately.
+5. **Symptoms follow their cause, and one severity rule (round 3 of judging, #21).** On a day held, or one whose story
+   has something wrong, a finding that isn't the cause is an effect of it ("Card tip rate empty on 99.6% of zone hours"
+   on trips_enriched when only Flex Fare arrived; "Passengers 1: 0.2%"): its card has no primary verb, its verbs wait
+   behind a labelled ⋯ ("More"), and its detail leads with the pause's verb, Decide (or who decides), never "Open an
+   incident" or "Mark as expected" of its own. The rows a check drops where it passed, and those a filter removes, are
+   routine: What changed says them in neutral ink, its bar's dropped part too; amber stays for checks that held the run
+   or came within a point of their limit (§10). A card's file seal ("checked back to the bytes") is an outlined tick in
+   ink, never green beside a card's alert, and the canvas keys it in its corner ("file matches its list") whenever a card
+   carries one. A share far from a band learned from last year but level with the 14 days before it is a lasting change,
+   told as a note after the day it first crossed (ADR 0010 §5), with its strip saying where those days ran (4. above);
+   the band itself, from normal.ts's year guess, is left to that model's own decision.

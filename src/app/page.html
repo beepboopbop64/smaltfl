@@ -283,7 +283,9 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .hash4 { font-family: var(--mono); font-size: 12px; word-break: break-all; }
 .seal { pointer-events: none; }
 .seal circle { stroke: var(--surface); stroke-width: 1.5; }
-.seal.ok circle { fill: var(--ok); } .seal.bad circle { fill: var(--bad); } .seal.amber circle { fill: var(--warn); } .seal.grey circle { fill: var(--muted); }
+/* A file that matches its list is a quiet fact, not good news beside a card's alert (round 3, #21): outlined, in ink. */
+.seal.ok circle { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.3; } .seal.ok path { stroke: var(--ink-2); }
+.seal.bad circle { fill: var(--bad); } .seal.amber circle { fill: var(--warn); } .seal.grey circle { fill: var(--muted); }
 .seal path { fill: none; stroke: var(--surface); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .chain { list-style: none; margin: 0; padding: 0; }
 .chain > li { border-left: 3px solid var(--line); padding: 4px 0 10px 12px; margin-left: 6px; position: relative; }
@@ -300,8 +302,10 @@ pre.code { margin: 8px 0 0; padding: 10px 12px; background: var(--sunk); border-
 .stopped-line .linkish { background: none; border: 0; padding: 0; color: var(--bad); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .f-from { font-size: 11.5px; color: var(--muted); margin: 2px 0 0; }
 .f-affects { font-size: 12.5px; color: var(--muted); margin: 6px 0 0; }
-.seal-key { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; }
-.seal-key circle { fill: var(--ok); } .seal-key path { fill: none; stroke: var(--surface); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.seal-key, #canvas .canvas-key svg { width: 13px; height: 13px; flex: none; cursor: default; }
+.seal-key circle { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.3; } .seal-key path { fill: none; stroke: var(--ink-2); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* The canvas's key, in its corner beside the zoom buttons: what a card's outlined tick means (round 3, #21). */
+.canvas-key { display: inline-flex; align-items: center; gap: 5px; margin: 0 auto 0 0; align-self: center; padding: 3px 8px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 11.5px; color: var(--ink-2); pointer-events: none; }
 .dot-key { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 3px; vertical-align: -1px; }
 .dot-key.warn { background: var(--warn); } .dot-key.alert { background: var(--bad); margin-right: 6px; }
 .health-dot { stroke: var(--surface); stroke-width: 2; pointer-events: none; }
@@ -459,6 +463,9 @@ textarea { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertic
 .split .lost { background: var(--warn); min-width: 4px; }
 .split-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 0; font-size: 12px; }
 .split-key .k { color: var(--teal); } .split-key .l { color: var(--warn); font-weight: 600; }
+/* Rows a check that passed drops, or a filter removes, are routine (round 3, #21): in neutral ink, never the warning's. */
+.split-wrap.routine .split .lost { background: var(--ink-2); } .split-wrap.routine .split-key .l { color: var(--ink-2); font-weight: 500; }
+.vf-more.labelled { display: inline-flex; gap: 4px; padding: 0 10px; min-width: 0; }
 .rows-box { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 4px; }
 .change th, .change td { padding: 5px 8px; }
 /* Rows: a table whose header and first column stay put, striped; or cards, one row at a time. */
@@ -558,6 +565,9 @@ th.hit, td.hit { background: var(--warn-wash); }
 .load.unusual { border-color: var(--warn); }
 .load.unusual .ld-stat { color: var(--warn); font-weight: 700; }
 .load:disabled { cursor: default; opacity: 0.75; }
+/* For someone who may not decide the days are read, not stepped (round 3, #7): full ink, a padlock and who runs them. */
+.loads-row.ro .load:disabled { opacity: 1; }
+.loads-lock { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-size: 12px; color: var(--ink-2); }
 .ld-day { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .ld-date { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ld-stat { font-size: 11px; font-variant-numeric: tabular-nums; }

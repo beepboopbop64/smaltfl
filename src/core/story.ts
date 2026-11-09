@@ -1187,4 +1187,16 @@ export function glanceStrings(s: Story): string[] {
   return [s.head, s.chip ?? '', s.labels.after ?? '', s.labels.settle ?? '', ...s.labels.amount, ...s.labels.hero, ...s.labels.key, s.labels.context ? `${CONTEXT_TAG} ${s.labels.context}` : '', s.labels.health, s.labels.folded ?? '', s.labels.more ?? '', s.labels.notes ?? '', s.labels.primary ?? '', ...s.stories.map((f) => f.title)].filter(Boolean);
 }
 
+/**
+ * Whether a finding follows from the day's cause (round 3, #21): on a day held, or one whose story has something wrong,
+ * any finding but the one the story is anchored on (`anchor`, its key: its cause, or the count or part it is told by) is an effect of it ("Card tip rate empty on 99.6% of
+ * rows" when only Flex Fare arrived, "Passengers 1: 0.2%"), so it gets no primary verb of its own: the cause's card and
+ * Decide are what to act on. A file refused is a cause in itself; a calm or merely unusual day has no effects to fold.
+ */
+export function followsCause(f: { key: string; kind: string }, day: { held: boolean; story: Pick<Story, 'severity'> | null; anchor: string | null }): boolean {
+  if (f.kind === 'integrity') return false;
+  if (!day.held && day.story?.severity !== 'alert') return false;
+  return day.anchor === null || day.anchor !== f.key;
+}
+
 export { shareWords };

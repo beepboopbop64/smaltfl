@@ -499,8 +499,10 @@ Builder and drawn in the family's look. The first concepts are on the design can
 - **What is closed to someone isn't shown to them.** Viewing as someone, a step closed to them is left out of the
   canvas with its edges (the flow is laid out again without it), as is a section with nothing left in it, and no
   sheet names it; Results, the Ontology and the Policies leave out the outputs, object types, rules, people and
-  edits that aren't theirs, and Runs shows the run as far as they can see the flow, without its full record.
-  Arranging the canvas stays with the owner.
+  edits that aren't theirs, and Runs shows the run as far as they can see the flow, without its full record: a closed
+  source's file, size and rows, a closed node's checks and a finding's title left out, a part's counts only where
+  every row is theirs (ADR 0009 S16). Arranging the canvas stays with the owner, and running it (stepping its days,
+  Play, Run, a step's settings) with whoever may decide, since a day that passes publishes.
 - **Profile boxes.** What a table's rows hold has a box of its own on the canvas, beside it in its section, joined to
   it by a dashed edge: it only looks (the document's `profiles`, display fields, out of the plan, the flow hash and
   every key). The example has one on each input, the trips, the zones and the weather, so each load's story is in

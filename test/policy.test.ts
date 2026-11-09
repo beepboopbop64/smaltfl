@@ -9,7 +9,7 @@ import io from '@smaltdb/io';
 import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../src/plugin/index.js';
-import { checkAction, checkDecision, DECIDE, readView, runFlow, validateDocument, wrapRead, type Edit, type FlowDocument, type Policies } from '../src/index.js';
+import { checkAction, checkDecision, checkRun, DECIDE, readView, runFlow, validateDocument, wrapRead, type Edit, type FlowDocument, type Policies } from '../src/index.js';
 import { EXAMPLE_SOURCES } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
 import { examplePublishing } from './helpers/example.js';
@@ -122,6 +122,18 @@ describe('deciding a held day (smaltfl:decide, ADR 0009 §8)', () => {
     expect(checkDecision(p, 'ana', 'dont')).toEqual({ allowed: false, reason: 'only Owner may decide not to publish a held day' });
     expect(checkDecision(p, 'zed', 'dont')).toEqual({ allowed: false, reason: "zed is not one of the flow's people" });
     expect(checkDecision(p, 'owner', 'release' as never)).toEqual({ allowed: false, reason: 'release is not an option for a held day' });
+  });
+
+  it('lets only someone who may decide run the flow, since a day that passes publishes (round 3, #7)', () => {
+    expect(checkRun(p, 'owner')).toEqual({ allowed: true, reason: 'Owner owns the flow' });
+    expect(checkRun(undefined, 'anyone')).toEqual({ allowed: true, reason: 'the flow has no policies' });
+    // The example names no decide rule: only the owner runs it, and no one else is ever the one who published.
+    for (const who of ['ana', 'ben', 'cara', 'dev']) expect(checkRun(p, who)).toEqual({ allowed: false, reason: 'only Owner may run the flow: a day that passes publishes' });
+    // A rule that lets its people take any option lets them run, whatever it lists, and names the rule.
+    expect(checkRun(withRule(leads), 'ana')).toEqual({ allowed: true, reason: 'Leads decide allows Ana', rule: 'decide' });
+    expect(checkRun(withRule(leads), 'cara')).toEqual({ allowed: false, reason: 'only Owner and District leads may run the flow: a day that passes publishes' });
+    expect(checkRun(withRule({ ...leads, may: ['accept'] }), 'ben')).toMatchObject({ allowed: true, rule: 'decide' });
+    expect(checkRun(p, 'zed')).toEqual({ allowed: false, reason: "zed is not one of the flow's people" });
   });
 
   it('takes a fill and the complete part as options a rule may list, and says each (amendment 1 S8)', () => {

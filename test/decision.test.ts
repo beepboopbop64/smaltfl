@@ -4,7 +4,7 @@
  * within their budgets.
  */
 import { describe, expect, it } from 'vitest';
-import { afterLabel, afterLine, betweenLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, failLine, goLabel, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pauseWords, pickFails, receiptLines, ribbonOf, runFigures, sheetShown, sheetText, sheetWords, versionLines, waitedLabel, type SheetIn, type SheetPick, type SheetText, type Sight } from '../src/core/decision.js';
+import { afterLabel, afterLine, betweenLine, checksSeen, filesSeen, findingOf, dayPausedLine, daySentence, decidedLines, decisionDrawing, failLine, goLabel, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pauseWords, pickFails, receiptLines, ribbonOf, runFigures, sheetShown, sheetText, sheetWords, versionLines, waitedLabel, type SheetIn, type SheetPick, type SheetText, type Sight } from '../src/core/decision.js';
 import { missingOf } from '../src/core/fill.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { newsOf } from '../src/core/news.js';
@@ -447,6 +447,69 @@ describe('the cause card’s pause row, the day after an episode, and the record
     expect(runFigures({ day: null, run: 2, ms: '1.2 s', nodes, holds: [], sight: () => 'all', page: true })).toBe('Run 2 took 1.2 s: 3 built, 1 reused, 1 folded (the engine runs in the page here).');
     // Named as the Runs view names the run, by its record entry: one run, one number.
     expect(runFigures({ day: '2023-09-23', run: '#34', ms: '154 ms', nodes, holds: [], sight: () => 'all', page: false })).toMatch(/^Sat Sep 23: Run #34 took 154 ms: /);
+  });
+});
+
+describe('what a viewer sees of a run (round 3, #6)', () => {
+  // Thu Sep 21, 2023's run #12, as the Runs view read it to Ben: the trips are closed to him, the zones and the weather
+  // he reads some rows of (the District rule), the owner all of it.
+  const nodes = [
+    { origin: 'trips', rows: 41939, content: '6d678194adb6', file: { location: 'smaltfl:trips.parquet', bytes: 949820, sha256: 'cf4c2291' } },
+    { origin: 'zones', rows: 265, content: 'bd3544503d51', file: { location: 'smaltfl:zones.csv', bytes: 12331, sha256: '1a99e105' } },
+    { origin: 'weather', rows: 9216, content: '3d6db31e02d6', file: { location: 'smaltfl:weather.csv', bytes: 489330, sha256: '189f70f3' } },
+    { origin: 'trips_valid', rows: 37935, content: 'aa' },
+    { origin: 'zone_hour', rows: 1837, content: 'bb' },
+  ];
+  const owner = { open: () => true, counted: () => true };
+  const ben = { open: (o: string) => !o.startsWith('trips'), counted: () => false };
+  // Dev reads every row of the trips, without their fares.
+  const dev = { open: () => true, counted: (o: string) => o.startsWith('trips') };
+
+  it('leaves a closed source out of the files read, and a file’s size and rows to who reads every row of it', () => {
+    expect(filesSeen(nodes, owner)).toEqual({ left: false, files: [
+      { origin: 'trips', location: 'smaltfl:trips.parquet', sha256: 'cf4c2291', content: '6d678194adb6', bytes: 949820, rows: 41939 },
+      { origin: 'zones', location: 'smaltfl:zones.csv', sha256: '1a99e105', content: 'bd3544503d51', bytes: 12331, rows: 265 },
+      { origin: 'weather', location: 'smaltfl:weather.csv', sha256: '189f70f3', content: '3d6db31e02d6', bytes: 489330, rows: 9216 },
+    ] });
+    const b = filesSeen(nodes, ben);
+    expect(b.left).toBe(true);
+    expect(b.files.map((f) => f.origin)).toEqual(['zones', 'weather']);
+    expect(b.files.every((f) => f.bytes === null && f.rows === null)).toBe(true);
+    // Neither the trips' name nor any of their figures reach him.
+    expect(JSON.stringify(b)).not.toMatch(/trips|949820|41939|cf4c2291/);
+    const d = filesSeen(nodes, dev);
+    expect(d.left).toBe(false);
+    expect(d.files[0]).toMatchObject({ origin: 'trips', bytes: 949820, rows: 41939 });
+    expect(d.files[1]).toMatchObject({ origin: 'zones', bytes: null, rows: null });
+  });
+
+  it('keeps a check of a closed node from a viewer, and what a check says from who doesn’t read all of its node', () => {
+    const ids = new Set(nodes.map((n) => n.origin));
+    const checks = [
+      { origin: 'holds', check: 'held', ok: true, note: 'held by trips (Trips fall to trickle from 13:00)' },
+      { origin: 'keys', check: 'key', ok: true, note: '11 keys recomputed' },
+      { origin: 'trips', check: 'file', ok: true, note: 'smaltfl:trips.parquet: 949820 bytes, sha256 cf4c2291' },
+      { origin: 'trips_valid', check: 'accounting', ok: true },
+      { origin: 'zone_hour', check: 'stored', ok: false, note: 'this version is no longer stored' },
+    ];
+    expect(checksSeen(checks, ids, owner)).toEqual({ checks, left: false });
+    const b = checksSeen(checks, ids, ben);
+    expect(b.left).toBe(true);
+    expect(b.checks).toEqual([{ origin: 'holds', check: 'held', ok: true }, { origin: 'keys', check: 'key', ok: true }, { origin: 'zone_hour', check: 'stored', ok: false }]);
+    expect(JSON.stringify(b)).not.toMatch(/trips|13:00|949820/);
+    // Dev reads all of the trips: their checks say what they say; the run's own still don't, they name every node.
+    const d = checksSeen(checks, ids, dev);
+    expect(d.checks.find((c) => c.origin === 'trips')?.note).toMatch(/949820/);
+    expect(d.checks.find((c) => c.origin === 'holds')).toEqual({ origin: 'holds', check: 'held', ok: true });
+  });
+
+  it('finds the dataset a recorded finding is about, so its title goes only to who reads all of it', () => {
+    const ids = new Set(['trips', 'zone_hour', 'trips_enriched']);
+    expect(findingOf('zone_hour:empty:avg_fare', ids, 'trips')).toBe('zone_hour');
+    expect(findingOf('story:2023-09-21', ids, 'trips')).toBe('trips');
+    expect(findingOf('share:payment_type=3', ids, 'trips')).toBe('trips');
+    expect(findingOf('integrity:loads/yellow_tripdata_2023-09-21.parquet', ids, 'trips')).toBeNull();
+    expect(findingOf('gone:VendorID=1', ids, null)).toBeNull();
   });
 });
 

@@ -207,3 +207,23 @@ export function checkDecision(p: Policies | undefined, actor: string, option: De
   const may = [...new Set([...p.principals.filter((x) => x.owner).map((x) => x.name), ...rules.filter(lets).flatMap((r) => r.for.map(nameOf))])];
   return { allowed: false, reason: may.length ? `only ${listed(may)} may ${DECIDE_VERB[option]}` : `no one may ${DECIDE_VERB[option]}: the flow has no owner and no rule allows it` };
 }
+
+/**
+ * Whether `actor` may run the flow (round 3, #7). A run that passes publishes, and every day stepped to is a run, so
+ * only someone who may decide a held day runs one: the owner, a flow without policies' one user, or the people a
+ * `smaltfl:decide` rule names, whatever options it lists. Anyone else reads what was published, and the record never
+ * names them as the one who published it. Like checkDecision, a convenience until principals are bound to identity
+ * cards (ADR 0006 §8).
+ */
+export function checkRun(p: Policies | undefined, actor: string): ActionCheck {
+  for (const o of DECIDE_OPTIONS) {
+    const c = checkDecision(p, actor, o);
+    if (c.allowed) return c;
+  }
+  if (!p) return { allowed: true, reason: 'the flow has no policies' };
+  const who = p.principals.find((x) => x.id === actor);
+  if (!who) return { allowed: false, reason: `${actor} is not one of the flow's people` };
+  const nameOf = (id: string) => p.groups?.find((g) => g.id === id)?.name ?? p.principals.find((x) => x.id === id)?.name ?? id;
+  const may = [...new Set([...p.principals.filter((x) => x.owner).map((x) => x.name), ...p.rules.filter((r): r is ActionRule => r.kind === 'action' && r.action === DECIDE).flatMap((r) => r.for.map(nameOf))])];
+  return { allowed: false, reason: may.length ? `only ${listed(may)} may run the flow: a day that passes publishes` : 'no one may run the flow: it has no owner and no rule lets anyone decide' };
+}

@@ -24,15 +24,15 @@ import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, guessWords, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type KeptMark, type PauseState, type RemedyMark } from '../core/days.js';
-import { UNTIL, afterLine, betweenLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, failLine, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, type AfterPart, type KeptLacks, type RemedySaid, type SheetIn, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
+import { UNTIL, afterLine, betweenLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, failLine, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, checksSeen, filesSeen, findingOf, type RunSight, type AfterPart, type KeptLacks, type RemedySaid, type SheetIn, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { dayVersions, donorIdOf, fillCounts, levelOf as acceptedLevel, levelWays, partLabel as remedyPart, type Offer, type Repair, type Version } from '../core/fill.js';
 import { derivedAbout, derivedFails, derivedKeys, derivedWhy, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
-import { ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, axisShare, recentSpan, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type HourValues, type Story, type Told } from '../core/story.js';
+import { followsCause as followsFrom, ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, axisShare, recentSpan, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type HourValues, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeChip, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
-import { DECIDE, DECIDE_OPTIONS, checkDecision, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
+import { DECIDE, DECIDE_OPTIONS, checkDecision, checkRun, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
 import { flowHash, isPublish2, planPeriod, translate, type Column, type FlowPlan, type PlanNode } from '../core/plan.js';
@@ -301,6 +301,15 @@ const sightOf = (id: string): Sight => {
 };
 
 /**
+ * What the viewer may see of a run's parts in the Runs view, the Integrity tab and the record (round 3, #6, core/
+ * decision.ts RunSight): a node open to them (never one whose columns aren't known yet), and its whole count, a file's
+ * size and what its checks say only where every row of it is theirs.
+ */
+const runSight = (): RunSight => ({ open: (id) => isOwner() || access(id)?.open === true, counted: (id) => rowsOpen(id) });
+/** Whether the viewer may run the flow (round 3, #7): only someone who may decide, since a day that passes publishes. */
+const mayRun = (): boolean => checkRun(policies(), state.viewer).allowed;
+
+/**
  * Say a run on the status line, for the viewer now (ADR 0008 §10, ADR 0009 §12): its day in one sentence of what they
  * may see, the day's head where its story is theirs, else what became of the day; its figures in the line's title, a
  * node closed to them neither counted nor named. Again when the viewer changes, so no one reads another's line.
@@ -448,7 +457,8 @@ function remedyOf(p: Pause | null): RemedySaid | null {
   const d = r.decision !== undefined ? ledger?.entries[r.decision]?.about as Partial<DecideAbout> | undefined : undefined;
   const repair = (d?.repair ?? (ledger?.entries[r.release]?.about as { repair?: Repair } | undefined)?.repair) ?? null;
   const day = p?.day ?? null;
-  return { option: r.option, donor: r.donor, part: repair ? remedyPart(repair.missing, day ? storyFor(day)?.split?.name : undefined) : null };
+  // The part names the source's column and value ("Without VendorID 1"): only to someone the source is open to (#6).
+  return { option: r.option, donor: r.donor, part: repair && sourceOpen() ? remedyPart(repair.missing, day ? storyFor(day)?.split?.name : undefined) : null };
 }
 
 /** The remedy a withdrawal took back (Q-61): what the decision it amends chose. */
@@ -1053,6 +1063,7 @@ function renderTools(): void {
   );
   host.classList.toggle('arranging', state.arranging);
   setHint();
+  syncCanvasKey();
 }
 
 /** Reset asks twice: it puts the example's sections back, and forgets this browser's arrangement. */
@@ -1502,9 +1513,24 @@ function resetArrangement(): void {
 
 // ------------------------------------------------------------------ drawing the canvas
 
+/** Whether the canvas drew a card's file seal: the key under it says what the mark means only then. */
+let canvasSealed = false;
+/**
+ * The canvas's key (round 3, #21): the outlined tick a card carries for a file that matches its list, keyed once in
+ * the canvas's corner, so it reads as the file's check and never as the day's news beside an alert.
+ */
+function syncCanvasKey(): void {
+  const tools = document.querySelector('#canvas .canvas-tools');
+  if (!tools) return;
+  tools.querySelector('.canvas-key')?.remove();
+  if (!canvasSealed || state.arranging) return;
+  tools.prepend(h('p', { class: 'canvas-key' }, svgNode('<svg class="seal-key" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3"/><path d="M5.2 8l2 2.2 3.6-4"/></svg>'), 'file matches its list'));
+}
+
 function renderCanvas(): void {
   // Mid-drag, wait: the drop draws everything once it lands.
   if (moving) return;
+  let sealed = false;
   const host = $('canvas');
   const svg = host.querySelector('svg') ?? setUpCanvas(host);
   const world = svg.querySelector('#world')!;
@@ -1584,6 +1610,7 @@ function renderCanvas(): void {
     g.append(s('rect', { class: 'box', x, y, width: cardW, height: cardH, rx: 9 }));
     // Its seal: checked back to the bytes (a tick), or broken (a cross); beside the news dot.
     if (extra.seal) {
+      if (extra.seal === 'ok') sealed = true;
       const sx = x + cardW - (extra.health === 'alert' || extra.health === 'warn' ? 30 : 14);
       const sy = y + 15;
       const seal = s('g', { class: `seal ${extra.seal}` });
@@ -1677,6 +1704,8 @@ function renderCanvas(): void {
     card(id, kindLabel(id), id, cardLine(id), classes, { port: sourceIds().has(id) ? 'in' : isOutput(id) ? 'out' : undefined, end: readersOf(id).length === 0, shield: shieldOf(id), health: healthOf(id), seal: sealOf(id) });
   }
   world.replaceChildren(...parts);
+  canvasSealed = sealed;
+  syncCanvasKey();
   const refocus = focused?.card ? drawn.cards.get(focused.card) : focused?.head ? drawn.heads.get(focused.head) : undefined;
   (refocus as SVGElement | undefined)?.focus({ preventScroll: true });
   if (!view.ready && host.clientWidth > 0) startView(layout);
@@ -2601,7 +2630,8 @@ function dayPicker(): HTMLElement | null {
   const list = shownLoads();
   if (!l || list.length < 2) return null;
   const k = list.indexOf(loads.at);
-  const busy = state.running || loads.playing || !state.engine;
+  // Stepping a day is a run: off for anyone who may not decide (round 3, #7).
+  const busy = state.running || loads.playing || !state.engine || !mayRun();
   // On the first load a greyed ‹ says "first day", so the head doesn't read as broken; after the last, no arrow, its
   // place kept.
   const first = k <= 0;
@@ -3931,6 +3961,13 @@ function findingDetail(f: Finding, card: string): void {
   }
   if (day && f.columns?.[0] && (f.kind === 'share' || f.kind === 'gone' || f.kind === 'new') && history?.file.values?.[f.columns[0]]?.counts) body.push(block(`${NEWS_NAMES.column(f.columns[0])}, usual and today`, compositionOf(f.columns[0], day, f.values?.[0])));
   body.push(oneLine(f.detail));
+  // A finding that follows from the day's cause gets no primary verb of its own (round 3, #21): on a day paused its
+  // detail leads with the pause's verb, Decide (or who decides), and its own verbs wait behind ⋯.
+  if (followsCause(f)) {
+    const story = day && historyOpen() ? storyFor(day) : null;
+    const lead = story ? pausedLead(story) : null;
+    return openDetail(f.title, f.severity, body, f, card, null, lead);
+  }
   openDetail(f.title, f.severity, body, f, card);
 }
 
@@ -4502,6 +4539,10 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
   const later = shown && day && shown > day ? shown : null;
   const can = Object.fromEntries(DECIDE_OPTIONS.map((o) => [o, checkDecision(policies(), state.viewer, o)])) as Record<DecisionOption, ReturnType<typeof checkDecision>>;
   const anyone = can.asis.allowed || can.dont.allowed || can.fill.allowed || can.complete.allowed;
+  // Someone who may not decide, and doesn't read every row of the source, gets what readers get with nothing of the
+  // source, whatever path led here (round 3, #6: the sheet draws and counts the source's rows).
+  const src = loadSource();
+  if (!anyone && src && !rowsOpen(src)) return readersSheet(r);
   const n = r.result.waiting.length || (first?.pause?.waiting.length ?? 0);
   const pick: SheetPick = { option: null, scope: 'day', reason: null, donor: 0, preparing: false };
   const pause = first?.pause ?? null;
@@ -5065,15 +5106,36 @@ function healthStrip(card: string, day: string, findings: Finding[]): HTMLElemen
       h('span', { class: 'hl-dot', 'aria-hidden': 'true' }), h('span', { class: 'hl-name' }, name), h('span', { class: 'hl-what' }, f ? f.title : calm))));
 }
 
+/**
+ * Whether a finding follows from the day's cause (round 3, #21): on a day held, or one whose story has something wrong,
+ * any finding but the cause's own is an effect of it ("Card tip rate empty on 99.6% of rows" when only Flex Fare
+ * arrived, "Passengers 0: none"), so it gets no primary verb of its own: the cause's card and Decide are what to act on,
+ * and its own verbs wait behind ⋯. A file refused is a cause in itself.
+ */
+function followsCause(f: Finding): boolean {
+  const day = newsDay();
+  const story = day && historyOpen() ? storyFor(day) : null;
+  return followsFrom(f, { held: dayWaits(), story, anchor: story ? (anchorOf(story)?.key ?? null) : null });
+}
+/** Whether the day on screen waits for a decision: its follow-on findings' verbs leave out "Mark as expected" then. */
+const dayWaits = (): boolean => { const own = onScreen(); return !!own && !state.failed && pauseOf(own)?.state === 'waiting'; };
+
 /** A finding as a card (ADR 0008): its mark and title, its visual (or, with none, its one sentence), one verb; a tap
- * opens its detail. */
+ * opens its detail. One that follows from the day's cause has its verbs behind ⋯ only (round 3, #21). */
 function findingCard(f: Finding, card: string): HTMLElement {
   const m = sevMark(f.severity);
   const vis = findingVisual(f);
+  const after = followsCause(f);
   return h('article', { class: `vf-story ${f.severity}`, id: `finding-${f.key}` },
     h('button', { type: 'button', class: 'vf-story-h', onclick: () => findingDetail(f, card) }, m ? glyphEl(m, 15) : '', h('span', {}, f.title), h('span', { class: 'vf-chev' }, glyphEl('chev', 13))),
     vis ? h('button', { type: 'button', class: 'vf-hero', 'aria-label': `${f.title}: open`, onclick: () => findingDetail(f, card) }, vis) : (chipsOf(f) ?? oneLine(f.detail)),
-    f.acts.length ? actionsOf(f, card, f.acts[0] ?? null) : null);
+    f.acts.length ? (after ? moreOnly(actionsOf(f, card, null, null, dayWaits(), true)) : actionsOf(f, card, f.acts[0] ?? null)) : null);
+}
+/** Verbs behind ⋯ alone, the ⋯ labelled "More", so a lone square doesn't read as a stray control. */
+function moreOnly(acts: HTMLElement): HTMLElement {
+  const more = acts.querySelector<HTMLElement>('.vf-more');
+  if (more) (more.classList.add('labelled'), more.append(h('span', { class: 'vf-more-l' }, 'More')));
+  return acts;
 }
 
 /** Where a normal range comes from, in a line: the band under a finding's chart. */
@@ -5389,7 +5451,7 @@ function incidentsList(): HTMLElement | null {
     return h('li', {},
       h('span', { class: 'inc-day' }, dayLabel(day)), h('span', { class: 'inc-what' }, title),
       mine.length ? h('span', { class: `inc-state ${resolved ? 'done' : 'open'}` }, resolved ? 'resolved' : 'incident open') : null,
-      k >= 0 ? h('button', { type: 'button', class: 'btn small', disabled: state.running, onclick: () => void useLoad(k) }, 'Load it') : null);
+      k >= 0 && mayRun() ? h('button', { type: 'button', class: 'btn small', disabled: state.running, onclick: () => void useLoad(k) }, 'Load it') : null);
   });
   return h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, `Incidents · ${marked.length}`), h('ul', { class: 'incidents' }, ...items));
 }
@@ -5461,7 +5523,7 @@ function calendarView(): HTMLElement {
       calendar.picked = day;
       const k = loads.list.findIndex((l) => l.day === day);
       const top = verdictOf(day);
-      said.replaceChildren(top && (top.severity === 'alert' || top.severity === 'warn') ? glyphEl(top.severity, 13) : '', ` ${dayLabel(day)}: ${top?.title ?? ''} `, k >= 0 ? h('button', { type: 'button', class: 'btn small', disabled: state.running, onclick: () => void useLoad(k) }, 'Load it') : '');
+      said.replaceChildren(top && (top.severity === 'alert' || top.severity === 'warn') ? glyphEl(top.severity, 13) : '', ` ${dayLabel(day)}: ${top?.title ?? ''} `, k >= 0 && mayRun() ? h('button', { type: 'button', class: 'btn small', disabled: state.running, onclick: () => void useLoad(k) }, 'Load it') : '');
     });
     return el;
   };
@@ -5687,6 +5749,7 @@ function actButton(a: Act, f: Finding, card: string): HTMLElement | null {
   const open = done.some((e) => e.act === 'incident') && !done.some((e) => e.act === 'resolved');
   if (a === 'incident' && open) return h('button', { type: 'button', class: 'btn small', ...actAttrs('resolved', 'Resolve the incident', f), onclick: () => void ask(f, card, 'resolved') }, 'Resolve the incident');
   // Fetching a refused file again, and exporting, are done, not noted.
+  if (a === 'refetch' && !mayRun()) return null;
   if (a === 'refetch') return h('button', { type: 'button', class: 'btn small', ...actAttrs(a, ACT_LABEL[a], f), disabled: state.running, onclick: () => void refetch() }, ACT_LABEL[a]);
   // The audit bag carries the whole record, every source's manifest among it: the owner's to export.
   if (a === 'export') return ledger && isOwner() ? h('button', { type: 'button', class: 'btn small quiet', ...actAttrs(a, ACT_LABEL[a], f), onclick: () => void exportAudit() }, ACT_LABEL[a]) : null;
@@ -6025,9 +6088,9 @@ function showAs(id: string): void {
 }
 
 /** A bar of what was kept against what was left out, with both counts under it. */
-function split(kept: number, lost: number, keptLabel: string, lostLabel: string): HTMLElement {
+function split(kept: number, lost: number, keptLabel: string, lostLabel: string, routine = false): HTMLElement {
   const total = Math.max(1, kept + lost);
-  return h('div', { class: 'split-wrap' },
+  return h('div', { class: `split-wrap${routine ? ' routine' : ''}` },
     h('div', { class: 'split', role: 'img', 'aria-label': `${fmtInt(kept)} ${keptLabel}, ${fmtInt(lost)} ${lostLabel}` },
       h('span', { class: 'kept', style: `flex-grow:${kept / total}` }),
       lost ? h('span', { class: 'lost', style: `flex-grow:${lost / total}` }) : null),
@@ -6162,8 +6225,13 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
     }
     case 'expect': {
       const lost = inn - out;
-      headline(lost ? `Dropped ${fmtInt(lost)} of ${plural(inn, 'row')} (${pct(lost / Math.max(1, inn))})` : `Kept all ${plural(inn, 'row')}`, lost ? 'drop' : 'same');
-      box.append(split(out, lost, 'kept', 'dropped'));
+      // One severity rule (round 3, #21): the rows a check drops are routine where it passed, in neutral ink; amber only
+      // where its checks held the run, or came within a point of their limit.
+      const day = dayOfRun(run);
+      const gate = day && historyOpen() ? storyFor(day)?.gate : null;
+      const warned = run.result.holds.some((x) => x.by === 'checks' && x.origin === id) || (gate?.step === id && (gate.held || gate.near));
+      headline(lost ? `Dropped ${fmtInt(lost)} of ${plural(inn, 'row')} (${pct(lost / Math.max(1, inn))})` : `Kept all ${plural(inn, 'row')}`, lost && warned ? 'drop' : 'same');
+      box.append(split(out, lost, 'kept', 'dropped', !warned));
       box.append(await rulesTable(insp, i, rows, who));
       if (lost) {
         // Each dropped row with why it went: the rules it fails that the person can read, and their reasons.
@@ -6199,8 +6267,9 @@ async function changePanel(id: string, who = state.viewer): Promise<{ box: HTMLE
       }
       const lost = Math.max(0, inn - out);
       const kept = Math.min(inn, out);
-      headline(lost ? `Removed ${fmtInt(lost)} of ${plural(inn, 'row')} (${pct(lost / Math.max(1, inn))})` : out > inn ? `Added ${plural(out - inn, 'row')}` : `Kept all ${plural(inn, 'row')}`, lost ? 'drop' : 'same');
-      box.append(split(kept, lost, 'kept', 'removed'));
+      // A filter removes rows by design: routine, in neutral ink (round 3, #21).
+      headline(lost ? `Removed ${fmtInt(lost)} of ${plural(inn, 'row')} (${pct(lost / Math.max(1, inn))})` : out > inn ? `Added ${plural(out - inn, 'row')}` : `Kept all ${plural(inn, 'row')}`);
+      box.append(split(kept, lost, 'kept', 'removed', true));
       const removed = exceptIn(insp, input!, i, who);
       const key = insp.manifest.get(i)!.key;
       const where = viewIn(insp, i, who).where ?? '';
@@ -6389,6 +6458,12 @@ function editor(st: StepDef): HTMLElement {
     wrap.append(h('div', { class: 'field' }, h('label', { for: area.id }, f.label), area));
     return area;
   });
+  // A change runs the flow, and a run that passes publishes: read only for anyone who may not decide (round 3, #7).
+  if (!mayRun()) {
+    for (const area of inputs) area.readOnly = true;
+    wrap.append(h('p', { class: 'foot loads-lock' }, glyphEl('lock', 13), `${deciders()} runs this flow.`));
+    return wrap;
+  }
   if (state.issues.length) wrap.append(h('ul', { class: 'issues' }, ...state.issues.map((i) => h('li', {}, i))));
   const apply = h('button', { class: 'run', type: 'button' }, 'Apply and run');
   apply.addEventListener('click', () => {
@@ -6784,6 +6859,8 @@ function setViewer(id: string): void {
   state.object = null;
   state.verdict = null;
   if (!isOwner()) state.arranging = false;
+  // Someone who may not decide doesn't run the flow, nor step its days (round 3, #7).
+  syncRun();
   void computeChanges();
   // Their flow is laid out without what they can't see: start at its beginning.
   view.ready = false;
@@ -7275,6 +7352,9 @@ function renderLoads(): void {
   }
   box.hidden = false;
   const busy = state.running || !state.engine;
+  // A day stepped to is a run, and a run that passes publishes: only someone who may decide steps the days (round 3,
+  // #7). Anyone else reads the strip as it stands, at full ink, and who runs the days where Play was.
+  const runs = mayRun();
   const weeks = weeksOf();
   const now = loads.list[loads.at];
   if (!weeks.some((w) => w.monday === loads.week)) loads.week = now && now.episode === loads.episode ? mondayOf(now.day) : weeks[0]!.monday;
@@ -7315,7 +7395,7 @@ function renderLoads(): void {
     const held = !later && !absent && !state.doc.publish && !!(history && historyOpen() && storyFor(l.day)?.gate?.held);
     const range = tripsRanges?.at(l.day);
     const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : absent ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: not run` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}${counted ? `: ${rowsSaid(l.rows)}` : ''}${top ? (top.kind === 'unlearned' ? `, not judged yet${top.detail ? `: ${top.detail}` : ''}` : `, ${VERDICT_WORD[top.severity]}${saysHead(top) ? `: ${top.title}` : ''}`) : ''}${held ? ', held' : ''}${pm ? pauseSaid(l.day, pm) : ''}${r ? '' : ', not run yet'}`;
-    return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', later ? 'later' : '', absent ? 'notrun' : '', holidayOf(l.day, calendarNow()) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
+    return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', later ? 'later' : '', absent ? 'notrun' : '', holidayOf(l.day, calendarNow()) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing || !runs, onclick: () => void useLoad(k) },
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
       svgNode(stripBar({ v: later || absent || !counted ? 0 : l.rows, low: range?.low ?? null, high: range?.high ?? null, ymax, sev: sev === 'alert' || sev === 'warn' ? sev : null })),
@@ -7332,7 +7412,7 @@ function renderLoads(): void {
           // Its mark from its days, never its place: the worst any of them is told (the history's verdict, the flow's
           // own), ! for something wrong, the triangle for unusual, none for a calm stretch.
           const worst = episodeWorst(e.name);
-          return h('button', { type: 'button', class: 'nav-chip ep-chip', 'aria-pressed': String(e.name === loads.episode), 'aria-label': `${e.name}${worst ? `: ${worst === 'alert' ? 'something’s wrong' : 'unusual'} on some days` : ''}`, disabled: busy || loads.playing, onclick: () => setEpisode(e.name) }, e.name, worst ? glyphEl(worst, 13) : '');
+          return h('button', { type: 'button', class: 'nav-chip ep-chip', 'aria-pressed': String(e.name === loads.episode), 'aria-label': `${e.name}${worst ? `: ${worst === 'alert' ? 'something’s wrong' : 'unusual'} on some days` : ''}`, disabled: busy || loads.playing || !runs, onclick: () => setEpisode(e.name) }, e.name, worst ? glyphEl(worst, 13) : '');
         }))
     : null;
   const weekNav = h('div', { class: 'week-nav' },
@@ -7357,9 +7437,9 @@ function renderLoads(): void {
   const after = nowStory?.recovery ? afterOf(nowStory) : null;
   const waitingDay = after?.verb && nowStory ? firstWaiting(nowStory) : null;
   box.replaceChildren(
-    h('div', { class: 'loads-head' }, h('p', { class: 'eyebrow' }, `Daily loads · ${loads.episode}`), h('div', { class: 'loads-act' }, play, next)),
+    h('div', { class: 'loads-head' }, h('p', { class: 'eyebrow' }, `Daily loads · ${loads.episode}`), runs ? h('div', { class: 'loads-act' }, play, next) : h('p', { class: 'loads-lock', title: `${deciders()} runs the days: a day that passes publishes` }, glyphEl('lock', 13), `${deciders()} runs days`)),
     episodes ?? '',
-    h('div', { class: 'loads-row scroll', role: 'group', 'aria-label': `Daily loads, ${weekSpan(list)}: tap one to run the flow on it` }, ...chips),
+    h('div', { class: `loads-row scroll${runs ? '' : ' ro'}`, role: 'group', 'aria-label': runs ? `Daily loads, ${weekSpan(list)}: tap one to run the flow on it` : `Daily loads, ${weekSpan(list)}: ${deciders()} runs them` }, ...chips),
     // A key for what the row draws, only what it draws (ADR 0008 §7): each mark on its days with its word, the line
     // under a holiday (light: a day of its season), and a dashed day: not run.
     keyOf(chips, list, notRun),
@@ -7466,10 +7546,12 @@ async function runLoad(k: number): Promise<void> {
   const engine = state.engine;
   const l = loads.list[k];
   if (!engine || !l || state.running) return;
+  // A day stepped to is a run (round 3, #7): only someone who may decide steps days, before anything is fetched.
+  if (!mayRun()) return void run();
   let bytes = loads.bytes.get(k);
   try {
     if (!bytes) {
-      setStatus(`Fetching ${dayLabel(l.day)}: ${rowsSaid(l.rows)}, checked against the data's list…`);
+      setStatus(`Fetching ${dayLabel(l.day)}${sourceOpen() ? `: ${rowsSaid(l.rows)}` : ''}, checked against the data's list…`);
       bytes = await checked(l.file, { sha256: l.sha256, bytes: l.bytes ?? -1, from: l.file });
       loads.bytes.set(k, bytes);
       for (const old of [...loads.bytes.keys()].slice(0, Math.max(0, loads.bytes.size - 3))) loads.bytes.delete(old);
@@ -7700,6 +7782,13 @@ async function claimsForRun(engine: Engine, day: string | undefined, parameters:
 }
 
 /** Whether the person may read the history: the trips source is open to them. */
+/** Whether the watched source is open to the viewer (or the flow watches none): what names its columns, values and
+ * counts may be said to them (round 3, #6). */
+function sourceOpen(): boolean {
+  const src = loadSource();
+  return !src || visible(src);
+}
+
 function historyOpen(): boolean {
   const src = loadSource();
   return !!history && !!src && visible(src);
@@ -7980,9 +8069,11 @@ function decidedCard(day: string): HTMLElement {
   const released = d ? [...(ledger?.entries ?? [])].reverse().find((e) => e.kind === 'release' && (e.about as { decision?: number }).decision === d.seq && (e.about as { outcome?: string }).outcome === 'applied') : undefined;
   const ra = released?.about as { manifest?: string; run?: unknown } | undefined;
   const l = decidedLines({ day, state: st, who: d ? personName(d.by) : null, minutes, reason: d?.reason ?? null, run: ra ? runNameOf(ra.manifest, ra.run) : run ? runName(run) : p ? runNameOf(p.manifest, p.run) : null, seq: d?.seq ?? null, release: released?.seq ?? null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, remedy: st === 'fill' || st === 'complete' ? remedyOf(p) : null });
-  // The day's own rows, small, as the decision sheet draws them, with the trips past its checks.
+  // The day's own rows, small, as the decision sheet draws them, with the trips past its checks: only to someone who reads
+  // every row of the source (round 3, #6: "41,939 trips" reached Ben, to whom the trips are closed).
   const k = history ? history.file.days.indexOf(day) : -1;
-  const rows = tripsOf(run) ?? (k >= 0 ? history!.file.rows[k]! : null);
+  const src = loadSource();
+  const rows = src && !rowsOpen(src) ? null : (tripsOf(run) ?? (k >= 0 ? history!.file.rows[k]! : null));
   const kept = run ? tripsKept(run) : undefined;
   const story = history && historyOpen() && k >= 0 ? storyFor(day) : null;
   const draw = rows !== null ? decisionDrawing(history, story, day, null, { day: rows, readers: null }) : null;
@@ -7998,7 +8089,7 @@ function decidedCard(day: string): HTMLElement {
     l.where ? h('button', { type: 'button', class: 'linkish rb-where', 'aria-expanded': 'false', onclick: (e: Event) => { hashes.hidden = !hashes.hidden; (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!hashes.hidden)); } }, l.where) : '',
     hashes,
     st === 'fill' || st === 'complete' || (st === 'dont' && p?.withdrawn !== null && p?.withdrawn !== undefined) ? h('button', { type: 'button', class: 'linkish vf-versions', onclick: () => versionsSheet(day) }, 'Versions ›') : '',
-    st === 'waiting' && at >= 0 ? h('button', { type: 'button', class: 'btn small', onclick: () => { location.hash = '#flow'; void useLoad(at); } }, `Open ${dayShort(day)} ›`) : '');
+    st === 'waiting' && at >= 0 && mayRun() ? h('button', { type: 'button', class: 'btn small', onclick: () => { location.hash = '#flow'; void useLoad(at); } }, `Open ${dayShort(day)} ›`) : '');
 }
 
 function renderRuns(): void {
@@ -8031,7 +8122,7 @@ function renderRuns(): void {
       body,
     );
     if (r.verified) {
-      const checks = r.verified.checks.filter((c) => owner || visible(c.origin));
+      const checks = checksFor(r).checks;
       const failed = checks.filter((c) => !c.ok);
       body.append(
         levelPills(r),
@@ -8143,20 +8234,26 @@ function levelPills(r: RunRecord): HTMLElement {
  * only the files that changed since, the rest named in one line. */
 function runFiles(r: RunRecord, before?: RunRecord): HTMLElement | null {
   const m = r.result.manifest;
-  const all = m.nodes.filter((n) => n.file);
+  // Only the sources open to the viewer, a file's size and rows only where every row of it is theirs (round 3, #6).
+  const seen = filesSeen(m.nodes, runSight());
+  const all = seen.files;
   if (!all.length && !m.data) return null;
-  const had = new Set((before?.result.manifest.nodes ?? []).filter((n) => n.file).map((n) => `${n.origin}:${n.file!.sha256}`));
-  const files = before ? all.filter((n) => !had.has(`${n.origin}:${n.file!.sha256}`)) : all;
-  const same = before ? all.filter((n) => had.has(`${n.origin}:${n.file!.sha256}`)).map((n) => n.origin) : [];
+  const had = new Set(before ? filesSeen(before.result.manifest.nodes, runSight()).files.map((f) => `${f.origin}:${f.sha256}`) : []);
+  const files = before ? all.filter((f) => !had.has(`${f.origin}:${f.sha256}`)) : all;
+  const same = before ? all.filter((f) => had.has(`${f.origin}:${f.sha256}`)).map((f) => f.origin) : [];
   return h('div', { class: 'part' },
     h('p', { class: 'eyebrow' }, 'Read, by hash'),
     same.length ? h('p', { class: 'foot' }, `${same.join(', ')}: the same bytes as run ${runName(before!)}`) : null,
-    h('ul', { class: 'chain' }, ...files.map((n) => h('li', {},
-      h('p', { class: 'c-what' }, `${n.origin}: ${n.file!.location.replace(PINNED_PREFIX_APP, '')}, ${fmtInt(n.file!.bytes)} bytes`),
-      h('p', { class: 'c-line' }, 'sha256 ', hash4(n.file!.sha256, `${n.origin} file hash`)),
-      h('p', { class: 'c-line' }, `→ ${fmtInt(n.rows ?? 0)} rows, content ${short(n.content ?? '')}`)))),
+    h('ul', { class: 'chain' }, ...files.map((f) => h('li', {},
+      h('p', { class: 'c-what' }, `${f.origin}: ${f.location.replace(PINNED_PREFIX_APP, '')}${f.bytes !== null ? `, ${fmtInt(f.bytes)} bytes` : ''}`),
+      h('p', { class: 'c-line' }, 'sha256 ', hash4(f.sha256, `${f.origin} file hash`)),
+      h('p', { class: 'c-line' }, `→ ${f.rows !== null ? `${fmtInt(f.rows)} rows, ` : ''}content ${short(f.content ?? '')}`)))),
+    seen.left ? h('p', { class: 'foot' }, 'Closed parts left out.') : null,
     m.data ? h('p', { class: 'foot' }, `Checked against the data's list at commit ${m.data.commit.slice(0, 12)} (MANIFEST.json ${m.data.manifest.slice(0, 12)}…); built from smaltfl ${m.build?.smaltfl.slice(0, 12) ?? 'dev'}.`) : null);
 }
+
+/** A run's checks as the viewer may see them (round 3, #6, core/decision.ts checksSeen). */
+const checksFor = (r: RunRecord) => checksSeen(r.verified?.checks ?? [], new Set([...r.result.manifest.nodes.map((n) => n.origin), ...Object.keys(r.result.manifest.outputs)]), runSight());
 const PINNED_PREFIX_APP = 'smaltfl:';
 
 async function verify(r: RunRecord, level: VerifyLevel = 'rerun'): Promise<void> {
@@ -8176,7 +8273,9 @@ async function verify(r: RunRecord, level: VerifyLevel = 'rerun'): Promise<void>
     }
     const failed = r.verified.checks.filter((c) => !c.ok).map((c) => `${c.origin}:${c.check}`);
     if (ledger) await ledger.append('verify', state.viewer, { run: r.result.run, manifest: r.result.hash, level, ok: r.verified.ok, failed, smaltdb: SMALTDB });
-    setStatus(r.verified.ok ? `Run ${runName(r)} ${LEVEL_DONE[level]}.` : `Run ${runName(r)} failed verification: ${failed.slice(0, 3).join(', ')}.`, !r.verified.ok);
+    // What failed, as the viewer may see it: a closed part's failure is counted in the verdict, never named (round 3, #6).
+    const named = checksFor(r).checks.filter((c) => !c.ok).map((c) => `${c.origin}:${c.check}`);
+    setStatus(r.verified.ok ? `Run ${runName(r)} ${LEVEL_DONE[level]}.` : `Run ${runName(r)} failed verification${named.length ? `: ${named.slice(0, 3).join(', ')}` : ''}.`, !r.verified.ok);
   } catch (e) {
     setStatus(message(e), true);
   }
@@ -8200,9 +8299,31 @@ async function sign(r: RunRecord): Promise<void> {
 
 // ------------------------------------------------------------------ running
 
+/**
+ * The Run button, for the viewer now (round 3, #7): off while a run is on, and for anyone who may not decide, whose
+ * run would publish a day that passes under their name; its label then says who runs the flow.
+ */
+function syncRun(): void {
+  const btn = $<HTMLButtonElement>('run');
+  const may = mayRun();
+  btn.disabled = state.running || !state.engine || !may;
+  if (may) (btn.removeAttribute('title'), btn.setAttribute('aria-label', 'Run the flow'));
+  else {
+    btn.title = `${deciders()} runs this flow: a day that passes publishes`;
+    btn.setAttribute('aria-label', `Run: ${deciders()} runs this flow`);
+  }
+}
+
 async function run(): Promise<void> {
   const engine = state.engine;
   if (!engine || state.running) return;
+  // Only someone who may decide runs the flow: a day that passes publishes, and the record names who ran it (round 3,
+  // #7). Every control that runs is off for anyone else; this is the last stop.
+  const may = checkRun(policies(), state.viewer);
+  if (!may.allowed) {
+    setStatus(`${may.reason.replace(/^./, (c) => c.toUpperCase())}.`, true);
+    return;
+  }
   state.running = true;
   attempts++;
   state.failed = null;
@@ -8253,7 +8374,7 @@ async function run(): Promise<void> {
   } finally {
     syncTitle();
     state.running = false;
-    $<HTMLButtonElement>('run').disabled = false;
+    syncRun();
     // A held run leaves on screen the last day before it that passed, which may not be the run counted last.
     syncShown();
     renderCanvas();
@@ -8814,13 +8935,16 @@ function versionsSheet(day: string): void {
   const repair = firstRemedy ? (ledger.entries[firstRemedy.seq]?.about as { repair?: Repair } | undefined)?.repair : undefined;
   // What readers get at the source: the load's rows as they arrived; a fill's or the part's from the history's counts,
   // the same number its derived run counts (S4), where the record doesn't say.
+  const src = loadSource();
   const counted = (v: Version): number | null => {
+    // Counts of the source only to someone who reads every row of it (round 3, #6).
+    if (src && !rowsOpen(src)) return null;
     if (v.rows !== undefined) return v.rows;
     if (v.kind === 'arrived') return load?.rows ?? null;
     const rp = (ledger!.entries[v.seq]?.about as { repair?: Repair } | undefined)?.repair;
     return rp && flowHistory ? (fillCounts(flowHistory, day, rp.missing, rp.donor?.day ?? null)?.total ?? null) : null;
   };
-  const l = versionLines(vs, { day, noun: rowNoun(loadSource() ?? ''), name: (v: Version) => runNameOf(v.manifest, v.run), rows: counted, part: repair ? remedyPart(repair.missing, story?.split?.name) : null });
+  const l = versionLines(vs, { day, noun: rowNoun(loadSource() ?? ''), name: (v: Version) => runNameOf(v.manifest, v.run), rows: counted, part: repair && sourceOpen() ? remedyPart(repair.missing, story?.split?.name) : null });
   openDetail(l.title, 'ok', [h('ul', { class: 'vf-versions-list' }, ...l.lines.map((x) => h('li', { class: x.shown ? 'now' : '' }, x.text)))]);
 }
 
@@ -8957,9 +9081,14 @@ async function integrityTab(card: string, id: string, who: string): Promise<HTML
   const m = r.result.manifest;
   const seal = sealOf(card);
   const want = new Set([id, ...upstreamOf(id)].map((x) => x.toLowerCase()));
-  const chainNodes = m.nodes.filter((n) => want.has(n.origin.toLowerCase()));
+  // Back to the bytes as far as the viewer may see: a part closed to them left out, neither named nor counted, and a
+  // count, a file's size or what a check says only where every row of it is theirs (round 3, #6).
+  const sight = runSight();
+  const upstream = m.nodes.filter((n) => want.has(n.origin.toLowerCase()));
+  const chainNodes = upstream.filter((n) => sight.open(n.origin));
   const v = r.verified;
-  const checksOf = (origin: string) => v?.checks.filter((c) => c.origin === origin) ?? [];
+  const seenChecks = checksFor(r).checks;
+  const checksOf = (origin: string) => (v ? seenChecks.filter((c) => c.origin === origin) : []);
   // Green only once sealed: a run recorded but not yet verified is said in grey (ADR 0008).
   box.append(h('div', { class: `verdict ${seal === 'bad' ? 'alert' : seal === 'amber' ? 'warn' : seal === 'ok' || levelOf(r) > 0 ? 'ok' : 'note'}` },
     h('p', { class: 'v-day' }, `Run ${runName(r)}${r.load !== undefined && loads.list[r.load] ? ` · ${dayLabel(loads.list[r.load]!.day)}` : ''}`),
@@ -8979,17 +9108,18 @@ async function integrityTab(card: string, id: string, who: string): Promise<HTML
     const bad = checksOf(n.origin).some((c) => !c.ok);
     const fileCheck = n.file ? checkOfRead(n.file.sha256) : undefined;
     const lines: Child[] = [];
+    const all = sight.counted(n.origin);
     if (n.file) {
-      lines.push(h('p', { class: 'c-line' }, `Read ${n.file.location.replace('smaltfl:', '')} (${fmtInt(n.file.bytes)} bytes), hashed by the engine:`), h('p', { class: 'c-line' }, 'sha256 ', hash4(n.file.sha256, `${n.origin} file hash`)));
+      lines.push(h('p', { class: 'c-line' }, `Read ${n.file.location.replace('smaltfl:', '')}${all ? ` (${fmtInt(n.file.bytes)} bytes)` : ''}, hashed by the engine:`), h('p', { class: 'c-line' }, 'sha256 ', hash4(n.file.sha256, `${n.origin} file hash`)));
       lines.push(h('p', { class: `c-line ${fileCheck ? '' : 'bad'}` }, fileCheck ? `${describeFile(fileCheck).title}${fileCheck.commit ? `, data commit ${fileCheck.commit.slice(0, 12)}` : ''}.` : 'Not matched to the data’s list in this visit.'));
     } else if (n.op === 'table') lines.push(h('p', { class: 'c-line' }, 'A table in the database, snapshotted by its rows: no file.'));
-    if (n.content) lines.push(h('p', { class: 'c-line' }, `${fmtInt(n.rows ?? 0)} rows, content `, hash4(n.content, `${n.origin} content hash`)));
+    if (n.content) lines.push(h('p', { class: 'c-line' }, all ? `${fmtInt(n.rows ?? 0)} rows, content ` : 'Content ', hash4(n.content, `${n.origin} content hash`)));
     else lines.push(h('p', { class: 'c-line muted' }, 'folded into the step that reads it'));
     lines.push(h('p', { class: 'c-line' }, 'key ', h('span', { class: 'hash' }, short(n.key)), ` · ${n.status}`));
     for (const c of checksOf(n.origin)) lines.push(h('p', { class: `c-line ${c.ok ? '' : 'bad'}` }, `${c.ok ? '✓' : '✗'} ${c.check}${c.note ? `: ${c.note}` : ''}`));
     return h('li', { class: bad ? 'bad' : v ? '' : 'unchecked' }, h('p', { class: 'c-what' }, `${n.origin} · ${n.op}`), ...lines);
   });
-  box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, 'From this card back to the bytes'), h('ul', { class: 'chain' }, ...items)));
+  box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, 'From this card back to the bytes'), h('ul', { class: 'chain' }, ...items), chainNodes.length < upstream.length ? h('p', { class: 'foot' }, 'Closed parts left out.') : null));
   box.append(h('p', { class: 'foot' }, `Manifest `, hash4(r.result.hash, 'manifest hash'), `. Kept in this browser’s record${ledger ? ` (#${ledger.last('run', (e) => (e.about as { manifest?: string }).manifest === r.result.hash)?.seq ?? '?'})` : ''}, with the flow and plan it ran.`));
   return box;
 }
@@ -9091,7 +9221,9 @@ const runSaid = (a: Record<string, unknown>) => `run ${runNameOf(typeof a.manife
 const KIND_WORD: Record<string, (e: { seq: number; about: Record<string, unknown>; by: { as: string }; reason: string | null; amends?: number | null }, ctx: RecordContext) => string> = {
   // A run is named by its own entry (the line's number), as the Runs view names it.
   run: ({ seq, about: a }, ctx) => {
-    const files = Array.isArray(a.files) ? `${a.files.length} file${a.files.length === 1 ? '' : 's'} read by their hashes` : '';
+    // The files of sources open to the viewer: a closed one neither counted nor named (round 3, #6).
+    const read = Array.isArray(a.files) ? (a.files as { source?: string }[]).filter((f) => runSight().open(String(f.source ?? ''))) : null;
+    const files = read ? `${read.length} file${read.length === 1 ? '' : 's'} read by their hashes` : '';
     // A day that published once days before it were held: readers now see it, and a standing decision ends with it.
     if (a.outcome === 'ok' && ctx.passed.has(seq) && typeof (a.day ?? a.load) === 'string') return `${passedLine(String(a.day ?? a.load), ctx.passed.get(seq)!)} · ${files}`;
     if (a.outcome === 'ok') return `${ctx.rerun.has(seq) ? 'Ran again' : 'Ran the flow'}${a.load ? ` on ${dayLabel(String(a.load))}` : ''}: manifest ${String(a.manifest).slice(0, 12)}…, ${files}`;
@@ -9116,7 +9248,8 @@ const KIND_WORD: Record<string, (e: { seq: number; about: Record<string, unknown
     // "Thu Sep 21 refilled from Wed 20 · amends #22"; a withdrawal, "Thu Sep 21 fill withdrawn · amends #22".
     const repair = a.repair as Repair | undefined;
     const was = amends !== null && amends !== undefined ? (ledger?.entries[amends]?.about as { option?: string } | undefined)?.option : undefined;
-    const remedy = repair ? (repair.kind === 'fill' && repair.donor ? `${was === 'fill' ? 'refilled' : 'filled'} from ${dayShort(repair.donor.day)}` : `published ${remedyPart(repair.missing, a.day ? storyFor(String(a.day))?.split?.name : undefined).replace(/^(Before|Without|From) /, (m) => m.toLowerCase())}`) : null;
+    // The part names the source's column and value: to someone it is closed to, only that it was the part (#6).
+    const remedy = repair ? (repair.kind === 'fill' && repair.donor ? `${was === 'fill' ? 'refilled' : 'filled'} from ${dayShort(repair.donor.day)}` : sourceOpen() ? `published ${remedyPart(repair.missing, a.day ? storyFor(String(a.day))?.split?.name : undefined).replace(/^(Before|Without|From) /, (m) => m.toLowerCase())}` : 'published with the part that arrived') : null;
     // Accept the new level (amendment 1 S6): "Mon Nov 14: new level from Mon 14 · decision #24"; a later day under it,
     // "Tue Nov 15 published, by #24’s new level".
     const level = a.level as { from?: string } | undefined;
@@ -9140,9 +9273,17 @@ const KIND_WORD: Record<string, (e: { seq: number; about: Record<string, unknown
     return `Released ${plural(changed.length, 'output')} of ${runSaid(a)}, by decision #${String(a.decision)}${ends}`;
   },
   flow: ({ about: a }) => (a.before ? `The flow changed: ${String(a.before).slice(0, 12)}… to ${String(a.after).slice(0, 12)}…` : `The flow as it first ran here: ${String(a.after).slice(0, 12)}…`),
-  file: ({ about: a }) => describeFile(a as unknown as FileCheck).title,
-  act: ({ about: a, by }) => `${personName(by.as)} ${ACT_DONE[a.act as LogAct] ?? String(a.act)}: ${String(a.title)}`,
-  verify: ({ about: a }) => (a.ok ? `Run ${runSaid(a).slice(4)} ${LEVEL_DONE[a.level as VerifyLevel] ?? 'verified'}` : `Run ${runSaid(a).slice(4)} failed verification: ${(a.failed as string[]).slice(0, 3).join(', ')}`),
+  // A file of a source closed to the viewer names neither the source nor its file (round 3, #6).
+  file: ({ about: a }) => (fileSeen(String(a.path ?? '')) ? describeFile(a as unknown as FileCheck).title : 'A closed part’s file, checked against the data’s list'),
+  // What was done is said to anyone; what it was done about only to someone who reads all of its dataset, or who did it,
+  // as they read it then (#6).
+  act: ({ about: a, by }) => `${personName(by.as)} ${ACT_DONE[a.act as LogAct] ?? String(a.act)}${by.as === state.viewer || actSeen(String(a.finding ?? '')) ? `: ${String(a.title)}` : ''}`,
+  verify: ({ about: a }) => {
+    if (a.ok) return `Run ${runSaid(a).slice(4)} ${LEVEL_DONE[a.level as VerifyLevel] ?? 'verified'}`;
+    // A closed part's failure counted in the verdict, never named (#6).
+    const named = (a.failed as string[]).filter((x) => !nodeIds().has(x.split(':')[0]!) || runSight().open(x.split(':')[0]!));
+    return `Run ${runSaid(a).slice(4)} failed verification${named.length ? `: ${named.slice(0, 3).join(', ')}` : ''}`;
+  },
   sign: ({ about: a }) => `Signed ${runSaid(a)}'s manifest`,
   edit: ({ about: a }) => {
     const e = a.edit as { action?: string; objectType?: string; outcome?: string } | null;
@@ -9153,6 +9294,22 @@ const KIND_WORD: Record<string, (e: { seq: number; about: Record<string, unknown
   check: ({ about: a }) => (a.ok ? `Checked against a checkpoint kept elsewhere, at ${String(a.size)} entries: consistent` : `Checked against a checkpoint kept elsewhere: ${String(a.reason)}`),
 };
 const ROUTINE = new Set(['file', 'sign']);
+
+/** The flow's sources and steps, by id: what a record line may name, as far as the viewer may see it. */
+const nodeIds = (): Set<string> => new Set([...state.doc.sources.map((x) => x.id), ...state.doc.steps.map((x) => x.id)]);
+/** Whether a recorded finding's title is the viewer's to read: only when they read all of its dataset (round 3, #6). */
+function actSeen(key: string): boolean {
+  if (isOwner()) return true;
+  const of = findingOf(key, nodeIds(), loadSource() ?? null);
+  const a = of ? access(of) : null;
+  return !!a && accessOf(a) === 'all';
+}
+/** Whether a checked file is of a source open to the viewer (round 3, #6): a day's load is the watched source's. */
+function fileSeen(path: string): boolean {
+  if (isOwner()) return true;
+  const src = loads.list.some((l) => l.file === path) ? loadSource() : state.doc.sources.find((x) => integrity.files[x.id]?.path === path)?.id;
+  return !!src && runSight().open(src);
+}
 
 /**
  * A record line's mark (ADR 0009 §12): ‖ a held run with outputs waiting, ⚑ or ✕ a decision, ⚑ an applied release. A

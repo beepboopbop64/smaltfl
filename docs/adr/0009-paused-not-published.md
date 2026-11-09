@@ -1115,6 +1115,39 @@ Words only, and where readers' rows are read from; no encoding, record entry or 
   claims, so the derived run had no claim/2 for the day (fixed in d05e6c4); the sheet then called every hold "fails its
   checks". Thu 14 is a normal day, and the fill passes its checks.
 
+### S16. Who runs, and what a viewer never sees (round 3 of judging, 2026-11-09, as built)
+
+No encoding, record entry or plugin check changes: the app runs, draws and words less for someone a rule doesn't open
+things to.
+
+- **Only someone who may decide runs the flow (#7).** A run that passes publishes, and every day stepped to is a run, so
+  "View as" someone who may not decide (`checkRun`, core/policy.ts: the owner, a flow without policies, or the people a
+  `smaltfl:decide` rule names, whatever it lists) shows the flow as it stands and runs nothing: Run is off ("Owner runs
+  this flow"), the loads strip is read at full ink with a padlock and "Owner runs days" where Play and Next were, the
+  days, the episodes, the sheet's ‹ › and "Load it" don't step, a step's settings are read only, "Fetch it again" and the
+  ribbon's "Open Thu 21 ›" are gone, and `run()` itself refuses ("Only Owner may run the flow: a day that passes
+  publishes"). So the record never names someone who may not decide as the one who ran or published a day ("Sat Nov 12
+  passed: published · Ben" was the owner's View as recorded as Ben's act). What anyone may still do is note what they
+  know (Tell the source, an incident), each named as theirs; deciding is §8's.
+- **A part closed to the viewer is left out, neither named nor counted (#6).** The canvas's rule now holds for the Runs
+  view, the Integrity tab and the record (`filesSeen`, `checksSeen`, `findingOf`, core/decision.ts):
+  - a run's files read only the sources open to them, and a file's size and rows, and a node's count in the chain back
+    to the bytes, only where every row is theirs; hashes stay, which prove a part and say nothing of it; "Closed parts
+    left out" says once that something was ("trips: trips.parquet, 949,820 bytes → 41,939 rows" reached Ben, to whom the
+    trips are closed, and Ana's zone_hour Integrity named trips_valid, trips_filled and the day's file);
+  - a run's checks only of the nodes open to them, what a check says only where they read all of its node, and the run's
+    own checks (holds, keys, manifest) without their notes but to someone who reads every node ("held by trips (Trips
+    fall to trickle from 13:00)");
+  - the ribbon's card draws and counts a day's rows, and its Versions count them, only for someone who reads every row
+    of the source; a remedy's part ("Without VendorID 1") is said only where the source is open ("Part only" else);
+  - record lines: a run's files counted of the open sources; what was done about a finding ("Owner opened an incident")
+    to anyone, its title only to someone who reads all of its dataset; a closed source's file check as "A closed part's
+    file, checked"; a failed verification naming only open parts;
+  - the decision sheet, whatever path reaches it, gives someone who may not decide and doesn't read every row of the
+    source "What readers get" with nothing of the source (`readersSheet`).
+  "Built from a short load" (§12) stays: the flow's verdict, naming no source, value or figure, is what §12 lets an output
+  say to someone the source is closed to.
+
 ### Encodings (amendment 1)
 
 **Unchanged:** `key/0`, `flow/1`, `plan/0`, `plan/1` (E10), `dataset/0`, `run/1`, `log/1`, `checkpoint/0`, `edit/0`,

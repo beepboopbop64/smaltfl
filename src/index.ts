@@ -63,7 +63,7 @@ export { nodeKey } from './core/keys.js';
 export type { KeyEnv } from './core/keys.js';
 export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, planKind, signManifest, verifyManifest } from './core/manifest.js';
 export type { DatasetRecord, ExpectationResult, Identity, IdentityCard, ManifestNode, RunManifest, SignatureCheck, SignedManifest } from './core/manifest.js';
-export { DECIDE, DECIDE_OPTIONS, checkAction, checkDecision, covers, readView, wrapRead } from './core/policy.js';
+export { DECIDE, DECIDE_OPTIONS, checkAction, checkDecision, checkRun, covers, readView, wrapRead } from './core/policy.js';
 export type { ActionCheck, ActionRule, ColumnRule, DecideOption, DecisionOption, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
 export type { ActRequest, ActionType, Edit, LinkType, Noun, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
 export { counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, VERDICT_MARKS } from './core/ontology.js';

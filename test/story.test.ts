@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { LEGACY_JUDGE, newsOf, type JudgeSettings, type Names } from '../src/core/news.js';
-import { ACT_VERB, CELL_KINDS, CONTEXT_TAG, HEALTH_HEAD, KEPT_SHARE, axisShare, recentSpan, SETTLE_LINE, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, keptOf, partLabel, ruleOrder, ruleUsual, rowName, shortWho, splitOf, splitSentence, stepLabels, storyOf, wordsIn, type Gate, type HourValues, type Story, type StoryOptions } from '../src/core/story.js';
+import { followsCause, ACT_VERB, CELL_KINDS, CONTEXT_TAG, HEALTH_HEAD, KEPT_SHARE, axisShare, recentSpan, SETTLE_LINE, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, keptOf, partLabel, ruleOrder, ruleUsual, rowName, shortWho, splitOf, splitSentence, stepLabels, storyOf, wordsIn, type Gate, type HourValues, type Story, type StoryOptions } from '../src/core/story.js';
 import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
 const DAY = '2023-10-11'; // a Wednesday
@@ -543,5 +543,26 @@ describe('a story on any dataset (ADR 0010 §1, §4, §8)', () => {
       expect(glanceStrings(s).filter((x) => /trip/i.test(x)), `${day} ${s.head}`).toEqual([]);
     }
     expect(told({ [DAY]: { stopAt: 13 } }, DAY, signIns, general()).head).toMatch(/^Sign-ins fall /);
+  });
+
+  it('folds every finding but the cause on a day held or wrong, and none on a calm or merely unusual day', () => {
+    // Fri Sep 22, 2023: only Flex Fare arrived; the day is held.
+    const wrong = told({ [DAY]: { vendorGone: true } }, DAY, vendorNames);
+    expect(wrong.severity).toBe('alert');
+    // The finding the story is anchored on, as the app finds it (its cause, else the count or part it is told by).
+    const anchor = wrong.cause ?? wrong.absorbed.find((x) => x.kind === 'volume') ?? wrong.absorbed[0]!;
+    const cause = anchor.key;
+    const effect = { key: 'trips_enriched:empty:card_tip_rate', kind: 'empty' };
+    expect(followsCause(effect, { held: true, story: wrong, anchor: cause })).toBe(true);
+    expect(followsCause({ key: 'share:passenger_count=1', kind: 'share' }, { held: false, story: wrong, anchor: cause })).toBe(true);
+    // The cause keeps its verbs; a file refused is a cause in itself.
+    expect(followsCause({ key: cause, kind: anchor.kind }, { held: true, story: wrong, anchor: cause })).toBe(false);
+    expect(followsCause({ key: 'integrity:loads/x.parquet', kind: 'integrity' }, { held: true, story: wrong, anchor: cause })).toBe(false);
+    // Held for someone the story is closed to: every finding on the day's outputs follows from what held it.
+    expect(followsCause(effect, { held: true, story: null, anchor: null })).toBe(true);
+    // A calm day, or one merely unusual, has no effects to fold: a finding there is its own news.
+    const calm = told({}, DAY, vendorNames);
+    expect(followsCause(effect, { held: false, story: calm, anchor: null })).toBe(false);
+    expect(followsCause(effect, { held: false, story: { severity: 'warn' }, anchor: cause })).toBe(false);
   });
 });

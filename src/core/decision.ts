@@ -820,6 +820,72 @@ export function runFigures(o: { day: string | null; run: number | string; ms: st
 }
 
 /**
+ * What a viewer may see of a run's parts, for the Runs view, the Integrity tab and the record (round 3, #6): `open`, a
+ * node they may read at all; `counted`, one whose every row they read (its whole count, a file's size, what its checks
+ * counted are theirs only then, ADR 0009 §12).
+ */
+export interface RunSight {
+  open: (origin: string) => boolean;
+  counted: (origin: string) => boolean;
+}
+
+/** A file a run read, as one viewer sees it: its size and rows null where they aren't theirs to see. */
+export interface FileSeen {
+  origin: string;
+  location: string;
+  sha256: string;
+  content: string | null;
+  bytes: number | null;
+  rows: number | null;
+}
+
+/**
+ * The files a run read, as a viewer may see them (round 3, #6): a source closed to them is left out, neither named nor
+ * counted, and `left` says only that something was ("Closed parts left out", as the canvas says it); a source they read
+ * part of keeps its name and hashes, which prove it and say nothing of it, but not its size or rows, which count all of
+ * it. "trips: trips.parquet, 949,820 bytes → 41,939 rows" reached Ben, to whom the trips are closed.
+ */
+export function filesSeen(nodes: readonly { origin: string; rows?: number | undefined; content?: string | undefined; file?: { location: string; bytes: number; sha256: string } | undefined }[], sight: RunSight): { files: FileSeen[]; left: boolean } {
+  const read = nodes.filter((n) => n.file);
+  const files = read.filter((n) => sight.open(n.origin)).map((n): FileSeen => {
+    const all = sight.counted(n.origin);
+    return { origin: n.origin, location: n.file!.location, sha256: n.file!.sha256, content: n.content ?? null, bytes: all ? n.file!.bytes : null, rows: all ? (n.rows ?? null) : null };
+  });
+  return { files, left: files.length < read.length };
+}
+
+/**
+ * A run's checks, as a viewer may see them (round 3, #6): a node's check only where the node is open to them, and what
+ * it says only where they read all of it (a check's note counts rows, names a file, or tells the flow's verdict); the
+ * run's own checks (its manifest, plan, flow, keys, holds) without their notes but to who reads every node, as they name
+ * every node ("held by trips
+ * (Trips fall to trickle from 13:00)", "11 keys recomputed"). `left` says whether a check was left out.
+ */
+export function checksSeen<C extends { origin: string; note?: string | undefined }>(checks: readonly C[], nodes: ReadonlySet<string>, sight: RunSight): { checks: C[]; left: boolean } {
+  // The run's own checks say what they say only to someone who reads every node all through (the owner).
+  const whole = [...nodes].every((n) => sight.counted(n));
+  const shown = checks.filter((c) => !nodes.has(c.origin) || sight.open(c.origin)).map((c) => {
+    if (c.note === undefined || (nodes.has(c.origin) ? sight.counted(c.origin) : whole)) return c;
+    const { note: _note, ...rest } = c;
+    void _note;
+    return rest as C;
+  });
+  return { checks: shown, left: shown.length < checks.length };
+}
+
+/**
+ * The dataset a finding the record kept is about (round 3, #6), so its title reaches only someone who reads all of it: a
+ * table's finding is keyed by its node ("zone_hour:empty:avg_fare"); a file's check names no node (null, the title kept
+ * from anyone but the owner); any other is the day's, of the watched source ("story:2023-09-21", "share:payment_type=3").
+ */
+export function findingOf(key: string, nodes: ReadonlySet<string>, source: string | null): string | null {
+  const head = key.split(':')[0] ?? '';
+  if (nodes.has(head) && key.includes(':')) return head;
+  if (head === 'integrity') return null;
+  return source;
+}
+
+/**
  * The head of a waiting output's News on a held day (ADR 0009 §12), over the staged bar that says which day readers see:
  * that it waits, with Decide for someone who may decide, or whom it waits on; once decided, what became of it.
  */
