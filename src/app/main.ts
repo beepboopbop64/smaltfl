@@ -18,6 +18,7 @@ import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, NotebookOutline, ProfileDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, periodOf, sourceOf, takeOut, validateDocument, watchHistory, withoutDisplay, type CellRef } from '../core/document.js';
 import { notebookSectionId } from '../core/notebook.js';
+import { briefOf, briefText, type BriefIn, type BriefOption } from '../core/brief.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDayHours, emitDistinct, emitHourValues, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, stampShift, type EmitContext } from '../core/emit.js';
 import { effectOf, type Effect } from '../core/effect.js';
 import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, timeOf, type HistoryFile, type Metric } from '../core/history.js';
@@ -4410,6 +4411,133 @@ function firstWaiting(story: Story): string | null {
 
 /** Decide an earlier day from a later one: its sheet over its run in this visit, else the day run again first (its
  * news then has Decide), as a day held in an earlier visit is (ADR 0009 §10). */
+// ------------------------------------------------------------------ the brief (ADR 0012 §1, §2)
+
+const briefKey = (day: string) => `smaltfl:brief:${state.doc.id}:${day}`;
+
+/** The facts of a day the brief is built from: the story, the pause, what readers get, the file, the options. */
+function briefInputs(day: string): BriefIn {
+  const story = storyFor(day);
+  const r = heldRunOf(day) ?? [...state.runs].reverse().find((x) => dayOfRun(x) === day);
+  const p = r ? pauseOf(r) : null;
+  const readers = r ? readersDay(r) : null;
+  const outs = state.doc.steps.filter((st) => st.dataset && visible(st.id)).map((st) => st.id);
+  const waiting = new Set(r?.result.waiting ?? []);
+  const outputs: BriefIn['outputs'] = outs.map((name) => {
+    const shows = showsDay(name);
+    const fate: BriefIn['outputs'][number]['fate'] = waiting.has(name) || (p?.state === 'waiting' && r && name in r.result.manifest.outputs && shows !== day) ? 'waits' : shows === day ? 'published' : shows && shows < day ? 'kept' : r ? 'published' : 'not built';
+    return { name, fate };
+  });
+  const affected = new Set(outputs.filter((o) => o.fate !== 'published').map((o) => o.name));
+  const objects = (state.doc.ontology?.objectTypes ?? []).filter((t) => affected.size ? affected.has(t.dataset) : outs.includes(t.dataset)).map((t) => t.name);
+  const who = (policies()?.principals ?? []).filter((x) => !x.owner && outs.some((o) => access(o, x.id)?.open !== false)).map((x) => x.name);
+  const load = loads.list.find((l) => l.day === day);
+  const check = load ? integrity.checks.get(load.file)?.class ?? null : null;
+  const options: BriefOption[] = [];
+  if (r && p) {
+    const later = readers && readers > day ? readers : null;
+    const can = (o: DecisionOption) => checkDecision(policies(), state.viewer, o);
+    options.push({ option: 'asis', label: 'Publish as is', line: 'readers get the day as it came, marked', off: later ? `${dayShort(later)} is published` : can('asis').allowed ? null : `${deciders()} decides` });
+    options.push({ option: 'dont', label: readers && readers < day ? `Keep ${dayShort(readers)}` : 'Don’t publish', line: readers && readers < day ? `readers keep ${dayShort(readers)} until a corrected file arrives` : 'readers get nothing for the day', off: can('dont').allowed ? null : `${deciders()} decides` });
+    const rem = remediesFor(r);
+    for (const o of rem?.offers ?? []) if (o.option === 'fill' || o.option === 'complete') options.push({ option: o.option, label: o.label, line: o.option === 'fill' ? 'a good day near it fills what is missing, marked' : 'the part that arrived goes out alone, marked', off: o.off ?? (can(o.option).allowed ? null : `${deciders()} decides`) });
+    const acc = acceptFor(r);
+    if (acc) options.push({ option: 'accept', label: acc.offer.label, line: 'later days are judged at the new level', off: acc.offer.off ?? (can('accept').allowed ? null : `${deciders()} decides`) });
+  }
+  const picked: DecisionOption | null = p ? (p.state === 'waiting' ? null : p.state === 'accepted' ? 'accept' : p.state) : null;
+  let edited: string | null = null;
+  try {
+    edited = localStorage.getItem(briefKey(day));
+  } catch {
+    // No storage: the generated words.
+  }
+  return {
+    day, flow: state.doc.name, noun: (n) => (n === 1 ? rowNoun(loadSource() ?? '').one : rowNoun(loadSource() ?? '').many), story,
+    pause: p ? { state: p.state, readers, deciders: deciders(), may: mayDecide(state.viewer), remedy: p.remedy ? (p.remedy.donor ? `Filled from ${dayShort(p.remedy.donor)}` : p.remedy.part ? `${p.remedy.part} only` : null) : null } : null,
+    outputs, objects, readers: who, file: load ? { name: load.file.replace(/^loads\//, ''), rows: load.rows, check } : null, options, picked, edited,
+  };
+}
+
+/**
+ * The brief (ADR 0012 §1): one screen, SBAR order, the point on top. The status word and the head; the situation in
+ * one sentence, editable; the cause's own visual; the impact; the cause as facts, a theory labelled; the fix, with
+ * the decision a tap away while it waits; and the whole as text to paste into a message.
+ */
+function briefPage(day: string): void {
+  const input = briefInputs(day);
+  const b = briefOf(input);
+  const story = storyFor(day);
+  const sev = story?.severity ?? 'ok';
+  const statusWord = b.status === 'no action' ? 'no action needed' : b.status;
+  const status = h('p', { class: `brief-status ${b.status.replace(/\s+/g, '-')}` }, h('span', { class: 'pill' }, statusWord), h('span', { class: 'brief-day' }, dayMid(day)));
+  // The sentence, and a person's own words in its place when they want them (kept in this browser; ADR 0012 says the
+  // record keeps them once the brief's record entry is specified).
+  const sit = h('p', { class: `brief-sit${b.edited ? ' edited' : ''}` }, b.situation);
+  const edit = h('button', { type: 'button', class: 'btn small', 'aria-label': 'Edit the sentence' }, b.edited ? 'Edit words' : 'Edit words');
+  const area = h('textarea', { class: 'brief-edit', rows: '3', hidden: true, 'aria-label': 'The situation, in your words' });
+  area.value = b.situation;
+  const save = h('button', { type: 'button', class: 'btn small primary', hidden: true }, 'Keep these words');
+  const reset = h('button', { type: 'button', class: 'btn small', hidden: !b.edited }, 'The app’s words');
+  edit.addEventListener('click', () => { area.hidden = false; save.hidden = false; edit.hidden = true; area.focus(); });
+  save.addEventListener('click', () => {
+    try {
+      if (area.value.trim() && area.value.trim() !== b.generated) localStorage.setItem(briefKey(day), area.value.trim());
+      else localStorage.removeItem(briefKey(day));
+    } catch {
+      // No storage: shown this once.
+    }
+    briefPage(day);
+  });
+  reset.addEventListener('click', () => {
+    try {
+      localStorage.removeItem(briefKey(day));
+    } catch {
+      // Nothing kept.
+    }
+    briefPage(day);
+  });
+  const hero = story ? (heroOf(story) ?? amountVisual(story)) : null;
+  const impact = b.impact.length ? block('Impact', h('ul', { class: 'brief-list' }, ...b.impact.map((x) => h('li', {}, x)))) : null;
+  const cause = b.cause.facts.length || b.cause.theories.length
+    ? block('Cause', h('ul', { class: 'brief-list' }, ...b.cause.facts.map((x) => h('li', {}, x)), ...b.cause.theories.map((x) => h('li', { class: 'theory' }, x))))
+    : null;
+  const r = heldRunOf(day);
+  const waiting = input.pause?.state === 'waiting';
+  const fixRows = b.fix.options.map((o) => {
+    const mark = o.option === b.fix.picked ? 'decided' : o.option === b.fix.proposed ? 'proposed' : '';
+    return h('li', { class: `brief-opt${mark ? ` ${mark}` : ''}${o.off ? ' off' : ''}` },
+      h('span', { class: 'brief-opt-label' }, o.label, mark ? h('span', { class: 'chip' }, mark) : ''),
+      o.off ? h('span', { class: 'brief-opt-line' }, o.off) : o.line ? h('span', { class: 'brief-opt-line' }, o.line) : '');
+  });
+  const fix = block(b.fix.picked ? 'Decided' : waiting ? 'Fix' : 'Nothing to decide',
+    fixRows.length ? h('ul', { class: 'brief-list opts' }, ...fixRows) : null,
+    b.fix.why ? h('p', { class: 'brief-why' }, b.fix.why) : null,
+    waiting && r && input.pause?.may ? h('button', { type: 'button', class: 'btn small primary', onclick: () => decisionSheet(r, story) }, 'Decide ›') : null);
+  const copy = h('button', { type: 'button', class: 'btn small' }, 'Copy as text');
+  copy.addEventListener('click', () => {
+    const text = briefText(b, { flow: input.flow, pause: input.pause });
+    const done = () => { copy.textContent = 'Copied'; setTimeout(() => (copy.textContent = 'Copy as text'), 1500); };
+    navigator.clipboard?.writeText(text).then(done).catch(() => {
+      const ta = h('textarea', { class: 'brief-edit', rows: '8', 'aria-label': 'The brief as text' });
+      ta.value = text;
+      copy.replaceWith(ta);
+      ta.select();
+    });
+  });
+  const cell = story && loadSource() ? notebookCellOf(sourceOf(state.doc, loadSource()!) ?? '') : undefined;
+  void cell;
+  openDetail(b.title, sev, [
+    status,
+    h('div', { class: 'brief-sitwrap' }, sit, area, h('div', { class: 'nb-actions' }, edit, save, reset)),
+    hero ? h('div', { class: 'brief-hero' }, hero) : null,
+    impact,
+    cause,
+    fix,
+    h('div', { class: 'nb-actions brief-acts' }, copy),
+  ]);
+  document.querySelector('.vf-detail')?.classList.add('brief');
+}
+
 function decideDay(day: string): void {
   const r = heldRunOf(day);
   if (r) return decisionSheet(r, storyFor(day));
@@ -7620,7 +7748,9 @@ function renderLoads(): void {
       h('div', { class: 'loads-acts' },
         pl?.verb && own ? h('button', { type: 'button', class: 'btn small primary vf-decide-day', 'aria-label': `Decide what readers get for ${dayMid(now!.day)}`, onclick: () => decisionSheet(own, storyFor(now!.day)) }, `${pl.verb} ›`) : null,
         waitingDay && after?.verb ? h('button', { type: 'button', class: 'btn small primary vf-decide-day', 'aria-label': `Decide what readers get for ${dayMid(waitingDay)}`, onclick: () => decideDay(waitingDay) }, `${after.verb} ›`) : null,
-        lens && top && visible(src!) ? h('button', { type: 'button', class: 'btn small', onclick: () => openTab(lens, 'news') }, 'The news ›') : null)));
+        lens && top && visible(src!) ? h('button', { type: 'button', class: 'btn small', onclick: () => openTab(lens, 'news') }, 'The news ›') : null,
+        // The brief (ADR 0012 §1): the day's explanation for leadership, one screen, on a day with something to say.
+        now && counted && ((top && (top.severity === 'alert' || top.severity === 'warn')) || held) ? h('button', { type: 'button', class: 'btn small brief-open', 'aria-label': `The brief for ${dayMid(now.day)}`, onclick: () => briefPage(now.day) }, 'Brief ›') : null)));
   // The loaded day in view in the scrolling row.
   requestAnimationFrame(() => {
     const row = box.querySelector('.loads-row') as HTMLElement | null;

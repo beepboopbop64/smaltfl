@@ -90,6 +90,20 @@ What the survey found (sources in §7):
    answer graded against the day's facts. The open round-3 findings (colour-only severity, missing keys and scales,
    rounding, calm days that look flagged) are fixed inside this work, not after it.
 
+## As built
+
+- **The brief, first pass (2026-11-09).** `src/core/brief.ts` (pure, tested on the sign-in log's planted days in
+  `test/brief.test.ts`): `briefOf` orders the day's facts as §1 says (the status word; the head as the title; the
+  situation in one sentence ≤ 25 words, a clause left out when its value is missing; impact; cause as facts, a
+  theory labelled; the fix with the option proposed: a remedy that can go, else keep the last good day while
+  something is wrong, else publish as is), `briefText` writes it as SBAR, `briefWords` and `briefBanned` hold it to
+  the glance budget (90 words) and ADR 0008's banned words. In the app (`briefPage`), a *Brief ›* button on the day
+  line of a day with something to say opens it over the page: the status pill and day, the sentence (editable, the
+  person's words kept in this browser until the record's `note` entry is specified), the cause's own visual, the
+  impact, the cause, the fix's options with the proposed or decided one marked and *Decide ›* while the day waits,
+  and *Copy as text*. Not yet: the incident page's full order for the News tab (§2), sharing as an image or link, the
+  two-minute test (§7).
+
 ## Consequences
 
 - **Order of work** (Q-103): (a) the brief and the incident page, from the day's story, measures, holds and
