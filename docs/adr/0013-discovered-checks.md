@@ -171,6 +171,17 @@ controls fixture, generator, flow and tests (`test/combos.test.ts` on a syntheti
 The sign-ins' demo day (ADR 0012, Wed Mar 20) will name its pair once its history is rebuilt with pair counts: the
 built history predates this ADR.
 
+**No judge knows a date (2026-11-09, on the maintainer's challenge).** Nothing in `src/` names a day, a control or a
+column: every finding comes from the watches the flow document declares, the histories built from the days before,
+and the ontology's marks. The fixture's trouble is an option (`Trouble`: a day, a control and a kind among `missing`,
+`column`, `odd`, `flip`, `double`, `within`, `across`), the demo's five days its default; `test/controls-anyday.test.ts`
+runs the same engine harness (`test/helpers/controls-world.ts`) on another seed, 300 applications, and trouble on
+other days and other controls of all seven kinds, and asserts each is held by the check it calls for (the amount; the
+refused file; the new value and the checks; the share that moved; the doubled amount, which fans out through the join
+to the posture; the combination on a control's own pair; the combination on the posture alone) and that every other
+day publishes. The deterministic checks (data missing, a column missing, a value never seen, a share or an amount
+moved, rows the checks drop) and the learned ones (a pair's odds, the forest) are the same code on either seed.
+
 ## Consequences
 
 - **A check nobody wrote.** Every pair the history keeps is judged every day, with the day's own counts as the

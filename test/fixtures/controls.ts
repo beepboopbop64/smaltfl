@@ -67,12 +67,43 @@ export const HISTORY_FROM = '2023-09-01';
 export const LOADS_FROM = '2024-03-01';
 export const LOADS_TO = '2024-03-28';
 
+/**
+ * A trouble planted on a day, in the kinds a feed goes wrong (each one check the flow must find from the data alone):
+ * - `missing`: the control's file arrives with its header and no rows;
+ * - `column`: the file lacks a column (the engine refuses it against its declared columns);
+ * - `odd`: a share of the statuses read a value never seen (`value`, default `ERROR`; `share`, default 0.35);
+ * - `flip`: the control's failures multiply by `by` (default 3): one column's share moves on its own;
+ * - `double`: every row twice (the amount doubles, the shares as they were);
+ * - `within`: every failure lands on applications with `value` (default `yes`) in `column` (a yes/no column of the
+ *   control), as many failures and as many with the value as ever: two columns of one control off together;
+ * - `across`: every application failing `other` passes this control, and as many passers of `other` that passed it
+ *   fail it instead, every column's own share as it was: two controls off together, seen only where they meet.
+ */
+export type Trouble =
+  | { day: string; control: Control; kind: 'missing' | 'double' }
+  | { day: string; control: Control; kind: 'column'; column: string }
+  | { day: string; control: Control; kind: 'odd'; value?: string; share?: number }
+  | { day: string; control: Control; kind: 'flip'; by?: number }
+  | { day: string; control: Control; kind: 'within'; column: string; value?: string }
+  | { day: string; control: Control; kind: 'across'; other: Control };
+
+/** The demo's five days (PLANTED), as trouble. */
+export const DEMO_TROUBLE: readonly Trouble[] = [
+  { day: PLANTED.missing, control: 'patching', kind: 'missing' },
+  { day: PLANTED.column, control: 'logging', kind: 'column', column: 'coverage_pct' },
+  { day: PLANTED.odd, control: 'mfa', kind: 'odd' },
+  { day: PLANTED.within, control: 'backup', kind: 'within', column: 'restore_tested' },
+  { day: PLANTED.across, control: 'encryption', kind: 'across', other: 'tls' },
+];
+
 export interface ControlsOptions {
   seed?: number;
   /** How many applications (default 400). */
   apps?: number;
   /** The planted days (default true; false is the calm variant). */
   incidents?: boolean;
+  /** The trouble planted, by day and control (default DEMO_TROUBLE when `incidents` is on). */
+  trouble?: readonly Trouble[];
 }
 
 export interface App {
@@ -163,39 +194,53 @@ function rowOf(control: Control, app: App, day: string, status: string, seed: nu
 
 /**
  * A day's rows of a control, one an application, in application order: each row's status and the control's own
- * columns, with the day's planted trouble applied when `incidents` is on (the default): a missing day has no rows, a
- * day with a column missing lacks it, a day with a value never seen writes it, and the two combination days move
- * statuses between applications so that every column's own counts stay as they were.
+ * columns, with the day's planted trouble (`Trouble`) applied when `incidents` is on (the default): the demo's five
+ * days unless `trouble` names others. Nothing here knows a date: a trouble is a day, a control and a kind.
  */
 export function controlRows(control: Control, day: string, apps: readonly App[], o: ControlsOptions = {}): { columns: string[]; rows: (string | number | null)[][] } {
   const seed = o.seed ?? 3;
-  const inc = o.incidents !== false;
+  const planted = o.incidents === false ? [] : (o.trouble ?? DEMO_TROUBLE).filter((t) => t.day === day && t.control === control);
   const columns = [...CONTROL_COLUMNS[control]];
-  if (inc && day === PLANTED.missing && control === 'patching') return { columns, rows: [] };
+  if (planted.some((t) => t.kind === 'missing')) return { columns, rows: [] };
   const status = new Map(apps.map((a) => [a.app_id, fails(a, control, day, seed) ? 'fail' : 'pass']));
-  if (inc && day === PLANTED.within && control === 'backup') {
-    // As many failures as drawn, all of them on applications whose restores are tested.
-    const n = [...status.values()].filter((s) => s === 'fail').length;
-    const tested = apps.filter((a) => restoreTested(a, seed));
-    for (const a of apps) status.set(a.app_id, 'pass');
-    for (const a of tested.slice(0, n)) status.set(a.app_id, 'fail');
-  }
-  if (inc && day === PLANTED.across && control === 'encryption') {
-    // Every application failing TLS passes encryption; as many TLS passers that passed encryption fail it instead.
-    const tlsFail = new Set(apps.filter((a) => fails(a, 'tls', day, seed)).map((a) => a.app_id));
-    let moved = 0;
-    for (const a of apps) if (tlsFail.has(a.app_id) && status.get(a.app_id) === 'fail') (status.set(a.app_id, 'pass'), moved++);
-    for (const a of apps) {
-      if (moved === 0) break;
-      if (!tlsFail.has(a.app_id) && status.get(a.app_id) === 'pass') (status.set(a.app_id, 'fail'), moved--);
+  const yesNo = (a: App, column: string): string => String(rowOf(control, a, day, 'pass', seed)[CONTROL_COLUMNS[control].indexOf(column)]);
+  for (const t of planted) {
+    if (t.kind === 'flip') {
+      // The failures multiply: the passers most likely to fail (the lowest draws) fail too.
+      const n = [...status.values()].filter((s) => s === 'fail').length;
+      const more = Math.min(apps.length, Math.round(n * (t.by ?? 3))) - n;
+      const passers = apps.filter((a) => status.get(a.app_id) === 'pass').sort((x, y) => uniform(seed, x.app_id, control, 'flip', day) - uniform(seed, y.app_id, control, 'flip', day));
+      for (const a of passers.slice(0, Math.max(0, more))) status.set(a.app_id, 'fail');
+    }
+    if (t.kind === 'within') {
+      // As many failures as drawn, all of them on applications with the value in the column.
+      const n = [...status.values()].filter((s) => s === 'fail').length;
+      const withValue = apps.filter((a) => yesNo(a, t.column) === (t.value ?? 'yes'));
+      for (const a of apps) status.set(a.app_id, 'pass');
+      for (const a of withValue.slice(0, n)) status.set(a.app_id, 'fail');
+    }
+    if (t.kind === 'across') {
+      // Every application failing the other control passes this one; as many of the other's passers that passed
+      // this one fail it instead.
+      const otherFail = new Set(apps.filter((a) => fails(a, t.other, day, seed)).map((a) => a.app_id));
+      let moved = 0;
+      for (const a of apps) if (otherFail.has(a.app_id) && status.get(a.app_id) === 'fail') (status.set(a.app_id, 'pass'), moved++);
+      for (const a of apps) {
+        if (moved === 0) break;
+        if (!otherFail.has(a.app_id) && status.get(a.app_id) === 'pass') (status.set(a.app_id, 'fail'), moved--);
+      }
     }
   }
-  const rows = apps.map((a) => rowOf(control, a, day, status.get(a.app_id)!, seed));
-  if (inc && day === PLANTED.odd && control === 'mfa') for (const r of rows) if (uniform(seed, String(r[0]), 'error', day) < 0.35) r[columns.length - 1] = 'ERROR';
-  if (inc && day === PLANTED.column && control === 'logging') {
-    const at = columns.indexOf('coverage_pct');
-    columns.splice(at, 1);
-    for (const r of rows) r.splice(at, 1);
+  let rows = apps.map((a) => rowOf(control, a, day, status.get(a.app_id)!, seed));
+  for (const t of planted) {
+    if (t.kind === 'odd') for (const r of rows) if (uniform(seed, String(r[0]), 'odd', day) < (t.share ?? 0.35)) r[columns.length - 1] = t.value ?? 'ERROR';
+    if (t.kind === 'double') rows = [...rows, ...rows.map((r) => [...r])];
+    if (t.kind === 'column') {
+      const at = columns.indexOf(t.column);
+      if (at < 0) throw new Error(`${control} has no column ${t.column}`);
+      columns.splice(at, 1);
+      for (const r of rows) r.splice(at, 1);
+    }
   }
   return { columns, rows };
 }

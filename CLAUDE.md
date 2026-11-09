@@ -97,7 +97,8 @@ match smaltdb's `CLAUDE.md`.
   a published step (its claim told in the engine from `RunContext.tell`, `src/plugin/tell.ts`; its history built by
   `scripts/data/history.ts --watch <step>` running the flow on each day's files). `examples/controls/` is the controls
   posture (six daily control sources, the posture joined and watched, five planted days; `test/fixtures/controls.ts`,
-  `scripts/data/controls.ts`, `test/controls.test.ts`); `npm run build:app -- --flow examples/controls/flow.json --out
+  `scripts/data/controls.ts`, `test/controls.test.ts`; `test/controls-anyday.test.ts` plants the fixture's `Trouble`
+  on other days and another seed through `test/helpers/controls-world.ts`); `npm run build:app -- --flow examples/controls/flow.json --out
   dist/app-controls` builds it; loads.json may list several daily sources (read as days) and name the dataset the
   views follow (`judged`).
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`

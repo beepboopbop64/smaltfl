@@ -46,7 +46,9 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   the days before, by the isolation forest); a watch on a published step, its claim told in the engine; the history
   builder's step mode; the app on several daily sources, following the dataset the list names; the controls example
   (six controls over 400 applications, five planted days) through the engine (`test/controls.test.ts`) and in the
-  app. What the planted days read as is ADR 0013 §6's table. Open: Q-104 to Q-109.
+  app. What the planted days read as is ADR 0013 §6's table. `test/controls-anyday.test.ts` plants seven kinds of
+  trouble on other days, other controls and another seed and finds each by the same code, with no false alarm on the
+  other days: the judges know no date. Open: Q-104 to Q-109.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.
