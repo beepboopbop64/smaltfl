@@ -332,6 +332,27 @@ function sayRun(r: RunRecord): void {
 }
 
 /**
+ * The node a failed run's message names: a step or source by id ("trips_valid: …"), or a source by its table
+ * ("logging_file: the header has 3 fields but 4 columns are declared": the engine refused the file the source reads).
+ */
+function failedOrigin(msg: string): string | undefined {
+  const token = /^([A-Za-z][A-Za-z0-9_]*): /.exec(msg)?.[1];
+  if (!token) return undefined;
+  if (steps().has(token) || sourceIds().has(token)) return token;
+  return state.doc.sources.find((x) => x.table.toLowerCase() === token.toLowerCase())?.id;
+}
+
+/** A failed run's head for the strip and the day line, in a few words: what was refused, and how, when the engine's
+ * message is one we know ("logging: file has 3 of 4 columns"); else which node stopped it. */
+function failedHead(): string {
+  const f = state.failed;
+  if (!f) return 'Run failed';
+  const cols = /the header has (\d+) fields but (\d+) columns are declared/.exec(f.message);
+  if (cols) return `${f.origin ?? 'file'}: file has ${cols[1]} of ${cols[2]} columns`;
+  return f.origin ? `${f.origin}: run failed` : 'Run failed';
+}
+
+/**
  * Say a run that stopped (an engine error, or a gate that held under a flow that doesn't say what holds it): a gate as
  * the day's state, any other failure with its message; to someone the step that stopped it is closed to, neither its name
  * nor the engine's message, which names what it read.
@@ -1867,7 +1888,13 @@ function renderCanvas(): void {
     const text = latest() ? `${f.members.length} steps · ${built} built` : `${f.members.length} steps`;
     const nbk = notebookOfSection(f.id);
     const outs = f.members.filter((m) => isOutput(m)).length;
-    card(f.id, nbk ? `NOTEBOOK${outs ? ` · ${outs === 1 ? 'OUTPUT' : `${outs} OUTPUTS`}` : ''}` : 'SECTION', f.name, { text, tone: lost ? 'drop' : 'same', badge: lost ? `−${fmtCompact(lost)} rows` : undefined }, ['summary', `c-${f.color ?? 'slate'}`]);
+    // What is wrong inside the box shows on the box (ADR 0013 §5): the day's cause (the judged dataset's story, a
+    // load held by its own verdict), checks that held, or the step a failed run stopped at, with its line and mark.
+    const cday = newsDay();
+    const wrong = f.members.find((m) => (cday && m === loadSource() && storyFor(cday)?.severity === 'alert') || ownHoldOf(m) || state.failed?.origin === m || (!state.failed && onScreen()?.result.holds.some((x) => x.by === 'checks' && x.origin === m)));
+    const line = wrong ? cardLine(wrong) : { text, tone: lost ? 'drop' as const : 'same' as const, badge: lost ? `−${fmtCompact(lost)} rows` : undefined };
+    const heldInside = !!wrong && !ownHoldOf(wrong) && wrong !== loadSource();
+    card(f.id, nbk ? `NOTEBOOK${outs ? ` · ${outs === 1 ? 'OUTPUT' : `${outs} OUTPUTS`}` : ''}` : 'SECTION', f.name, line, ['summary', `c-${f.color ?? 'slate'}`, ...(wrong ? (heldInside ? ['failed', 'held'] : ['cause']) : [])], wrong ? { health: 'alert' } : {});
   }
   for (const id of layout.cards.keys()) {
     if (shownAs.has(id)) continue;
@@ -5404,7 +5431,7 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     const said = g?.held && g.step === origin ? gateLabels(g) : null;
     if (after) box.append(h('div', { class: 'verdict alert stopped' },
       h('p', { class: 'v-day' }, now ? dayLabel(now) : ''),
-      h('h3', { class: 'v-head' }, glyphEl('held', 16), refused ? 'Not built: the file was refused' : origin ? `Not built: held at ${origin}` : 'The run stopped'),
+      h('h3', { class: 'v-head' }, glyphEl(origin && sourceIds().has(origin) ? 'alert' : 'held', 16), refused ? 'Not built: the file was refused' : origin && steps().get(origin)?.kind === 'expectations' ? `Not built: held at ${origin}` : origin && sourceIds().has(origin) ? (origin === dataOf(card) ? failedHead() : `Not built: ${failedHead()}`) : 'The run stopped'),
       h('p', { class: 'v-line' }, refused ? describeFile(refused).title : said ? `${said.share}${said.limit ? ` · ${said.limit}` : ''}` : state.failed.message),
       origin && origin !== dataOf(card) ? h('button', { type: 'button', class: 'btn small', onclick: () => select(origin) }, `Open ${origin} ›`) : null));
     const bar = rowsFromBar();
@@ -7762,10 +7789,19 @@ function verdictOf(day: string): Finding | undefined {
     const said = describeFile(c);
     return { key: `integrity:${c.path}`, kind: 'integrity', severity: fileSeverity(c.class), score: 100, title: said.title, detail: said.detail, look: 'integrity', acts: [] };
   }
+  // A run that failed on the day (a file the engine refused): the day is wrong, by its file (ADR 0013 §6).
+  if (state.failed && !state.failed.file && loads.list[loads.at]?.day === day) return { key: `failed:${day}`, kind: 'schema', severity: 'alert', score: 100, title: failedHead(), detail: state.failed.message, look: 'integrity', acts: [] };
+  // Another watched load that held the day (ADR 0013 §5), the cause before the judged dataset's own symptom: its
+  // verdict is the day's, with the cell its words point at.
+  const other = heldElsewhere(state.runs.find((x) => dayOfRun(x) === day));
+  if (other) return { key: `hold:${day}:${other.origin}`, kind: kindOfHead(other.said), severity: 'alert', score: 100, title: `${other.origin}: ${other.said}`, detail: '', look: 'news', acts: [] };
   // The day as its story tells it: one head, one severity, for the strip, the history and the header alike.
   const story = history && historyOpen() && history.file.days.includes(day) ? storyFor(day) : null;
   return story ? { key: `story:${day}`, kind: story.state === 'unlearned' ? 'unlearned' : story.cause?.kind ?? 'calm', severity: story.severity, score: 100, title: story.head, detail: story.chip ?? '', look: 'news', acts: [] } : undefined;
 }
+/** The kind of finding a claim's head reads as (a claim carries its head, not its kind): for the strip's cell word. */
+const kindOfHead = (head: string): Finding['kind'] =>
+  /^(Almost no|Fewer|More) /.test(head) ? 'volume' : /^Gap in|fall to| from \d\d:\d\d/.test(head) ? 'hours' : /^New /.test(head) ? 'new' : / with .*: \d/.test(head) ? 'combo' : / blank/.test(head) ? 'missing' : /: none$|almost gone/.test(head) ? 'gone' : 'share';
 // A day with notes says its head when the head isn't a calm one ("Busier than usual for days", Sep 14, 2022), as its
 // News does: never "a normal day" beside a count outside its range.
 const VERDICT_WORD: Record<Severity, string> = { alert: 'something’s wrong', warn: 'unusual', note: 'with a note', ok: 'a normal day' };
@@ -7821,7 +7857,8 @@ function renderLoads(): void {
   // §7: dashes mean absent). A refused file was tried: its mark stays.
   const notRun = (k: number) => {
     const l = loads.list[k]!;
-    return !!viewed && l.day < viewed && !runOfLoad(k) && !dayPause(l.day) && verdictOf(l.day)?.kind !== 'integrity';
+    const v = verdictOf(l.day);
+    return !!viewed && l.day < viewed && !runOfLoad(k) && !dayPause(l.day) && v?.kind !== 'integrity' && !v?.key.startsWith('failed:');
   };
   // The day's trips, drawn and said, only to someone the trips are open to (ADR 0009 §12: a viewer never sees what is
   // closed to them); anyone else gets the days and what became of each.
@@ -7838,7 +7875,7 @@ function renderLoads(): void {
     const pm = later ? null : dayPause(l.day);
     const held = !later && !absent && !state.doc.publish && !!(history && historyOpen() && storyFor(l.day)?.gate?.held);
     const range = tripsRanges?.at(l.day);
-    const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : absent ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: not run` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}${counted ? `: ${rowsSaid(l.rows)}` : ''}${top ? (top.kind === 'unlearned' ? `, not judged yet${top.detail ? `: ${top.detail}` : ''}` : `, ${VERDICT_WORD[top.severity]}${saysHead(top) ? `: ${top.title}` : ''}`) : ''}${held ? ', held' : ''}${pm ? pauseSaid(l.day, pm) : ''}${r ? '' : ', not run yet'}`;
+    const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : absent ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: not run` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}${counted ? `: ${rowsSaid(l.rows)}` : ''}${top ? (top.kind === 'unlearned' ? `, not judged yet${top.detail ? `: ${top.detail}` : ''}` : `, ${VERDICT_WORD[top.severity]}${saysHead(top) ? `: ${top.title}` : ''}`) : ''}${held ? ', held' : ''}${pm ? pauseSaid(l.day, pm) : ''}${r ? '' : top?.key.startsWith('failed:') ? ', the run failed: nothing published' : ', not run yet'}`;
     return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', later ? 'later' : '', absent ? 'notrun' : '', holidayOf(l.day, calendarNow()) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing || !runs, onclick: () => void useLoad(k) },
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
@@ -8848,8 +8885,7 @@ async function run(): Promise<void> {
     sayRun(rec);
   } catch (e) {
     const msg = message(e);
-    const origin = /^([A-Za-z][A-Za-z0-9_]*): /.exec(msg)?.[1];
-    state.failed = { origin: origin && (steps().has(origin) || sourceIds().has(origin)) ? origin : undefined, message: msg };
+    state.failed = { origin: failedOrigin(msg), message: msg };
     sayFailed();
     await recordRun(null, msg);
   } finally {
