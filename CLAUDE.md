@@ -112,7 +112,10 @@ match smaltdb's `CLAUDE.md`.
   [ADR 0012](docs/adr/0012-visual-first-in-two-minutes.md): the brief and the incident page first, then the drill by
   the biggest driver, then the phone canvas read sideways, then the notebook as a page behind the visuals.
   [ADR 0013](docs/adr/0013-discovered-checks.md) adds the combination and forest judges and the watched step, built on
-  the controls example; its Q-104 to Q-109 are the maintainers' to confirm.
+  the controls example; its Q-104 to Q-109 are the maintainers' to confirm. **Next:** [ADR 0014](docs/adr/0014-gates.md),
+  gates (bronze, silver, gold checks as a `gate()` cell in the notebook, written bands and due marks in the ontology,
+  scope and dependency rules, the classifier on a kept sample, a sealed gold), in its seven slices, judged against the
+  control estate's answer key (its §"The answer key").
 
 ## Rules for this repository
 

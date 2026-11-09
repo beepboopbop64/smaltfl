@@ -54,8 +54,10 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   to, five on SLA dates with clustered due dates, four status words, one dependency rule, and three layers of planted
   days (obvious, contradictions and scope, look-alikes beside one real SLA problem). `examples/control-estate/`,
   built with `npm run build:app -- --flow examples/control-estate/flow.json --out dist/app-estate`. **What the flow
-  should say of each day is not decided**: the maintainer has a plan to explain. Until then `test/estate.test.ts`
-  asserts the data, and the app shows what today's judges make of it.
+  should say of each day is now decided**: ADR 0014 (gates), from the maintainer's answers Q-110 to Q-117, with the
+  estate's March as its answer key and seven slices in order. Nothing of it is built. Until it is, `test/estate.test.ts`
+  asserts the data, and the app shows what today's judges make of it: they hold the look-alike days (the pentest
+  cluster from Mar 16 on) and hide the real DR problem behind that standing hold, which is the gap ADR 0014 closes.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

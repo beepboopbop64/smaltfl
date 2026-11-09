@@ -51,6 +51,24 @@ behind the proposals is in [research/ecosystem-survey.md](research/ecosystem-sur
 | Q-15 | Lineage granularity in v1? | Dataset-level and run-level from the start; column-level when the plan API lands | open |
 | Q-18 | Data quality in v1? | Row expectations (warn, drop, fail) and dataset checks (freshness, row count, uniqueness, schema) | open |
 
+## Gates: the maintainer's answers (ADR 0014)
+
+Asked through the question prompt on 2026-11-09, after a survey of layered data-quality checks, classifier two-sample
+tests, isolation forests and how tools show checks. The ADR that records them is proposed; nothing in it is built.
+
+| ID | Question | Decision | Status |
+| --- | --- | --- | --- |
+| Q-110 | Where is a stage's gate (its checks, each on/off and warn/hold) written? | The maintainer: in the notebooks, "but easy to configure as toggles that just add steps to the notebook": a `gate()` cell beside the step; the app's toggles edit that cell and record the change (ADR 0014 §1) | decided |
+| Q-111 | Where is an expected band (a pass rate around 85–95%) written, and how does it change? | In the ontology, per property value (`expect`), applying wherever the column appears; a lasting change offers Accept the new band, a recorded decision that edits the ontology (ADR 0014 §3) | decided |
+| Q-112 | The classifier needs rows from earlier days: where from? | The maintainer: "small holdout but sample smartly": a kept sample of a few hundred rows a day beside the history, stratified (Q-117) (ADR 0014 §5) | decided |
+| Q-113 | How are SLA look-alike days (many due dates together, usual lateness) told from a wave of lateness? | A `due` mark on the date column in the ontology, judged deterministically: what was due, what ran late, the late share against its history (ADR 0014 §3) | decided |
+| Q-114 | Which checks hold and which warn by default, at each layer? | Deterministic checks hold, learned ones warn, at every layer, unless the ontology marks the value bad; a toggle flips either (ADR 0014 §2) | decided |
+| Q-115 | What seals a gold dataset, and how does the seal show? | Automatic when every gate passed or every hold was decided: the signed manifest is the seal; a badge on the card, with what was checked, who signed, when and the hash behind a tap; unsealed by a re-run or a later decision (ADR 0014 §6) | decided |
+| Q-116 | How do the layers read on the canvas, and where do the checks live? | The maintainer: "keep the free layout; gate marks only": each card carries its gate's worst state and reason; the checks on a Checks tab of the card's sheet (ADR 0014 §7) | decided |
+| Q-117 | What does "sample smartly" mean for the kept rows? | Stratified by the dataset's typed columns and status, plus every row a judge flagged (ADR 0014 §5) | decided |
+| Q-118 | The gold reconcile check's key: declared in the gate, or the ontology's `lookup`? | Not asked yet | open |
+| Q-119 | Should a silver `needs` rule be derivable from the ontology rather than written per gate? | Not asked yet | open |
+
 ## Checks nobody wrote: the maintainer's request, and what is open (ADR 0013)
 
 The maintainer, 2026-11-09: a dataset like the one they work with, a list of applications passing or failing
