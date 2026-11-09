@@ -54,8 +54,19 @@ describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
     const json = jsonDoc();
     const checks = json.steps[0] as Extract<StepDef, { kind: 'expectations' }>;
     expect(doc.steps[0]).toMatchObject({ rules: checks.rules, maxDropped: checks.maxDropped });
+    // Each step knows its cell, and the canvas gets a section a notebook (display only, out of every hash).
+    expect(doc.cells).toEqual({
+      auth_valid: { notebook: 'checks.nb.ts', cell: 'auth_valid', lang: 'ts', line: 15, endLine: 23 },
+      signins_by_hour: { notebook: 'counts.nb.ts', cell: 'signins_by_hour', lang: 'sql', line: 10, endLine: 14 },
+      failures_by_country: { notebook: 'counts.nb.ts', cell: 'failures_by_country', lang: 'sql', line: 19, endLine: 23 },
+    });
+    expect(doc.groups).toEqual([
+      { id: 'nb-checks', name: 'Checks', steps: ['auth', 'auth_valid'], color: 'smalt' },
+      { id: 'nb-counts', name: 'Counts', steps: ['signins_by_hour', 'failures_by_country'], color: 'teal' },
+    ]);
+    expect(await flowHash(doc)).toBe(await flowHash({ ...doc, cells: undefined, groups: undefined }));
     // Everything but the format is the JSON example's: the steps too, where the JSON's visual steps are SQL here.
-    const { notebooks: _n, smaltfl: _f, ...rest } = doc;
+    const { notebooks: _n, smaltfl: _f, cells: _c, groups: _g, ...rest } = doc;
     const { smaltfl: _jf, ...jrest } = json;
     expect({ ...rest, steps: rest.steps.map((s) => (s.kind === 'sql' ? { ...s, sql: '' } : s)) }).toEqual({ ...jrest, steps: jrest.steps.map((s) => (s.kind === 'aggregate' ? { kind: 'sql', id: s.id, inputs: s.inputs, sql: '', description: s.description, dataset: s.dataset } : s)) });
   });

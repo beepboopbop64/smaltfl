@@ -171,6 +171,20 @@ export interface FlowDocument {
   profiles?: ProfileDef[];
   /** Display only: where each card sits on the canvas. Not part of any hash. */
   layout?: Record<string, [number, number]>;
+  /**
+   * Display only, in a format-4 document: the notebook cell each step came from (`expandNotebooks`), so the canvas
+   * and a step's sheet can show the cell. Not part of any hash.
+   */
+  cells?: Record<string, CellRef>;
+}
+
+/** Where a step is written: its notebook, its cell, the cell's language and its lines (1-based, inclusive). */
+export interface CellRef {
+  notebook: string;
+  cell: string;
+  lang: 'ts' | 'sql' | 'df' | 'md';
+  line: number;
+  endLine: number;
 }
 
 /** A notebook of a format-4 document: its path, relative to the document, and its source as loaded. */
@@ -446,6 +460,10 @@ export function validateDocument(doc: unknown): Issue[] {
   if (issues.length === 0) {
     const cycle = findCycle(steps as unknown as StepDef[]);
     if (cycle) add('$.steps', `the steps form a cycle: ${cycle.join(' → ')}`);
+  }
+  if (doc.cells !== undefined) {
+    if (!isRecord(doc.cells)) add('$.cells', 'an object: each step\'s notebook cell');
+    else for (const [k, v] of Object.entries(doc.cells)) if (!isRecord(v) || typeof v.notebook !== 'string' || typeof v.cell !== 'string' || typeof v.line !== 'number') add(`$.cells.${k}`, '{ notebook, cell, lang, line, endLine }');
   }
   if (doc.layout !== undefined) {
     if (!isRecord(doc.layout)) add('$.layout', 'an object');
@@ -952,8 +970,8 @@ export function sourceOf(doc: Pick<FlowDocument, 'steps'>, id: string): string |
   return undefined;
 }
 
-/** The document without display-only fields (its layout, groups and profiles): what the flow hash covers. */
-export function withoutDisplay(doc: FlowDocument): Omit<FlowDocument, 'layout' | 'groups' | 'profiles'> {
-  const { layout: _layout, groups: _groups, profiles: _profiles, ...rest } = doc;
+/** The document without display-only fields (its layout, groups, profiles and cells): what the flow hash covers. */
+export function withoutDisplay(doc: FlowDocument): Omit<FlowDocument, 'layout' | 'groups' | 'profiles' | 'cells'> {
+  const { layout: _layout, groups: _groups, profiles: _profiles, cells: _cells, ...rest } = doc;
   return rest;
 }

@@ -15,7 +15,7 @@ match smaltdb's `CLAUDE.md`.
 | `npm run check` | `npm run typecheck` then `npm test` (vitest): what CI runs | Before every commit |
 | `npm run build` | `dist/`: the core (`index.js`), the runtime plugin (`plugin/index.js`) and their declarations | Packaging checks |
 | `npm run bench` | The scenario benchmarks in `bench/`, written to `bench/results/node.json` | Changes that could affect speed |
-| `npm run build:app` | The app in `dist/app`, with the `data` branch's 100k sample if fetched (else the XS fixtures) | Changes to `src/app` |
+| `npm run build:app` | The app in `dist/app` on `examples/nyc-taxis-weather/` (its notebooks expanded, shipped as `data/flow.json`), with the `data` branch's daily loads if fetched (else the XS fixtures); `-- --flow examples/security-signins/flow.json` for another flow | Changes to `src/app` |
 
 ## Layout
 
@@ -81,8 +81,10 @@ match smaltdb's `CLAUDE.md`.
   and graph on smaltty (`smaltkit/typescript`, passed in); `src/notebook.ts` is `smaltfl/notebook`, what a notebook
   imports (`source`, `check`, `fill`); its plan is plan/3 (E14, `test/notebook.test.ts`). A flow is a folder:
   `examples/security-signins/` and `examples/nyc-taxis-weather/` (`flow.json` and `*.nb.ts`, typechecked with the
-  repository; `test/notebook-taxi.test.ts` holds them to the JSON forms, which the app still reads). `packed.json`
-  pins smaltnb and smaltkit beside smaltdb.
+  repository; `test/notebook-taxi.test.ts` holds them to the JSON forms, which the real-history tests still read).
+  `scripts/flow.ts` reads either form from disk for the app build and the history builder. The app shows a step's
+  cell (`cells`, `groups`, display fields `expandNotebooks` fills). `packed.json` pins smaltnb and smaltkit beside
+  smaltdb.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).

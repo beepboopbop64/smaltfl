@@ -149,6 +149,14 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
      fill and expect nodes, outputs and publish block, and give the same rows on the XS fixtures. The hold and donor
      vectors run on the JSON form, which stays `examples/nyc-taxis-weather.smaltfl.json` until the app reads folders
      (slice 4);
-  4. the app: notebook groups, the cell sheet with smaltkit's editor, everything else as it is;
+  4. the app: notebook groups, the cell sheet with smaltkit's editor, everything else as it is. Built 2026-11-09, the
+     editor excepted: `npm run build:app` reads the flow folder (`scripts/flow.ts`, bundled for Node: notebooks loaded,
+     steps derived) and ships it as `data/flow.json`, which the page opens as it opens any shipped flow; the canvas
+     draws one section a notebook (`groups`, derived unless the document draws its own) and marks each card from a
+     cell `CELL · SQL`, `CELL · CHECKS`, `CELL · FILL`; a card's About tab shows the cell as written (its notebook,
+     lines and code, `cells`, display only) where a JSON step shows editable settings, with the Statement tab still
+     saying what the engine runs. Editing a cell in smaltkit's editor, re-deriving in the page, is the next step of
+     this slice. The flow document is the build's own file: checked against loads.json's entry when read, never
+     against the data branch's MANIFEST.json (`namedFiles`);
   5. a headless run (`node scripts/run.mjs --flow DIR --day D`) on the in-process engine, ahead of `smaltnb run`;
   6. the smaltts seam, when its milestone 7 lands: publish through `flow()`, the plugin's tables through specs.

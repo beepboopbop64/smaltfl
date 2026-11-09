@@ -26,7 +26,7 @@
  */
 import { buildGraph } from 'smaltnb/graph';
 import { importSpecifiers, moduleOf, parseNotebook, type Cell, type Notebook, type TypeScriptKit } from 'smaltnb/format';
-import type { ExpectationRule, FlowDocument, Issue, NotebookDef, StepDef } from './document.js';
+import { GROUP_COLORS, type CellRef, type ExpectationRule, type FlowDocument, type GroupDef, type Issue, type NotebookDef, type StepDef } from './document.js';
 import { PlanError } from './plan.js';
 
 /** The module a flow's notebook imports its markers from. */
@@ -57,6 +57,8 @@ export interface ExpandOptions {
 export interface Expanded {
   steps: StepDef[];
   cells: CellStep[];
+  /** One section a notebook, for the canvas: its source bindings and its steps, named by the file. Display only. */
+  groups: GroupDef[];
   issues: Issue[];
 }
 
@@ -75,13 +77,23 @@ export async function loadNotebooks<D extends { notebooks?: NotebookRef[] }>(doc
 }
 
 /**
- * A format-4 document with its steps derived from its notebooks. Throws a PlanError naming the first problem when a
- * notebook isn't a flow's (its own diagnostics, a cell that isn't a step, a name nothing defines).
+ * A format-4 document with its steps derived from its notebooks, each step's cell noted (`cells`, display only) and,
+ * unless the document draws its own sections, one section a notebook (`groups`). Throws a PlanError naming the first
+ * problem when a notebook isn't a flow's (its own diagnostics, a cell that isn't a step, a name nothing defines).
  */
 export async function expandNotebooks(doc: FlowDocument, ts: TypeScriptKit, options: ExpandOptions = {}): Promise<FlowDocument> {
-  const { steps, issues } = await stepsOfNotebooks(doc, ts, options);
+  const { steps, cells, groups, issues } = await stepsOfNotebooks(doc, ts, options);
   if (issues.length > 0) throw new PlanError(`the notebooks have ${issues.length} problem${issues.length === 1 ? '' : 's'}: ${issues[0]!.path}: ${issues[0]!.message}`, issues);
-  return { ...doc, steps };
+  const refs: Record<string, CellRef> = {};
+  for (const c of cells) refs[c.step.id] = { notebook: c.notebook, cell: c.cell, lang: c.lang, line: c.span.line, endLine: c.span.endLine };
+  return { ...doc, steps, cells: refs, ...(doc.groups === undefined ? { groups } : {}) };
+}
+
+/** A notebook's section name: its file's stem, as words (`clean.nb.ts` → "Clean", `by_hour.nb.ts` → "By hour"). */
+export function notebookName(path: string): string {
+  const stem = path.slice(path.lastIndexOf('/') + 1).replace(/\.nb\.ts$/, '').replace(/\.ts$/, '');
+  const words = stem.replace(/[-_]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+  return words ? words[0]!.toUpperCase() + words.slice(1) : stem;
 }
 
 /** What a top-level name of a notebook stands for. */
@@ -192,9 +204,14 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
   // then what the publish cells say, on the steps they name.
   const steps: StepDef[] = [];
   const cells: CellStep[] = [];
+  const groups: GroupDef[] = [];
   const published: { parsed: Parsed; where: string; name: string; options: Record<string, unknown> }[] = [];
   for (const parsed of byPath.values()) {
     const kinds = classified.get(parsed)!;
+    // Named apart from any source or step (`weather.nb.ts` beside the source `weather`).
+    const group: GroupDef = { id: `nb-${parsed.def.path.replace(/\.nb\.ts$|\.ts$/, '').replace(/[^A-Za-z0-9_]+/g, '_')}`, name: notebookName(parsed.def.path), steps: [], color: GROUP_COLORS[(groups.length + 1) % GROUP_COLORS.length] };
+    groups.push(group);
+    for (const c of kinds.values()) if (c.kind === 'source' && !groups.some((g) => g.steps.includes(c.id))) group.steps.push(c.id);
     let description: string | undefined;
     for (const id of parsed.order) {
       const cell = parsed.nb.cells.find((c) => c.id === id);
@@ -242,6 +259,7 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
       if (step) {
         steps.push(step);
         cells.push({ step, notebook: parsed.def.path, cell: cell.id, lang: cell.lang, span: cell.span });
+        group.steps.push(step.id);
       }
     }
   }
@@ -257,7 +275,7 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
     if (step.dataset) add(p.where, `${p.name} is published twice`);
     step.dataset = { ...(typeof description === 'string' ? { description } : {}), ...(storage !== undefined ? { storage: storage as 'row' | 'columnar' } : {}) };
   }
-  return { steps, cells, issues };
+  return { steps, cells, groups: groups.filter((g) => g.steps.length > 0), issues };
 }
 
 type Classified =

@@ -108,7 +108,9 @@ export function readDataList(raw: unknown, fallback: DataBindings): DataList {
 
 /** Every file a list names, with the sha256 and size it gives: what must be in MANIFEST.json, as it says. */
 export function namedFiles(list: DataList): { path: string; sha256: string; bytes: number }[] {
-  const fixed = Object.values(list.files).map((f) => ({ path: f.from ?? f.path, sha256: f.sha256, bytes: f.bytes }));
+  // The flow document is the build's own file (ADR 0011: a folder's flow.json, its notebooks expanded), never the data
+  // branch's: it is checked against loads.json's entry when it is read, not against MANIFEST.json.
+  const fixed = Object.entries(list.files).filter(([k]) => k !== 'flow').map(([, f]) => ({ path: f.from ?? f.path, sha256: f.sha256, bytes: f.bytes }));
   const days = [...list.loads, ...list.episodes.flatMap((e) => e.loads), ...list.donors].map((l) => ({ path: l.file, sha256: l.sha256, bytes: l.bytes ?? -1 }));
   return [...fixed, ...days];
 }

@@ -49,9 +49,13 @@ describe('the taxi example as notebooks (ADR 0011 §1, §5)', () => {
     expect(plan.publish).toEqual(other.publish);
     // Everything but the steps and the format is the JSON example's; the steps share their ids, descriptions and
     // datasets, in the JSON's order.
-    const { steps, notebooks: _n, smaltfl: _f, ...rest } = doc;
-    const { steps: jsteps, smaltfl: _jf, ...jrest } = json;
+    const { steps, notebooks: _n, smaltfl: _f, cells: _c, groups, ...rest } = doc;
+    const { steps: jsteps, smaltfl: _jf, groups: jgroups, ...jrest } = json;
     expect(rest).toEqual(jrest);
+    // The sections the JSON drew by hand are the notebooks here, one each, with the same members.
+    const sections = (gs: NonNullable<FlowDocument['groups']>) => gs.map((g) => [...g.steps].sort());
+    expect(groups!.map((g) => g.name)).toEqual(['Clean', 'Places', 'Enrich', 'Demand', 'Weather']);
+    expect(sections(groups!)).toEqual(sections(jgroups!));
     const facts = (xs: FlowDocument['steps']) => [...xs].sort((a, b) => a.id.localeCompare(b.id)).map((s) => [s.id, s.description, s.dataset]);
     expect(facts(steps)).toEqual(facts(jsteps));
   });

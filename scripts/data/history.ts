@@ -27,6 +27,7 @@ import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../../src/plugin/index.js';
 import { measureLoad, pinFile, translate, type FlowDocument, type WatchDef } from '../../src/index.js';
+import { bindingsPath, readFlow } from '../flow.js';
 import { type DayError, type HistoryFile } from '../../src/core/history.js';
 import { appendPeriods, checksOf, emptyHistory, SAMPLE, type MeasureSettings, type Measures } from '../../src/core/measures.js';
 import { pinnedDdl, type Binding, type DataBindings } from '../../examples/sources.js';
@@ -91,7 +92,7 @@ async function worker(): Promise<void> {
 const list = (v: string | undefined) => (v === undefined ? undefined : v.split(',').map((x) => x.trim()).filter(Boolean));
 
 /** What to build, from the arguments. */
-function jobOf(args: string[]): { job: Job; out: string } {
+async function jobOf(args: string[]): Promise<{ job: Job; out: string }> {
   const flags = new Map<string, string[]>();
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -110,10 +111,10 @@ function jobOf(args: string[]): { job: Job; out: string } {
     return jobOf(['--flow', 'examples/nyc-taxis-weather.smaltfl.json', '--watch', 'trips', '--files', JSON.stringify(files), '--count', TAXI.count.join(','), '--follow', TAXI.follow.join(','), '--pair', TAXI.pair.join(','), '--time', TAXI.time, '--param', 'month={slot:7}', out]);
   }
   const flowPath = one('flow')!;
-  const doc = JSON.parse(readFileSync(flowPath, 'utf8')) as FlowDocument;
+  const doc = await readFlow(flowPath);
   const source = one('watch') ?? Object.keys(doc.publish?.watch ?? {})[0];
   if (!source || !doc.sources.some((s) => s.id === source)) throw new Error(`${flowPath} has no source ${source ?? '(none named)'} to watch`);
-  const bindPath = one('bind') ?? flowPath.replace(/\.smaltfl\.json$/, '.data.json');
+  const bindPath = one('bind') ?? bindingsPath(flowPath);
   if (!existsSync(bindPath)) throw new Error(`no data list ${bindPath} for ${basename(flowPath)}: pass --bind`);
   const data = JSON.parse(readFileSync(bindPath, 'utf8')) as DataBindings;
   const binding = data.sources[source];
@@ -140,7 +141,7 @@ function jobOf(args: string[]): { job: Job; out: string } {
 }
 
 async function main(): Promise<void> {
-  const { job, out } = jobOf(process.argv.slice(2));
+  const { job, out } = await jobOf(process.argv.slice(2));
   const files = [...job.files].sort((a, b) => (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0));
   if (!files.length) throw new Error('no loads to measure');
   const n = Math.max(1, Math.min(availableParallelism(), files.length));

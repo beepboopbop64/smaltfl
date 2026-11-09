@@ -838,58 +838,6 @@
       }
     ]
   },
-  "groups": [
-    {
-      "id": "clean",
-      "name": "Clean trips",
-      "color": "amber",
-      "steps": [
-        "trips",
-        "trips_filled",
-        "trips_valid",
-        "trips_dedup"
-      ]
-    },
-    {
-      "id": "places",
-      "name": "Places",
-      "color": "smalt",
-      "steps": [
-        "zones",
-        "zone_list",
-        "districts"
-      ]
-    },
-    {
-      "id": "enrich",
-      "name": "Enrich",
-      "color": "teal",
-      "steps": [
-        "trips_zoned",
-        "trips_enriched"
-      ]
-    },
-    {
-      "id": "demand",
-      "name": "Demand",
-      "color": "green",
-      "steps": [
-        "zone_hour",
-        "borough_hour"
-      ]
-    },
-    {
-      "id": "weather_group",
-      "name": "Weather and demand",
-      "color": "violet",
-      "steps": [
-        "weather",
-        "weather_hourly",
-        "borough_hour_weather",
-        "weather_effect"
-      ]
-    }
-  ],
   "profiles": [
     {
       "id": "trips_profile",

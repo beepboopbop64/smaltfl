@@ -3,17 +3,20 @@
 // worker), and data/ (a flow's files, listed in data/loads.json, format 2: each source's binding with its file or its
 // daily loads and the days a paused one may be filled from, and each watched source's history, ADR 0010 §9).
 //
-//   node scripts/build-app.mjs            the example: the daily loads from origin/data, or the 10k fixtures
+//   node scripts/build-app.mjs            the example (examples/nyc-taxis-weather/, its notebooks expanded, ADR 0011):
+//                                         the daily loads from origin/data, or the 10k fixtures
 //   node scripts/build-app.mjs --xs       the example on the 10k fixtures
-//   node scripts/build-app.mjs --flow examples/security-signins.smaltfl.json
+//   node scripts/build-app.mjs --flow examples/security-signins/flow.json
 //                                         another example: its data list's generator writes its daily files, the
-//                                         general builder its history; the document ships as data/flow.json
+//                                         general builder its history. Every build ships its document as data/flow.json,
+//                                         a folder's with its notebooks' sources and the steps derived from them
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const out = 'dist/app';
 rmSync(out, { recursive: true, force: true });
@@ -47,8 +50,21 @@ const xs = process.argv.includes('--xs');
 const flowAt = process.argv.indexOf('--flow');
 const flowPath = flowAt >= 0 ? process.argv[flowAt + 1] : null;
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// The flow reader (scripts/flow.ts), bundled for Node: a folder's flow.json comes back with its notebooks loaded and its
+// steps derived (ADR 0011); a .smaltfl.json as it is.
+const reader = 'node_modules/.cache/smaltfl/flow.mjs';
+await build({ entryPoints: ['scripts/flow.ts'], bundle: true, platform: 'node', format: 'esm', target: 'node20', outfile: reader, logLevel: 'warning' });
+const { readFlow, bindingsPath } = await import(pathToFileURL(reader).href);
+const EXAMPLE_FLOW = 'examples/nyc-taxis-weather/flow.json';
 // The example's bindings (ADR 0010 §9): each source's table, format and file name, which loads.json carries on.
-const bindingsOf = (doc) => JSON.parse(readFileSync(doc.replace(/\.smaltfl\.json$/, '.data.json'), 'utf8'));
+const bindingsOf = (doc) => JSON.parse(readFileSync(bindingsPath(doc), 'utf8'));
+/** The document the build ships, as data/flow.json, and its entry in loads.json. */
+const shipFlow = async (path) => {
+  const doc = await readFlow(path);
+  const bytes = Buffer.from(JSON.stringify(doc, null, 2) + '\n');
+  writeFileSync(`${out}/data/flow.json`, bytes);
+  return { path: 'flow.json', from: path, sha256: sha256(bytes), bytes: bytes.length };
+};
 // The data branch at one commit, read by it for every file, so the list and the files can't come from two builds.
 let data = null;
 let manifestBytes = null;
@@ -112,10 +128,10 @@ if (days.length) {
   const donors = (manifest.loads.donors ?? []).map(entryOf);
   // Each day's numbers, for each load's normal range: a data branch built before the history has none.
   const history = manifest.history ? file('history.json', 'history.json') : null;
-  const b = bindingsOf('examples/nyc-taxis-weather.smaltfl.json').sources;
+  const b = bindingsOf(EXAMPLE_FLOW).sources;
   const source = manifest.loads.source ?? 'trips';
   const index = {
-    format: 2, month: manifest.month, built: manifest.built, data: { commit: data, manifest: sha256(manifestBytes), bytes: manifestBytes.length }, flow: null,
+    format: 2, month: manifest.month, built: manifest.built, data: { commit: data, manifest: sha256(manifestBytes), bytes: manifestBytes.length }, flow: await shipFlow(EXAMPLE_FLOW),
     sources: { [source]: { ...b[source], loads: list, donors }, zones: { ...b.zones, entry: files.zones }, weather: { ...b.weather, entry: files.weather } },
     histories: history ? { [source]: history } : {},
     episodes,
@@ -138,7 +154,7 @@ if (days.length) {
     writeFileSync(`${out}/data/${name}`, bytes);
     return { path: name, from, sha256: sha256(bytes), bytes: bytes.length };
   };
-  const flowEntry = entry('flow.json', readFileSync(flowPath), flowPath);
+  const flowEntry = await shipFlow(flowPath);
   const history = entry('history.json', readFileSync(join(work, 'history.json')), `${bind.generate}, scripts/data/history.mjs`);
   const list = JSON.parse(readFileSync(join(work, 'loads.json'), 'utf8')).map((l) => {
     const e = entry(`loads/${basename(l.file)}`, readFileSync(l.file), bind.generate);
@@ -150,13 +166,13 @@ if (days.length) {
   console.log(`built ${out} (${commit.slice(0, 12)}) with ${flowPath}: ${list.length} daily loads of ${source} and its history, generated by ${bind.generate}`);
 } else {
   // The fixtures: hashed here, as this build's own list, never as the data branch's.
-  const b = bindingsOf('examples/nyc-taxis-weather.smaltfl.json').sources;
+  const b = bindingsOf(EXAMPLE_FLOW).sources;
   const sources = {};
   for (const [id, binding] of Object.entries(b)) {
     const bytes = readFileSync(`fixtures/xs/${binding.file}`);
     put(binding.file, bytes);
     sources[id] = { ...binding, entry: { path: binding.file, from: `fixtures/xs/${binding.file}`, sha256: sha256(bytes), bytes: bytes.length } };
   }
-  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ format: 2, data: null, flow: null, sources, histories: {}, episodes: [] }, null, 2) + '\n');
+  writeFileSync(`${out}/data/loads.json`, JSON.stringify({ format: 2, data: null, flow: await shipFlow(EXAMPLE_FLOW), sources, histories: {}, episodes: [] }, null, 2) + '\n');
   console.log(`built ${out} (${commit.slice(0, 12)}) with data from fixtures/xs (10,000 trips)`);
 }

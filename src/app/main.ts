@@ -16,7 +16,7 @@ import { holidayOf, seasonOf, US_NYC_1, type Calendar } from '../core/calendar.j
 const calendarNow = (): Calendar => history?.calendar ?? US_NYC_1;
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
-import { GROUP_COLORS, insertAfter, periodOf, sourceOf, takeOut, validateDocument, watchHistory, withoutDisplay } from '../core/document.js';
+import { GROUP_COLORS, insertAfter, periodOf, sourceOf, takeOut, validateDocument, watchHistory, withoutDisplay, type CellRef } from '../core/document.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDayHours, emitDistinct, emitHourValues, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, stampShift, type EmitContext } from '../core/emit.js';
 import { effectOf, type Effect } from '../core/effect.js';
 import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, timeOf, type HistoryFile, type Metric } from '../core/history.js';
@@ -607,7 +607,30 @@ function kindLabel(id: string): string {
   const st = steps().get(id)!;
   // Checks that only drop rows are a filter, with a reason for each rule.
   const kind = st.kind === 'expectations' && st.rules.every((r) => r.onFail === 'drop') ? 'FILTER' : (KIND[st.kind] ?? st.kind.toUpperCase());
-  return `${kind}${st.dataset ? ' · OUTPUT' : ''}`;
+  // A step written as a notebook cell says so (ADR 0011): the cell is what a person reads and edits.
+  return `${notebookCellOf(id) ? 'CELL · ' : ''}${kind}${st.dataset ? ' · OUTPUT' : ''}`;
+}
+
+/** The notebook cell a step came from, in a format-4 flow (ADR 0011). */
+const notebookCellOf = (id: string): CellRef | undefined => state.doc.cells?.[id];
+
+/**
+ * A step's cell, as written (ADR 0011 §6): its notebook and lines, and its code. What the flow runs is derived from
+ * it, so the step's settings aren't edited here: the notebook is. The Statement tab shows what the engine runs.
+ */
+function cellView(id: string): HTMLElement | null {
+  const ref = notebookCellOf(id);
+  const nb = ref ? state.doc.notebooks?.find((n) => n.path === ref.notebook) : undefined;
+  if (!ref || !nb) return null;
+  const lines = nb.source.split('\n').slice(ref.line - 1, ref.endLine);
+  // The cell's own lines, their common indent gone, the trailing blank lines too.
+  while (lines.length && lines[lines.length - 1]!.trim() === '') lines.pop();
+  const indent = Math.min(...lines.filter((l) => l.trim()).map((l) => /^\s*/.exec(l)![0].length));
+  const code = lines.map((l) => l.slice(Number.isFinite(indent) ? indent : 0)).join('\n');
+  return h('div', { class: 'part cell-part' },
+    h('p', { class: 'eyebrow' }, `Cell · ${ref.notebook} · lines ${ref.line}–${ref.endLine}`),
+    h('pre', { class: 'cell-code', tabindex: '0', 'aria-label': `The cell ${ref.cell} in ${ref.notebook}` }, h('code', {}, code)),
+    h('p', { class: 'foot' }, `The flow reads this cell as written${ref.lang === 'sql' ? ': its SQL is the step, each \${name} what it reads' : ''}. To change the step, change the notebook; the Statement tab shows what the engine runs.`));
 }
 
 // ------------------------------------------------------------------ who can see what, per step
@@ -2677,7 +2700,10 @@ async function aboutTab(card: string, id: string, who: string): Promise<HTMLElem
     fact('Section', section);
   }
   box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, 'This run'), facts));
-  if (st && !profileOf(card)) box.append(editor(st));
+  // A step from a notebook cell shows the cell (ADR 0011); any other its settings, editable where they are text.
+  const cellBox = st && !profileOf(card) ? cellView(id) : null;
+  if (cellBox) box.append(cellBox);
+  else if (st && !profileOf(card)) box.append(editor(st));
   const danger: HTMLElement[] = [];
   if (st && isOwner() && !profileOf(card) && takeOut(state.doc, id)) {
     const out = h('button', { class: 'btn danger', type: 'button' }, 'Take this step out');

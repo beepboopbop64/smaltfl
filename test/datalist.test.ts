@@ -43,7 +43,8 @@ describe('readDataList', () => {
     expect(list).toMatchObject({ format: 2, loadSource: 'auth', flow, histories: { auth: history } });
     expect(list.loads).toEqual([{ day: '2024-03-12', file: 'loads/auth_2024-03-12.csv', sha256: SHA('a'), bytes: 1, rows: 3 }]);
     expect(list.files).toEqual({ history, 'history:auth': history, flow });
-    expect(namedFiles(list).map((f) => f.path)).toEqual(['history.json', 'history.json', 'examples/security-signins.smaltfl.json', 'loads/auth_2024-03-12.csv']);
+    // The flow document is the build's own, checked by its entry when read, not one of the data's files (ADR 0011).
+    expect(namedFiles(list).map((f) => f.path)).toEqual(['history.json', 'history.json', 'loads/auth_2024-03-12.csv']);
   });
 });
 
