@@ -541,7 +541,7 @@ describe('a fill step (ADR 0009 amendment 1 S1)', () => {
     expect(issues((d) => Object.assign(fill(d), { missing: { column: 'VendorID', value: 1 }, from: '2022-11-07' }))).toEqual([{ path: '$.steps[0].inputs', message: 'a fill step that fills from another day reads its source and the donor' }]);
     expect(issues((d) => Object.assign(fill(d), { missing: { column: 'VendorID', value: 1 }, from: 'last week' }))).toEqual([
       { path: '$.steps[0].inputs', message: 'a fill step that fills from another day reads its source and the donor' },
-      { path: '$.steps[0].from', message: 'the donor’s day, YYYY-MM-DD, or null for the part that arrived alone' },
+      { path: '$.steps[0].from', message: 'the donor’s day, YYYY-MM-DD (or its slot, YYYY-MM-DDTHH, ADR 0010 §7), or null for the part that arrived alone' },
     ]);
     const missing = (m: unknown) => issues((d) => Object.assign(fill(d), { missing: m, from: null }));
     expect(missing({ time: 'tpep_pickup_datetime', hours: [13, 23] })).toEqual([]);

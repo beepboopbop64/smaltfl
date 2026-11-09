@@ -131,6 +131,62 @@ export interface Hold {
   reaches: string[];
   /** A story hold: the claim it rests on; a donor hold whose claim says something wrong: the donor's claim. */
   claim?: Claim;
+  /**
+   * With several watched sources (ADR 0010 §7): the load it is about, a story's or a source not judged, or the checks
+   * of the one watched source they read. Holds and decisions are then about loads, not days.
+   */
+  load?: Load;
+  /** The run that first held the load, when an earlier run did: a carried hold, decided once (ADR 0010 §7). */
+  carried?: number;
+}
+
+/**
+ * A load (ADR 0010 §7): one file of one watched source for one slot, by the file's sha256 (a source read from a table,
+ * by its snapshot's content hash).
+ */
+export interface Load {
+  source: string;
+  slot: string;
+  sha256: string;
+}
+
+/** A load as one comparable text: its source (without case), slot and file. */
+export const loadKey = (l: Pick<Load, 'source' | 'slot' | 'sha256'>): string => `${l.source.toLowerCase()}|${l.slot}|${l.sha256}`;
+
+/** Whether a value is a load. */
+export const isLoad = (v: unknown): v is Load => typeof v === 'object' && v !== null && !Array.isArray(v) && typeof (v as Load).source === 'string' && typeof (v as Load).slot === 'string' && typeof (v as Load).sha256 === 'string';
+
+/**
+ * Whether a plan's holds and decisions are about loads (ADR 0010 §7): it watches more than one source. With one, a load
+ * is the run's day, and everything is as ADR 0009 has it.
+ */
+export const byLoad = (pub: FlowPlan['publish']): boolean => watchesOf(pub).length > 1;
+
+/**
+ * Each watched source's load in a run (ADR 0010 §7), by its node: its slot, the watch's period parameter's value; its
+ * file, as the manifest names the snapshot's (else its content hash). A watch with no slot, or a source the run didn't
+ * read, has none.
+ */
+export function loadsOf(plan: Pick<FlowPlan, 'nodes' | 'publish'>, manifest: Pick<RunManifest, 'nodes' | 'parameters'>): Map<number, Load> {
+  const out = new Map<number, Load>();
+  for (const w of watchesOf(plan.publish)) {
+    const slot = w.period === null ? undefined : manifest.parameters[w.period];
+    const n = manifest.nodes.find((x) => x.node === w.node);
+    const sha256 = n?.file?.sha256 ?? n?.content;
+    if (typeof slot === 'string' && sha256) out.set(w.node, { source: plan.nodes[w.node]!.origin, slot, sha256 });
+  }
+  return out;
+}
+
+/**
+ * Holds with the run each load was first held by, when an earlier run held it (`earlier`): carried holds, which cite
+ * that run (ADR 0010 §7). The rest as they were.
+ */
+export function carry<H extends Pick<Hold, 'load' | 'carried'>>(holds: readonly H[], earlier: (load: Load) => number | undefined): H[] {
+  return holds.map((h) => {
+    const c = h.load ? earlier(h.load) : undefined;
+    return c === undefined ? h : { ...h, carried: c };
+  });
 }
 
 /**
@@ -485,15 +541,20 @@ export function judgeClaims(plan: Pick<FlowPlan, 'nodes' | 'parameters' | 'publi
  * rows from the manifest, the measures as stored (else as the claims name them), and the flow hash they must be told
  * under.
  */
-export function factsFromClaims(claims: readonly Claim[], o: { rows(node: number): number | undefined; flow?: string; measured?(node: number): string | undefined }): ClaimFacts {
-  const own = (node: number) => claims.find((c): c is StoryClaim2 => isClaim2(c))?.measured;
+export function factsFromClaims(claims: readonly Claim[], o: { rows(node: number): number | undefined; flow?: string; measured?(node: number): string | undefined; origin?(node: number): string | undefined }): ClaimFacts {
+  // Several watched sources (ADR 0010 §7): each node's measures are its own source's claim's.
+  const own = (node: number) => {
+    const c2 = claims.filter(isClaim2);
+    const origin = o.origin?.(node)?.toLowerCase();
+    return origin !== undefined ? c2.find((c) => c.source.toLowerCase() === origin)?.measured : c2.length === 1 ? c2[0]!.measured : undefined;
+  };
   return {
     rows: o.rows,
     pinned: (path) => {
       const b = claims.map(claimBase).find((x) => x?.path === path);
       return b ? { sha256: b.sha256, bytes: b.bytes } : undefined;
     },
-    measured: o.measured ?? ((node) => (claims.filter(isClaim2).length === 1 ? own(node) : undefined)),
+    measured: o.measured ?? own,
     // The claims' own tails: judged again where the pinned tail is gone, each stands for itself.
     tail: () => ({ known: claims.flatMap((c) => (isClaim2(c) && c.history.tail ? [c.history.tail] : [])) }),
     ...(o.flow !== undefined ? { flow: o.flow } : {}),
@@ -569,11 +630,12 @@ function fillSaid(n: Extract<FlowPlan['nodes'][number], { op: 'fill' }>): string
  * step whose counts trip (a step whose counts are missing holds too); each watched source whose claim holds under
  * `hold`; each watched source not judged. A derived run (amendment 1 S4) is held too, by each fill node that fills,
  * reaching every output, and by each donor not judged or not good. None for a plan that doesn't say what holds it. In
- * node order, checks first.
+ * node order, checks first. With several watched sources, each hold of a source (and each check that reads one) names
+ * its load (ADR 0010 §7).
  */
-export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, manifest: Pick<RunManifest, 'nodes'>, judged: readonly Judged[]): Hold[];
-export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, manifest: Pick<RunManifest, 'nodes'>, judged: readonly Judged[], derived: Derived): RunHold[];
-export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, manifest: Pick<RunManifest, 'nodes'>, judged: readonly Judged[], derived: Derived = {}): RunHold[] {
+export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, manifest: Pick<RunManifest, 'nodes' | 'parameters'>, judged: readonly Judged[]): Hold[];
+export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, manifest: Pick<RunManifest, 'nodes' | 'parameters'>, judged: readonly Judged[], derived: Derived): RunHold[];
+export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, manifest: Pick<RunManifest, 'nodes' | 'parameters'>, judged: readonly Judged[], derived: Derived = {}): RunHold[] {
   const pub = plan.publish;
   if (!pub) return [];
   const out: RunHold[] = [];
@@ -598,6 +660,21 @@ export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, m
     const origin = plan.nodes[j.node]?.origin ?? String(j.node);
     if ('unjudged' in j) out.push({ by: 'donor', node: j.node, origin, said: j.unjudged, reaches: reachOf(plan, j.node) });
     else if (!donorGood(j.claim)) out.push({ by: 'donor', node: j.node, origin, said: `the donor day ${claimDay(j.claim)}: ${j.claim.head}`, reaches: reachOf(plan, j.node), claim: j.claim });
+  }
+  // Several watched sources (ADR 0010 §7): each hold of a source, and each check that reads one watched source, is about
+  // its load.
+  if (byLoad(pub)) {
+    const loads = loadsOf(plan, manifest as Pick<RunManifest, 'nodes' | 'parameters'>);
+    const watched = new Set(loads.keys());
+    for (const h of out) {
+      if (h.by === 'story' || h.by === 'unjudged') {
+        const l = loads.get(h.node);
+        if (l) h.load = { ...l };
+      } else if (h.by === 'checks') {
+        const read = [...upstream(plan, h.node)].filter((i) => watched.has(i));
+        if (read.length === 1) h.load = { ...loads.get(read[0]!)! };
+      }
+    }
   }
   if (derived.derived) {
     const all = plan.outputs.map((o) => o.name);
@@ -706,6 +783,9 @@ export interface HeldAbout {
    * the decision is still the same one.
    */
   keys: Record<string, string>;
+  /** With several watched sources (ADR 0010 §7): every load the run read (`loadsOf`), held or not. A run's entry, `ok`
+   * or held, names them, so a load that holds no more is seen to pass. */
+  loads?: Load[];
 }
 
 /** A run, by its number in the engine and its manifest's hash. */
@@ -758,6 +838,11 @@ export interface DecideAbout {
   /** Accept the new level (amendment 1 S6, C6): the source, the day the level starts and the metrics it names, as
    * `metricKey` does. A day published under a standing level (`under`) names the same level. */
   level?: { source: string; from: string; metrics: string[] };
+  /**
+   * With several watched sources (ADR 0010 §7): the load it is about, in place of the outputs (`outputs` is empty, or,
+   * for a fill, the derived run's keys as evidence): one decision a load, applied to every run that carries it.
+   */
+  load?: Load;
 }
 
 /** A release's record entry (`release`), citing the decision it applies. */
@@ -779,6 +864,9 @@ export interface ReleaseAbout {
   under?: number;
   /** A withdrawal (Q-61): the release of the fill it takes back, by its seq. */
   withdraws?: number;
+  /** With several watched sources (ADR 0010 §7): every decide entry it applies, one a load that holds the outputs it
+   * names, by seq; `decision` is the first. */
+  decisions?: number[];
 }
 
 /** A decision as the record holds it. */
@@ -829,6 +917,9 @@ export interface Pause {
   repaired: { option: 'fill' | 'complete'; release: number; decision: number; donor: string | null; meanwhile: boolean } | null;
   /** The applied withdrawal that took the day's fill back (Q-61), by its seq; null when none since the last fill. */
   withdrawn: number | null;
+  /** With several watched sources (ADR 0010 §7): the load it is about. Such a pause is keyed by its load, not by the
+   * run's inputs: every later run that still reads the load carries it, and one decision decides it. `day` is its slot. */
+  load?: Load;
 }
 
 type EntryLike = Pick<LogEntry, 'seq' | 'kind' | 'at' | 'by' | 'about' | 'reason' | 'amends'>;
@@ -886,17 +977,48 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
   const applied: { seq: number; about: Record<string, unknown> }[] = [];
   // Each pause's decisions to publish as is, by their seq, with the keys each names.
   const asis = new Map<string, Map<number, Record<string, string>>>();
+  const blank = (key: string, inputs: Inputs, seq: number, run: number, manifest: string): Pause => ({ key, inputs, day: null, run, manifest, keys: {}, waiting: [], holds: [], opened: seq, seq, state: 'open', decision: null, otherBuild: false, released: null, repaired: null, withdrawn: null });
+  // A load that a run read and doesn't hold (or a run that published) passes its pause (ADR 0010 §7).
+  const pass = (loads: unknown, holding: ReadonlySet<string>) => {
+    if (!Array.isArray(loads)) return;
+    for (const l of loads) {
+      if (!isLoad(l) || holding.has(loadKey(l))) continue;
+      const p = pauses.get(`load:${loadKey(l)}`);
+      if (p) p.state = 'passed';
+    }
+  };
   for (const e of entries) {
     const a = e.about as JSONValue;
     if (!isRecord(a)) continue;
-    if (e.kind === 'run' && isHeld(a)) {
+    if (e.kind === 'run' && isHeld(a) && Array.isArray(a.holds) && a.holds.some((h) => isLoad(h.load))) {
+      // Several watched sources: a pause a load, keyed by it (ADR 0010 §7). Each load's holds keep back the outputs
+      // they reach; a later run that reads the load again carries the same pause.
+      const byKey = new Map<string, { load: Load; holds: Hold[] }>();
+      for (const h of a.holds) if (isLoad(h.load)) byKey.set(loadKey(h.load), { load: h.load, holds: [...(byKey.get(loadKey(h.load))?.holds ?? []), h] });
+      const waitingAll = Array.isArray(a.waiting) ? a.waiting : Object.keys(a.keys);
+      for (const [lk, { load, holds }] of byKey) {
+        const reach = new Set(holds.flatMap((h) => h.reaches));
+        const keys = Object.fromEntries(Object.entries(a.keys).filter(([n]) => reach.has(n)));
+        const waiting = waitingAll.filter((n) => reach.has(n));
+        if (waiting.length === 0 || Object.keys(keys).length === 0) continue;
+        const key = `load:${lk}`;
+        held.set(a.manifest, key);
+        const p = pauses.get(key) ?? blank(key, a.inputs, e.seq, a.run, a.manifest);
+        Object.assign(p, { load: { source: load.source, slot: load.slot, sha256: load.sha256 }, day: load.slot, inputs: a.inputs, run: a.run, manifest: a.manifest, keys, waiting, holds, seq: e.seq });
+        p.otherBuild = false;
+        p.state = p.decision ? 'decided' : 'open';
+        pauses.set(key, p);
+      }
+      pass(a.loads, new Set(byKey.keys()));
+    } else if (e.kind === 'run' && isHeld(a)) {
       const key = inputsKey(a.inputs);
       // Nothing waits (every held output's staged key is already current, as after a day published as is is run
       // again): there is nothing to decide, and nothing to open or change.
       const waiting = Array.isArray(a.waiting) ? a.waiting : Object.keys(a.keys);
+      pass(a.loads, new Set());
       if (waiting.length === 0 || Object.keys(a.keys).length === 0) continue;
       held.set(a.manifest, key);
-      const p = pauses.get(key) ?? { key, inputs: a.inputs, day: null, run: a.run, manifest: a.manifest, keys: {}, waiting: [], holds: [], opened: e.seq, seq: e.seq, state: 'open' as const, decision: null, otherBuild: false, released: null, repaired: null, withdrawn: null };
+      const p = pauses.get(key) ?? blank(key, a.inputs, e.seq, a.run, a.manifest);
       Object.assign(p, { day: dayOf(a, period), run: a.run, manifest: a.manifest, keys: { ...a.keys }, waiting: [...waiting], holds: Array.isArray(a.holds) ? a.holds : [], seq: e.seq });
       p.otherBuild = !!p.decision && !sameKeys(p.decision.about.outputs, p.keys);
       p.state = p.decision && !p.otherBuild ? 'decided' : 'open';
@@ -904,11 +1026,13 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
     } else if (e.kind === 'run' && a.outcome === 'ok' && isInputs(a.inputs)) {
       const p = pauses.get(inputsKey(a.inputs));
       if (p) p.state = 'passed';
+      pass(a.loads, new Set());
     } else if (e.kind === 'decide' && isDecide(a)) {
-      const key = inputsKey(a.inputs);
-      const p = pauses.get(key) ?? { key, inputs: a.inputs, day: a.day, run: a.run, manifest: a.manifest, keys: { ...a.outputs }, waiting: Object.keys(a.outputs), holds: [], opened: e.seq, seq: e.seq, state: 'open' as const, decision: null, otherBuild: false, released: null, repaired: null, withdrawn: null };
+      const key = isLoad(a.load) ? `load:${loadKey(a.load)}` : inputsKey(a.inputs);
+      const p = pauses.get(key) ?? { ...blank(key, a.inputs, e.seq, a.run, a.manifest), day: a.day, keys: { ...a.outputs }, waiting: Object.keys(a.outputs), ...(isLoad(a.load) ? { load: { ...a.load }, day: a.load.slot } : {}) };
       p.decision = decided(e, a);
-      p.otherBuild = !sameKeys(a.outputs, p.keys);
+      // A load's decision names the load, not keys: it decides every run that carries it.
+      p.otherBuild = !isLoad(a.load) && !sameKeys(a.outputs, p.keys);
       p.state = p.otherBuild ? 'open' : 'decided';
       pauses.set(key, p);
       if (asCame(a.option)) asis.set(key, (asis.get(key) ?? new Map()).set(e.seq, a.outputs));
@@ -916,14 +1040,16 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
     } else if (e.kind === 'flow') {
       flows.add(e.seq);
     } else if (e.kind === 'release' && Number.isInteger(a.decision) && (a.outcome === 'applied' || a.outcome === 'refused')) {
-      if (releases.get(a.decision as number) !== 'applied') releases.set(a.decision as number, a.outcome);
+      const cited = Array.isArray(a.decisions) && a.decisions.every((d) => Number.isInteger(d)) ? (a.decisions as number[]) : [a.decision as number];
+      for (const d of cited) if (releases.get(d) !== 'applied') releases.set(d, a.outcome);
       if (a.outcome === 'applied') applied.push({ seq: e.seq, about: a });
     }
   }
   const out = [...pauses.values()].sort((x, y) => x.opened - y.opened);
   for (const p of out) {
     const mine = asis.get(p.key);
-    p.released = mine ? [...mine].some(([seq, keys]) => releases.get(seq) === 'applied' && sameKeys(keys, p.keys)) : null;
+    // A load's decision to publish is released when a release cites it: its keys are each run's own.
+    p.released = mine ? [...mine].some(([seq, keys]) => releases.get(seq) === 'applied' && (p.load !== undefined || sameKeys(keys, p.keys))) : null;
   }
   // What readers got from remedies (amendment 1 S5, Q-61), release by release in the record's order: a fill or the part
   // alone, released for a decision of the day or under the flow's `meanwhile` setting, until a withdrawal takes it back.
@@ -947,15 +1073,65 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
 }
 
 /**
+ * The latest decision about a load (ADR 0010 §7), amendments included: what every run that carries the load applies
+ * again, whatever its other sources' loads (their keys change with each). Null when the load was never decided.
+ */
+export function decisionForLoad(entries: readonly EntryLike[], load: Load): Decided | null {
+  const key = loadKey(load);
+  let found: Decided | null = null;
+  for (const e of entries) if (e.kind === 'decide' && isDecide(e.about) && isLoad(e.about.load) && loadKey(e.about.load) === key) found = decided(e, e.about);
+  return found;
+}
+
+/**
+ * The standing decision a held load falls under (ADR 0009 §6, ADR 0010 §7): the decision not to publish, to fill, or to
+ * publish only the part that arrived, "until a load passes", about the nearest earlier load of the same source (never
+ * one amended since, never one applied under another), when no load of that source after it and before this one passed:
+ * read by a run that didn't hold it, or published by a release of a decision about it to publish. Slots compare as
+ * text, so ids order in time.
+ */
+export function standingForLoad(entries: readonly EntryLike[], load: Load): Decided | null {
+  const source = load.source.toLowerCase();
+  const amended = new Set(entries.filter((e) => e.kind === 'decide' && e.amends !== null).map((e) => e.amends));
+  let best: Decided | null = null;
+  for (const e of entries) {
+    const a = e.about as JSONValue;
+    if (e.kind !== 'decide' || !isDecide(a) || !isLoad(a.load) || a.load.source.toLowerCase() !== source) continue;
+    if ((a.option !== 'dont' && !isRemedy(a.option)) || a.scope !== 'untilPass' || a.under !== undefined || amended.has(e.seq) || !(a.load.slot < load.slot)) continue;
+    if (!best || a.load.slot > best.about.load!.slot || (a.load.slot === best.about.load!.slot && e.seq > best.seq)) best = decided(e, a);
+  }
+  if (!best) return null;
+  const from = best.about.load!.slot;
+  const between = (l: Load) => l.source.toLowerCase() === source && l.slot > from && l.slot < load.slot;
+  const publishing = new Set<number>();
+  for (const e of entries) if (e.kind === 'decide' && isDecide(e.about) && isLoad(e.about.load) && between(e.about.load) && asCame(e.about.option)) publishing.add(e.seq);
+  for (const e of entries) {
+    const a = e.about as JSONValue;
+    if (!isRecord(a)) continue;
+    if (e.kind === 'run' && (a.outcome === 'ok' || a.outcome === 'held') && Array.isArray(a.loads)) {
+      const holding = new Set((Array.isArray(a.holds) ? (a.holds as unknown as Hold[]) : []).flatMap((h) => (isLoad(h.load) ? [loadKey(h.load)] : [])));
+      if ((a.loads as unknown[]).some((l) => isLoad(l) && between(l) && !holding.has(loadKey(l)))) return null;
+    } else if (e.kind === 'release' && a.outcome === 'applied') {
+      const cited = Array.isArray(a.decisions) ? (a.decisions as number[]) : [a.decision as number];
+      if (cited.some((d) => publishing.has(d))) return null;
+    }
+  }
+  return best;
+}
+
+/**
  * The days the record leaves out of learning (ADR 0010 §5, C5, Q-80): every day held and not published as is, whether
  * still waiting, not published, filled, or the part that arrived published alone. A day published as is, or passed
- * by a later run of the same inputs, is learned from, as a day published as it arrived is. In order.
+ * by a later run of the same inputs, is learned from, as a day published as it arrived is. In order. With several
+ * watched sources, a source's slots its loads' pauses leave out (`source`), and every pause of a day otherwise.
  */
-export function skipOf(entries: readonly EntryLike[], period?: string | null): string[] {
+export function skipOf(entries: readonly EntryLike[], period?: string | null, source?: string): string[] {
   const out = new Set<string>();
   for (const p of pausesOf(entries, period)) {
     if (p.day === null || p.state === 'passed') continue;
     if (p.state === 'decided' && asCame(p.decision?.about.option)) continue;
+    // With several watched sources, a load's pause leaves out its slot for its own source alone (ADR 0010 §7).
+    if (p.load && source !== undefined && p.load.source.toLowerCase() !== source.toLowerCase()) continue;
     out.add(p.day);
   }
   return [...out].sort();

@@ -320,6 +320,8 @@ const KINDS: readonly StepKind[] = ['sql', 'filter', 'formula', 'select', 'join'
 const COLUMN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** A day, as a period's value is written. */
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** A slot of a day (ADR 0010 §7): its day and first hour. */
+const SLOT_ID = /^\d{4}-\d{2}-\d{2}T\d{2}$/;
 
 /**
  * Check a document's shape and references. An empty list means it can be translated into a flow plan. SQL text is
@@ -778,7 +780,7 @@ function validateConfig(s: Record<string, unknown>, at: string, add: (path: stri
         const problem = missingProblem(s.missing, s.time);
         if (problem) add(`${at}.missing`, problem);
       }
-      if (s.from !== undefined && s.from !== null && (typeof s.from !== 'string' || !DAY.test(s.from))) add(`${at}.from`, 'the donor’s day, YYYY-MM-DD, or null for the part that arrived alone');
+      if (s.from !== undefined && s.from !== null && (typeof s.from !== 'string' || !(DAY.test(s.from) || SLOT_ID.test(s.from)))) add(`${at}.from`, 'the donor’s day, YYYY-MM-DD (or its slot, YYYY-MM-DDTHH, ADR 0010 §7), or null for the part that arrived alone');
       if (has !== (s.from !== undefined)) add(`${at}.${has ? 'from' : 'missing'}`, has ? 'a missing part needs from: the donor’s day, or null for the part that arrived alone' : 'from needs the missing part it fills');
       break;
     }

@@ -50,10 +50,11 @@ export { emitSelect, missingSql, nodeSelect, shiftSql } from './core/emit.js';
 export { checksOver, drift, fillGaps, growForest, isolationForest, isolationPath, madsOf, pathLength, principalComponents, profileColumn, psi, scoreOf, suggestChecks, unusual } from './core/quality.js';
 export type { ColumnFacts, Cut, Drift, Forest, Judge, Kind, Profile, Projection, Quantiles, Suggestion, Tree, Unusual } from './core/quality.js';
 export { calendarProblems, dayLastYear, holidayOf, holidaysOf, isSpecial, NONE, resolveCalendar, seasonOf, shortName, specialOf, US_1, US_NYC_1 } from './core/calendar.js';
-export type { Calendar, CalendarBase, CalendarDate, CalendarDay, CalendarDef, CalendarWindow } from './core/calendar.js';
+export { dayOfSlot, EVERIES, isEvery, isSlotOf, nextSlot, partsOf, sameSlotOn, slotId, slotLabel, slotOf, slotsOfDay, slotsPerDay, slotStart } from './core/calendar.js';
+export type { Calendar, CalendarBase, CalendarDate, CalendarDay, CalendarDef, CalendarWindow, Every } from './core/calendar.js';
 export { NormalRanges } from './core/normal.js';
 export type { Backtest, DailySeries, Guess, NoRange, NormalOptions, NormalRange, Pattern, Place, Scale } from './core/normal.js';
-export { checksStart, HISTORY_FORMAT, HISTORY_FORMATS, HistoryRanges, isHistory, metricKey, seriesOf, timeOf } from './core/history.js';
+export { checksStart, HISTORY_FORMAT, HISTORY_FORMATS, HistoryRanges, isHistory, metricKey, seriesOf, slotSeries, timeOf } from './core/history.js';
 export type { DayError, HistoryFile, Level, Metric, RangeOptions, ValueHistory } from './core/history.js';
 export { isPlaceholder, MATERIAL, newsOf, PLACEHOLDERS, schemaChanges, tableNewsOf } from './core/news.js';
 export { coverageOf, flowNames, judgeOf, LEGACY_JUDGE, materialFor, notJudgedChip, nounFor } from './core/news.js';
@@ -73,8 +74,9 @@ export { claimBase, claimDay, factsFromClaims, isClaim2, levelsOf, skipOf, tailP
 export { countedChecks, donorGood, holdsOf, judgeClaim, judgeClaims, judgeDonors, tripped } from './core/hold.js';
 export { heldOutputs, reachOf, stagedKeys, waitingOf } from './core/hold.js';
 export { dayState, decisionFor, inputsKey, inputsOf, pausesOf, pauseState, sameKeys, standingFor } from './core/hold.js';
+export { byLoad, carry, decisionForLoad, isLoad, loadKey, loadsOf, standingForLoad } from './core/hold.js';
 export type { Claim, ClaimAt, ClaimFacts, Derived, FillHold, FlowFor, HistoryRef, Hold, Judged, LoadClaimInput, RunHold, StoryClaim, StoryClaim2 } from './core/hold.js';
-export type { DecideAbout, Decided, DerivedAbout, HeldAbout, Inputs, Pause, ReleaseAbout, RunRef } from './core/hold.js';
+export type { DecideAbout, Decided, DerivedAbout, HeldAbout, Inputs, Load, Pause, ReleaseAbout, RunRef } from './core/hold.js';
 // Filling a paused day (ADR 0009 amendment 1).
 export { DONOR_WINDOW, dayVersions, donorChoices, donorFor, donorIdOf, donorRuleOf, donorSourceOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument } from './core/fill.js';
 export type { Direction, DonorPick, DonorQuery, FillCounts, NoDonor, Offer, OfferInput, Repair, Version } from './core/fill.js';

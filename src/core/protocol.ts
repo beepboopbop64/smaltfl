@@ -3,7 +3,7 @@
  * only, so it crosses the worker protocol by structured clone.
  */
 import type { Repair } from './fill.js';
-import type { Claim, FillHold, Hold, RunRef } from './hold.js';
+import type { Claim, FillHold, Hold, Load, RunRef } from './hold.js';
 import type { RunManifest } from './manifest.js';
 import type { Measures } from './measures.js';
 import type { DecisionOption } from './policy.js';
@@ -109,6 +109,12 @@ export interface ReleaseInput {
   /** A withdrawal (Q-61): the release of the fill it takes back, by its number here. `run`, `manifest` and `keys` are
    * that release's. */
   withdraws?: number;
+  /**
+   * With several watched sources (ADR 0010 §7): the decisions it applies, one a load that holds the outputs it names,
+   * each about a load the run read and held, each checked as a decision is (who may, the option, a reason). The
+   * top-level option, actor, reason and decision are the first's. Required for such a run, and only for one.
+   */
+  loads?: { load: Load; option: DecisionOption; actor: string; reason: string | null; decision: string }[];
 }
 
 export interface ReleaseResult {

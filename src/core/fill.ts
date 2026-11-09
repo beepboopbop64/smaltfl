@@ -13,7 +13,7 @@
  *   calendar marks unless the held day is one, and a file in the data's list (S3). The watch's own rule comes first:
  *   the one it names, else its pattern's (ADR 0010 §3, C1).
  */
-import { isSpecial, plusDays } from './calendar.js';
+import { isSpecial, plusDays, type Every } from './calendar.js';
 import { canonicalJSON } from './canonical.js';
 import { dayShort } from './days.js';
 import { fillStepOf, isGeneralWatch, type DonorRule, type FillStep, type FlowDocument, type Missing } from './document.js';
@@ -78,10 +78,17 @@ function valueOf(json: string): string | number | boolean | null {
 /**
  * The part of a held day a fill takes from another day (S2), from the flow's story: the hours the story's hours cause
  * names, by the fill step's `time`; the part that vanished; or the rest, where a part held while the rest vanished.
- * Null for any other cause, a part that surged among them: nothing is missing.
+ * Null for any other cause, a part that surged among them: nothing is missing. A slot's hours are its own, named as
+ * the day's (06:00–10:00 of the 06–12 slot is hours 6 to 9, ADR 0010 §7).
  */
 export function missingOf(story: Pick<Story, 'hero' | 'hours' | 'split'>, time: string): Missing | null {
-  if (story.hero === 'hours' && story.hours) return { time, hours: [story.hours.from, story.hours.to] };
+  if (story.hero === 'hours' && story.hours) {
+    // A slot's parts are its own hours, placed in the day (ADR 0010 §7); quarter hours (a slot under 3 hours) are no
+    // hours a fill can name: nothing it can take.
+    const { start = 0, width = 60 } = story.hours;
+    if (width !== 60 || start % 60 !== 0) return null;
+    return { time, hours: [start / 60 + story.hours.from, start / 60 + story.hours.to] };
+  }
   if (story.hero === 'split' && story.split) {
     const sp = story.split;
     if (sp.kind === 'vanished') return { column: sp.column, value: valueOf(sp.value) };
@@ -315,6 +322,8 @@ export interface OfferInput {
    * offered by them (S6). Without them, no Accept. */
   told?: Pick<Story, 'state' | 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'>;
   holds?: readonly Pick<Hold, 'by'>[];
+  /** What the held load covers (ADR 0010 §7): a level starts on a day, so a slot of one gets no Accept. */
+  every?: Every;
 }
 
 /**
@@ -334,7 +343,7 @@ export function offersOf(o: OfferInput): Offer[] {
   }
   if (o.readers === 'fill' || o.readers === 'complete') out.push({ option: 'dont', label: o.readers === 'fill' ? 'Withdraw the fill' : 'Withdraw the part', withdraws: true });
   // Accept the new level (S6): off while a later day is current, as publish as is is.
-  if (!o.readers && o.told && o.holds && acceptable(o.told, o.claim, o.holds)) out.push({ option: 'accept', label: 'Accept the new level', ...(o.later ? { off: `${dayShort(o.later)} is published` } : {}) });
+  if (!o.readers && (o.every ?? 'day') === 'day' && o.told && o.holds && acceptable(o.told, o.claim, o.holds)) out.push({ option: 'accept', label: 'Accept the new level', ...(o.later ? { off: `${dayShort(o.later)} is published` } : {}) });
   return out;
 }
 

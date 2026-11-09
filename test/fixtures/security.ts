@@ -446,7 +446,7 @@ export function edrRows(plan: EdrSlot, seed = 7): string[][] {
 /**
  * The sign-in flow with endpoint events beside it (variant E, ADR 0010 §7): auth judged a day at a time, edr a 6-hour
  * slot at a time under its own period parameter (`slot`), each with its own history (machines keep no holidays: the
- * calendar is the sign-ins' alone); a check on the sign-ins; one
+ * calendar is the sign-ins' alone); a check on the sign-ins; edr read through its fill step, its rows marked; one
  * output of each source and one that reads both; `together: false`, so a held load keeps back only what reads it.
  */
 export function twoSourceDoc(): FlowDocument {
@@ -459,8 +459,9 @@ export function twoSourceDoc(): FlowDocument {
     steps: [
       ...d.steps,
       { id: 'auth_results', kind: 'aggregate', inputs: ['auth_valid'], groupBy: ['result'], measures: [{ name: 'signins', expr: 'count(*)' }], dataset: {} },
-      { id: 'edr_actions', kind: 'aggregate', inputs: ['edr'], groupBy: ['action'], measures: [{ name: 'events', expr: 'count(*)' }], dataset: {} },
-      { id: 'edr_hosts_signing_in', kind: 'sql', inputs: ['auth_results', 'edr_actions'], sql: 'SELECT (SELECT sum(signins) FROM auth_results) AS signins, (SELECT sum(events) FROM edr_actions) AS events', dataset: {} },
+      { id: 'edr_filled', kind: 'fill', inputs: ['edr'], time: 'event_time', shift: ['event_time'] },
+      { id: 'edr_actions', kind: 'aggregate', inputs: ['edr_filled'], groupBy: ['action'], measures: [{ name: 'events', expr: 'count(*)' }, { name: 'filled_from', expr: 'max(filled_from)' }], dataset: {} },
+      { id: 'edr_hosts_signing_in', kind: 'sql', inputs: ['auth_results', 'edr_actions'], sql: 'SELECT (SELECT sum(signins) FROM auth_results) AS signins, (SELECT sum(events) FROM edr_actions) AS events, (SELECT max(filled_from) FROM edr_actions) AS filled_from', dataset: {} },
     ],
     ontology: { ...d.ontology!, nouns: { ...d.ontology!.nouns, edr: { one: 'endpoint event', many: 'endpoint events' } } },
     publish: {

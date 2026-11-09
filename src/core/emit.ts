@@ -117,7 +117,8 @@ function fillSelect(node: FillNode, from: readonly string[], source: readonly Co
   const inside = `CASE WHEN (${missingSql(node.missing, source)}) THEN 1 ELSE 0 END`;
   const kept = `SELECT ${source.map(([c]) => q(c)).join(', ')}, ${mark(null)} FROM ${from[0]} WHERE ${inside} = 0`;
   if (node.from === null) return kept;
-  const days = daysBetween(node.from, node.to!);
+  // A slot's donor is the same slot of another day (ADR 0010 §7): its rows move by the days between.
+  const days = daysBetween(node.from.slice(0, 10), node.to!.slice(0, 10));
   const shifted = new Set(node.shift.map((c) => c.toLowerCase()));
   const cols = source.map(([c, t]) => {
     const value = shifted.has(c.toLowerCase()) ? shiftSql(q(c), days, t) : q(c);

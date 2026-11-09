@@ -26,9 +26,9 @@
 import type { Database } from 'smaltdb/engine';
 import type { FlowDocument } from '../core/document.js';
 import { repairDocument, type Repair } from '../core/fill.js';
-import { donorGood, heldOutputs, type Hold, type RunRef } from '../core/hold.js';
+import { byLoad, donorGood, heldOutputs, isLoad, loadKey, loadsOf, type Hold, type RunRef } from '../core/hold.js';
 import { manifestHash, policiesHash, type RunManifest } from '../core/manifest.js';
-import { flowHash, planPeriod, plannedDonor, type FlowPlan } from '../core/plan.js';
+import { flowHash, planPeriod, plannedDonor, watchesOf, type FlowPlan } from '../core/plan.js';
 import { checkDecision, DECIDE_OPTIONS, type DecisionOption } from '../core/policy.js';
 import type { ReleaseInput, ReleaseResult } from '../core/protocol.js';
 import { currentOf, derivedOf, ensureStore, findVersion, holdsOfRun, inTransaction, nameInUse, pointDataset, recordRelease, recordRepair, recordWithdrawal, releasesOf, repairOf, withdrawalsOf, type Shown, type StoredDerived, type StoredRelease } from './store.js';
@@ -60,7 +60,62 @@ function shapeProblem(input: unknown): string | null {
   if (input.withdraws !== undefined && (!Number.isSafeInteger(input.withdraws) || input.option !== 'dont')) return 'a withdrawal is a decision not to publish, naming the release it takes back by its number';
   if ((input.option === 'fill' || input.option === 'complete') && (!isRunRef(input.from) || !isRecord(input.repair))) return `${String(input.option)} releases a derived run: it names the held run it repairs (from) and the repair`;
   if (input.meanwhile !== undefined && typeof input.meanwhile !== 'boolean') return 'meanwhile is true or false';
+  if (input.loads !== undefined) {
+    const ls = input.loads;
+    if (!Array.isArray(ls) || ls.length === 0) return 'loads lists the decisions it applies, one a load';
+    for (const [k, x] of ls.entries()) {
+      if (!isRecord(x) || !isLoad(x.load) || !(DECIDE_OPTIONS as readonly unknown[]).includes(x.option) || typeof x.actor !== 'string' || x.actor === '' || !(x.reason === null || typeof x.reason === 'string') || typeof x.decision !== 'string' || !HEX64.test(x.decision))
+        return `loads[${k}] isn't a decision about a load: { load: { source, slot, sha256 }, option, actor, reason, decision }`;
+    }
+    const first = ls[0] as Record<string, unknown>;
+    if (first.option !== input.option || first.actor !== input.actor || (first.reason ?? null) !== (input.reason ?? null) || first.decision !== input.decision) return "the release's option, actor, reason and decision are its first load's decision's";
+  }
   return null;
+}
+
+/**
+ * Why a run of a flow that watches several sources can't be released as asked (ADR 0010 §7), or null: each decision is
+ * about a load the run read (its source's file and its slot parameter) and held, may be taken by its actor, publishes
+ * (with a reason), and is cited once; each name it releases waits only for the loads it cites (a hold of no load, or
+ * of another, keeps it back). `heldBy` is each held output's holds.
+ */
+function loadsProblem(r: ReleaseInput, run: Stored, holds: readonly Hold[], doc: FlowDocument): string | null {
+  const ls = r.loads;
+  if (!ls) return `run ${r.run} watches several sources: a release of it names the decisions it applies, one a load (loads)`;
+  const read = new Map([...loadsOf(run.plan, run.manifest).values()].map((l) => [loadKey(l), l]));
+  const holding = new Set(holds.flatMap((h) => (h.load ? [loadKey(h.load)] : [])));
+  const cited = new Set<string>();
+  for (const x of ls) {
+    const k = loadKey(x.load);
+    const name = `${x.load.source}'s ${x.load.slot} load`;
+    if (cited.has(k)) return `it cites two decisions about ${name}`;
+    cited.add(k);
+    if (!read.has(k)) return `run ${r.run} didn't read ${name} (${short(x.load.sha256)}): a decision is applied to a run that read its load`;
+    if (!holding.has(k)) return `${name} doesn't hold run ${r.run}: there is nothing of it to release`;
+    if (x.option !== 'asis' && x.option !== 'accept' && !(r.option === 'fill' || r.option === 'complete')) return `the decision about ${name} is ${x.option}, which publishes nothing`;
+    if ((x.option === 'asis' || x.option === 'accept') && (typeof x.reason !== 'string' || x.reason.trim() === '')) return `${x.option === 'asis' ? 'publish as is' : 'accept the new level'} needs a reason (${name})`;
+    const may = checkDecision(doc.policies, x.actor, x.option);
+    if (!may.allowed) return may.reason;
+  }
+  if ((r.option === 'fill' || r.option === 'complete') && ls.length !== 1) return `${r.option === 'fill' ? 'a fill' : 'the part that arrived'} is about one load, and it cites ${ls.length}`;
+  for (const name of Object.keys(r.keys).sort()) {
+    const other = holds.find((h) => h.reaches.includes(name) && !(h.load && cited.has(loadKey(h.load))));
+    if (other) return `${name} waits for ${other.origin} (${other.by === 'checks' ? 'its checks' : other.by === 'story' ? other.said : 'not judged'}${other.load ? `, its ${other.load.slot} load` : ''}), which no decision it cites is about`;
+  }
+  return null;
+}
+
+/** Whether a run's periods are any of them later than another's, or all the same (ADR 0010 §7: each watched source's
+ * period only moves forward, compared parameter by parameter). */
+function periodsAfter(a: RunManifest['parameters'], b: RunManifest['parameters'], periods: readonly string[]): 'later' | 'same' | 'earlier' {
+  let same = true;
+  for (const p of periods) {
+    const x = a[p];
+    const y = b[p];
+    if (typeof x === 'string' && typeof y === 'string' && x > y) return 'later';
+    if (x !== y) same = false;
+  }
+  return same ? 'same' : 'earlier';
 }
 
 /** A stored run: its manifest and hash, its plan, and the flow document and its text, read before a transaction. */
@@ -122,6 +177,8 @@ async function repairProblem(db: Database, r: ReleaseInput, run: Stored, d: Stor
   if (derivedOf(db, d.from.run)) return `run ${d.from.run} is a derived run itself: a repair is made from the held run`;
   const period = planPeriod(run.plan.publish);
   if (period === null || held.manifest.parameters[period] !== run.manifest.parameters[period]) return `run ${r.run} isn't of run ${d.from.run}'s day`;
+  // Several watched sources: of the same slot of each (ADR 0010 §7).
+  for (const w of watchesOf(run.plan.publish)) if (w.period !== null && held.manifest.parameters[w.period] !== run.manifest.parameters[w.period]) return `run ${r.run} isn't of run ${d.from.run}'s ${w.period}`;
   // The derived document: the repair of the held run's own document, compared by flow hash.
   if (!held.doc || !run.doc) return "the held run's flow document, or the derived run's, isn't stored, so the repair can't be checked";
   let rebuilt: FlowDocument;
@@ -215,6 +272,12 @@ export async function release(db: Database, input: unknown): Promise<ReleaseResu
       if (policies !== manifest.flow.policies) return `the stored flow document's policies aren't the ones run ${r.run} recorded`;
       const may = checkDecision(doc.policies, r.actor, r.option as DecisionOption);
       if (!may.allowed) return may.reason;
+      // Several watched sources: each load decided once, and a name released only by the decisions it waits for.
+      const several = byLoad(plan.publish);
+      if (several) {
+        const problem = loadsProblem(r, stored, kept.holds, doc);
+        if (problem) return problem;
+      } else if (r.loads !== undefined) return `run ${r.run} watches one source: its decisions are about its day, not loads`;
       const heldNames = new Set(heldOutputs(plan, [...kept.holds, ...fills]));
       const names = Object.keys(r.keys).sort();
       const outputs = new Set(plan.outputs.map((o) => o.name));
@@ -234,17 +297,29 @@ export async function release(db: Database, input: unknown): Promise<ReleaseResu
         if (twice) return `${twice} was already released, by release ${earlier.id}`;
       }
       // Together: what the decision leaves out must already show the run's version, or the outputs would show two days.
+      // With several watched sources, only of the names its loads alone keep back: the rest wait for other loads.
+      const cites = new Set((r.loads ?? []).map((x) => loadKey(x.load)));
+      const freed = (name: string) => !several || kept.holds.filter((h) => h.reaches.includes(name)).every((h) => h.load && cites.has(loadKey(h.load)));
       for (const name of [...heldNames].sort()) {
-        if (Object.hasOwn(r.keys, name)) continue;
+        if (Object.hasOwn(r.keys, name) || !freed(name)) continue;
         if (currentOf(db, name)?.key !== manifest.outputs[name]!.key) return `the decision leaves out ${name}, which run ${r.run} holds with another version than its name shows`;
       }
       // A release never moves a name back: no later day (or, without a period, no later run) is current for it. A
       // fill or the part alone replaces any version of its own day, whatever order the runs were made in.
       const period = planPeriod(plan.publish);
       const day = period === null ? null : manifest.parameters[period];
+      const periods = [...new Set(watchesOf(plan.publish).flatMap((w) => (w.period === null ? [] : [w.period])))];
       for (const name of names) {
         const cur = currentOf(db, name);
         if (!cur || cur.run === r.run) continue;
+        if (several) {
+          const row = db.query('SELECT manifest FROM _smaltfl_runs WHERE id = ?', [cur.run]).rows[0];
+          if (!row) return `${name} shows run ${cur.run}, which isn't in this database`;
+          const was = periodsAfter((JSON.parse(String(row[0])) as RunManifest).parameters, manifest.parameters, periods);
+          if (was === 'later') return `a later load is current for ${name} (run ${cur.run}): a release never moves a name back`;
+          if (!held && was === 'same' && cur.run > r.run) return `a later run of the same loads (run ${cur.run}) is current for ${name}`;
+          continue;
+        }
         if (typeof day === 'string') {
           const curDay = dayOfRun(db, cur.run, period!);
           if (curDay === undefined) return `${name} shows run ${cur.run}, which isn't in this database`;

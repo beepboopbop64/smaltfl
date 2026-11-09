@@ -28,7 +28,7 @@ import type { EmitContext } from '../core/emit.js';
 import { createTable, emitSelect } from '../core/emit.js';
 import { hex } from '../core/hash.js';
 import { repairDocument } from '../core/fill.js';
-import { factsFromClaims, heldOutputs, holdsOf, isClaim2, judgeClaims, judgeDonors, type FillHold, type RunRef } from '../core/hold.js';
+import { carry, factsFromClaims, heldOutputs, holdsOf, isClaim2, judgeClaims, judgeDonors, type FillHold, type RunRef } from '../core/hold.js';
 import { measuresHash } from '../core/measures.js';
 import { measureTable } from './measure.js';
 import { nodeKey } from '../core/keys.js';
@@ -44,7 +44,7 @@ import { hashTable } from './dataset-hash.js';
 import { PINNED_PREFIX, pinned, pinnedLocation, takeOpened } from './pinned.js';
 import { donorRead } from './release.js';
 import { aborted, countExpectations, engineVersion, RunError } from './runtime.js';
-import { currentOf, datasetView, derivedOf, ensureStore, findVersion, holdsOfRun, measuresOfRun, releasesOf, repairsOf } from './store.js';
+import { carriedFrom, currentOf, datasetView, derivedOf, ensureStore, findVersion, holdsOfRun, measuresOfRun, releasesOf, repairsOf } from './store.js';
 
 type Json = Parameters<typeof canonicalJSON>[0];
 const same = (a: unknown, b: unknown) => canonicalJSON(a as Json) === canonicalJSON(b as Json);
@@ -187,12 +187,12 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
         const k = again.find((x) => x.node === j.node);
         if (!k || 'unjudged' in k || !same(k.claim, j.claim)) notes.push(`its claim for ${plan.nodes[j.node]?.origin ?? j.node} doesn't match the run${k && 'unjudged' in k ? `: ${k.unjudged}` : ''}`);
       }
-      holds = holdsOf(plan, manifest, kept.judged);
+      holds = carry(holdsOf(plan, manifest, kept.judged), (l) => carriedFrom(db, plan.flow.id, l, runId));
       if (!same(holds, kept.holds)) notes.push("the holds stored with it aren't what its manifest and its claims hold");
       // A derived run: its donors judged again, and what holds it besides, computed again (amendment 1 S4, S11).
       if (derived) {
         const donorClaims = derived.donors.flatMap((j) => ('claim' in j ? [j.claim] : []));
-        const againDonors = judgeDonors(plan, donorClaims, factsFromClaims(donorClaims, { rows: (node) => byNode.get(node)?.rows, flow: measuredBy.flow ?? plan.flow.hash }));
+        const againDonors = judgeDonors(plan, donorClaims, factsFromClaims(donorClaims, { rows: (node) => byNode.get(node)?.rows, flow: measuredBy.flow ?? plan.flow.hash, origin: (node) => plan.nodes[node]?.origin }));
         for (const j of derived.donors) {
           if (!('claim' in j)) continue;
           const k = againDonors.find((x) => x.node === j.node);

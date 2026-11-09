@@ -33,7 +33,7 @@ import type { Database } from 'smaltdb/engine';
 import { canonicalJSON } from '../core/canonical.js';
 import type { Repair } from '../core/fill.js';
 import type { MeasureSettings, Measures } from '../core/measures.js';
-import type { FillHold, Hold, Judged, RunRef } from '../core/hold.js';
+import { loadKey, type FillHold, type Hold, type Judged, type Load, type RunRef } from '../core/hold.js';
 import type { ExpectationResult } from '../core/manifest.js';
 import type { DecisionOption } from '../core/policy.js';
 import { quoteIdent as q } from '../core/sqltext.js';
@@ -157,6 +157,17 @@ export function withdrawalsOf(db: Database): { release: number; withdraws: numbe
 /** What held a run, and its watched sources as the run judged them. Runs inside the run's transaction. */
 export function recordHolds(db: Database, run: number, holds: readonly Hold[], judged: readonly Judged[]): void {
   db.run('INSERT INTO _smaltfl_holds(run, holds, claims) VALUES (?, ?, ?)', [run, JSON.stringify(holds), JSON.stringify(judged)]);
+}
+
+/**
+ * The first run of a flow, before `before` (any, without it), whose stored holds name a load (ADR 0010 §7): what a later
+ * run that holds the same load carries, citing it. Undefined when no earlier run held it.
+ */
+export function carriedFrom(db: Database, flow: string, load: Load, before?: number): number | undefined {
+  const key = loadKey(load);
+  const rows = db.query('SELECT h.run, h.holds FROM _smaltfl_holds h JOIN _smaltfl_runs r ON r.id = h.run WHERE r.flow = ? AND h.run < ? ORDER BY h.run', [flow, before ?? Number.MAX_SAFE_INTEGER]).rows;
+  for (const row of rows) if ((JSON.parse(String(row[1])) as Hold[]).some((h) => h.load && loadKey(h.load) === key)) return Number(row[0]);
+  return undefined;
 }
 
 /** A run's stored holds and judged sources, or null for a run with no row (a plan without a publish block). */

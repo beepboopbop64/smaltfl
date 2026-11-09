@@ -27,7 +27,7 @@ import { flowHash, translate } from '../core/plan.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, ColumnType, ExpectNode, FillNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
 import { isPublish2, validatePlan, watchesOf } from '../core/plan.js';
-import { heldOutputs, holdsOf, judgeClaims, judgeDonors, tailPath, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef } from '../core/hold.js';
+import { carry, heldOutputs, holdsOf, judgeClaims, judgeDonors, tailPath, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef } from '../core/hold.js';
 import { measuresHash, settingsFor, type MeasureSettings, type Measures } from '../core/measures.js';
 import { measureSnapshot, pinnedHeader, pinnedTail } from './measure.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
@@ -36,7 +36,7 @@ import type { TableHash } from './dataset-hash.js';
 import { hashTable, sourceColumns } from './dataset-hash.js';
 import { pinned, pinnedLocation, takeOpened } from './pinned.js';
 
-import { currentOf, ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, measuresOfRun, nameInUse, pointDataset, recordCheck, recordDerived, recordHolds, recordMeasures, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
+import { carriedFrom, currentOf, ensureStore, findCheck, findVersion, inTransaction, isFresh, lastSnapshot, measuresOfRun, nameInUse, pointDataset, recordCheck, recordDerived, recordHolds, recordMeasures, recordSnapshot, recordVersion, resetWatch, versionTable, watchable } from './store.js';
 
 export class RunError extends Error {
   override name = 'RunError';
@@ -250,7 +250,8 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
       flow: told ? told.flow : plan.flow.hash,
     };
     judged = judgeClaims(plan, context.claims, facts);
-    holds = holdsOf(plan, manifest, judged);
+    // With several watched sources, a load an earlier run held is carried, citing that run (ADR 0010 §7).
+    holds = carry(holdsOf(plan, manifest, judged), (l) => carriedFrom(db, plan.flow.id, l));
     if (stage) {
       // A derived run: held by its fill whatever else holds, and by each donor not judged good (S3, S4).
       const donors = judgeDonors(plan, context.claims, facts);

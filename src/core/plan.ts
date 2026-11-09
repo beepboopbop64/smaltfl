@@ -274,8 +274,10 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
     // (validateDocument made sure a fill from a day has one).
     const period = step.kind === 'fill' ? periodOf(doc, step.inputs[0]!) : undefined;
     const day = period === undefined ? undefined : params[period]?.value;
-    if (step.kind === 'fill' && step.from !== undefined && step.from !== null && (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day))) {
-      const message = `a fill from ${step.from} moves its rows to the run's day, and ${period} is ${day === null || day === undefined ? 'not given' : `'${String(day)}', not a day`}`;
+    // A slot's (ADR 0010 §7) to the same slot of the run's day.
+    const fits = (d: unknown, from: string) => typeof d === 'string' && (/^\d{4}-\d{2}-\d{2}$/.test(d) || /^\d{4}-\d{2}-\d{2}T\d{2}$/.test(d)) && d.slice(10) === from.slice(10);
+    if (step.kind === 'fill' && step.from !== undefined && step.from !== null && !fits(day, step.from)) {
+      const message = `a fill from ${step.from} moves its rows to the run's day, and ${period} is ${day === null || day === undefined ? 'not given' : `'${String(day)}', not a day${step.from.length > 10 ? ` with that slot (${step.from.slice(11)})` : ''}`}`;
       throw new PlanError(`${at}: ${message}`, [{ path: at, message }]);
     }
     nodes.push(translateStep(step, base, at, bind, typeof day === 'string' ? day : null));
@@ -417,6 +419,7 @@ function topological(steps: readonly StepDef[]): StepDef[] {
 
 const OPS = new Set(['table', 'sql', 'filter', 'formula', 'select', 'join', 'aggregate', 'expect', 'fill']);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const SLOT_ID = /^\d{4}-\d{2}-\d{2}T\d{2}$/;
 
 /**
  * Check a plan's structure before the runtime trusts it: the format, the operations, inputs that come earlier, and
@@ -522,7 +525,9 @@ function fillProblem(p: FlowPlan, n: FillNode, i: number, fail: (message: string
   if (typeof n.time !== 'string' || n.time === '' || !Array.isArray(n.shift) || n.shift.some((c) => typeof c !== 'string' || c === '')) fail(`node ${i} (fill) names its time and the columns it shifts`);
   if (n.inputs.some((j) => p.nodes[j]?.op !== 'table')) fail(`node ${i} (fill) reads a node that isn't a source: it fills a source, from a source`);
   if (n.missing !== null && missingProblem(n.missing, n.time) !== null) fail(`node ${i} (fill): its missing part isn't one: ${missingProblem(n.missing, n.time)}`);
-  if (n.from !== null && (typeof n.from !== 'string' || !DAY.test(n.from) || typeof n.to !== 'string' || !DAY.test(n.to))) fail(`node ${i} (fill) fills from a day to a day: from and to are YYYY-MM-DD`);
+  // From a day to a day, or (ADR 0010 §7) from a slot to the same slot of another day.
+  const period = (x: unknown) => typeof x === 'string' && (DAY.test(x) || SLOT_ID.test(x));
+  if (n.from !== null && (!period(n.from) || !period(n.to) || n.from.slice(10) !== String(n.to).slice(10))) fail(`node ${i} (fill) fills from a day to a day: from and to are YYYY-MM-DD, or the same slot of two days, YYYY-MM-DDTHH`);
   if (n.from === null && n.to !== null) fail(`node ${i} (fill) moves rows to ${String(n.to)} from no day`);
   if (n.missing === null && n.from !== null) fail(`node ${i} (fill) fills from ${n.from} with no missing part`);
 }
