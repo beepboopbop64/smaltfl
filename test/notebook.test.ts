@@ -36,7 +36,7 @@ const flow = (notebooks: Record<string, string>, extra: Partial<FlowDocument> = 
     ...extra,
   }) as FlowDocument;
 
-const SETUP = "import { cell, md, param, sql } from 'smaltnb';\nimport { check, fill, source } from 'smaltfl/notebook';\n";
+const SETUP = "import { cell, md, param, sql } from 'smaltnb';\nimport { check, fill, publish, source } from 'smaltfl/notebook';\n";
 
 describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
   it('derives the JSON example\'s steps from its two notebooks, the exports as datasets', async () => {
@@ -45,6 +45,7 @@ describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
     expect(documentFormat(doc)).toBe(4);
     expect(validateDocument(doc)).toEqual([]);
     const brief = doc.steps.map((s) => [s.id, s.kind, s.inputs, s.dataset?.description]);
+    expect(doc.steps.map((s) => s.description)).toEqual(['Sign-ins with a known result, on the day', 'Sign-ins by hour and result', 'Failed and locked-out sign-ins by country and client']);
     expect(brief).toEqual([
       ['auth_valid', 'expectations', ['auth'], 'Checked sign-ins'],
       ['signins_by_hour', 'sql', ['auth_valid'], 'Sign-ins by hour'],
@@ -53,10 +54,10 @@ describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
     const json = jsonDoc();
     const checks = json.steps[0] as Extract<StepDef, { kind: 'expectations' }>;
     expect(doc.steps[0]).toMatchObject({ rules: checks.rules, maxDropped: checks.maxDropped });
-    // Everything but the steps and the format is the JSON example's.
-    const { steps: _s, notebooks: _n, smaltfl: _f, ...rest } = doc;
-    const { steps: _js, smaltfl: _jf, ...jrest } = json;
-    expect(rest).toEqual(jrest);
+    // Everything but the format is the JSON example's: the steps too, where the JSON's visual steps are SQL here.
+    const { notebooks: _n, smaltfl: _f, ...rest } = doc;
+    const { smaltfl: _jf, ...jrest } = json;
+    expect({ ...rest, steps: rest.steps.map((s) => (s.kind === 'sql' ? { ...s, sql: '' } : s)) }).toEqual({ ...jrest, steps: jrest.steps.map((s) => (s.kind === 'aggregate' ? { kind: 'sql', id: s.id, inputs: s.inputs, sql: '', description: s.description, dataset: s.dataset } : s)) });
   });
 
   it('translates to plan/3: the expect node and the publish block the JSON example has, the aggregates as SQL', async () => {
@@ -116,13 +117,16 @@ export const valid = check(today, { rules: [{ name: 'has_user', check: 'user IS 
 cell('count', { lang: 'sql' });
 export const count = sql\`SELECT count(*) AS n FROM \${valid}\`;
 count;
+cell('published');
+publish(valid);
+publish(count, { description: 'How many', storage: 'columnar' });
 `;
     const { steps, cells, issues } = await stepsOfNotebooks(flow({ 'a.nb.ts': nb }), ts);
     expect(issues).toEqual([]);
     expect(steps).toEqual([
       { kind: 'sql', id: 'today', inputs: ['auth'], sql: "SELECT * FROM auth WHERE substr(event_time, 1, 10) = :day", description: "Only the day's rows" },
       { kind: 'expectations', id: 'valid', inputs: ['today'], rules: [{ name: 'has_user', check: 'user IS NOT NULL', onFail: 'drop' }], dataset: {} },
-      { kind: 'sql', id: 'count', inputs: ['valid'], sql: 'SELECT count(*) AS n FROM valid', dataset: {} },
+      { kind: 'sql', id: 'count', inputs: ['valid'], sql: 'SELECT count(*) AS n FROM valid', dataset: { description: 'How many', storage: 'columnar' } },
     ]);
     expect(cells.map((c) => [c.cell, c.lang, c.span.line])).toEqual([['today', 'sql', 10], ['valid', 'ts', 12], ['count', 'sql', 14]]);
     const doc = await expandNotebooks(flow({ 'a.nb.ts': nb }), ts);
@@ -140,17 +144,19 @@ cell('auth');
 const auth = source('auth');
 cell('rows', { lang: 'sql' });
 export const rows = sql\`SELECT * FROM \${auth}\`;
+cell('published');
+publish(rows);
 `;
     const doc = await expandNotebooks(flow({ 'v.nb.ts': nb }, { id: 'v', name: 'v', parameters: [] }), ts);
     // The flow hash covers the notebook's source and the derived steps (ADR 0011, "The derived steps are kept").
-    expect(await flowHash(doc)).toBe('314572a5b58418ec0cb541d4ec42c9fb931b9029356c822de64f3d8c25f36726');
+    expect(await flowHash(doc)).toBe('4082850eb0bcd8c11a7531782fd3f95179a7a26b1c908512925d5ec40fe48a71');
     const plan = await translate(doc);
     expect(canonicalJSON(plan)).toBe(
-      '{"flow":{"hash":"314572a5b58418ec0cb541d4ec42c9fb931b9029356c822de64f3d8c25f36726","id":"v"},"nodes":[{"inputs":[],"op":"table","origin":"auth","table":"auth_file"},{"inputs":[0],"names":["auth"],"op":"sql","origin":"rows","sql":"SELECT * FROM auth"}],"outputs":[{"name":"rows","node":1}],"parameters":{},"smaltflPlan":3}',
+      '{"flow":{"hash":"4082850eb0bcd8c11a7531782fd3f95179a7a26b1c908512925d5ec40fe48a71","id":"v"},"nodes":[{"inputs":[],"op":"table","origin":"auth","table":"auth_file"},{"inputs":[0],"names":["auth"],"op":"sql","origin":"rows","sql":"SELECT * FROM auth"}],"outputs":[{"name":"rows","node":1}],"parameters":{},"smaltflPlan":3}',
     );
-    expect(await planHash(plan)).toBe('724148bc9b4ebafc71d5977ac2e878d94228acef66353c19e93576977b1caf3a');
+    expect(await planHash(plan)).toBe('aa56689e4d8a1cdc2a5781259cb6256d4a35aed09ecd723feb9bb5b2eddf5e29');
     // The same bytes tagged plan/2 would be another hash: an older build refuses plan/3 rather than verify it (§1).
-    expect(await planHash({ ...plan, smaltflPlan: 2 })).not.toBe('724148bc9b4ebafc71d5977ac2e878d94228acef66353c19e93576977b1caf3a');
+    expect(await planHash({ ...plan, smaltflPlan: 2 })).not.toBe('aa56689e4d8a1cdc2a5781259cb6256d4a35aed09ecd723feb9bb5b2eddf5e29');
   });
 
   it('imports another listed notebook\'s exports, steps and sources alike', async () => {
@@ -190,11 +196,30 @@ await exec\`DELETE FROM t\`;
     expect(steps).toEqual([]);
     expect(issues).toEqual([
       { path: '$.notebooks[0]#auth', message: "source() names a source of the document, and users isn't one (sources: auth)" },
-      { path: '$.notebooks[0]#n', message: 'not a step a flow runs: a sql cell (const n = sql`…`), a df cell, source(), check(), fill() or param()' },
+      { path: '$.notebooks[0]#n', message: 'not a step a flow runs: a sql cell (const n = sql`…`), a df cell, source(), check(), fill(), publish() or param()' },
       { path: '$.notebooks[0]#rows', message: '${nothing}: nothing defines nothing' },
       { path: '$.notebooks[0]#frame', message: 'a df cell needs a frame compiler (expandNotebooks options.df): this build has none' },
     ]);
     await expect(expandNotebooks(flow({ 'a.nb.ts': nb }), ts)).rejects.toThrow('the notebooks have');
+    const pub = `${SETUP}
+cell('auth');
+const auth = source('auth');
+cell('rows', { lang: 'sql' });
+const rows = sql\`SELECT * FROM \${auth}\`;
+cell('published');
+publish(auth);
+publish(rows, { owner: 'me' });
+publish(rows);
+cell('again');
+publish(nothing);
+`;
+    const p = await stepsOfNotebooks(flow({ 'a.nb.ts': pub }), ts);
+    expect(p.issues.map((i) => i.message)).toEqual([
+      "publish() names a step; auth isn't one (auth is a source)",
+      'publish(rows, …): unknown setting owner (description, storage)',
+      'rows is published twice',
+      "publish() names a step; nothing isn't one",
+    ]);
   });
 
   it('takes a df cell through the frame compiler, its reads as the inputs', async () => {
@@ -215,7 +240,7 @@ export const failed = table(auth).filter(col('result').eq('fail'));
     });
     expect(issues).toEqual([]);
     expect(seen).toEqual([{ notebook: 'a.nb.ts', name: 'failed', code: expect.stringContaining("table(auth).filter(col('result').eq('fail'))"), inputs: { auth: 'auth' } }]);
-    expect(steps).toEqual([{ kind: 'sql', id: 'failed', inputs: ['auth'], sql: "SELECT * FROM auth WHERE result = 'fail'", dataset: {} }]);
+    expect(steps).toEqual([{ kind: 'sql', id: 'failed', inputs: ['auth'], sql: "SELECT * FROM auth WHERE result = 'fail'" }]);
   });
 
   it('is format 4 by its notebooks, which validateDocument reads before the steps are derived', async () => {

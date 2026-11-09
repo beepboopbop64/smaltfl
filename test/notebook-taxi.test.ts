@@ -1,5 +1,5 @@
 /**
- * The taxi example as notebooks (ADR 0011 slice 3, examples/nyc-taxis-weather/): three notebooks, one a stage, giving
+ * The taxi example as notebooks (ADR 0011 slice 3, examples/nyc-taxis-weather/): five notebooks, one a stage, giving
  * the JSON example's fill and expect nodes, its outputs and its publish block, and the same rows on the XS fixtures.
  * The hold and donor vectors (test/hold-real.test.ts, test/fill-real.test.ts) read the history, not the steps, and
  * run on the JSON example: this file shows the two forms compute the same thing.
@@ -47,10 +47,13 @@ describe('the taxi example as notebooks (ADR 0011 §1, §5)', () => {
     expect(squeeze(a.zone_list as { sql: string })).toEqual(squeeze(b.zone_list as { sql: string }));
     expect(plan.outputs.map((o) => o.name)).toEqual(other.outputs.map((o) => o.name));
     expect(plan.publish).toEqual(other.publish);
-    // Everything but the steps and the format is the JSON example's.
-    const { steps: _s, notebooks: _n, smaltfl: _f, ...rest } = doc;
-    const { steps: _js, smaltfl: _jf, ...jrest } = json;
+    // Everything but the steps and the format is the JSON example's; the steps share their ids, descriptions and
+    // datasets, in the JSON's order.
+    const { steps, notebooks: _n, smaltfl: _f, ...rest } = doc;
+    const { steps: jsteps, smaltfl: _jf, ...jrest } = json;
     expect(rest).toEqual(jrest);
+    const facts = (xs: FlowDocument['steps']) => [...xs].sort((a, b) => a.id.localeCompare(b.id)).map((s) => [s.id, s.description, s.dataset]);
+    expect(facts(steps)).toEqual(facts(jsteps));
   });
 
   it('runs to the same rows as the JSON example on the XS fixtures', async () => {

@@ -1,10 +1,11 @@
 // The sign-ins counted (ADR 0011): the second stage of the Sign-ins flow, over the checked sign-ins the first stage
 // exports. Each exported sql cell is a dataset the flow publishes, under the cell's name.
 import { cell, md, sql } from 'smaltnb';
+import { publish } from 'smaltfl/notebook';
 import { auth_valid } from './checks.nb.js';
 
 cell('by_hour', { lang: 'md' });
-md`Sign-ins by hour`;
+md`Sign-ins by hour and result`;
 
 cell('signins_by_hour', { lang: 'sql' });
 export const signins_by_hour = sql`
@@ -13,10 +14,14 @@ export const signins_by_hour = sql`
   GROUP BY 1, 2`;
 
 cell('by_country', { lang: 'md' });
-md`Failures by country`;
+md`Failed and locked-out sign-ins by country and client`;
 
 cell('failures_by_country', { lang: 'sql' });
 export const failures_by_country = sql`
   SELECT country, ua_family, sum(CASE WHEN result IN ('fail', 'locked') THEN 1 ELSE 0 END) AS failures, count(*) AS signins
   FROM ${auth_valid}
   GROUP BY 1, 2`;
+
+cell('published');
+publish(signins_by_hour, { description: 'Sign-ins by hour' });
+publish(failures_by_country, { description: 'Failures by country' });

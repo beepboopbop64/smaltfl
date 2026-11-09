@@ -1,8 +1,8 @@
 // The weather (ADR 0011): each district's hours labelled by condition, joined to the trips per borough and hour, and
 // weather's effect on demand against dry hours at the same hour of day.
 import { cell, md, sql } from 'smaltnb';
-import { source } from 'smaltfl/notebook';
-import { borough_hour } from './trips.nb.js';
+import { publish, source } from 'smaltfl/notebook';
+import { borough_hour } from './demand.nb.js';
 
 cell('weather');
 export const weather = source('weather');
@@ -29,7 +29,7 @@ cell('about_effect', { lang: 'md' });
 md`Trips per hour in each condition, against dry hours at the same hour of day`;
 
 cell('weather_effect', { lang: 'sql' });
-export const weather_effect = sql`
+const weather_effect = sql`
   WITH h AS (
     SELECT pu_borough, condition, CAST(strftime('%H', pu_hour) AS INTEGER) AS hour_of_day, trips, filled, filled_from
     FROM ${borough_hour_weather} WHERE condition IS NOT NULL
@@ -40,3 +40,7 @@ export const weather_effect = sql`
     avg(h.trips / d.dry_trips) AS vs_dry, sum(h.filled) AS filled, max(h.filled_from) AS filled_from
   FROM h JOIN dry d ON d.pu_borough = h.pu_borough AND d.hour_of_day = h.hour_of_day
   GROUP BY 1, 2`;
+
+cell('published');
+publish(weather_hourly, { description: 'Hourly weather per district, with a condition' });
+publish(weather_effect, { description: "Weather's effect on demand, per borough" });

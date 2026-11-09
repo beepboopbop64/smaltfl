@@ -35,8 +35,10 @@
     }
   ],
   "notebooks": [
-    "trips.nb.ts",
+    "clean.nb.ts",
     "places.nb.ts",
+    "enrich.nb.ts",
+    "demand.nb.ts",
     "weather.nb.ts"
   ],
   "ontology": {

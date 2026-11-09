@@ -15,7 +15,9 @@
  * - a `df` cell is a step whose statement smaltdf gives (§4): translated by the `df` hook the caller supplies, since
  *   the frame has to be evaluated to be compiled; without the hook such a cell is refused, named;
  * - an `md` cell describes the step after it;
- * - an exported cell is a dataset (an output name); an unexported one an intermediate step;
+ * - `publish(name, { description, storage })`, a statement in a cell of its own (several allowed), makes that step a
+ *   dataset (an output name); a step nothing publishes is an intermediate, exported or not: `export` is for other
+ *   notebooks to import, `publish` for readers;
  * - `action()` cells never run in a flow run (§2) and are left out;
  * - a notebook imports another listed notebook's exports (`import { x } from './checks.nb.js'`).
  *
@@ -186,9 +188,11 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
     return ref?.kind === 'source' || ref?.kind === 'step' ? ref.id : null;
   };
 
-  // 4. Build: each step from its cell, in the notebook's run order, with the md cell before it as its description.
+  // 4. Build: each step from its cell, in the notebook's run order, with the md cell before it as its description;
+  // then what the publish cells say, on the steps they name.
   const steps: StepDef[] = [];
   const cells: CellStep[] = [];
+  const published: { parsed: Parsed; where: string; name: string; options: Record<string, unknown> }[] = [];
   for (const parsed of byPath.values()) {
     const kinds = classified.get(parsed)!;
     let description: string | undefined;
@@ -201,9 +205,12 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
         continue;
       }
       const c = kinds.get(cell.id);
-      const exported = cell.exports.includes(cell.id);
-      const base = { id: cell.id, ...(description ? { description } : {}), ...(exported ? { dataset: description ? { description } : {} } : {}) };
+      const base = { id: cell.id, ...(description ? { description } : {}) };
       description = undefined;
+      if (c?.kind === 'publish') {
+        for (const p of c.names) published.push({ parsed, where, ...p });
+        continue;
+      }
       if (!c || c.kind === 'source' || c.kind === 'params') continue;
       let step: StepDef | null = null;
       if (c.kind === 'sql') {
@@ -238,10 +245,23 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
       }
     }
   }
+  for (const p of published) {
+    const id = idOf(p.parsed, p.name);
+    const step = id === null ? undefined : steps.find((s) => s.id.toLowerCase() === id.toLowerCase());
+    if (!step) {
+      if (resolve(p.parsed, p.name)?.kind !== 'broken') add(p.where, `publish() names a step; ${p.name} isn't one${id ? ` (${id} is a source)` : ''}`);
+      continue;
+    }
+    const { description, storage, ...rest } = p.options;
+    if (Object.keys(rest).length) add(p.where, `publish(${p.name}, …): unknown setting ${Object.keys(rest).join(', ')} (description, storage)`);
+    if (step.dataset) add(p.where, `${p.name} is published twice`);
+    step.dataset = { ...(typeof description === 'string' ? { description } : {}), ...(storage !== undefined ? { storage: storage as 'row' | 'columnar' } : {}) };
+  }
   return { steps, cells, issues };
 }
 
 type Classified =
+  | { kind: 'publish'; names: { name: string; options: Record<string, unknown> }[] }
   | { kind: 'source'; id: string }
   | { kind: 'params' }
   | { kind: 'sql'; text: string }
@@ -255,6 +275,14 @@ function classify(parsed: Parsed, cell: Cell, ts: TypeScriptKit, sources: Map<st
   const where = `${parsed.at}#${cell.id}`;
   if (cell.sql?.kind === 'query') return { kind: 'sql', text: cell.sql.text };
   const body = cell.body ? parsed.statements.filter((st) => tree.start[st]! >= cell.body!.start && tree.end[st]! <= cell.body!.end) : [];
+  const published = publishesOf(tree, ts, body, parsed.names);
+  if (published) {
+    if (published.length === 0) {
+      add(where, 'publish() names a step, with its settings as an object literal: publish(name, { description, storage })');
+      return null;
+    }
+    return { kind: 'publish', names: published };
+  }
   const decl = declarationOf(tree, ts, body, cell.id);
   const callee = decl?.callee ? parsed.names.get(decl.callee) : undefined;
   const marker = callee?.kind === 'marker' ? callee.name : null;
@@ -289,7 +317,7 @@ function classify(parsed: Parsed, cell: Cell, ts: TypeScriptKit, sources: Map<st
     return { kind: 'fill', input, time: opts.time as string, shift: Array.isArray(opts.shift) ? (opts.shift as string[]) : [] };
   }
   if (cell.lang === 'df') return { kind: 'df' };
-  add(where, `not a step a flow runs: a sql cell (const ${cell.id} = sql\`…\`), a df cell, source(), check(), fill() or param()`);
+  add(where, `not a step a flow runs: a sql cell (const ${cell.id} = sql\`…\`), a df cell, source(), check(), fill(), publish() or param()`);
   return null;
 }
 
@@ -325,6 +353,32 @@ function sqlOf(text: string, resolve: (name: string) => Ref | undefined, problem
     return null;
   }
   return { sql, inputs };
+}
+
+/**
+ * A publish cell: every statement `publish(name[, { … }])`, by the local name `publish` is imported under. Null when
+ * the cell is anything else; empty when a statement names nothing or gives settings that aren't a literal.
+ */
+function publishesOf(tree: Tree, ts: TypeScriptKit, body: number[], names: Map<string, Ref>): { name: string; options: Record<string, unknown> }[] | null {
+  const { K } = ts;
+  if (body.length === 0) return null;
+  const out: { name: string; options: Record<string, unknown> }[] = [];
+  for (const st of body) {
+    if (tree.kind[st] !== K.ExpressionStatement) return null;
+    const call = tree.first[st]!;
+    if (tree.kind[call] !== K.CallExpression) return null;
+    const [callee, ...parts] = tree.children(call);
+    if (callee === undefined || tree.kind[callee] !== K.Identifier) return null;
+    const ref = names.get(tree.textOf(callee));
+    if (ref?.kind !== 'marker' || ref.name !== 'publish') return null;
+    const args = parts.filter((n) => !ts.isTypeNode(tree.kind[n]!));
+    const [first, second] = args;
+    if (first === undefined || tree.kind[first] !== K.Identifier) return [];
+    const options = second === undefined ? {} : literalValue(tree, ts, second);
+    if (!isRecord(options)) return [];
+    out.push({ name: tree.textOf(first), options });
+  }
+  return out;
 }
 
 /** `[export] const <name> = <callee>(<args>)` as the cell's one statement (a trailing `name;` allowed), else null. */

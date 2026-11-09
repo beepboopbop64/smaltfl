@@ -1,7 +1,7 @@
 // The sign-ins, checked (ADR 0011): the first stage of the Sign-ins flow (flow.json), as a smaltnb notebook. The flow
 // reads this notebook's exported cells as its steps; run on its own in a notebook page, each cell is what it says.
 import { cell, md, param } from 'smaltnb';
-import { check, source } from 'smaltfl/notebook';
+import { check, publish, source } from 'smaltfl/notebook';
 
 cell('params');
 export const params = param({ day: param.text('') });
@@ -10,7 +10,7 @@ cell('auth');
 export const auth = source('auth');
 
 cell('about', { lang: 'md' });
-md`Checked sign-ins`;
+md`Sign-ins with a known result, on the day`;
 
 cell('auth_valid');
 export const auth_valid = check(auth, {
@@ -21,3 +21,6 @@ export const auth_valid = check(auth, {
   ],
   maxDropped: 0.05,
 });
+
+cell('published');
+publish(auth_valid, { description: 'Checked sign-ins' });

@@ -1,6 +1,6 @@
 // The places (ADR 0011): the taxi zone lookup, each zone in its district, and the districts themselves.
 import { cell, md, sql } from 'smaltnb';
-import { source } from 'smaltfl/notebook';
+import { publish, source } from 'smaltfl/notebook';
 
 cell('zones');
 export const zones = source('zones');
@@ -19,3 +19,7 @@ md`The districts: the five boroughs and Newark airport`;
 
 cell('districts', { lang: 'sql' });
 export const districts = sql`SELECT borough, count(*) AS zones FROM ${zone_list} GROUP BY 1`;
+
+cell('published');
+publish(zone_list, { description: 'Taxi zones' });
+publish(districts, { description: 'Districts' });

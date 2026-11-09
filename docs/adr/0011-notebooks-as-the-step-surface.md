@@ -99,14 +99,19 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
   `param({...})` is the notebook's parameters and `${params.day}` in SQL the flow's `:day`; a `sql` cell is a `sql`
   step whose `${x}` are its inputs, by id; `check(x, {...})` the `expectations` step; `fill(x, { time, shift })` the
   `fill` step; a `df` cell a `sql` step whose statement the caller's frame compiler gives (§4); an `md` cell the
-  description of the step after it; an exported cell a dataset, an unexported one an intermediate; `action()` cells are
-  left out; `import { x } from './other.nb.js'` reads another listed notebook's exports. On disk a flow is a folder:
+  description of the step after it; `publish(name, { description, storage })`, a statement in a cell of its own, makes
+  the step a dataset (the maintainer, 2026-11-09: publishing is separate from exporting, so a stage can hand an
+  intermediate to the next notebook without publishing it); `action()` cells are left out; `import { x } from
+  './other.nb.js'` reads another listed notebook's exports. On disk a flow is a folder:
   `flow.json` with `notebooks: ["checks.nb.ts", …]`, loaded by `loadNotebooks` and expanded by `expandNotebooks`.
 - **E14, plan/3's vector** (`test/notebook.test.ts`): a format-4 document `v` with one source `auth` (`auth_file`) and
   one notebook `v.nb.ts` (`const auth = source('auth')`, `export const rows = sql\`SELECT * FROM ${auth}\``), no
   parameters: flow hash `314572a5…f36726`; plan
   `{"flow":{"hash":"314572a5…","id":"v"},"nodes":[{"inputs":[],"op":"table","origin":"auth","table":"auth_file"},{"inputs":[0],"names":["auth"],"op":"sql","origin":"rows","sql":"SELECT * FROM auth"}],"outputs":[{"name":"rows","node":1}],"parameters":{},"smaltflPlan":3}`;
-  plan/3 hash `724148bc9b4ebafc71d5977ac2e878d94228acef66353c19e93576977b1caf3a`. The sign-ins example in both forms
+  plan/3 hash `724148bc…` as first pinned; with the `publish(rows)` cell the notebook needs, flow hash
+  `4082850eb0bcd8c11a7531782fd3f95179a7a26b1c908512925d5ec40fe48a71` and plan/3 hash
+  `aa56689e4d8a1cdc2a5781259cb6256d4a35aed09ecd723feb9bb5b2eddf5e29` (the plan's bytes are the same; the flow hash
+  moved with the source). The sign-ins example in both forms
   (`examples/security-signins.smaltfl.json`, `examples/security-signins/`) gives the same expect node, the same
   publish block and the same rows on a generated day.
 - **The example's keys change; its verdicts do not.** An aggregate step rewritten as a `sql` cell is a different plan
@@ -136,11 +141,11 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
      smaltdf that compiled to SQL (`explain()`) is not used: the notebook page runs the pinned one, and a flow and the
      page must take the statement from the same code;
   3. the taxi example as notebooks (`sql` and `df` cells, the fill step as a cell), the hold and donor tables unmoved.
-     Built 2026-11-09: `examples/nyc-taxis-weather/` is three notebooks, one a stage (`trips.nb.ts`: the fill, the
-     checks, deduplication, zones, enrichment and the two counts; `places.nb.ts`; `weather.nb.ts`), all its cells
-     `sql` (a df cell waits on the plan node, slice 2's note). Since an exported cell is a dataset and a notebook
-     imports only exports, the trips' chain is one notebook, where the JSON form drew three sections: the
-     intermediates stay unexported and fold as before. `test/notebook-taxi.test.ts` shows the two forms share their
+     E14 was recomputed when `publish()` arrived (flow hash `4082850e…`, plan/3 hash `aa56689e…`), before any release.
+     Built 2026-11-09: `examples/nyc-taxis-weather/` is five notebooks, the sections the JSON form drew (`clean`,
+     `places`, `enrich`, `demand`, `weather`), each stage importing the last one's exports and publishing only what
+     the JSON published, all its cells `sql` (a df cell waits on the plan node, slice 2's note); the intermediates
+     fold as before. `test/notebook-taxi.test.ts` shows the two forms share their
      fill and expect nodes, outputs and publish block, and give the same rows on the XS fixtures. The hold and donor
      vectors run on the JSON form, which stays `examples/nyc-taxis-weather.smaltfl.json` until the app reads folders
      (slice 4);

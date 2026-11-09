@@ -33,6 +33,23 @@ export function check<T>(input: T, options: CheckOptions): T {
   return input;
 }
 
+/** What a published dataset says about itself: its description, and how the engine stores it (default `row`). */
+export interface PublishOptions {
+  description?: string;
+  storage?: 'row' | 'columnar';
+}
+
+/**
+ * Publishes a step as a dataset, under the cell's name (ADR 0011 §1): its versions are hashed, held or pointed by
+ * the flow's runtime. Written as its own statement, usually in a cell of its own at the end of a notebook:
+ * `publish(zone_hour); publish(borough_hour, { description: 'Trips per borough and hour' })`. An exported cell
+ * another notebook imports is not published by that alone.
+ */
+export function publish<T>(step: T, options: PublishOptions = {}): T {
+  void options;
+  return step;
+}
+
 /** A fill step's settings (ADR 0009 amendment 1): the time column its hours are of, and the columns a donor's rows
  * are moved by whole days. */
 export interface FillOptions {
