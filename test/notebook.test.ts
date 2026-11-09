@@ -60,9 +60,14 @@ describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
       signins_by_hour: { notebook: 'counts.nb.ts', cell: 'signins_by_hour', lang: 'sql', line: 10, endLine: 14 },
       failures_by_country: { notebook: 'counts.nb.ts', cell: 'failures_by_country', lang: 'sql', line: 19, endLine: 23 },
     });
+    // Each notebook is a box on the canvas, folded, its steps inside; a source stands on its own as an input.
     expect(doc.groups).toEqual([
-      { id: 'nb-checks', name: 'Checks', steps: ['auth', 'auth_valid'], color: 'smalt' },
-      { id: 'nb-counts', name: 'Counts', steps: ['signins_by_hour', 'failures_by_country'], color: 'teal' },
+      { id: 'nb-checks', name: 'Checks', steps: ['auth_valid'], collapsed: true, color: 'smalt' },
+      { id: 'nb-counts', name: 'Counts', steps: ['signins_by_hour', 'failures_by_country'], collapsed: true, color: 'teal' },
+    ]);
+    expect(doc.outline!.map((o) => [o.path, o.cells.map((c) => c.kind)])).toEqual([
+      ['checks.nb.ts', ['params', 'source', 'md', 'step', 'publish']],
+      ['counts.nb.ts', ['md', 'step', 'md', 'step', 'publish']],
     ]);
     expect(await flowHash(doc)).toBe(await flowHash({ ...doc, cells: undefined, groups: undefined, outline: undefined }));
     // Everything but the format is the JSON example's: the steps too, where the JSON's visual steps are SQL here.

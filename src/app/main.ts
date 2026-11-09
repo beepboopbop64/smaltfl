@@ -15,9 +15,9 @@ import { holidayOf, seasonOf, US_NYC_1, type Calendar } from '../core/calendar.j
  * among the taxi example's. */
 const calendarNow = (): Calendar => history?.calendar ?? US_NYC_1;
 import { canonicalJSON } from '../core/canonical.js';
-import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
+import type { FlowDocument, GroupDef, NotebookOutline, ProfileDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, periodOf, sourceOf, takeOut, validateDocument, watchHistory, withoutDisplay, type CellRef } from '../core/document.js';
-import { notebookName } from '../core/notebook.js';
+import { notebookSectionId } from '../core/notebook.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDayHours, emitDistinct, emitHourValues, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, stampShift, type EmitContext } from '../core/emit.js';
 import { effectOf, type Effect } from '../core/effect.js';
 import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, timeOf, type HistoryFile, type Metric } from '../core/history.js';
@@ -1277,7 +1277,9 @@ function setUpCanvas(host: HTMLElement): SVGSVGElement {
  */
 function tap(press: { card?: string; head?: string; shield?: boolean }): void {
   if (press.card) {
-    if (state.doc.groups?.some((g) => g.id === press.card)) setFolded(press.card, false);
+    // A notebook's box opens the notebook (ADR 0011 §6); any other folded section unfolds.
+    if (notebookOfSection(press.card)) openSection(press.card);
+    else if (state.doc.groups?.some((g) => g.id === press.card)) setFolded(press.card, false);
     else {
       state.sheetFocus = press.shield ? 'access' : null;
       select(press.card);
@@ -1553,35 +1555,16 @@ function syncCanvasKey(): void {
 
 // ------------------------------------------------------------------ the notebook view (ADR 0011 §6)
 
-/** Whether the flow is read as its notebooks (the default where it has them) or drawn on the canvas. */
-function notebookView(): boolean {
-  if (!state.doc.outline?.length) return false;
-  try {
-    const saved = localStorage.getItem('smaltfl:flow-view');
-    return saved === null ? true : saved === 'notebook';
-  } catch {
-    return true;
-  }
-}
-
-function setFlowView(view: 'notebook' | 'canvas'): void {
-  try {
-    localStorage.setItem('smaltfl:flow-view', view);
-  } catch {
-    // Storage unavailable: the choice holds for this page.
-  }
-  renderCanvas();
-}
+/** The notebook a section of the canvas is, if it is one (ADR 0011 §6): a box on the canvas, its steps inside. */
+const notebookOfSection = (id: string): NotebookOutline | undefined => state.doc.outline?.find((o) => notebookSectionId(o.path) === id);
 
 /**
- * The flow as its notebooks, top to bottom (ADR 0011 §6): each heading a stage, each md cell its words, each source
- * and step a card that opens its sheet, with the rows that flow out of it once it has run, each step's code a tap
- * away, and what the notebook publishes. What the canvas shows across, read down the page: on a phone the default.
+ * A notebook read top to bottom (ADR 0011 §6): each heading a part, each md cell its words, each source and step a
+ * card that opens its sheet, with the rows that flow out of it once it has run and the rows that go on to the next
+ * card between them, a check's rules and what each caught, each step's code a tap away, and what the notebook
+ * publishes. What its box on the canvas holds, read down the page.
  */
-function renderNotebook(): void {
-  const host = $('notebook');
-  const outline = state.doc.outline ?? [];
-  const groups = state.doc.groups ?? [];
+function notebookElements(o: NotebookOutline): HTMLElement[] {
   const run = latest();
   const rowsOf = (id: string): number | undefined => nodeOf(id)?.rows;
   const nb = (id: string) => state.doc.notebooks?.find((n) => n.path === id);
@@ -1591,7 +1574,6 @@ function renderNotebook(): void {
     const indent = Math.min(...lines.filter((l) => l.trim()).map((l) => /^\s*/.exec(l)![0].length));
     return lines.map((l) => l.slice(Number.isFinite(indent) ? indent : 0)).join('\n');
   };
-  const sectionOfStep = (id: string) => groups.find((g) => g.steps.includes(id));
   const card = (id: string, kind: 'source' | 'step'): HTMLElement => {
     if (!visible(id)) return h('p', { class: 'nb-md' }, `${id}: closed to ${personName(state.viewer)}.`);
     const st = steps().get(id);
@@ -1624,30 +1606,20 @@ function renderNotebook(): void {
       h('span', { class: 'k' }, 'dropped'), h('span', {}, ''), h('span', { class: `n ${e.dropped ? 'drop' : ''}` }, `${fmtInt(e.dropped)} rows`));
   };
   const parts: HTMLElement[] = [];
-  for (const o of outline) {
-    if (outline.length > 1) parts.push(h('div', { class: 'nb-file' }, h('span', { class: 'eyebrow' }, 'Notebook'), h('code', {}, o.path)));
-    let stage: HTMLElement | null = null;
-    let lastCard: string | null = null;
-    const open = (name: string, body?: string, color?: string) => {
-      stage = h('div', { class: `nb-stage c-${color ?? 'slate'}` }, h('h3', {}, name), body ? h('p', { class: 'nb-lede' }, body) : '');
-      parts.push(stage);
-      lastCard = null;
-    };
-    const put = (el: HTMLElement) => {
-      if (!stage) open(notebookName(o.path), undefined, groups[0]?.color);
-      stage!.append(el);
-    };
-    const between = (id: string) => {
-      if (lastCard && stage) {
-        const said = flowOut(lastCard);
-        if (said) stage.append(h('div', { class: 'nb-flow', 'aria-hidden': 'true' }, h('span', { class: 'arrow' }, '↓'), said));
-      }
-      lastCard = id;
-    };
+  let lastCard: string | null = null;
+  const put = (el: HTMLElement) => parts.push(el);
+  const between = (id: string) => {
+    if (lastCard) {
+      const said = flowOut(lastCard);
+      if (said) parts.push(h('div', { class: 'nb-flow', 'aria-hidden': 'true' }, h('span', { class: 'arrow' }, '↓'), said));
+    }
+    lastCard = id;
+  };
+  {
     for (const c of o.cells) {
       if (c.kind === 'heading') {
-        const g = groups.find((x) => x.name === c.heading);
-        open(c.heading ?? '', c.text, g?.color);
+        put(h('h3', { class: 'nb-h' }, c.heading ?? ''));
+        if (c.text) put(h('p', { class: 'nb-lede' }, c.text));
       } else if (c.kind === 'md') put(h('p', { class: 'nb-md' }, c.text ?? ''));
       else if (c.kind === 'params') {
         const values = run?.result.manifest.parameters ?? Object.fromEntries((state.doc.parameters ?? []).map((p) => [p.name, p.default ?? null]));
@@ -1666,26 +1638,53 @@ function renderNotebook(): void {
         put(h('p', { class: 'nb-pub' }, 'Publishes ', ...c.publishes.flatMap((n, i) => [i ? ', ' : '', h('b', {}, n)])));
       }
     }
-    void sectionOfStep;
   }
-  host.replaceChildren(...parts);
+  return parts;
+}
+
+/**
+ * A notebook's sheet (ADR 0011 §6): what opens when its box on the canvas is tapped. The notebook itself, read top
+ * to bottom, each of its cells a tap from its own sheet; and the box's own settings (its steps shown on the canvas or
+ * folded into the box, its name and colour) under it.
+ */
+function renderNotebookSheet(g: GroupDef, o: NotebookOutline): void {
+  const sheet = $('sheet');
+  sheet.classList.remove('drill');
+  const folded = state.collapsed.has(g.id);
+  const published = g.steps.filter((id) => isOutput(id));
+  const fold = h('button', { class: 'btn small', type: 'button', onclick: () => setFolded(g.id, !folded) }, folded ? 'Show its steps on the canvas' : 'Fold it into one box');
+  const name = h('input', { id: 'section-name', type: 'text', maxlength: '40', autocomplete: 'off', spellcheck: 'false', enterkeyhint: 'done' });
+  name.value = g.name;
+  const title = h('h2', {}, g.name);
+  name.addEventListener('input', () => {
+    const v = name.value.trim() || 'Untitled';
+    title.textContent = v;
+    editSection(g.id, (x) => ({ ...x, name: v }));
+  });
+  name.addEventListener('keydown', (e) => e.key === 'Enter' && name.blur());
+  const color = g.color ?? 'slate';
+  const swatches = h('div', { class: 'swatches', role: 'radiogroup', 'aria-label': 'Colour' },
+    ...GROUP_COLORS.map((c) => h('button', { type: 'button', class: `swatch-btn c-${c}`, role: 'radio', 'aria-checked': String(c === color), 'aria-label': c, title: c, onclick: () => (editSection(g.id, (x) => ({ ...x, color: c })), renderSheet()) })));
+  sheet.setAttribute('aria-label', 'Notebook');
+  sheet.replaceChildren(
+    h('div', { class: 'sheet-head' },
+      h('div', { style: 'flex:1;min-width:0' }, h('p', { class: 'eyebrow' }, `Notebook · ${o.path}`), title,
+        h('p', { class: 'foot' }, `${plural(g.steps.length, 'step')}${published.length ? `, publishes ${published.join(', ')}` : ', publishes nothing: the next notebook reads it'}.`)),
+      h('button', { class: 'close', type: 'button', 'aria-label': 'Close', onclick: () => select(null) }, '×')),
+    h('div', { class: 'sheet-body' },
+      h('div', { class: 'nb-actions' }, fold),
+      h('div', { class: 'nb' }, ...notebookElements(o)),
+      isOwner() ? h('details', { class: 'about-flow' }, h('summary', {}, 'The box on the canvas'),
+        h('div', { class: 'sheet-body' },
+          h('div', { class: 'field' }, h('label', { for: name.id }, 'Name'), name),
+          h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Colour'), swatches),
+          h('p', { class: 'foot' }, 'The box only changes how the flow looks: never what it computes, or its hashes. The notebook is what runs.'))) : ''));
+  sheet.hidden = false;
 }
 
 function renderCanvas(): void {
   // Mid-drag, wait: the drop draws everything once it lands.
   if (moving) return;
-  // The notebook view, where the flow has notebooks: the canvas waits behind the switch (ADR 0011 §6).
-  const hasNotebooks = !!state.doc.outline?.length;
-  const asNotebook = notebookView();
-  $('view-switch').hidden = !hasNotebooks;
-  $('notebook').hidden = !asNotebook;
-  $('canvas').hidden = asNotebook;
-  $('switch-notebook').setAttribute('aria-pressed', String(asNotebook));
-  $('switch-canvas').setAttribute('aria-pressed', String(!asNotebook));
-  if (asNotebook) {
-    renderNotebook();
-    return;
-  }
   let sealed = false;
   const host = $('canvas');
   const svg = host.querySelector('svg') ?? setUpCanvas(host);
@@ -1833,7 +1832,9 @@ function renderCanvas(): void {
     const built = f.members.filter((m) => nodeOf(m)?.status === 'built').length;
     const lost = f.members.reduce((sum, m) => sum + (state.changes.get(m) ? removedRows(state.changes.get(m)!) : 0), 0);
     const text = latest() ? `${f.members.length} steps · ${built} built` : `${f.members.length} steps`;
-    card(f.id, 'SECTION', f.name, { text, tone: lost ? 'drop' : 'same', badge: lost ? `−${fmtCompact(lost)} rows` : undefined }, ['summary', `c-${f.color ?? 'slate'}`]);
+    const nbk = notebookOfSection(f.id);
+    const outs = f.members.filter((m) => isOutput(m)).length;
+    card(f.id, nbk ? `NOTEBOOK${outs ? ` · ${outs === 1 ? 'OUTPUT' : `${outs} OUTPUTS`}` : ''}` : 'SECTION', f.name, { text, tone: lost ? 'drop' : 'same', badge: lost ? `−${fmtCompact(lost)} rows` : undefined }, ['summary', `c-${f.color ?? 'slate'}`]);
   }
   for (const id of layout.cards.keys()) {
     if (shownAs.has(id)) continue;
@@ -1881,7 +1882,9 @@ function openSection(id: string, focusName = false): void {
   state.selected = null;
   state.section = id;
   renderCanvas();
-  renderSectionSheet(focusName);
+  // A notebook's box opens its notebook (ADR 0011 §6); a section of the owner's own, or one being arranged, its settings.
+  if (focusName || state.arranging || !notebookOfSection(id)) renderSectionSheet(focusName);
+  else void renderSheet();
 }
 
 // ------------------------------------------------------------------ data quality: columns, odd rows, drift, checks
@@ -6112,7 +6115,12 @@ function setAside(f: Finding, day: string): void {
 // ------------------------------------------------------------------ the sheet
 
 async function renderSheet(): Promise<void> {
-  if (state.section) return renderSectionSheet();
+  if (state.section) {
+    const g = state.doc.groups?.find((x) => x.id === state.section);
+    const o = notebookOfSection(state.section);
+    if (g && o && !state.arranging) return renderNotebookSheet(g, o);
+    return renderSectionSheet();
+  }
   const sheet = $('sheet');
   const id = state.selected;
   if (!id) {
@@ -9699,8 +9707,6 @@ async function start(): Promise<void> {
   picker.value = state.viewer;
   picker.addEventListener('change', () => setViewer(picker.value));
   window.addEventListener('hashchange', showView);
-  $('switch-notebook').addEventListener('click', () => setFlowView('notebook'));
-  $('switch-canvas').addEventListener('click', () => setFlowView('canvas'));
   let resize = 0;
   window.addEventListener('resize', () => {
     cancelAnimationFrame(resize);

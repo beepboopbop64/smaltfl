@@ -1,6 +1,6 @@
 /**
- * The taxi example as a notebook (ADR 0011 slice 3, examples/nyc-taxis-weather/): one notebook whose headings open the
- * stages, giving
+ * The taxi example as notebooks (ADR 0011 slice 3, examples/nyc-taxis-weather/): five notebooks, one a stage and one a
+ * box on the canvas, giving
  * the JSON example's fill and expect nodes, its outputs and its publish block, and the same rows on the XS fixtures.
  * The hold and donor vectors (test/hold-real.test.ts, test/fill-real.test.ts) read the history, not the steps, and
  * run on the JSON example: this file shows the two forms compute the same thing.
@@ -53,16 +53,17 @@ describe('the taxi example as notebooks (ADR 0011 §1, §5)', () => {
     const { steps, notebooks: _n, smaltfl: _f, cells: _c, outline: _o, groups, ...rest } = doc;
     const { steps: jsteps, smaltfl: _jf, groups: jgroups, ...jrest } = json;
     expect(rest).toEqual(jrest);
-    // The sections the JSON drew by hand are the notebook's headings here, with the same members.
-    const sections = (gs: NonNullable<FlowDocument['groups']>) => gs.map((g) => [...g.steps].sort());
+    // The sections the JSON drew by hand are the notebooks here, each a folded box with the same steps; the sources
+    // the JSON put in them stand on their own as inputs.
+    const sources = new Set(doc.sources.map((s) => s.id));
+    const sections = (gs: NonNullable<FlowDocument['groups']>) => gs.map((g) => [...g.steps].filter((x) => !sources.has(x)).sort());
     expect(groups!.map((g) => g.name)).toEqual(['Clean', 'Places', 'Enrich', 'Demand', 'Weather']);
+    expect(groups!.every((g) => g.collapsed)).toBe(true);
     expect(sections(groups!)).toEqual(sections(jgroups!));
-    // The outline reads the notebook top to bottom: headings, prose, sources, steps and what is published.
-    expect(doc.outline!.map((o) => o.path)).toEqual(['taxis.nb.ts']);
-    const kinds = doc.outline![0]!.cells.map((c) => c.kind);
-    expect(kinds.slice(0, 6)).toEqual(['params', 'heading', 'source', 'md', 'step', 'md']);
-    expect(doc.outline![0]!.cells.filter((c) => c.kind === 'heading').map((c) => c.heading)).toEqual(['Clean', 'Places', 'Enrich', 'Demand', 'Weather']);
-    expect(doc.outline![0]!.cells.at(-1)).toMatchObject({ kind: 'publish', publishes: ['zone_hour', 'borough_hour', 'zone_list', 'districts', 'weather_hourly', 'weather_effect'] });
+    // The outline reads each notebook top to bottom: prose, sources, steps and what is published.
+    expect(doc.outline!.map((o) => o.path)).toEqual(['clean.nb.ts', 'places.nb.ts', 'enrich.nb.ts', 'demand.nb.ts', 'weather.nb.ts']);
+    expect(doc.outline![0]!.cells.map((c) => c.kind)).toEqual(['params', 'source', 'md', 'step', 'md', 'step', 'md', 'step']);
+    expect(doc.outline![3]!.cells.at(-1)).toMatchObject({ kind: 'publish', publishes: ['zone_hour', 'borough_hour'] });
     const facts = (xs: FlowDocument['steps']) => [...xs].sort((a, b) => a.id.localeCompare(b.id)).map((s) => [s.id, s.description, s.dataset]);
     expect(facts(steps)).toEqual(facts(jsteps));
   });

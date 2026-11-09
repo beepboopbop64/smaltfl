@@ -157,15 +157,17 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
      lines and code, `cells`, display only) where a JSON step shows editable settings, with the Statement tab still
      saying what the engine runs. Editing a cell in smaltkit's editor, re-deriving in the page, is the next step of
      this slice. The flow document is the build's own file: checked against loads.json's entry when read, never
-     against the data branch's MANIFEST.json (`namedFiles`). **Second pass, the same day,** on the maintainer's review
-     ("I don't see the notebook that made a cell; the packed canvas is hard to follow on a phone; collapse the
-     example into one notebook"): the Flow view opens on the **notebook view** (`renderNotebook`), the flow read top
-     to bottom as its notebooks: each `# heading` md cell opens a stage (a section of the canvas, named by it, in its
-     colour), each md cell is its words, each source and step a card that opens its sheet, with its rows once it
-     has run and the rows that flow on to the next card between them, a check's rules and what each caught under
-     its card, and each step's code a tap away (SQL open by default); the canvas is a switch away (`Notebook |
-     Canvas`, remembered in this browser). `expandNotebooks` fills `outline` (every cell of every notebook, in
-     order, display only) for it. The taxi example is one notebook, `taxis.nb.ts`, its five headings the stages the
-     JSON drew;
+     against the data branch's MANIFEST.json (`namedFiles`). **Second and third pass, the same day,** on the
+     maintainer's review: a notebook is a **box on the canvas**, and opening the box shows the notebook. The canvas
+     stays the main view. Each notebook is a section folded into one box (`NOTEBOOK · 2 OUTPUTS`, its steps inside;
+     its sources stand on their own as inputs, so the data's path reads input → box → box); tapping the box opens
+     the notebook's sheet (`renderNotebookSheet`): the notebook read top to bottom (`notebookElements`), each md cell
+     its words, each source and step a card that opens its own sheet, with its rows once it has run and the rows
+     that flow on to the next card between them, a check's rules and what each caught, each step's code a tap away
+     (SQL open), what it publishes; and "Show its steps on the canvas" unfolds the box. A notebook of one `sql` cell
+     is a box like any other, labelled by its one step. `expandNotebooks` fills `outline` (every cell of every
+     notebook, in order, display only) for the sheet, and folds the derived sections (`collapsed`). The maintainer's
+     first reading of this pass (the notebook as the default view, the canvas a switch away) was built and taken
+     out the same day: the canvas is the main thing;
   5. a headless run (`node scripts/run.mjs --flow DIR --day D`) on the in-process engine, ahead of `smaltnb run`;
   6. the smaltts seam, when its milestone 7 lands: publish through `flow()`, the plugin's tables through specs.

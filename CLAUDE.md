@@ -82,10 +82,10 @@ match smaltdb's `CLAUDE.md`.
   imports (`source`, `check`, `fill`); its plan is plan/3 (E14, `test/notebook.test.ts`). A flow is a folder:
   `examples/security-signins/` and `examples/nyc-taxis-weather/` (`flow.json` and `*.nb.ts`, typechecked with the
   repository; `test/notebook-taxi.test.ts` holds them to the JSON forms, which the real-history tests still read).
-  `scripts/flow.ts` reads either form from disk for the app build and the history builder. The app's Flow view opens
-  on the notebook view, the flow read top to bottom (`renderNotebook`; a `# heading` md cell opens a stage), the
-  canvas a switch away; `cells`, `groups` and `outline` are the display fields `expandNotebooks` fills for it. `packed.json` pins smaltnb and smaltkit beside
-  smaltdb.
+  `scripts/flow.ts` reads either form from disk for the app build and the history builder. On the canvas a notebook
+  is a box (a section folded, `notebookSectionId`), and tapping it opens the notebook read top to bottom
+  (`renderNotebookSheet`, `notebookElements`), each cell a tap from its own sheet; `cells`, `groups` and `outline` are
+  the display fields `expandNotebooks` fills for it. `packed.json` pins smaltnb and smaltkit beside smaltdb.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
