@@ -6,8 +6,8 @@
 //   node scripts/build-app.mjs            the example (examples/nyc-taxis-weather/, its notebooks expanded, ADR 0011):
 //                                         the daily loads from origin/data, or the 10k fixtures
 //   node scripts/build-app.mjs --xs       the example on the 10k fixtures
-//   node scripts/build-app.mjs --flow examples/security-signins/flow.json
-//                                         another example: its data list's generator writes its daily files, the
+//   node scripts/build-app.mjs --flow examples/security-signins/flow.json [--out dist/app-signins]
+//                                         another example: its data list's generator (with its `generateArgs`) writes its daily files, the
 //                                         general builder its history. Every build ships its document as data/flow.json,
 //                                         a folder's with its notebooks' sources and the steps derived from them
 import { build } from 'esbuild';
@@ -18,7 +18,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const out = 'dist/app';
+const outAt = process.argv.indexOf('--out');
+const out = outAt >= 0 ? process.argv[outAt + 1] : 'dist/app';
 rmSync(out, { recursive: true, force: true });
 mkdirSync(`${out}/data`, { recursive: true });
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
@@ -104,7 +105,11 @@ for (const name of ['worker', 'inline', 'app']) {
   rmSync(`${out}/${name}.js.map`, { force: true });
   hashed[name] = to;
 }
-writeFileSync(`${out}/page.html`, readFileSync('src/app/page.html', 'utf8').replace('src="app.js"', `src="${hashed.app}"`));
+// The page's title is the flow's name: the artifact host and the browser tab show it.
+const titleOf = (doc) => `${doc.name} · smaltfl`.replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'));
+writeFileSync(`${out}/page.html`, readFileSync('src/app/page.html', 'utf8')
+  .replace('src="app.js"', `src="${hashed.app}"`)
+  .replace(/<title>[^<]*<\/title>/, `<title>${titleOf(await readFlow(flowPath ?? EXAMPLE_FLOW))}</title>`));
 writeFileSync(`${out}/bundles.json`, JSON.stringify(hashed, null, 2) + '\n');
 const fromData = (path) => git('show', `${data}:${path}`);
 /** A data file's entry in the published list, checked against the bytes read: the list is what the app trusts. */
@@ -160,7 +165,7 @@ if (days.length) {
   const bind = bindingsOf(flowPath);
   if (!bind.generate) throw new Error(`${flowPath}'s data list names no generator for its files`);
   const work = mkdtempSync(join(tmpdir(), 'smaltfl-data-'));
-  execFileSync('node', [bind.generate, work], { stdio: 'inherit' });
+  execFileSync('node', [bind.generate, work, ...(bind.generateArgs ?? [])], { stdio: 'inherit' });
   const [source, b] = Object.entries(bind.sources)[0];
   execFileSync('node', ['scripts/data/history.mjs', '--flow', flowPath, '--watch', source, '--files', join(work, 'base.json'), join(work, 'history.json')], { stdio: 'inherit' });
   mkdirSync(`${out}/data/loads`, { recursive: true });

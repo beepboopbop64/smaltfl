@@ -11,7 +11,7 @@ answers and what is still open).
 | The code | `beepboopbop64/smaltfl`, branch `claude/elegant-knuth-r8364a` (the repository's default branch), all pushed. No PR is open. |
 | stenhoor's initial commit | merged in (remote `stenhoor/main`); the move to `stenhoor/smaltfl` (ADR 0007) was blocked by GitHub access, see "Moving the repository" |
 | The data | the `data` branch: tip `0ca4dd1` (history format `smaltfl-history/3`, 31 days of January 2024, three incident episodes, 11 donor days), on top of `6e387dd`; built by `.github/workflows/data.yml` |
-| The app, published | a private claude.ai artifact (version 22, built from `6be5755`): it doesn't have the last three commits (round 3 below). The notebook form (ADR 0011, slice 4) is published separately: https://claude.ai/artifact/3xkiHJnRGK4viZkT4y5k6u, built from the fork's `claude/gallant-mendel-uckiwr` on the data branch's loads |
+| The app, published | a private claude.ai artifact (version 22, built from `6be5755`): it doesn't have the last three commits (round 3 below). The notebook form (ADR 0011, slice 4) is published separately: https://claude.ai/artifact/3xkiHJnRGK4viZkT4y5k6u, built from the fork's `claude/gallant-mendel-uckiwr` on the data branch's loads; the sign-ins with the demo's three days (ADR 0012) as a second artifact, built with `--flow examples/security-signins/flow.json --out dist/app-signins` |
 | Browser checks and judging tools | [tools/](../tools/README.md) (added for this handoff; they lived in a session scratch folder before) |
 
 ## What is built

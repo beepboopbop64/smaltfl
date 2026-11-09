@@ -176,7 +176,9 @@ export function causeOf(o: Pick<BriefIn, 'story' | 'file' | 'noun'>): { facts: s
     facts.push(`${sp.name}${sp.who ? ` (${sp.who})` : ''} ${verb}${range ? ` (${range})` : ''}`);
   }
   if (s?.amount && s.amount.change !== null && !s.hours) facts.push(`${compact(s.amount.value)} ${o.noun(s.amount.value)}, ${changeLabel(s.amount.change)} against a usual day`);
-  if (s?.gate) {
+  // The checks' figure matters when they dropped anything, held, or came near the limit: on a day with no rows, or a
+  // clean one, it is noise beside the cause.
+  if (s?.gate && (s.gate.dropped > 0 || s.gate.held || s.gate.near)) {
     const g = s.gate;
     // Said as the checks' own line says it (9.55%, not 10% beside a 10% limit; round 3 #29).
     const pct = (x: number) => `${Number((x * 100).toFixed(2))}%`;

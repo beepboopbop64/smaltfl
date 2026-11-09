@@ -79,6 +79,11 @@ export interface SecurityOptions {
   /** Rows added on chosen days, as a planted incident's are: each its rows (times `scale`), its hours and every coded
    * column's shares. What a test plants on a day of its own (a burst on a first-year holiday, a new tool). */
   extra?: Record<string, { n: number; hours: number[]; dist: Record<string, Dist> }[]>;
+  /** Days on which nothing arrived: a file with its header and no rows (the demo's missing day). */
+  missing?: string[];
+  /** A day's mix of one or more coded columns set outright (the demo's day with one column off, its amount as usual):
+   * `{ '2024-03-18': { method: { sso: 0.5, … } } }`, normalised with the rest. */
+  shares?: Record<string, Record<string, Dist>>;
 }
 
 /** Whether a day is its month's last, and whether it is Patch Tuesday (the Tuesday between the 8th and the 14th). */
@@ -115,6 +120,10 @@ function planDays(o: SecurityOptions, rnd: () => number): SecurityDay[] {
   const scale = o.scale ?? 1;
   const days: SecurityDay[] = [];
   for (const [k, day] of SECURITY_DAYS.entries()) {
+    if (o.missing?.includes(day)) {
+      days.push({ day, segs: [] });
+      continue;
+    }
     const wd = WD[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
     const batch = (o.monthEnd && isMonthEnd(day) ? o.monthEnd : 1) * (o.patchTuesday && isPatchTuesday(day) ? o.patchTuesday : 1) * (o.step && day >= o.step.from ? o.step.by : 1);
     const n = 200_000 * scale * wd * (1 + 0.1 * (k / 365)) * Math.exp(0.03 * gauss(rnd)) * batch;
@@ -132,6 +141,7 @@ function planDays(o: SecurityOptions, rnd: () => number): SecurityDay[] {
     const mfaGone = inc && ((PLANTED.mfa as readonly string[]).includes(day) || day === PLANTED.firstHoliday);
     if (mfaGone) dist.method!.mfa_push = 0;
     if (inc && day === PLANTED.burst) dist.result!.locked = 0.02;
+    for (const [c, d] of Object.entries(o.shares?.[day] ?? {})) dist[c] = { ...d };
     for (const c of CODED) {
       const d = dist[c]!;
       const t = Object.values(d).reduce((a, b) => a + b, 0);

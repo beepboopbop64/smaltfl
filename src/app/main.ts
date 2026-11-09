@@ -1127,8 +1127,10 @@ const WRAP_ZOOM = 0.72;
 /** On a narrow canvas (a phone), the width the flow's sections stack to, in world units at WRAP_ZOOM; none on a
  * wide one. */
 function wrapWidth(): number | undefined {
-  const w = document.getElementById('canvas')?.clientWidth ?? 0;
-  return w > 0 && w < 640 ? (w - 24) / WRAP_ZOOM : undefined;
+  // ADR 0012 §4: on a phone the flow reads sideways at a readable size, as on a wide screen, never stacked. The stacked
+  // layout stays in layout.ts for a flow a person pins that way.
+  void WRAP_ZOOM;
+  return undefined;
 }
 
 /** The beginning of the flow, at a size where its cards are easy to read: on a phone, the flow wrapped to the width,
@@ -1143,7 +1145,12 @@ function startView(layout: GridLayout): void {
     applyView();
     return;
   }
-  view.k = Math.max(0.55, Math.min(1, (host.clientHeight - 40) / layout.height, (host.clientWidth - 16) / (2.2 * (GRID.cardW + GRID.gapX))));
+  // On a phone, two cards and a bit across at a readable size, the flow panned sideways (ADR 0012 §4); on a wider
+  // screen the whole flow's height fits too.
+  const narrow = host.clientWidth < 640;
+  view.k = narrow
+    ? Math.max(0.78, Math.min(1, (host.clientWidth - 16) / (2.2 * (GRID.cardW + GRID.gapX))))
+    : Math.max(0.55, Math.min(1, (host.clientHeight - 40) / layout.height, (host.clientWidth - 16) / (2.2 * (GRID.cardW + GRID.gapX))));
   view.x = 16 - layout.left * view.k;
   view.y = Math.max(16, (host.clientHeight - layout.height * view.k) / 2) - layout.top * view.k;
   view.ready = true;
@@ -7690,6 +7697,9 @@ function loadStats(r: RunRecord): { rows: number; dropped: number | null } | nul
 
 /** A day's verdict from its news: its worst finding, or none without a history. */
 /** A day's verdict: a file refused or republished first, else its news. */
+/** The health cell a finding's kind belongs to (story.ts CELL_KINDS), for the strip's marks. */
+const cellOfKind = (kind: Finding['kind']): Cell | null => (Object.keys(CELL_KINDS) as Cell[]).find((c) => (CELL_KINDS[c] as readonly string[]).includes(kind)) ?? null;
+
 function verdictOf(day: string): Finding | undefined {
   const l = loads.list.find((x) => x.day === day);
   const c = l ? integrity.checks.get(l.file) : undefined;
@@ -7778,7 +7788,10 @@ function renderLoads(): void {
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
       svgNode(stripBar({ v: later || absent || !counted ? 0 : l.rows, low: range?.low ?? null, high: range?.high ?? null, ymax, sev: sev === 'alert' || sev === 'warn' ? sev : null })),
-      h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 14) : top?.kind === 'unlearned' ? glyphEl('unlearned', 14) : '', held ? glyphEl('held', 14) : pm ? glyphEl(PAUSE_MARK[pm], 14) : ''));
+      h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 14) : top?.kind === 'unlearned' ? glyphEl('unlearned', 14) : '',
+        // A mark about the values or the hours, under a bar within its range, says so (the two-minute test, round 1):
+        // the bar is the amount; the mark is the day's story.
+        (sev === 'alert' || sev === 'warn') && top && cellOfKind(top.kind) && cellOfKind(top.kind) !== 'amount' && cellOfKind(top.kind) !== 'file' ? h('span', { class: 'ld-cell' }, CELL_NAMES[cellOfKind(top.kind)!].toLowerCase()) : '', held ? glyphEl('held', 14) : pm ? glyphEl(PAUSE_MARK[pm], 14) : ''));
   });
   const at = list.indexOf(loads.at);
   const last = at >= list.length - 1;

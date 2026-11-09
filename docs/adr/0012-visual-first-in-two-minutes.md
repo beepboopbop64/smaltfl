@@ -115,6 +115,21 @@ What the survey found (sources in §7):
   stopped at 13:00; X kept arriving", the part never a fact of its own; a sender's outage on its second day proposing
   the part that arrived, not a fill). `test/brief-real.test.ts` holds the real days to it.
 
+- **The phone canvas, first step (2026-11-09).** On a phone the canvas no longer stacks its sections: it lays the
+  flow out left to right as on a wide screen, at a size where two cards and a bit fit across, and is panned sideways
+  (§4's first half). The node grammar, the status marks, the row counts on the edges, the mini-map and the lenses
+  are still to come. The loads strip's mark says its cell when it isn't the amount (⚠ VALUES under a bar within its
+  range: the two-minute test's confusion, and the maintainer's).
+- **A second dataset, with the kinds of trouble told apart (2026-11-09).** The sign-in log (ADR 0010's fixture, a
+  day a time) builds as its own app (`npm run build:app -- --flow examples/security-signins/flow.json --out
+  dist/app-signins`) with three days planted for the demo (`scripts/data/security.mjs --demo`, named in its data
+  list's `generateArgs`): Fri Mar 15, 2024, nothing arrived (a file with its header and no rows: "Almost no sign-ins:
+  0", paused, keep the last good day proposed); Mon Mar 18, as many sign-ins as usual but half through single sign-on
+  (one column's mix off, the amount in range); Wed Mar 20, lock-outs through API keys (a combination; told as "Locked
+  out 8.2× usual" with the API key share as a second story: the pair itself is not yet named, since the history
+  carries no pairs for it). The fixture gained `missing` and `shares` options for them, off by default, so every
+  planted-day vector stands.
+
 ## Consequences
 
 - **Order of work** (Q-103): (a) the brief and the incident page, from the day's story, measures, holds and
