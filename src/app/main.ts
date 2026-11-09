@@ -27,7 +27,7 @@ import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.
 import { isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, guessWords, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type KeptMark, type PauseState, type RemedyMark } from '../core/days.js';
 import { UNTIL, afterLine, betweenLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, failLine, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, checksSeen, filesSeen, findingOf, type RunSight, type AfterPart, type KeptLacks, type RemedySaid, type SheetIn, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
-import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
+import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Hold, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { dayVersions, donorIdOf, fillCounts, levelOf as acceptedLevel, levelWays, partLabel as remedyPart, type Offer, type Repair, type Version } from '../core/fill.js';
 import { derivedAbout, derivedFails, derivedKeys, derivedWhy, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
 import { followsCause as followsFrom, ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, axisShare, recentSpan, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type HourValues, type Story, type Told } from '../core/story.js';
@@ -418,13 +418,20 @@ const onScreen = (): RunRecord | undefined => {
  */
 function heldElsewhere(r: RunRecord | undefined): { origin: string; said: string } | null {
   if (!r) return null;
+  const judged = loadSource();
   const day = dayOfRun(r);
   const own = day ? verdictOf(day) : undefined;
-  if (own?.severity === 'alert') return null;
-  const judged = loadSource();
-  const h = r.result.holds.find((x) => (x.by === 'story' || x.by === 'unjudged') && x.origin !== judged && (isOwner() || visible(x.origin)));
+  const holds = r.result.holds.filter((x) => (x.by === 'story' || x.by === 'unjudged') && x.origin !== judged && (isOwner() || visible(x.origin)));
+  // The cause before the symptom: a load upstream of the judged dataset that held (a control's file with no rows) is
+  // what went wrong; the judged dataset's own verdict (its column blank) follows from it. Another load, unrelated,
+  // leads only when the judged dataset's own day isn't wrong.
+  const above = judged ? new Set(upstreamOf(judged)) : new Set<string>();
+  const cause = holds.find((x) => above.has(x.origin));
+  const h = cause ?? (own?.severity === 'alert' ? undefined : holds[0]);
   return h ? { origin: h.origin, said: h.said } : null;
 }
+/** Whether the run on screen holds a load of this node by its own story, or as not judged (ADR 0013 §5). */
+const ownHoldOf = (id: string): Hold | undefined => (!state.failed && id !== loadSource() ? onScreen()?.result.holds.find((x) => x.origin === id && (x.by === 'story' || x.by === 'unjudged')) : undefined);
 /**
  * The bar over rows on screen that aren't what readers get: another day's, after a refused file ("Rows from Thu Sep 21
  * · the last day published"); or the viewed day's own, staged while it waits or after it was not published ("Thu 21
@@ -950,7 +957,7 @@ function cardLine(id: string): CardLine {
   if (story && id === loadSource() && (story.severity === 'alert' || story.severity === 'warn')) return { text: shortHead(story), tone: 'drop' };
   if (story?.gate?.held && id === history?.file.step) return heldCardLine(story.gate);
   // Another watched load's own verdict, on its card (ADR 0013 §5): what the engine judged it by, in a few words.
-  const ownHold = id !== loadSource() ? onScreen()?.result.holds.find((x) => x.origin === id && (x.by === 'story' || x.by === 'unjudged')) : undefined;
+  const ownHold = ownHoldOf(id);
   if (ownHold) return { text: ownHold.said.replace(/\s*\((usually|never)[^)]*\)$/, ''), tone: 'drop' };
   // An output the held run didn't build, or one built from a day with something wrong upstream (ADR 0008); on a day
   // paused, an output that waits says what readers see meanwhile, and after a decision what became of it (ADR 0009).
@@ -1877,6 +1884,8 @@ function renderCanvas(): void {
     else if (!state.failed && onScreen()?.result.holds.some((x) => x.by === 'checks' && x.origin === id)) classes.push('failed', 'held');
     const cday = newsDay();
     if (cday && id === loadSource() && storyFor(cday)?.severity === 'alert') classes.push('cause');
+    // A load the run holds by its own verdict is a cause too (ADR 0013 §5): drawn as the day's cause is.
+    else if (ownHoldOf(id)) classes.push('cause');
     const os = outputState(id);
     if (os === 'asis' || os === 'fill' || os === 'complete') classes.push(cday && storyFor(cday)?.severity === 'alert' ? 'from-alert' : n?.status ?? 'built');
     else if (os) classes.push(os === 'alert' ? 'from-alert' : 'not-published');
@@ -8098,6 +8107,8 @@ function healthOf(card: string): Severity | undefined {
   // The trips' card carries the day's mark; their profile is grouped under it, without a mark of its own.
   if (story && kind === 'trips') return profileOf(card) ? undefined : story.severity;
   if (story?.gate?.held && kind === 'checks') return 'alert';
+  // A load held by its own verdict (ADR 0013 §5): something wrong, marked on its card.
+  if (ownHoldOf(dataOf(card))) return 'alert';
   // Nothing of it was built from the day: no dot from another day's rows.
   if (notBuilt(dataOf(card))) return undefined;
   const news = cardNews(card);

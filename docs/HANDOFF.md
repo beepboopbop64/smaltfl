@@ -115,6 +115,10 @@ Parked behind the notebook surface by the maintainer's decision of 2026-11-09 (Q
      posture cell's amount line (400 apps against 400–400, a 10k scale) says nothing and should give way; the canvas
      places the inventory above the controls and the notebook boxes off screen on a phone (Fit brings them in); a
      control's News on a held day shows the engine's verdict over "Nothing out of the ordinary" from its own rows.
+     Fixed on the maintainer's first look (2026-11-09): the strip's mark word spilt into the next day's cell (it now
+     drops to its own line), and the day's headline led with the posture's symptom ("Patching blank") while the cause
+     was the patching file upstream: a held load upstream of the judged dataset now leads the status line and the
+     brief, and its card is drawn as the cause with the wrong mark.
    - **The sign-ins' pair.** Its shipped history predates the pair counts: rebuild the sign-ins app and check that
      Wed Mar 20, 2024 now names "result locked with method api_key" (ADR 0012's open point).
    - **Hour-fall days:** check them with fresh five-second readers. The new head ("Only Flex Fare after 13:00") and the
