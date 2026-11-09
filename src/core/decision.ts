@@ -23,7 +23,7 @@
  *   that says what readers got of the day; and a day's versions (`versionLines`).
  */
 import { slotLabel, type Every } from './calendar.js';
-import { dayMid, dayShort, MARK, readersSee, type DayState, type RemedyMark } from './days.js';
+import { dayMid, dayShort, KEPT_MARK, MARK, readersSee, type DayState, type KeptMark, type RemedyMark } from './days.js';
 import type { FillCounts, Missing, Offer, Version } from './fill.js';
 import type { HistoryRanges } from './history.js';
 import { counted, type Noun } from './ontology.js';
@@ -32,6 +32,9 @@ import type { DecisionOption } from './policy.js';
 import { CONTEXT_TAG, gateLabels, wordsIn, type Gate, type Story } from './story.js';
 
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
+/** How long a standing decision stands, said one way everywhere (round 3, #19, #20): never "until a day passes", which
+ * read as a day of time going by. */
+export const UNTIL = 'until a later day publishes';
 /** A count's axis end said short: "120k", "4.8k", "900". */
 const compact = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${Math.round(n / 100) / 10}k`.replace('.0k', 'k') : String(Math.round(n)));
 const plusDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -69,6 +72,17 @@ export interface Drawing {
   complete: { rows: ReaderRows; usual: ReaderRows; short: readonly [number, number] | null } | null;
   /** The day readers keep, when they have it filled (S12): which of its rows came from another day, stippled. */
   dontFilled?: readonly [number, number] | 'part' | 'rest' | null;
+  /** The day readers keep, when it went out short (published as is, round 3 #3): its own usual, so what it lacks is drawn
+   * absent on its hatched rows as on its own day's, and its short hours. Null for a day kept whole. */
+  dontUsual?: ReaderRows | null;
+  dontShort?: readonly [number, number] | null;
+}
+
+/** A day readers keep that went out short (round 3, #3): its trips' guess, and, for a day that fell at an hour, its
+ * usual hours and the hours it fell short in. */
+export interface KeptLacks {
+  expected: number;
+  hours?: { usual: readonly number[]; from: number; to: number } | null;
 }
 
 /** A day's trips by hour, and by a coded value, from the history file: null for a day it doesn't have. */
@@ -81,7 +95,28 @@ function historyDay(h: HistoryRanges | null, day: string): number {
  * a strip of the week. `rows` are the trips the runs counted (the held run's, and the run readers see), which the
  * history equals on every load; `readers` is the day readers see now, or null when nothing is published.
  */
-export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'hero' | 'hours' | 'split'> | null, day: string, readers: string | null, rows: { day: number; readers: number | null }, remedy: { missing: Missing; donors: readonly string[] } | null = null, kept: { missing: Missing; donor: string | null } | null = null): Drawing {
+export function decisionDrawing(h: HistoryRanges | null, story: Pick<Story, 'hero' | 'hours' | 'split'> | null, day: string, readers: string | null, rows: { day: number; readers: number | null }, remedy: { missing: Missing; donors: readonly string[] } | null = null, kept: { missing: Missing; donor: string | null } | null = null, lacks: KeptLacks | null = null): Drawing {
+  const d = drawingOf(h, story, day, readers, rows, remedy, kept);
+  // The day readers keep drawn as it went out (round 3, #3): published as is short, what it lacked absent on its own
+  // hatched rows, as its own day drew it, never a whole day to fall back on. Within the drawing's one scale.
+  if (!lacks || !d.dont || !readers || rows.readers === null || rows.readers >= lacks.expected) return d;
+  if (d.cause === 'hours' && d.dont.cause === 'hours' && lacks.hours) {
+    return { ...d, dontUsual: { cause: 'hours', hours: lacks.hours.usual }, dontShort: [lacks.hours.from, lacks.hours.to], scale: Math.max(d.scale, ...lacks.hours.usual) };
+  }
+  if (d.dont.cause === 'split') {
+    const usual: ReaderRows = { cause: 'split', part: d.dont.part, rest: Math.max(d.dont.rest, lacks.expected - d.dont.part) };
+    const scale = Math.max(d.scale, lacks.expected);
+    return { ...d, dontUsual: usual, dontShort: null, scale, ticks: d.ticks.length ? [[0, '0'], [scale, compact(scale)]] : d.ticks };
+  }
+  if (d.dont.cause === 'amount') {
+    const days = [...d.dont.days];
+    const scale = Math.max(d.scale, lacks.expected);
+    return { ...d, dontUsual: { cause: 'amount', days: [...days.slice(0, -1), lacks.expected] }, dontShort: null, scale };
+  }
+  return d;
+}
+
+function drawingOf(h: HistoryRanges | null, story: Pick<Story, 'hero' | 'hours' | 'split'> | null, day: string, readers: string | null, rows: { day: number; readers: number | null }, remedy: { missing: Missing; donors: readonly string[] } | null, kept: { missing: Missing; donor: string | null } | null): Drawing {
   const k = historyDay(h, day);
   const kr = readers ? historyDay(h, readers) : -1;
   const file = h?.file;
@@ -180,7 +215,8 @@ export interface SheetIn {
   day: string | null;
   /** Minutes since the day was held. */
   waited: number | null;
-  /** The clock time it was held, when that was today ("10:31"): said as "Paused since 10:31", not as minutes waited. */
+  /** The clock time it was held, when that was today ("10:31"): said as "Paused today 10:31" (a bare clock time beside the
+   * data's day read as that day's, round 3 #28), not as minutes waited. */
   since?: string | null;
   /** A decision for the day was made under another build. */
   otherBuild: boolean;
@@ -193,8 +229,13 @@ export interface SheetIn {
   reach: number | null;
   /** What readers see now, its trips as they arrived (what its hatched drawing shows), or null when nothing is
    * published. Where readers have the day's own fill (`withdraws`), the day they would see again. */
-  /** The day readers keep, its rows as they have it, and its mark when they have it filled (◧) or the part alone (◐). */
-  readers: { day: string; rows: number; mark?: RemedyMark } | null;
+  /** The day readers keep, its rows as they have it (what its hatched drawing shows), and its mark when they have it
+   * filled (◧), the part alone (◐) or as is (⚑); `reach`, its rows past its checks: what readers have of it (round 3,
+   * #4), its number on the sheet. */
+  readers: { day: string; rows: number; reach?: number | null; mark?: KeptMark } | null;
+  /** The day's range (its trips' low and high, as they arrived): a day kept of another weekday outside it is flagged,
+   * "busier than a Mon" (round 3, #33). */
+  usual?: { low: number; high: number } | null;
   /** A later day readers see already: the day can no longer be shown (Q-51). */
   later: string | null;
   /** The checks held the day too: publishing as is overrides them, and the sheet says so with their share and limit. */
@@ -222,11 +263,13 @@ export interface SheetIn {
   donors?: readonly { day: string; counts: FillCounts }[];
   /** What the part that arrived alone gives readers. */
   partOnly?: FillCounts | null;
-  /** The staged run of a remedy, once the engine made it (S4): whether its checks trip. The part alone is marked so
-   * before it is staged when the held run's checks tripped on it (Q-67). */
-  staged?: { option: RemedyMark; donor: string | null; fails: boolean } | null;
+  /** The staged run of a remedy, once the engine made it (S4): whether its checks trip, and why it can't go (`why`). The
+   * part alone is marked so before it is staged when the held run's checks tripped on it (Q-67). */
+  staged?: { option: RemedyMark; donor: string | null; fails: boolean; why?: StagedFail | null; reach?: number | null } | null;
   /** Readers have this day's fill, or its part alone, now (Q-61): Keep takes it back, and readers see `readers` again. */
   withdraws?: RemedyMark | null;
+  /** Leave the kept day's weekday flag out: it gave way to the 45 words (sheetText says it again without it). */
+  noFlag?: boolean;
 }
 
 /** A donor as the fill row offers it: its chip ("Wed 20"), and the row's label, number, line and button with it. */
@@ -239,8 +282,9 @@ export interface SheetDonor {
   aria: string;
   go: string;
   preparing: string;
-  /** Its staged run's checks tripped: it can't go. */
+  /** Its staged run's checks tripped (or it can't go for another reason): it can't go, and `failed` says why. */
   fails: boolean;
+  failed?: string | null;
 }
 
 export interface SheetOption {
@@ -257,11 +301,16 @@ export interface SheetOption {
    * (limit 10%)"; once picked, its figures alone (`warnPicked`), since the button says "over the checks". */
   warn: string | null;
   warnPicked?: string | null;
+  /** Said under it before anything is picked, as a fact, not a warning: Publish as is's rows as they arrived ("of 41,939
+   * arrived", the drawing's count and the card's, round 3 #4); a day kept of another weekday outside the day's range
+   * ("busier than a Mon", round 3 #33), the first to give way to the sheet's 45 words. */
+  note?: string | null;
   off: boolean;
   aria: string;
   /** A fill's donors, the one the flow's rule found first: picking another redraws the row and relabels it. */
   donors?: readonly SheetDonor[];
-  /** The remedy's staged run failed its checks (or, for the part alone, the held run's did on it): it can't go. */
+  /** The remedy's staged run failed its checks (or, for the part alone, the held run's did on it): it can't go, and
+   * `sub` says why (failLine). */
   fails?: boolean;
   /** Don't publish takes back a fill readers have (Q-61). */
   withdraws?: boolean;
@@ -305,6 +354,27 @@ export interface SheetPick {
   preparing?: boolean;
 }
 
+/**
+ * Why a remedy's staged run can't go (amendment 1 S10), from what holds it besides its day's story and its being
+ * derived: its checks tripped (their share against their limit, or a `fail` rule by name), a watched source of it not
+ * judged (no claim it could be judged by), or its donor not judged good. Each is said apart: a run held for not being
+ * judged never reads as one whose checks failed.
+ */
+export type StagedFail = { by: 'checks'; gate: Pick<Gate, 'share' | 'limit'> | null; rule: string | null } | { by: 'unjudged' } | { by: 'donor'; day: string | null };
+
+/** The one line a remedy's row says when it can't go: "fails its checks: 12.3% dropped (limit 10%)", "fails its
+ * checks: fare failed", "not judged: can’t go", "Thu 14 isn’t judged good". */
+export function failLine(why: StagedFail | null | undefined): string {
+  if (!why) return 'fails its checks';
+  if (why.by === 'unjudged') return 'not judged: can’t go';
+  if (why.by === 'donor') return `${why.day ? dayShort(why.day) : 'its donor'} isn’t judged good`;
+  if (why.gate && (why.gate.limit === null || why.gate.share > why.gate.limit)) return `fails its checks: ${checksSaid(why.gate)}`;
+  return why.rule ? `fails its checks: ${why.rule} failed` : 'fails its checks';
+}
+
+/** The button while the remedy picked can't go: "Fails its checks", "Not judged", "Donor not good". */
+const failGo = (why: StagedFail | null | undefined): string => (why?.by === 'unjudged' ? 'Not judged' : why?.by === 'donor' ? 'Donor not good' : 'Fails its checks');
+
 /** A part's label as a sentence goes on: "before 13:00 only", "without Vendor 1"; a name keeps its capital. */
 const lowerLead = (part: string) => part.replace(/^(Before|Without|From) /, (m) => m.toLowerCase());
 
@@ -342,20 +412,33 @@ export function sheetText(o: SheetIn): SheetText {
   const trips = (n: number) => counted(n, o.noun);
   // A noun of two words is said once, on the first row, and the numbers after it are bare (Q-78), so the sheet keeps
   // its 45 words with "endpoint events".
-  const bare = (n: number) => (wordsIn(o.noun.many) > 1 ? fmtInt(n) : trips(n));
-  const past = o.reach !== null && o.reach !== o.rows ? `${fmtInt(o.reach)} after checks` : null;
+  // Every number after the first is bare (round 3, #4): the column is one count of one noun, said once.
+  const bare = (n: number) => fmtInt(n);
+  // Each row leads with what readers would get, the rows past the checks (round 3, #4); Publish as is says under it
+  // the rows that arrived (what its drawing shows, and what the card counts), with the checks' figures when they held
+  // it too, so readers' count and the check that drops the rest read as one line, never as a contradiction.
+  const gets = o.reach ?? o.rows;
+  const arrived = o.reach !== null && o.reach !== o.rows ? `of ${fmtInt(o.rows)} arrived` : null;
+  const past = arrived;
   const age = o.readers && o.day ? Math.round((Date.parse(`${o.day}T12:00:00Z`) - Date.parse(`${o.readers.day}T12:00:00Z`)) / 864e5) : 0;
   const see = o.readers ? readersSee(o.readers.day, null, false, o.readers.mark) : 'nothing published yet';
-  const keptMark = o.readers?.mark ? ` ${MARK[o.readers.mark]}` : '';
+  const keptMark = o.readers?.mark ? ` ${KEPT_MARK[o.readers.mark]}` : '';
   const figures = o.checks ? checksSaid(o.checks) : null;
   const withdraws = o.withdraws ?? null;
+  // A day kept of another weekday, its trips outside the day's own range (round 3, #33): a Saturday standing in for a
+  // Monday is busier than any usual Monday, and says so. Not for a day that went out short as is (⚑): its own missing
+  // part is drawn. It gives way first to the sheet's 45 words (below).
+  const wd = (d: string) => dayShort(d).split(' ')[0]!;
+  const unlike = !o.noFlag && o.readers && o.day && o.usual && o.readers.mark !== 'asis' && wd(o.readers.day) !== wd(o.day) && (o.readers.rows > o.usual.high || o.readers.rows < o.usual.low)
+    ? `${o.readers.rows > o.usual.high ? 'busier' : 'quieter'} than a ${wd(o.day)}` : null;
   const options: SheetOption[] = [
     {
-      option: 'asis', label: 'Publish as is', number: o.later ? `${dayShort(o.later)} is published` : trips(o.rows), sub: o.later ? null : past, warn: o.later || !figures ? null : `Overrides checks: ${figures}`, warnPicked: o.later ? null : figures, off: !!o.later,
-      aria: o.later ? `Publish as is: not possible, ${dayMid(o.later)} is what readers see now` : `Publish as is: readers get ${name} as it came, ${trips(o.rows)}${past ? `, ${fmtInt(o.reach!)} of them past its checks` : ''}${o.head ? `, ${o.head}` : ''}${o.checks ? `; this overrides its checks, which held it: ${figures}` : ''}`,
+      // Once a later day is out, it can't be picked: said with its reason, beside a lock (round 3, #19).
+      option: 'asis', label: 'Publish as is', number: o.later ? `${dayShort(o.later)} already out` : trips(gets), sub: o.later ? null : past, warn: o.later || !figures ? null : `${arrived ?? `of ${fmtInt(o.rows)} arrived`}: ${figures}`, warnPicked: o.later ? null : figures, note: o.later ? null : arrived, off: !!o.later,
+      aria: o.later ? `Publish as is: not possible, ${dayMid(o.later)} is already out to readers` : `Publish as is: readers get ${name} as it came past its checks, ${trips(gets)}${arrived ? ` of ${fmtInt(o.rows)} that arrived` : ''}${o.head ? `, ${o.head}` : ''}${o.checks ? `; this publishes past its checks, which held it: ${figures}` : ''}`,
     },
     {
-      option: 'dont', label: o.readers ? `Keep ${dayShort(o.readers.day)}${keptMark}` : 'Don’t publish', number: o.readers ? bare(o.readers.rows) : 'nothing shown', sub: age >= 2 ? `${age} days old` : null, warn: null, off: false, ...(withdraws ? { withdraws: true } : {}),
+      option: 'dont', label: o.readers ? `Keep ${dayShort(o.readers.day)}${keptMark}` : 'Don’t publish', number: o.readers ? bare(o.readers.reach ?? o.readers.rows) : 'nothing shown', sub: age >= 2 ? `${age} days old` : null, warn: null, note: unlike, off: false, ...(withdraws ? { withdraws: true } : {}),
       aria: withdraws
         ? `Withdraw the ${withdraws === 'fill' ? 'fill' : 'part'}: readers ${o.later && o.readers ? `keep ${dayMid(o.readers.day)}, ${trips(o.readers.rows)}` : `see ${o.readers ? `${dayMid(o.readers.day)} again, ${trips(o.readers.rows)}` : 'nothing'}`}, and this day is not published`
         : o.readers ? `Don’t publish: readers keep ${dayMid(o.readers.day)}, ${trips(o.readers.rows)}${age >= 2 ? `, ${age} days old` : ''}, and this day is never published` : 'Don’t publish: readers get nothing, nothing is published yet',
@@ -371,23 +454,28 @@ export function sheetText(o: SheetIn): SheetText {
     const donors: SheetDonor[] = fill.off ? [] : (o.donors ?? []).map((d) => {
       const short = dayShort(d.day);
       return {
-        day: d.day, chip: short, label: `Fill from ${short}`, number: bare(d.counts.total), sub: `${fmtInt(d.counts.taken)} filled`,
+        // Once staged, its rows past its checks (what readers would get, round 3 #4); before, its rows from the history.
+        day: d.day, chip: short, label: `Fill from ${short}`, number: bare(staged && staged.option === 'fill' && staged.donor === d.day && staged.reach != null ? staged.reach : d.counts.total), sub: `${fmtInt(d.counts.taken)} filled`,
         aria: `Fill from ${short}: readers get ${trips(d.counts.total)}, ${fmtInt(d.counts.taken)} of them from ${dayMid(d.day)}${d.counts.setAside ? `, in place of the ${fmtInt(d.counts.setAside)} that arrived of that part` : ''}`,
         go: goLabel('fill', 'day', o.outputs, o.day, false, { donor: d.day }), preparing: `Preparing ${short}`,
         fails: !!staged && staged.option === 'fill' && staged.donor === d.day && staged.fails,
+        failed: staged && staged.option === 'fill' && staged.donor === d.day && staged.fails ? failLine(staged.why) : null,
       };
     });
     const first = donors[0];
     options.push(first
-      ? { option: 'fill', label: first.label, number: first.number, sub: first.fails ? 'fails its checks' : first.sub, warn: null, off: false, aria: first.aria, donors, fails: first.fails }
+      ? { option: 'fill', label: first.label, number: first.number, sub: first.fails ? (first.failed ?? failLine(null)) : first.sub, warn: null, off: false, aria: first.aria, donors, fails: first.fails }
       : { option: 'fill', label: fill.label, number: fill.off ?? 'no good day near', sub: null, warn: null, off: true, aria: `Fill: not possible, ${(fill.off ?? 'no good day near').replace(/^./, (c) => c.toLowerCase())}` });
   }
   if (part) {
     const n = o.partOnly ?? null;
-    const fails = !!part.note || (!!staged && staged.option === 'complete' && staged.fails);
+    const ran = !!staged && staged.option === 'complete';
+    const fails = ran ? staged!.fails : !!part.note;
+    // Once staged, why it can't go from its own run (its checks' figures); before, the held run's checks tripped on it.
+    const failed = fails ? (ran ? failLine(staged!.why) : failLine(null)) : null;
     options.push({
-      option: 'complete', label: part.label, number: part.off ?? (n ? bare(n.total) : ''), sub: part.off ? null : fails ? 'fails its checks' : n ? `${fmtInt(n.setAside)} set aside` : null, warn: null, off: !!part.off, fails,
-      aria: part.off ? `${part.label}: not possible, ${part.off}` : `${part.label}: readers get ${name} with only the part that arrived${n ? `, ${trips(n.total)}, ${fmtInt(n.setAside)} set aside` : ''}${fails ? '; it fails its checks, so it can’t be published' : ''}`,
+      option: 'complete', label: part.label, number: part.off ?? (ran && staged!.reach != null ? bare(staged!.reach) : n ? bare(n.total) : ''), sub: part.off ? null : failed ?? (n ? `${fmtInt(n.setAside)} set aside` : null), warn: null, off: !!part.off, fails,
+      aria: part.off ? `${part.label}: not possible, ${part.off}` : `${part.label}: readers get ${name} with only the part that arrived${n ? `, ${trips(n.total)}, ${fmtInt(n.setAside)} set aside` : ''}${failed ? `; it can’t be published: ${failed}` : ''}`,
     });
   }
   // Accept the new level (amendment 1 S6, X6): readers get the day as it came, and normal is learned from it on. Its
@@ -399,9 +487,9 @@ export function sheetText(o: SheetIn): SheetText {
       aria: accept.off ? `Accept the new level: not possible, ${accept.off}` : `Accept the new level: readers get ${name} as it came, ${trips(o.rows)}, and what is usual is learned from ${o.day ? dayMid(o.day) : 'it'} on`,
     });
   }
-  return {
+  const t: SheetText = {
     title: `${o.day ? `${dayMid(o.day)} · w` : 'W'}hat readers get`,
-    status: o.may ? (o.otherBuild ? 'Other build’s decision' : o.since && o.waited !== null ? `Paused since ${o.since}` : waitedLabel(o.waited)) : null,
+    status: o.may ? (o.otherBuild ? 'Other build’s decision' : o.since && o.waited !== null ? `Paused today ${o.since}` : waitedLabel(o.waited)) : null,
     waitsOn: o.may ? null : `${see.replace(/^./, (c) => c.toUpperCase())} until ${o.deciders} decides`,
     ask: o.may ? null : 'Ask ›',
     options,
@@ -420,11 +508,13 @@ export function sheetText(o: SheetIn): SheetText {
     switch: o.day && !o.later && !withdraws ? 'Later days too' : null,
     go: {
       rest: goLabel(null, 'day', o.outputs, o.day), reason: 'Pick a reason', asis: goLabel('asis', 'day', o.outputs, o.day, !!o.checks), dont: goLabel('dont', 'day', o.outputs, o.day), until: goLabel('dont', 'untilPass', o.outputs, o.day),
-      complete: goLabel('complete', 'day', o.outputs, o.day, false, { part: part?.label ?? null }), withdraw: goLabel('dont', 'day', o.outputs, o.day, false, { withdraws: withdraws ?? 'fill' }), fails: 'Fails its checks',
+      complete: goLabel('complete', 'day', o.outputs, o.day, false, { part: part?.label ?? null }), withdraw: goLabel('dont', 'day', o.outputs, o.day, false, { withdraws: withdraws ?? 'fill' }), fails: failGo(staged?.fails ? staged.why : null),
       accept: goLabel('accept', 'day', o.outputs, o.day),
     },
     hash: `${o.hash.slice(0, 4)} ${o.hash.slice(4, 8)}`,
   };
+  // The kept day's weekday flag is the first to give way to the 45 words (round 3, #33).
+  return unlike && sheetWords(t) > 45 ? sheetText({ ...o, noFlag: true }) : t;
 }
 
 /** The donor picked on a fill row (by its place, the first by default), or null for any other row. */
@@ -471,13 +561,13 @@ export function sheetShown(t: SheetText, pick: SheetPick): string[] {
     out.push(d?.label ?? x.label);
     // What publishing overrides is said to someone who may publish; read only, the rows are what readers would get.
     if (!pick.option) {
-      out.push(d?.number ?? x.number, t.waitsOn ? '' : (x.warn ?? ''));
+      out.push(d?.number ?? x.number, t.waitsOn ? (x.note ?? '') : (x.warn ?? x.note ?? ''));
       continue;
     }
     if (pick.option !== x.option) continue;
     // Accept's number is the day as it came: Publish as is's, said here once Accept is picked.
     const number = x.option === 'accept' && !x.off ? (t.options.find((y) => y.option === 'asis')?.number ?? '') : (d?.number ?? x.number);
-    out.push(number, x.option === 'asis' ? (x.warnPicked ?? x.sub ?? '') : d ? (d.fails ? 'fails its checks' : d.sub) : (x.sub ?? ''));
+    out.push(number, x.option === 'asis' ? (x.warnPicked ?? x.sub ?? '') : d ? (d.fails ? (d.failed ?? failLine(null)) : d.sub) : (x.sub ?? ''));
     if (d) out.push(...x.donors!.filter((y) => y !== d).map((y) => y.chip));
   }
   out.push(t.part ?? '', t.missing ?? '', t.cut ?? '', ...t.ticks);
@@ -516,26 +606,29 @@ const remedySaid = (r: RemedySaid): string => (r.option === 'fill' ? remedyHead(
 
 /**
  * The sheet once decided, collapsed to a receipt, and the same line on the canvas (ADR 0009 §12): what readers now see
- * ("Published as is · readers now see Thu 21"; "Not published · readers keep Wed 20 until a day passes"; "Filled from
+ * ("Published as is · readers now see Thu 21"; "Not published · readers keep Wed 20 until a later day publishes"; "Filled from
  * Thu 14 · readers now see Thu 21"; "Fill withdrawn · readers see Wed 20 again"), then what it took or set aside, the
  * outputs released, who and when (or the standing decision it came under) and the record's entry; whether the decision
  * can still be changed (a day not published can be published later, a fill replaced or withdrawn; one published as is
  * can't be taken back); and, for a remedy, that the day's versions are a tap away.
  */
-export function receiptLines(o: { state: DayState; day: string | null; readers: string | null; past?: boolean; released: number; who: string | null; at: string | null; seq: number | null; under: string | null; standing: boolean; remedy?: (RemedySaid & { filled: number | null; setAside: number | null }) | null; withdrawn?: RemedyMark | null; level?: string | null }): { head: string; sub: string; change: string | null; versions?: true } {
+export function receiptLines(o: { state: DayState; day: string | null; readers: string | null; past?: boolean; released: number; who: string | null; at: string | null; seq: number | null; under: string | null; standing: boolean; remedy?: (RemedySaid & { filled: number | null; setAside: number | null }) | null; withdrawn?: RemedyMark | null; level?: string | null; reason?: string | null }): { head: string; sub: string; change: string | null; versions?: true; note?: string } {
+  // The reason the decision recorded, said where it was given (round 3, #28): "Why: Real change".
+  const why = o.reason && !o.under ? `Why: ${o.reason}` : null;
   const by = o.under ? `Under ${o.under}’s decision` : o.who ? `${o.who}${o.at ? ` · ${o.at}` : ''}` : null;
   const rec = o.seq !== null ? `record #${o.seq}` : null;
   const released = o.released ? `${o.released} output${o.released === 1 ? '' : 's'} released` : null;
   // Once a later day has published, the day readers kept then (days.readersOf), never the later day.
   const keep = o.past ? (o.readers ? `readers kept ${dayShort(o.readers)}` : '') : o.readers ? `readers keep ${dayShort(o.readers)}` : 'nothing published yet';
-  if (o.state === 'asis') return { head: `Published as is${o.day ? ` · readers now see ${dayShort(o.day)}` : ''}`, sub: [released, by, rec].filter(Boolean).join(' · '), change: null };
+  // Published as is can't be taken back (§12): said where Change decision would be, so its absence reads as meant.
+  if (o.state === 'asis') return { head: `Published as is${o.day ? ` · readers now see ${dayShort(o.day)}` : ''}`, sub: [why, released, by, rec].filter(Boolean).join(' · '), change: null, note: 'Can’t be recalled' };
   // Accept (amendment 1 S6, X6): the new level's first day, what it learns from, and its decision, never undone. A day
   // published under a standing level names the Accept it came under.
   if (o.state === 'accepted') {
     const from = o.level ?? o.day;
     return {
       head: `${o.under ? `By ${o.under}’s new level` : `New level from ${from ? dayShort(from) : 'this day'}`}${o.day && !o.past ? ` · readers now see ${dayShort(o.day)}` : ''}`,
-      sub: [from && !o.under ? `learns from ${dayShort(from)}` : null, released, o.under ? null : by, rec].filter(Boolean).join(' · '), change: null,
+      sub: [from && !o.under ? `learns from ${dayShort(from)}` : null, why, released, o.under ? null : by, rec].filter(Boolean).join(' · '), change: null, note: 'Can’t be recalled',
     };
   }
   if ((o.state === 'fill' || o.state === 'complete') && o.remedy) {
@@ -544,7 +637,7 @@ export function receiptLines(o: { state: DayState; day: string | null; readers: 
     const took = r.option === 'fill' ? (r.filled !== null ? `${fmtInt(r.filled)} filled` : null) : r.setAside !== null ? `${fmtInt(r.setAside)} set aside` : null;
     return {
       head: `${head}${o.day && !o.past ? ` · readers now see ${dayShort(o.day)}` : ''}`,
-      sub: [took, released, o.standing && !o.under ? 'later days too, until a day passes' : null, by, rec].filter(Boolean).join(' · '),
+      sub: [took, released, o.standing && !o.under ? `later days too, ${UNTIL}` : null, by, rec].filter(Boolean).join(' · '),
       change: 'Change decision', versions: true,
     };
   }
@@ -552,7 +645,7 @@ export function receiptLines(o: { state: DayState; day: string | null; readers: 
     const back = o.past ? (o.readers ? `readers kept ${dayShort(o.readers)}` : '') : o.readers ? `readers see ${dayShort(o.readers)} again` : 'nothing published';
     return { head: `${o.withdrawn === 'fill' ? 'Fill' : 'Part'} withdrawn${back ? ` · ${back}` : ''}`, sub: [by, rec].filter(Boolean).join(' · '), change: 'Change decision', versions: true };
   }
-  if (o.state === 'dont') return { head: `Not published${keep ? ` · ${keep}` : ''}${o.standing && !o.under ? ' until a day passes' : ''}`, sub: [by, rec].filter(Boolean).join(' · '), change: 'Change decision' };
+  if (o.state === 'dont') return { head: `Not published${keep ? ` · ${keep}` : ''}${o.standing && !o.under ? ` ${UNTIL}` : ''}`, sub: [why, by, rec].filter(Boolean).join(' · '), change: 'Change decision' };
   return { head: 'Decided, not yet published', sub: [by, rec].filter(Boolean).join(' · '), change: null };
 }
 
@@ -595,6 +688,9 @@ export interface PauseRow {
   verb: string | null;
   /** In the verb's place for someone who may not decide: who does ("Owner decides"). */
   waits: string | null;
+  /** Once decided, for someone who may decide, the decision a tap from changing where it still can change (a day not
+   * published, a fill or the part alone): "Change decision", in the row, as the canvas's receipt has it (round 3, #28). */
+  change?: string | null;
 }
 
 /**
@@ -606,23 +702,29 @@ export interface PauseRow {
  * glance, so readers' day goes without its age here: the day line under the strip, the staged bar and the list of
  * outputs a tap away carry it.
  */
-export function pauseLines(o: { state: DayState; names: readonly string[]; by?: readonly string[]; readers?: string | null; past?: boolean; who: string | null; at: string | null; under: string | null; may: boolean; deciders: string; standing?: boolean; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null; readersMark?: RemedyMark | null }): PauseRow {
+export function pauseLines(o: { state: DayState; names: readonly string[]; by?: readonly string[]; readers?: string | null; past?: boolean; who: string | null; at: string | null; under: string | null; may: boolean; deciders: string; standing?: boolean; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null; readersMark?: KeptMark | null; top?: boolean }): PauseRow {
   const by = o.who ? ` · ${o.who}${o.at ? ` · ${o.at}` : ''}` : '';
   const reasons = o.by ?? [];
   // Once a later day has published, readers' day as it stood then (days.readersOf): "readers kept Mon 18".
   const see = o.readers === undefined ? null : readersSee(o.readers, null, o.past, o.readersMark) || null;
   if (o.state === 'waiting') {
+    // With the pause said at the top of the News (`top`, round 3 #12: dayPausedLine, readers' day, its age and Decide),
+    // the card's row says only what paused it and what waits, never the same words twice on one screen.
+    if (o.top) return { reach: reasons.length ? `Paused by ${reasons.join(', ')}` : 'Paused', see: null, names: o.names, verb: null, waits: null };
     return { reach: reasons.length ? `Paused by ${reasons.join(', ')}` : 'Paused', see, names: o.names, verb: o.may ? 'Decide' : null, waits: o.may ? null : `${o.deciders} decides` };
   }
   if (o.state === 'asis') return { reach: `Published as is${by}`, see: null, names: o.names, verb: null, waits: null };
   if (o.state === 'accepted') return { reach: `${o.under ? `By ${o.under}’s new level` : 'New level'}${o.under ? '' : by}`, see: null, names: o.names, verb: null, waits: null };
+  // What can still change (a day not published, a fill, the part alone) says so in the row, a tap from its sheet.
+  const change = o.may ? 'Change decision' : null;
   // A remedy readers have (amendment 1 S12): "Filled from Thu 14 · Owner · 09:40", "Filled from Tue 1 · under Mon’s
   // decision"; the day itself is what readers see.
-  if ((o.state === 'fill' || o.state === 'complete') && o.remedy) return { reach: `${remedyHead(o.remedy)}${o.under ? ` · under ${o.under}’s decision` : by}`, see: null, names: o.names, verb: null, waits: null };
-  if (o.state === 'dont' && o.withdrawn) return { reach: `${o.withdrawn === 'fill' ? 'Fill' : 'Part'} withdrawn${by}`, see: see && keeps(see), names: o.names, verb: null, waits: null };
-  // A decision that stands says so, by its effect: the days after it are closed too, until one passes. Readers keep
-  // the day they had.
-  return { reach: o.under ? `Not published · under ${o.under}’s decision` : o.standing ? 'Not published until a day passes' : `Not published${by}`, see: see && keeps(see), names: o.names, verb: null, waits: null };
+  if ((o.state === 'fill' || o.state === 'complete') && o.remedy) return { reach: `${remedyHead(o.remedy)}${o.under ? ` · under ${o.under}’s decision` : by}`, see: null, names: o.names, verb: null, waits: null, change };
+  if (o.state === 'dont' && o.withdrawn) return { reach: `${o.withdrawn === 'fill' ? 'Fill' : 'Part'} withdrawn${by}`, see: see && keeps(see), names: o.names, verb: null, waits: null, change };
+  // A decision that stands says so, by its effect, in the sheet's own words for it: the days after it are closed too
+  // ("later days too", the switch it was picked by; the receipt says until when). Readers keep the day they had. The
+  // time it was taken is the receipt's and the record's: the row keeps who, and room for Change decision.
+  return { reach: o.under ? `Not published · under ${o.under}’s decision` : o.standing ? 'Not published · later days too' : `Not published${o.who ? ` · ${o.who}` : ''}`, see: see && keeps(see), names: o.names, verb: null, waits: null, change };
 }
 
 /** What readers see said of a day not published: they keep it ("readers keep Wed 20"; "readers kept Mon 18" as it
@@ -631,7 +733,7 @@ const keeps = (see: string) => see.replace(/^readers see /, 'readers keep ');
 
 /** Every word a pause row shows at a glance. */
 export function pauseWords(l: PauseRow): number {
-  return [l.reach, l.see ?? '', ...l.names, l.verb ?? '', l.waits ?? ''].reduce((n, x) => n + wordsIn(x), 0);
+  return [l.reach, l.see ?? '', ...l.names, l.verb ?? '', l.waits ?? '', l.change ?? ''].reduce((n, x) => n + wordsIn(x), 0);
 }
 
 /**
@@ -656,7 +758,7 @@ export function pausedGlance(s: Story, row: PauseRow, decided = false): string[]
   const l = s.labels;
   const checks = pausedChecks(s.gate, decided);
   const gate = l.gate.length ? (checks.full ? [checks.head ?? '', ...l.gate.slice(1)] : checks.line ? [checks.line] : []) : [];
-  return [s.head, s.chip ?? '', ...l.amount, ...l.hero.slice(0, l.hero.length - l.gate.length), ...gate, ...l.key, l.context ? `${CONTEXT_TAG} ${l.context}` : '', l.folded ?? '', l.more ?? '', l.notes ?? '', ...s.stories.map((f) => f.title), row.reach, row.see ?? '', ...row.names, row.verb ?? '', row.waits ?? ''].filter(Boolean);
+  return [s.head, s.chip ?? '', ...l.amount, ...l.hero.slice(0, l.hero.length - l.gate.length), ...gate, ...l.key, l.context ? `${CONTEXT_TAG} ${l.context}` : '', l.folded ?? '', l.more ?? '', l.notes ?? '', ...s.stories.map((f) => f.title), row.reach, row.see ?? '', ...row.names, row.verb ?? '', row.waits ?? '', row.change ?? ''].filter(Boolean);
 }
 
 /**
@@ -664,7 +766,7 @@ export function pausedGlance(s: Story, row: PauseRow, decided = false): string[]
  * readers see meanwhile, its age when it is stale ("readers see Mon 18 · 3 days old", `day` being the day held), with
  * Decide for someone who may decide; once decided, what became of the day.
  */
-export function dayPausedLine(o: { state: DayState; readers: string | null; past?: boolean; may: boolean; standing: boolean; day?: string | null; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null; level?: string | null; under?: string | null; readersMark?: RemedyMark | null }): { text: string; verb: string | null } {
+export function dayPausedLine(o: { state: DayState; readers: string | null; past?: boolean; may: boolean; standing: boolean; day?: string | null; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null; level?: string | null; under?: string | null; readersMark?: KeptMark | null }): { text: string; verb: string | null } {
   // Its age while it waits, when what readers see is stale (two days or more before it); once decided, the line keeps
   // to its ten words. Once a later day has published, the day readers kept then, naming no later day. A day readers
   // have filled is marked ◧ beside its date (◐ the part alone, S12).
@@ -675,7 +777,7 @@ export function dayPausedLine(o: { state: DayState; readers: string | null; past
   if (o.state === 'accepted') return { text: o.under ? `By ${o.under}’s new level` : `New level from ${dayShort(o.level ?? o.day ?? '')}`.replace(/ from $/, ''), verb: null };
   if ((o.state === 'fill' || o.state === 'complete') && o.remedy) return { text: `${MARK[o.state]} ${remedyHead(o.remedy)}`, verb: null };
   if (o.withdrawn) return { text: `${o.withdrawn === 'fill' ? 'Fill' : 'Part'} withdrawn${see ? ` · ${keeps(see)}` : ''}`, verb: null };
-  return { text: `Not published${o.standing ? ' until a day passes' : ''}${see ? ` · ${keeps(see)}` : ''}`, verb: null };
+  return { text: `Not published${o.standing ? ` ${UNTIL}` : ''}${see ? ` · ${keeps(see)}` : ''}`, verb: null };
 }
 
 /**
@@ -727,19 +829,41 @@ export function outputPausedLine(o: { state: DayState; may: boolean; deciders: s
   if (o.state === 'accepted') return { text: 'Published as a new level', verb: null };
   if ((o.state === 'fill' || o.state === 'complete') && o.remedy) return { text: remedySaid(o.remedy).replace(/^./, (c) => c.toUpperCase()), verb: null };
   if (o.withdrawn) return { text: `${o.withdrawn === 'fill' ? 'Fill' : 'Part'} withdrawn`, verb: null };
-  return { text: o.standing ? 'Not published until a day passes' : 'Not published', verb: null };
+  return { text: o.standing ? `Not published ${UNTIL}` : 'Not published', verb: null };
 }
 
-/** Days said as runs of weekdays: "Fri–Sun", "Mon, Wed". */
-function spans(days: readonly string[]): string {
+/**
+ * Days said as runs of weekdays: "Fri–Sun", "Mon, Wed". A run of a week or more, or one whose weekday the line says of
+ * another day already (`taken`: "Mon 21 published · Mon–Sun still wait"), is said by its dates instead, so no weekday
+ * stands for two (round 3, #12): "Nov 14–20".
+ */
+function spans(days: readonly string[], taken: readonly string[] = []): string {
   const wd = (d: string) => dayShort(d).split(' ')[0]!;
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const md = (d: string) => `${MON[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`;
   const runs: [string, string][] = [];
   for (const d of [...days].sort()) {
     const r = runs.at(-1);
     if (r && plusDays(r[1], 1) === d) r[1] = d;
     else runs.push([d, d]);
   }
-  return runs.map(([a, b]) => (a === b ? wd(a) : `${wd(a)}–${wd(b)}`)).join(', ');
+  const clash = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) / 864e5 >= 6 || taken.includes(wd(a)) || taken.includes(wd(b));
+  return runs.map(([a, b]) => {
+    if (!clash(a, b)) return a === b ? wd(a) : `${wd(a)}–${wd(b)}`;
+    if (a === b) return md(a);
+    return a.slice(0, 7) === b.slice(0, 7) ? `${md(a)}–${Number(b.slice(8, 10))}` : `${md(a)}–${md(b)}`;
+  }).join(', ');
+}
+
+/**
+ * Why readers see the day they do while a day waits (round 3, #12): what became of each day between it and the day held,
+ * "Tue–Wed not run", "Sun not run · Mon paused". Days published as is or by a remedy aren't between: readers would see
+ * them. Null when there is no day between.
+ */
+export function betweenLine(days: readonly { day: string; state: DayState | 'published' | null }[]): string | null {
+  const said: [DayState | 'published' | null, string][] = [[null, 'not run'], ['waiting', 'paused'], ['dont', 'not published']];
+  const parts = said.map(([st, w]) => [days.filter((d) => d.state === st).map((d) => d.day), w] as const).filter(([ds]) => ds.length).map(([ds, w]) => `${spans(ds)} ${w}`);
+  return parts.length ? parts.join(' · ') : null;
 }
 
 /**
@@ -760,9 +884,15 @@ export function afterLine(days: readonly { day: string; state: DayState | 'publi
   if (!known.length) return lead ? line([lead], null) : null;
   const of = (s: DayState | 'published') => known.filter((d) => d.state === s).map((d) => d.day);
   const waiting = of('waiting');
-  if (waiting.length) return line([lead, { state: 'waiting', text: `${spans(waiting)} still wait${waiting.length === 1 ? 's' : ''}` }], o.may === false ? null : 'Decide');
-  const words: [DayState | 'published', string][] = [['asis', 'as is'], ['accepted', 'new level'], ['fill', 'filled'], ['complete', 'part only'], ['dont', 'unpublished'], ['published', 'published']];
-  return line([lead, ...words.map(([s, w]) => [s, of(s), w] as const).filter(([, ds]) => ds.length).map(([s, ds, w]) => ({ state: s, text: `${spans(ds)} ${w}` }))], null);
+  const taken = lead && o.today ? [dayShort(o.today.day).split(' ')[0]!] : [];
+  // Decide names the day it opens, the first still waiting (round 3, #19): with three waiting, "Decide" alone didn't say.
+  // Where the line says them by their dates ("Nov 14–19 still wait"), it starts at that day already.
+  const first = [...waiting].sort()[0]!;
+  const said = spans(waiting, taken);
+  if (waiting.length) return line([lead, { state: 'waiting', text: `${said} still wait${waiting.length === 1 ? 's' : ''}` }], o.may === false ? null : waiting.length > 1 && !/^[A-Z][a-z]{2} \d/.test(said) ? `Decide ${dayShort(first)}` : 'Decide');
+  // "not published", never "unpublished", which read as published and then taken back (round 3, #20).
+  const words: [DayState | 'published', string][] = [['asis', 'as is'], ['accepted', 'new level'], ['fill', 'filled'], ['complete', 'part only'], ['dont', 'not published'], ['published', 'published']];
+  return line([lead, ...words.map(([s, w]) => [s, of(s), w] as const).filter(([, ds]) => ds.length).map(([s, ds, w]) => ({ state: s, text: `${spans(ds, taken)} ${w}` }))], null);
 }
 
 /** A part of the line under the day after an episode: some of its days, what became of them, in words. */

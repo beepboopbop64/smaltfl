@@ -14,7 +14,7 @@
 
 import type { DrawCause, ReaderRows } from '../core/decision.js';
 
-export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack' | 'publish' | 'keep' | 'unlearned' | 'fill' | 'part' | 'level';
+export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack' | 'publish' | 'keep' | 'unlearned' | 'fill' | 'part' | 'level' | 'lock';
 
 export const esc = (s: unknown): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
@@ -72,6 +72,10 @@ export function glyph(kind: Mark, size = 16): string {
       return `<svg ${a}><circle class="g-seal" cx="8" cy="8" r="7"/><path class="g-sealmark" d="M4.8 8.2l2.2 2.2 4.2-4.6"/></svg>`;
     case 'ack':
       return `<svg ${a}><path class="g-ack" d="M3.2 8.4l3 3 6.6-7"/></svg>`;
+    // What can't be undone or picked (round 3, #19, #28): a padlock, in the ink; a published day can't be recalled, and
+    // Publish as is can't be picked once a later day is out.
+    case 'lock':
+      return `<svg ${a}><path class="g-shackle" d="M5.2 7.2V5.3a2.8 2.8 0 0 1 5.6 0v1.9"/><rect class="g-lockbody" x="3.4" y="7.2" width="9.2" height="7" rx="1.6"/></svg>`;
   }
 }
 
@@ -1556,7 +1560,10 @@ export function stripBar({ v, low, high, ymax, sev }: { v: number; low: number |
  * not as the day's own. The part that arrived alone is the day's own rows with what it leaves out absent at its usual
  * (`usual` and `short`, as for Publish as is): dashed, since those rows aren't there.
  */
-export function decisionRow(o: { mark: Mark | null; label: string; number: string; cause: DrawCause; rows: ReaderRows | null; usual?: ReaderRows | null; short?: readonly [number, number] | null; other?: boolean; scale: number; part?: string | null; ticks?: readonly (readonly [number, string])[]; missing?: string | null; cut?: readonly [number, string] | null; off?: boolean; filled?: readonly [number, number] | 'part' | 'rest' | null; aria: string; w?: number }): string {
+export function decisionRow(o: { mark: Mark | null; label: string; number: string; cause: DrawCause; rows: ReaderRows | null; usual?: ReaderRows | null; short?: readonly [number, number] | null; other?: boolean; lacks?: boolean; scale: number; part?: string | null; ticks?: readonly (readonly [number, string])[]; missing?: string | null; cut?: readonly [number, string] | null; off?: boolean; filled?: readonly [number, number] | 'part' | 'rest' | null; aria: string; w?: number }): string {
+  // Another day's rows draw what they lacked only when that day went out short (`lacks`, round 3 #3): published as is,
+  // its missing part dashed on its hatched rows as on its own day, so a fallback day can't read as a whole one.
+  const own = !o.other || !!o.lacks;
   const w = o.w ?? 300;
   const partH = o.cause === 'split' && o.part && !o.other ? 14 : 0;
   const top = 28 + partH;
@@ -1584,7 +1591,7 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
     const bw = cw - 2.5;
     const y = (v: number) => (v / scale) * drawH;
     const got = o.rows.hours;
-    const usual = !o.other && o.usual?.cause === 'hours' ? o.usual.hours : null;
+    const usual = own && o.usual?.cause === 'hours' ? o.usual.hours : null;
     const sh = o.short ?? null;
     // In the short hours the trips that came abut into one ribbon, 5 px at least, so a trickle reads as trips still
     // coming (as the card's hour chart draws it); the trips they lack are a wash under the usual hours' skyline, 3 px
@@ -1620,7 +1627,7 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
     const gap = 3;
     const x = (v: number) => (v / scale) * (w - gap);
     const by = top;
-    const u = !o.other && o.usual?.cause === 'split' ? o.usual : null;
+    const u = own && o.usual?.cause === 'split' ? o.usual : null;
     const pw = o.rows.part > 0 ? Math.max(MIN_MARK, x(o.rows.part)) : 0;
     const slot = Math.max(pw, u ? x(u.part) : 0);
     if (pw) s += filled === 'part' ? `<rect class="${stip}" x="0" y="${by}" width="${f1(pw)}" height="${drawH}" rx="2" data-part="part" data-filled="1"/>${topEdge(0, by, pw)}` : `<rect class="${fill}" x="0" y="${by}" width="${f1(pw)}" height="${drawH}" rx="2" data-part="part"/>`;
@@ -1636,7 +1643,7 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
     const cw = w / Math.max(1, n);
     const bw = Math.min(22, cw - 6);
     const y = (v: number) => (v / scale) * drawH;
-    const u = !o.other && o.usual?.cause === 'amount' ? o.usual.days : null;
+    const u = own && o.usual?.cause === 'amount' ? o.usual.days : null;
     days.forEach((v, i) => {
       const last = i === n - 1;
       const x0 = i * cw + (cw - bw) / 2;

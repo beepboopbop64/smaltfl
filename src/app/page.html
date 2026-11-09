@@ -1124,7 +1124,10 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-after.waiting { color: var(--ink); font-weight: 500; }
 .vf-after .btn { margin-left: auto; }
 .after-part { white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; }
-.after-parts { display: inline; }
+/* Each part and its separator on one centre line (round 3: an inline-flex part with a glyph first sat on the glyph's
+   foot, and the " · " beside it read as a stray full stop). */
+.after-parts { display: inline-flex; flex-wrap: wrap; align-items: center; }
+.after-parts .sep { white-space: pre; }
 .loads-pause.after { font-weight: 400; }
 /* A held day's mark by its date and on its News tab. */
 .day-mark { display: inline-flex; margin-right: 6px; vertical-align: -2px; }
@@ -1149,6 +1152,15 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .episodes .ep-chip[aria-pressed="true"] .g-tri { fill: var(--surface); stroke: var(--surface); } .episodes .ep-chip[aria-pressed="true"] .g-mark { fill: var(--smalt); }
 .vf-cell.sealed .g { margin-right: 1px; }
 .paused-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; color: var(--ink); font-size: 14px; }
+/* The paused day said at the top of the source's News (round 3, #12): the pause, readers' day and why that day, and
+   Decide, full width under the date, as the staged bar heads an output's tabs. */
+.pause-top { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--ink-2); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 14px; }
+.pause-top > .g { flex: none; }
+.nowrap { white-space: nowrap; }
+.pause-top .pt-t { display: grid; gap: 1px; flex: 1; min-width: 0; }
+.pause-top .pt-why { font-size: 12.5px; color: var(--ink-2); }
+.pause-top .pt-waits { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.pause-top .btn { flex: none; }
 .paused-line .g { flex: none; }
 .paused-line .btn { margin-left: auto; }
 /* The decision sheet (ADR 0009 §12): each option's mark (publish, or the hatched swatch of the day readers keep), what
@@ -1179,7 +1191,10 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-rc-head .g { flex: none; }
 .vf-rc-sub { margin: 0 0 0 22px; font-size: 13px; color: var(--ink-2); }
 .vf-rc-sub .vf-hash { font-size: 12px; white-space: nowrap; }
-.vf-rc-acts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-left: 22px; }
+.vf-rc-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-left: 22px; }
+/* What can't be undone or picked (round 3, #19, #28): a padlock in the ink, beside its words. */
+.g-shackle { fill: none; stroke: var(--ink-2); stroke-width: 1.6; stroke-linecap: round; } .g-lockbody { fill: var(--ink-2); }
+.vf-rc-note { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink-2); }
 .vf-rc-acts .linkish, .vf-waits-on .linkish { background: none; border: 0; padding: 0; min-height: 32px; color: var(--smalt); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .loads-receipt { border-top: 0; padding-top: 2px; margin-top: 4px; }
 .loads-receipt .vf-rc-head { font-size: 13px; }

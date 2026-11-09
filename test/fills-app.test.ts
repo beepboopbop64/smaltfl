@@ -8,7 +8,7 @@ import { fillCounts } from '../src/core/fill.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { dayClaim, flowStory, type HistoryRef } from '../src/core/hold.js';
 import type { RunResult } from '../src/core/protocol.js';
-import { derivedFails, donorsOf, repairOf } from '../src/app/fills.js';
+import { derivedFails, derivedWhy, donorsOf, repairOf } from '../src/app/fills.js';
 import { exampleLegacy, exampleUnfilled } from './helpers/example.js';
 import { historyWith } from './helpers/history.js';
 
@@ -62,5 +62,17 @@ describe('a staged run that can’t go (S10)', () => {
     expect(derivedFails(result(['story', 'checks'], ['derived']))).toBe(true);
     expect(derivedFails(result(['story'], ['derived', 'donor']))).toBe(true);
     expect(derivedFails(result(['unjudged'], ['derived']))).toBe(true);
+  });
+  it('says which hold keeps it back: its checks with their figures, a source not judged, or a donor judged not good', () => {
+    const gate = { share: 0.12, limit: 0.1 };
+    expect(derivedWhy(result(['story'], ['derived']), gate, '2023-09-14')).toBeNull();
+    expect(derivedWhy(result(['story', 'checks'], ['derived']), gate, '2023-09-14')).toEqual({ by: 'checks', gate, rule: null });
+    const rule = { holds: [{ by: 'checks', said: 'expectations failed: fare (3 rows)' }], derived: { holds: [{ by: 'derived' }], filled: 1 } } as unknown as RunResult;
+    expect(derivedWhy(rule, null, null)).toEqual({ by: 'checks', gate: null, rule: 'fare' });
+    // A day given no claim to be judged by (the owner's Sep 21 snapshot): not judged, not failing checks.
+    expect(derivedWhy(result(['story', 'unjudged'], ['derived']), null, '2023-09-14')).toEqual({ by: 'unjudged' });
+    const donor = (claim: boolean) => ({ holds: [{ by: 'story' }], derived: { holds: [{ by: 'derived' }, { by: 'donor', said: 'x', ...(claim ? { claim: {} } : {}) }], filled: 1 } }) as unknown as RunResult;
+    expect(derivedWhy(donor(true), null, '2023-09-14')).toEqual({ by: 'donor', day: '2023-09-14' });
+    expect(derivedWhy(donor(false), null, '2023-09-14')).toEqual({ by: 'unjudged' });
   });
 });

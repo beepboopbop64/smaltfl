@@ -181,8 +181,13 @@ describe('what the outputs of a day with something wrong say', () => {
 
 describe('a held day’s own rows, staged (ADR 0009 §12)', () => {
   it('sit under a bar naming the day staged and the day readers see', () => {
-    expect(stagedBar('2023-09-21', '2023-09-20')).toBe('Thu 21 built, not published · readers see Wed 20');
-    expect(stagedBar('2023-09-21', null)).toBe('Thu 21 built, not published · nothing published yet');
+    // One word a state (round 3, #20): a day that waits is paused; one decided not to publish is not published, and
+    // readers keep their day (beside its mark when it went out as is).
+    expect(stagedBar('2023-09-21', '2023-09-20', null, true)).toBe('Thu 21 paused · readers see Wed 20');
+    expect(stagedBar('2023-09-21', null, null, true)).toBe('Thu 21 paused · nothing published yet');
+    expect(stagedBar('2023-09-21', '2023-09-20')).toBe('Thu 21 not published · readers keep Wed 20');
+    expect(stagedBar('2023-09-22', '2023-09-21', null, true, 'asis')).toBe('Fri 22 paused · readers see Thu 21 ⚑');
+    expect(stagedBar('2023-09-22', '2023-09-21', null, false, 'asis')).toBe('Fri 22 not published · readers keep Thu 21 ⚑');
     // Published as is: its rows are what readers see, and no bar.
     expect(stagedBar('2023-09-21', '2023-09-21')).toBeNull();
     // A later day passed since: the day is no longer staged for readers, and is said as it stood then, naming no
@@ -190,11 +195,11 @@ describe('a held day’s own rows, staged (ADR 0009 §12)', () => {
     expect(stagedBar('2023-09-23', '2023-09-26', '2023-09-21')).toBe('Not published · readers kept Thu 21');
     expect(stagedBar('2023-09-23', '2023-09-26')).toBe('Not published');
     expect(stagedBar('2023-09-23', '2023-09-26', '2023-09-26')).toBe('Not published');
-    // A day that still waits for a decision isn't "Not published" over its own Decide: it was built, not published, and
-    // readers kept the day before it then (Thu 21 waiting, Mon 25 published since, Mon 18 the last day before).
-    expect(stagedBar('2023-09-21', '2023-09-25', '2023-09-18', true)).toBe('Thu 21 built, not published · readers kept Mon 18');
-    expect(stagedBar('2023-09-21', '2023-09-25', null, true)).toBe('Thu 21 built, not published');
-    expect(stagedBar('2023-09-21', '2023-09-20', '2023-09-20', true)).toBe('Thu 21 built, not published · readers see Wed 20');
+    // A day that still waits for a decision isn't "Not published" over its own Decide: it is paused, and readers kept
+    // the day before it then (Thu 21 waiting, Mon 25 published since, Mon 18 the last day before).
+    expect(stagedBar('2023-09-21', '2023-09-25', '2023-09-18', true)).toBe('Thu 21 paused · readers kept Mon 18');
+    expect(stagedBar('2023-09-21', '2023-09-25', null, true)).toBe('Thu 21 paused');
+    expect(stagedBar('2023-09-21', '2023-09-20', '2023-09-20', true)).toBe('Thu 21 paused · readers see Wed 20');
     // The day readers have, in a day's own views: today's, or once a later day published, the day kept then.
     expect(readersOf('2023-09-20', '2023-09-21', '2023-09-20')).toEqual({ day: '2023-09-20', past: false });
     expect(readersOf('2023-09-25', '2023-09-22', '2023-09-21')).toEqual({ day: '2023-09-21', past: true });
@@ -206,7 +211,7 @@ describe('a held day’s own rows, staged (ADR 0009 §12)', () => {
 
   it('say how old the day readers see is once it is two days or more before the day held', () => {
     // Tue 19 and Wed 20 not run in this visit: readers still see Mon 18, and the bar says it is stale.
-    expect(stagedBar('2023-09-21', '2023-09-18')).toBe('Thu 21 built, not published · readers see Mon 18 · 3 days old');
+    expect(stagedBar('2023-09-21', '2023-09-18', null, true)).toBe('Thu 21 paused · readers see Mon 18 · 3 days old');
     expect(readersSee('2023-09-20', '2023-09-21')).toBe('readers see Wed 20');
     expect(readersSee('2022-11-12', '2022-11-15')).toBe('readers see Sat 12 · 3 days old');
     // Across a month's end, by the calendar.

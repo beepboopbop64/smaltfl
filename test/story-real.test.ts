@@ -531,9 +531,10 @@ describe.skipIf(!has)('the story on the real history', () => {
       const states: ('waiting' | 'asis' | 'dont' | null)[][] = [days.map(() => 'waiting'), days.map((_, i) => (i === 0 ? 'asis' : 'dont')), days.map((_, i) => (i === days.length - 1 ? null : 'waiting'))];
       for (const fates of states) {
         const after = afterLine(days.map((x, i) => ({ day: x, state: fates[i]! })), { today: { day, state: 'published' } })!;
-        // Its strip keys the episode's ! ("wrong"); while a day of it waits, the health cells go without their head, as
-        // on a paused card (its line, with Decide, and its strip are named around them).
-        const said = [...glanceStrings(mon).filter((x) => x !== mon.labels.after && !(fates.includes('waiting') && x === mon.labels.health)), after.text, after.verb ?? '', fates.includes(null) ? 'not run' : ''];
+        // Its strip keys the episode's ! ("wrong"); once its line says what became of its days (with Decide while a day
+        // waits), the health cells go without their head, as on a paused card (the line and the strip are named around
+        // them; round 3, #20: its "not published" takes the head's word).
+        const said = [...glanceStrings(mon).filter((x) => x !== mon.labels.after && !(after.parts.length && x === mon.labels.health)), after.text, after.verb ?? '', fates.includes(null) ? 'not run' : ''];
         expect(said).toContain('wrong');
         expect(said.reduce((t, x) => t + wordsIn(x), 0), `${day}: ${said.join(' | ')}`).toBeLessThanOrEqual(24);
       }

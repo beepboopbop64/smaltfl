@@ -73,8 +73,8 @@ export function readersOf(published: string | null | undefined, day: string | nu
  * so a stale one reads stale: "readers see Wed 20", "readers see Mon 18 · 3 days old"; "nothing published yet". Said
  * as it stood then (`past`, readersOf): "readers kept Mon 18", or nothing when the day kept isn't known here.
  */
-export function readersSee(published: string | null | undefined, day: string | null | undefined, past = false, mark?: RemedyMark | null): string {
-  const m = mark ? ` ${MARK[mark]}` : '';
+export function readersSee(published: string | null | undefined, day: string | null | undefined, past = false, mark?: KeptMark | null): string {
+  const m = mark ? ` ${KEPT_MARK[mark]}` : '';
   if (past) return published ? `readers kept ${dayShort(published)}${m}` : '';
   if (!published) return 'nothing published yet';
   const age = day ? Math.round((at(day).getTime() - at(published).getTime()) / 864e5) : 0;
@@ -87,22 +87,29 @@ export function readersSee(published: string | null | undefined, day: string | n
  */
 export type RemedyMark = 'fill' | 'complete';
 export const MARK: Record<RemedyMark, string> = { fill: '◧', complete: '◐' };
+/** The mark beside a day readers keep (round 3, #3): filled (◧), the part alone (◐), or published as is (⚑), a day
+ * that went out with what it lacked, so a fallback day can't read as a whole one. Not a word. */
+export type KeptMark = RemedyMark | 'asis';
+export const KEPT_MARK: Record<KeptMark, string> = { ...MARK, asis: '⚑' };
 
 /**
- * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Thu 21 built, not
- * published · readers see Wed 20", "… · readers see Mon 18 · 3 days old", or "… · nothing published yet". Null when the day is the
+ * The bar over a panel whose rows are a held day's own, staged and not published (ADR 0009 §12): "Thu 21 paused ·
+ * readers see Wed 20", "… · readers see Mon 18 · 3 days old", or "… · nothing published yet"; decided not to publish,
+ * "Thu 21 not published · readers keep Wed 20". Null when the day is the
  * one published. A day a later one has passed since is said as it stood then, naming no later day (ADR 0008 §10),
  * with the last day published before it (`then`) where it is known here: while it still waits for a decision
- * (`waiting`), "Thu 21 built, not published · readers kept Mon 18"; once decided not to publish, "Not published ·
+ * (`waiting`), "Thu 21 paused · readers kept Mon 18"; once decided not to publish, "Not published ·
  * readers kept Thu 21".
  */
-export function stagedBar(day: string, published: string | null | undefined, then?: string | null, waiting = false): string | null {
+export function stagedBar(day: string, published: string | null | undefined, then?: string | null, waiting = false, mark?: KeptMark | null): string | null {
   if (published === day) return null;
   const r = readersOf(published, day, then);
   const kept = r.past ? readersSee(r.day, day, true) : '';
   if (r.past && !waiting) return `Not published${kept ? ` · ${kept}` : ''}`;
-  // In plain words, never "Staged": the day's own rows, built and not published (ADR 0009 §12).
-  return `${dayShort(day)} built, not published${r.past ? (kept ? ` · ${kept}` : '') : ` · ${readersSee(published, day)}`}`;
+  // In plain words, never "Staged", and one word a state (round 3, #20): a day that waits is paused; one decided not to
+  // publish is not published, readers keeping their day.
+  if (!waiting && !r.past) return `${dayShort(day)} not published · ${readersSee(published, day, false, mark).replace(/^readers see /, 'readers keep ')}`;
+  return `${dayShort(day)} paused${r.past ? (kept ? ` · ${kept}` : '') : ` · ${readersSee(published, day, false, mark)}`}`;
 }
 
 /** A panel with no rows to show for the viewed day: no day before it passed in this visit. */

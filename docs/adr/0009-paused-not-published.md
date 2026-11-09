@@ -1067,6 +1067,54 @@ ADR 0008's rules apply: shape first, words budgeted.
   (`levelWays(story, then)`). On the real history, Mon Nov 14, 2022 accepted covers Tue 15 to Sun 20, and Mon 21, the
   vendor back, pauses (hold-real).
 
+### S15. The pause carried through every view (round 3 of judging, 2026-11-09, as built)
+
+Words only, and where readers' rows are read from; no encoding, record entry or plugin check changes. These replace the
+§12 and S12 strings they name.
+
+- **What readers get, everywhere (#2).** Nothing reaches readers from a held day without a recorded decision, so someone
+  who may not decide reads an output kept back on the held day on screen (waiting, or decided not to publish) as readers
+  have it: Results, its Data, Columns and Odd rows read the version its name shows, under "As published · Wed 14", and
+  the weather's effect over the loads leaves the held day out. Someone who may decide still sees the staged rows under
+  the staged bar. About never says a held run published an output: "Publishes as zone_hour once decided · This run's
+  content a956… is paused; readers have Wed 14's, content …", "Not published as zone_hour from this run", and "Who can
+  see this" counts each person's rows in the version readers have ("Rows as published · Wed 14").
+- **One name a state (#20).** A day that waits is *paused* ("Thu 21 paused · readers see Wed 20", the staged bar; "‖
+  paused · shows Wed 20", an output's card; "paused · 45.7% dropped", the checks' card; "Paused at trips_valid", their
+  sheet); one decided not to publish is *not published* ("Thu 21 not published · readers keep Wed 20"; "Fri–Sun not
+  published" the day after, never "unpublished"); a standing decision lasts "until a later day publishes" (`UNTIL`),
+  never "until a day passes", which read as a day of time; the card's row says it in the sheet's own words, "Not
+  published · later days too". The Runs view's ribbon is two: "Paused, waiting" and "Paused, decided". An output's News
+  eyebrow is "From its rows, paused" or "From its rows, not published".
+- **The pause at the top (#12).** The source's News opens, under the date, on the day line the canvas has, "‖ Paused ·
+  readers see Mon 18 · 3 days old", with why that day under it ("Tue–Wed not run", `betweenLine`) and Decide (for someone
+  who may not decide, "Waits on Owner"). The cause card's row then says only what paused it and what waits
+  (`pauseLines`' `top`). A week of days, or a weekday the line already says of another day, is said by its dates ("Mon 21
+  published · Nov 14–20 still wait"), and Decide names the day it opens when several wait ("Decide Thu 21").
+- **After a decision (#9, #28).** The sheet behind the receipt is drawn again at once, under it: its date's and tab's
+  mark and the card's row say the decision, never "Paused" under a receipt. Receipts say the reason recorded ("Why: Real
+  change"), the time with its date ("today 18:47"), and, for a day published as is or accepted, "Can't be recalled" beside
+  a lock where Change decision would be. A day not published has "Change decision ›" in the card's row, as the canvas's
+  receipt has it, not only behind ⋯. The sheet's status is "Paused today 10:31".
+- **The kept day as it was (#3, #33).** A day readers keep that went out as is is marked ⚑ beside its date (`KEPT_MARK`:
+  "Keep Thu 21 ⚑", "readers see Thu 21 ⚑") and its Keep row draws what it lacked dashed on its hatched rows, as its own
+  day drew it (`decisionDrawing`'s `lacks`, `decisionRow`'s `lacks`). A day kept of another weekday whose trips are
+  outside the held day's range says so under its row ("busier than a Mon"), the first words to give way to the 45.
+- **The sheet counts what readers get (#4, supersedes §12's "the trips as they arrived").** Each row's number is its rows
+  past the checks: the day's own (37,935), the day kept's, a staged remedy's once its run is made. The noun is said once,
+  on the first row, and numbers are bare after it (Q-78 for every noun). Publish as is says under it the rows that
+  arrived, the count its drawing shows and the card prints ("of 41,939 arrived"); when the checks held the day too, the
+  same line carries their figures ("of 4,633 arrived: 45.7% dropped (limit 10%)"), never "Overrides checks" above a count
+  the checks still cut.
+- **What each option asks (#19).** Publish as is that a later day has passed shows a lock in its mark's place and "Mon 25
+  already out".
+- **A remedy that can't go says why (the owner's snapshot of Sep 21).** Its row and button name the hold
+  (`derivedWhy`, `failLine`): "fails its checks: 12.3% dropped (limit 10%)" or "fails its checks: fare failed", "not
+  judged: can't go" (a source given no claim it could be judged by), "Thu 14 isn't judged good". The snapshot's Sep 21
+  "Fill from Thu 14 · fails its checks" was a staged run held as *not judged*: making the ranges again cleared the
+  claims, so the derived run had no claim/2 for the day (fixed in d05e6c4); the sheet then called every hold "fails its
+  checks". Thu 14 is a normal day, and the fill passes its checks.
+
 ### Encodings (amendment 1)
 
 **Unchanged:** `key/0`, `flow/1`, `plan/0`, `plan/1` (E10), `dataset/0`, `run/1`, `log/1`, `checkpoint/0`, `edit/0`,

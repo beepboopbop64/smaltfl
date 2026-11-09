@@ -16,6 +16,7 @@ import type { HistoryRanges } from '../core/history.js';
 import { heldOutputs, inputsOf, stagedKeys, type Claim, type DerivedAbout, type HistoryRef } from '../core/hold.js';
 import type { FlowPlan } from '../core/plan.js';
 import type { RunResult } from '../core/protocol.js';
+import type { StagedFail } from '../core/decision.js';
 import type { Story } from '../core/story.js';
 import { pinFile, runFlow } from '../index.js';
 import type { Engine } from './engine.js';
@@ -127,7 +128,24 @@ export function derivedAbout(o: { result: RunResult; plan: FlowPlan; day: string
 }
 
 /** Whether a derived run can be released: nothing holds it but its day's story and its being derived (S10). Its checks
- * tripping, or its donor not judged good, keep it back: "fails its checks". */
+ * tripping, a source of it not judged, or its donor not judged good keep it back (derivedWhy says which). */
 export function derivedFails(r: RunResult): boolean {
   return r.holds.some((x) => x.by !== 'story') || (r.derived?.holds ?? []).some((x) => x.by !== 'derived');
+}
+
+/**
+ * Why a derived run can't be released (S10), for its row on the sheet (decision.ts failLine): its checks, with their
+ * share and limit (`gate`, as the page counts them from the run) or the `fail` rule that failed; a source not judged (no
+ * claim it could be judged by: the day's, or the donor's); its donor not judged good. Its checks come first: they are
+ * what readers would get. Null when it can go.
+ */
+export function derivedWhy(r: RunResult, gate: { share: number; limit: number | null } | null, donor: string | null): StagedFail | null {
+  if (!derivedFails(r)) return null;
+  const checks = r.holds.find((x) => x.by === 'checks');
+  if (checks) return { by: 'checks', gate, rule: /^expectations failed: ([^(,]+)/.exec(checks.said)?.[1]?.trim() ?? null };
+  if (r.holds.some((x) => x.by === 'unjudged')) return { by: 'unjudged' };
+  const d = (r.derived?.holds ?? []).find((x) => x.by === 'donor');
+  // A donor hold carries the donor's claim when it was judged and found not good; without one it wasn't judged.
+  if (d) return d.claim ? { by: 'donor', day: donor } : { by: 'unjudged' };
+  return { by: 'unjudged' };
 }

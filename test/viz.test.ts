@@ -717,6 +717,20 @@ describe('a held day’s options, drawn as what readers get (ADR 0009 §12)', ()
     expect(decisionRow({ mark: 'keep', label: 'Keep Wed 20', number: '1', cause: 'hours', rows: { cause: 'hours', hours: wed }, other: true, scale, aria: 'x' })).not.toContain('cut-t');
   });
 
+  it('draws a day kept that went out short as is with what it lacked dashed on its hatched rows, and a lock where Publish can’t go (round 3, #3, #19)', () => {
+    // Another day's rows draw no wash unless that day went out short (`lacks`): then its own, as its own day drew it.
+    const whole = decisionRow({ mark: 'keep', label: 'Keep Thu 21 ⚑', number: '37,935', cause: 'hours', rows: { cause: 'hours', hours: thu }, usual: { cause: 'hours', hours: usualThu }, short: [13, 23], other: true, scale, aria: 'x' });
+    expect(whole).not.toContain('absent-fill');
+    const short = decisionRow({ mark: 'keep', label: 'Keep Thu 21 ⚑', number: '37,935', cause: 'hours', rows: { cause: 'hours', hours: thu }, usual: { cause: 'hours', hours: usualThu }, short: [13, 23], other: true, lacks: true, scale, aria: 'x' });
+    expect(short).toContain('absent-fill');
+    expect(short).toContain('absent-edge');
+    expect(short).toContain('hatch-col');
+    // A split kept short: its bar runs on dashed to its usual.
+    const bar = decisionRow({ mark: 'keep', label: 'Keep Thu 21 ⚑', number: '37,935', cause: 'split', rows: { cause: 'split', part: 4_600, rest: 37_000 }, usual: { cause: 'split', part: 4_600, rest: 110_000 }, other: true, lacks: true, scale: 120_000, aria: 'x' });
+    expect(bar).toContain('class="absent"');
+    expect(glyph('lock')).toContain('g-lockbody');
+  });
+
   it('prints the shared axis once, under the row that carries it, hidden from screen readers', () => {
     expect(asis).not.toContain('class="tick"');
     for (const t of ['0h', '13h', '24h']) expect(dont).toMatch(new RegExp(`class="tick" aria-hidden="true">${t}</text>`));
