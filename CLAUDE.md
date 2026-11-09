@@ -65,6 +65,13 @@ match smaltdb's `CLAUDE.md`.
   claim/2 under plan/2 (`loadClaim`); `scripts/data/history.ts` builds any flow's history (`--flow DOC --watch SOURCE
   --files LIST.json`); sources are bound by id (`examples/<flow>.data.json`, loads.json format 2, `src/app/datalist.ts`);
   `npm run build:app -- --flow examples/security-signins.smaltfl.json` builds the app on the generated sign-ins.
+  Phase 3: the calendar's own `days`, `windows` and `dates` (`recurringOf`, `occurrencesBefore`; normal.ts's
+  occurrences' guess), the patterns `none` and `monthly`, breaks from accepted levels, the echo fix and `relearn`
+  (off unless a watch asks) in `normal.ts`; `rangesFor(doc, source)` (hold.ts) is what a flow's ranges are made with.
+  The taxi example is format 3 (Election Day; 25 days under `wrong`; `exampleLegacy()` in `test/helpers/example.ts`
+  is its legacy form, 28 days), and `test/backtest-real.test.ts` (`SMALTFL_REAL=all`) prints the variants. Accept the
+  new level (`accept`, Q-57): `fill.ts` `acceptable`/`levelMetrics`/`levelWays`, `hold.ts` `levelsOf`/`levelFor`, a
+  decide entry's `level`, a claim's `levels`, the step mark `g-level` in `viz.ts`.
 
 ## Rules for this repository
 

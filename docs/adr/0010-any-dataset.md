@@ -312,6 +312,42 @@ so moves the vector (Q-52):
 - **Taxi:** the first way moves `wrong` (§13), and the owner accepted it (Q-54). The second needs breaks, and the
   legacy form has none until a change is accepted. The third doesn't touch the vector, which has no decisions in it.
 
+**Phase 3 as built** (2026-11-09). Where the build settled what §2 to §5 leave open, or differs from them:
+- **Recurring days** (`calendar.ts`). A weekday's `between` is at most six days apart, so one such weekday falls in it;
+  `around` is 0 to 7 days each side; a day may give a `short` name for heads. A day with one month listed (Election
+  Day) is one of the flow's holidays: judged against the same day last year, by name, as the built-in holidays are. Any
+  other recurring day is judged by its occurrences. Windows may cross the new year, and dates are named and left out of
+  learning. Every list is checked in the document and again in the plan (`calendarListProblems`): an unknown field or a
+  day that can't be is refused, never ignored.
+- **The occurrences' guess** (`normal.ts`). Each of the day's last six occurrences (at least three, else the day is "Not
+  judged yet · 2nd Patch Tuesday here") is measured against the weeks' guess for its own weekday. Their weighted median lift,
+  the latest counting most, moves this day's weeks' guess. Its typical miss is measured on the occurrences before, and
+  is never less than the ordinary weeks' miss. A calm one says "Normal for Patch Tuesday". On the sign-in log's variant
+  M (a month-end batch at 1.6×, Patch Tuesday at +30%, no incidents), no day holds with the two days in the calendar,
+  and 20 or more of the 24 month-ends hold without them.
+- **Patterns.** `none` takes the 6 to 14 ordinary periods before, the latest counting most. `monthly` adds the same
+  day of the month over six months (the last three counted from the month's end), and measures each guess's miss on
+  the same day of the months before too, so a payday's guess earns its weight there.
+- **Breaks.** A day after a level is judged from the days since it: the same weekday once three exist, else every day
+  since, each moved by how its weekday compared before. While the window reaches back past the break, last year's guess
+  is left out, and the miss is measured on the days since (each guessed as if the break applied) or borrowed from
+  before until a quarter of the window is since it. Outlier references before the break are moved by the step. A level
+  on the rows (`trips`) applies to every count. The sign-in log's +60% step, accepted on its first day, holds that day
+  only; unaccepted, it holds 20 or more of its first 23.
+- **Echoes** are §5's first way exactly (0.6 on the logit), on for every general-form watch.
+- **Re-learning on its own is a watch setting, off unless chosen** (`relearn`, in format 3 and plan/2). This differs
+  from the text above, which starts it for every general-form watch. On the taxi history it re-learned the Omicron dip
+  of January 2022, and with it the outage of Jan 5–9: five real short days stopped pausing (wrong 25 → 20, short
+  22 → 17, §13). As built, the change is found by ranges that learn from accepted levels alone, 14 days after its first
+  day, by `lasting()`'s rule (4 days of 7, or the same weekday twice running). It is never applied to a metric that would
+  have held a day before the change had lasted (X7; `held`, per metric, in `history.ts`), nor to a bad value's metric.
+  `lasting()` counts no day before a break.
+- **What a flow's ranges are made with** is `rangesFor(doc, source)`: the calendar, the pattern, echoes, re-learning and
+  the bad values. `HistoryRanges` keeps them as `settings`, and `flowStory` refuses ranges made with any others.
+- **Accept the new level** was built as ADR 0009 amendment 1 S6 says, with the differences listed there under "Phase 3
+  as built". Its levels reach the ranges as breaks (`levels` in `RangeOptions`), the claims name them, and `audit.mjs
+  check --history` checks that each claim/2 names the levels the record accepted before it.
+
 ### 6. A general history, each period added from its own run (f)
 
 - **The builder** (`scripts/data/history.ts`, made general):
@@ -626,6 +662,7 @@ work:
   - `calendar` (default true);
   - `scale` (default `volume`);
   - `holds` (default true; false means told and recorded, but never holding);
+  - `relearn` (default false: re-learning on its own after 14 days, phase 3, §5);
   - `count` and `follow` (default: from the ontology, else from the profile).
 - **`publish.period`** becomes optional when every watch names its own period.
 - **`hold`** may add `unlearned` (§1).
@@ -644,7 +681,8 @@ mark (Q-79), is plan/2. It is hashed as `SHA-256(UTF-8("smaltfl/plan/2\n" + JCS(
   - `watch` is `[[node, WatchPlan], …]`, sorted by node;
   - `meanwhile` (`"last"` by default) and `until` (`"decision"` by default), as ADR 0009 amendment 1 S5 defines them.
 - **A `WatchPlan`** holds every judging setting, filled in:
-  - `{ history, period, every, pattern, donor, time, zone, calendar, scale, holds, count, follow, bad, newValues, after }`;
+  - `{ history, period, every, pattern, donor, time, zone, calendar, scale, holds, relearn, count, follow, bad, newValues,
+    after }` (`relearn` added in phase 3, false unless the watch asks);
   - `donor` is the watch's, or the pattern's default (§3);
   - `bad`, `newValues` and `after` are copied from the ontology's properties that apply to the source (`propertyOf`),
     each as a list of `[column, …]` sorted by column: `bad` as `[column, code, …]` (codes sorted), `newValues` as
@@ -692,8 +730,8 @@ ADR 0008's rules apply: shape first, colour third, words budgeted.
 | Echoes: shares not learned from (§5) | not applied | −2023-11-14 (measured) |
 | The calendar and echoes together | — | **25 days: −3, +0; `short` keeps its 22** (measured; the owner accepted it, Q-54) |
 | Recorded days left out of learning (§5) | none (the vector has no decisions) | the same |
-| Re-learning after 14 days (§5) | not applied until accepted | to backtest (the fare change of Dec 19, 2022 narrows January 2023's bands) |
-| The relative rule; floors that scale (§4) | fixed | to backtest. Unusual days move; whether a wrong day moves is to measure |
+| Re-learning after 14 days (§5) | not applied until accepted | measured: wrong 25 → 20, short 22 → 17. Jan 5–9, 2022 stop pausing: the outage on top of the Omicron dip it re-learned. Not proposed; off unless a watch asks (`relearn`) |
+| The relative rule; floors that scale (§4) | fixed | measured: the relative rule moves no held day and makes 19 more days unusual (51 → 70), as the example ships; floors that scale move no held day either (unusual 70 → 69). The example keeps `fixed` |
 | Bad values (§4) | none marked | none: payment type 4 (Dispute) is not marked bad now (the owner, Q-66) |
 | Pattern (§3) | weekly | weekly |
 | Nouns and shortcuts (§8) | no head changes (the example declares them) | the same |
@@ -704,6 +742,23 @@ plus Election Day, weekly, fixed floors, the echo fix, and its `donor` in the wa
 and `short` keeps its 22. The fills' held days go 28 → 25 with it, and the days with nothing to fill 11 → 8; no donor
 pick moves (Tue Nov 15, 2022 keeps Tue Nov 1, since Nov 8 becomes a calendar day). The backtests for re-learning and
 for the floors come back as further, separate acceptances.
+
+**Measured in phase 3** (`test/backtest-real.test.ts`, run with `SMALTFL_REAL=all` on the data branch's history), wrong
+and short held over 2022-01-01 to 2024-01-31:
+
+| Variant | wrong | short | unusual | notes | not judged |
+|---|---|---|---|---|---|
+| The legacy form (`us-nyc/1`) | 28 | 22 | 45 | 204 | 21 |
+| Election Day as a calendar day | 27 | 22 | 46 | 203 | 21 |
+| Shares far from their weeks not learned from (0.6 on the logit) | 27 | 22 | 50 | 212 | 21 |
+| Both, the legacy form otherwise | 25 | 22 | 51 | 214 | 21 |
+| **The example as it ships** (the general form: both, the relative rule, fixed floors) | **25** | **22** | 70 | 259 | 21 |
+| … and re-learning on its own after 14 days | 20 | 17 | 85 | 229 | 21 |
+| … and floors that scale with volume | 25 | 22 | 69 | 256 | 21 |
+
+The test asserts the legacy form's 28, the days each change moves, and the shipped 25 and 22. Neither re-learning on
+its own nor floors that scale is proposed to the owner: the first takes real short days out, and the second moves no
+held day.
 
 ### 14. Where the fills and this ADR meet
 
@@ -767,14 +822,20 @@ measured from real files are pinned in `test/measures.test.ts` when they are bui
     with `day` = `2023-09-21`. Its plan is E10's nodes, outputs and parameters with the `publish` of §11, filled in:
     `meanwhile` `"last"`, `until` `"decision"`, the watch's `pattern` `"weekly"`, `scale` `"volume"`, `donor`
     `"nearest"` as written, and `bad`, `newValues` and `after` `[]`:
-    `"publish":{"calendar":{"base":"none","dates":[],"days":[],"windows":[],"zone":"UTC"},"hold":["checks","wrong"],"meanwhile":"last","period":"day","together":true,"until":"decision","watch":[[0,{"after":[],"bad":[],"calendar":true,"count":null,"donor":"nearest","every":"day","follow":null,"history":"history.json","holds":true,"newValues":[],"pattern":"weekly","period":"day","scale":"volume","time":null,"zone":null}]]},"smaltflPlan":2`.
+    `"publish":{"calendar":{"base":"none","dates":[],"days":[],"windows":[],"zone":"UTC"},"hold":["checks","wrong"],"meanwhile":"last","period":"day","together":true,"until":"decision","watch":[[0,{"after":[],"bad":[],"calendar":true,"count":null,"donor":"nearest","every":"day","follow":null,"history":"history.json","holds":true,"newValues":[],"pattern":"weekly","period":"day","relearn":false,"scale":"volume","time":null,"zone":null}]]},"smaltflPlan":2`.
     - Its flow hash is `bed47b2e3bece5da61233c8a069710f7cd5c8959d9a4926e99dadc8d9783b56a`.
-    - Its plan/2 hash is `144ec790487930eb6d396769aa15e3e961de54e8133491af9e4d7742259d393f` (checked with `sha256sum` on
-      `smaltfl/plan/2\n` and the plan's canonical JSON).
-  - The first build of plan/2 refuses `pattern: "none"` (phase 1 judges the weekly pattern only), so the vector names its
-    donor rather than taking it from that pattern. The design's draft values (flow `fdeda350…bd59`, plan/2
-    `79671d10…f35f`) were computed on a `publish` without `meanwhile`, `until`, `donor` and `newValues`, and are not the
-    vector.
+    - Its plan/2 hash is `0c4d833a7aace2590b79d22431cd714063007d4f807f7e7a49b1f75cb2b19224` (checked with `sha256sum` on
+      `smaltfl/plan/2\n` and the plan's canonical JSON). It was recomputed in phase 3, when `WatchPlan` gained
+      `relearn`, filled in as every field is (C1); phase 1's value was `144ec790…393f`. plan/2 is in no release yet
+      (smaltfl's first publish waits for smaltdb 0.9.0), so the tag stays plan/2. A field added after the first publish
+      makes a new tag.
+  - The first build of plan/2 refused `pattern: "none"` (phase 1 judged the weekly pattern only), so the vector names
+    its donor rather than taking it from that pattern. Phase 3 accepts `none` and `monthly`. The design's draft values
+    (flow `fdeda350…bd59`, plan/2 `79671d10…f35f`) were computed on a `publish` without `meanwhile`, `until`, `donor`
+    and `newValues`, and are not the vector.
+  - **The example's own plan/2 vector** (ADR 0009 amendment 1's vector 6, test/plan.test.ts), for `2023-09-21`, is
+    `668856bd2ec35235a2882e3825a580d0905fa6de8531d89162b2d4d8130240c6`. Its node keys are those of the example in the
+    legacy form (vector 4).
   - The same document without the general form reproduces E10's plan/1 hash, `fc700fdf…8fd4`.
 - **claim/2** is data in log/1 and `_smaltfl_holds`, not a hash encoding:
   `{ by: "story", v: 2, source, slot, every, state, below, head, build, flow, history: { base, tail }, measured, rows, skip, levels }`.
@@ -842,3 +903,5 @@ Each is recorded in docs/OPEN_QUESTIONS.md.
   re-learning after an unaccepted hold), **Q-75** (who publishes the data branch), **Q-76** (Accept described once),
   **Q-77** (a later file of the same day), **Q-78** (two-word nouns in the sheet), **Q-79** (verdict-changing marks make
   plan/2), **Q-80** (legacy watches and `skip`).
+- **Raised by phase 3:** **Q-81** (re-learning on its own off unless the watch asks, §5), **Q-82** (`relearn` added to
+  plan/2 without a new tag, E13).

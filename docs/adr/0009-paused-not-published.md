@@ -768,6 +768,39 @@ Accept is described here once; ADR 0010 §5 says what a level does to normal (Q-
   `accept`. Delegating deciding doesn't include it: a rule without `may` allows every option but `accept` (S8).
 - **When it is built.** Once, on both lanes' work (the fills' sheet and ADR 0010's breaks). Until then Accept isn't
   offered.
+- **Phase 3 as built** (2026-11-09). Where the build settled what the text above leaves open, or differs from it:
+  - **Offered** (`fill.ts` `acceptable`) when the story and its claim say something wrong, only the story holds the
+    day, and the cause is the amount, a split whose part vanished or surged, or a finding of a level's kind (a volume,
+    a share, a part gone, blanks, a shape, new values). Never an hours, refused-file or checks hero, a part that held, or
+    a bad value. It is off ("Fri 18 is published") while a later day is current, as Publish as is is. On the history:
+    Accept on 20 of the legacy form's 28 held days, and on 17 of the example's 25.
+  - **Its metrics** (`levelMetrics`) are the cause's, as above, and also those of the findings it absorbed, those
+    that follow from it, and anything else wrong or unusual on the day: the day as it came becomes what is usual. This
+    goes further than "the ones the cause moved". On Mon Nov 14, 2022, Vendor 1's absence moves the extras' mix too, and
+    with the cause's metrics alone Tue 15 paused again. The rows (`trips`) are named whenever the amount is outside
+    its range.
+  - **A later day publishes under it** (`hold.ts` `levelFor`) when only the story holds it, and every metric off on it
+    is one the level names, off the same way as on the level's own day (`levelWays`, up or down). So Tue Nov 15, 2022
+    publishes under Mon 14's level, and Mon Nov 21 (Vendor 1 back) pauses again. The page records it as a decide entry
+    `accept`, with `under` the Accept's seq and the Accept's `level`, and releases it. Its receipt and day line say
+    "By Mon’s new level" (not "by #31's new level"). An Accept amended by a later decision of its day stands no more,
+    and the latest level that starts before a day is the one that stands.
+  - **The record.** `levelsOf(entries, source)` reads the root Accepts (no `under`) whose release applied and that were
+    never amended. The day's state is `accepted` (`dayState`; `pauseState` reads it as published). `skipOf` learns from
+    an accepted day. `release.ts` publishes an Accept as Publish as is, with its reason, and refuses one on a derived
+    run. The audit checks a root Accept (a reason, a level whose `from` is its day) and one under it (an earlier root
+    Accept released, the same level, starting before the day, the day held by the story alone). `audit.mjs check
+    --history` checks that each claim/2 names the levels the record accepted before it.
+  - **Words.** The row: "Accept the new level", no number before a pick, "learns from Mon 14" under it once picked
+    (with the as-is number); the reasons "Planned change" and "Source confirmed", one needed before the button,
+    "Accept from Mon 14", is enabled. No scope switch: it stands by itself. Receipt: the level glyph, "New level from
+    Mon 14 · readers now see Mon 14", "learns from Mon 14 · 3 outputs released · Owner · 09:40 · record #24". The day
+    line: "⚑ New level from Mon 14"; the outputs: "Published as a new level"; the status sentence: "Mon Nov 14: new
+    level from Mon 14".
+  - **The step mark** (`viz.ts`, `g-level`): a line that runs level, steps up and runs on, with a dot where it steps,
+    in the second ink (`--ink-2`), never a severity's colour. The fills' drawings for the row are picked by the cause, as S12 says.
+  - **Five rows in 45 words.** With five options the drawing's axis drops its end tick, and the picked Accept row shows
+    the as-is number. `sheetWords` checks every held day of the history with Accept among the offers.
 
 ### S7. A day's versions: what was true, what was used, what replaced it
 
@@ -1048,6 +1081,8 @@ ADR 0008's rules apply: shape first, words budgeted.
      vector. The keys of zone_list, districts and weather_hourly equal the old ones; every key from trips_filled down
      differs. When the example moves to the general form (ADR 0010 §13), its plan/2 vector replaces this one.
   5. This ADR's `fc700fdf…`, `32609b0f…` and `292c423f…`, unchanged.
+  6. The example as it ships in the general form (phase 3, ADR 0010 §13, Q-54), for `2023-09-21`: its plan/2 hash. Its
+     node keys are vector 4's. The legacy form (test/helpers/example.ts `exampleLegacy`) keeps vector 4.
 
   The values pinned (test/plan.test.ts):
 
@@ -1058,6 +1093,7 @@ ADR 0008's rules apply: shape first, words budgeted.
   | 3 | flow/1, plan/1, fill node key | `34bb7cfb…`, `1f0dccb4…`, `8e220625…` |
   | 4 | the example as it ships (step A10), with ADR 0010's nouns and Vendor's name and role | `0749ab06d7d6e78fff14b5ff23d4f8641ac315b70764b16881b367ed13074170` (`d145cfde…` without them) |
   | 5 | unchanged | `fc700fdf…`, `32609b0f…`, `292c423f…` |
+  | 6 | the example in the general form: Election Day, the watch an object (plan/2) | `668856bd2ec35235a2882e3825a580d0905fa6de8531d89162b2d4d8130240c6` |
 
   The example taken back out of its fill step (test/helpers/example.ts `exampleUnfilled`) keeps `7d7236ea…`, which
   shows the step added nothing else.

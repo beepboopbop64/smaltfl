@@ -178,8 +178,9 @@ plan/1. Where its run would have thrown, it holds (`src/plugin/runtime.ts`, with
    versions, *staged*, and a `_smaltfl_holds` row says what held it and the claims it was judged by.
 
 **Judging any dataset** ([ADR 0010](adr/0010-any-dataset.md), phase 1). A watch can be given as an object of its
-settings (`history`, `period`, `every`, `pattern`, `donor`, `time`, `zone`, `calendar`, `scale`, `holds`, `count`,
-`follow`), the flow can name its calendar (`calendar: { base: none | us | us-nyc, zone }`), and the ontology can mark
+settings (`history`, `period`, `every`, `pattern`, `donor`, `time`, `zone`, `calendar`, `scale`, `holds`, `relearn`,
+`count`, `follow`), the flow can name its calendar (`calendar: { base: none | us | us-nyc, zone, days, windows, dates
+}`), and the ontology can mark
 the values that are always bad (`bad`), the columns whose new values alert (`newValues: "alert"`) and a time that runs
 `after` another; it names a row (`nouns`), a part (`name: "Vendor {code}"`) and a sender (`role`), which are display.
 A document that says how a day is judged is format 3, and its plan plan/2, with every setting filled in; a watch given
@@ -188,7 +189,7 @@ as a file name keeps the settings every flow had (the `us-nyc/1` calendar, fixed
 against is *not judged yet* (`unlearned`, ◌), published, marked, unless `hold` lists `unlearned`; a day under a tenth
 of its last seven days' rows is something wrong, judged or not. A bad value above its range at twice its usual rows
 is something wrong, never marked as expected; a serious column's new value too. Every count says the source's noun.
-This build refuses a flow's own calendar days, any pattern but weekly and any `every` but day.
+This build refuses any `every` but day (phase 4).
 
 **Measuring a load, and judging it from its own run** (ADR 0010 phase 2). A watched load's numbers are its *measures*
 (measures/0, `src/core/measures.ts`): its rows, what its checks drop, each column's values present, medians and
@@ -207,8 +208,25 @@ computed again) and measures, and keeps the measures (`_smaltfl_measures`). A de
 against the held run it repairs (its flow hash and stored measures, the same snapshot), and each donor by its own day's
 measures (C4). The checks' numbers are judged only from the periods counted with the rules in force (`checksStart`).
 
+**A flow's own days, patterns and levels** (ADR 0010 phase 3). The calendar's `days` recur by a day of the month
+(negative from its end) or a weekday `between` two days, in some months or all, with days `around` them; one with a
+single month is judged against last year's as a holiday is, any other by its *occurrences' guess* (its last six
+occurrences' lift over their weeks, moving this day's weeks' guess; "Not judged yet · 2nd Patch Tuesday here" under
+three).
+`windows` are spans of the year, `dates` one-off days left out of learning. A watch's `pattern` is `weekly`, `none`
+(the ordinary periods before, whatever the weekday) or `monthly` (those, the same day of the month, and last year).
+The general form stops echoes (a share far from its weeks is not learned from), and with `relearn` re-learns a change
+that lasted 14 days and never held a day (X7); the taxi example leaves it off (ADR 0010 §13). `rangesFor(doc, source)`
+says what a flow's ranges are made with, and `flowStory` refuses others. The example is format 3, with Election Day
+in its calendar, and holds 25 days under `wrong` (Q-54). *Accept the new level* (`accept`, the owner and roles whose
+rule lists it, Q-57) publishes a held day as is and records a level (`{ source, from, metrics }`): `levelsOf` reads
+the levels from the record, `HistoryRanges` learns from each as a break (the weeks since it, the miss under it), each
+claim names them (`levels`), and a later day held by the story alone, off only on the level's metrics and the same
+way, publishes under it (`levelFor`), recorded as a decision under the Accept.
+
 **Releasing** (`src/plugin/release.ts`). A person decides what becomes of a held day: wait (nothing to do), publish
-it as is, or don't publish it, for that day or until a day publishes (`smaltfl:decide`, a rule in the flow's policies;
+it as is, accept its new level (released as publishing as is, with a reason), or don't publish it, for that day or
+until a day publishes (`smaltfl:decide`, a rule in the flow's policies;
 the owner may always decide). The decision is recorded first, by the day's inputs and every held output's staged key.
 Publishing as is is then a release, one transaction that checks the run against its manifest hash, the keys against
 the decision's, the actor against the policies stored with the run, the reason, the decision's record leaf, and that
@@ -281,6 +299,9 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
   A plan/2 run's *held* check judges its claim/2 again by the measures the run stored, and at the Recomputed level
   measures each watched snapshot (and each donor's) again with the settings it was measured by: the hash must be the
   stored one and the one its claim was told from.
+  The audit checks an Accept (a reason, and a level that starts on its day) and each day released under it (an earlier
+  Accept released, the same level, starting before the day, the day held by its story alone); `audit.mjs check
+  --history` tells each claim/2 again from the levels the record accepted before it, which the claim must name.
   Re-running on an older engine needs that version's worker build; smaltkit's engine loader, which already loads a
   chosen smaltdb version, is the starting point.
 - **Determinism:** results that can differ between runs of the same plan are pinned for verified runs: row order
