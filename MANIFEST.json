@@ -1,5 +1,5 @@
 {
-  "built": "2026-11-08T16:42:15+00:00",
+  "built": "2026-11-09T11:04:32+00:00",
   "month": "2024-01",
   "sources": {
     "trips": "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet",
@@ -12,6 +12,8 @@
     "method": "random.Random(seed).sample over row positions, kept in file order"
   },
   "loads": {
+    "source": "trips",
+    "every": "day",
     "days": [
       "2024-01-01",
       "2024-01-02",
@@ -111,7 +113,8 @@
     "from": "2021-10-01",
     "to": "2024-01-31",
     "days": 853,
-    "method": "each day's trips as a daily load, measured by scripts/data/history.ts: the example's trip checks run on the runtime; the trips profiled as the app's profile box does (exact counts, a median and quantiles from an even sample of 2,000 rows); every row of the coded columns counted, value by value and in pairs, and of the zones; the trips by pickup hour; each day's weather and each month's file's own columns from this script"
+    "format": "smaltfl-history/3",
+    "method": "each day's trips as a daily load, measured by scripts/data/history.ts with the plugin's measure (the method a run measures its own load with): the example's trip checks counted; the trips profiled as the app's profile box does (exact counts, a median and quantiles from an even sample of 2,000 rows); every row of the coded columns counted, value by value and in pairs, and of the zones; the trips by pickup hour; each day's weather and each month's file's own columns from this script"
   },
   "schema": {
     "VendorID": "int32",
@@ -137,8 +140,8 @@
   "files": [
     {
       "path": "history.json",
-      "bytes": 1619528,
-      "sha256": "61c5e9232b9712c037f5f49533e567cf4efc9e1088cb62ccee7991c7ae23af64"
+      "bytes": 1619634,
+      "sha256": "0ccbfbea0e83cd1330fb48647d26ed4c23753f15b7fb2c69244b9ff6e72ccb34"
     },
     {
       "path": "loads/yellow_tripdata_2022-09-10.parquet",
