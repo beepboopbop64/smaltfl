@@ -11,6 +11,7 @@
  * - `periodOf` takes a period out of a history file: the numbers the file keeps of it (`samePeriod` compares them with
  *   a load's measures). `appendPeriods` folds a tail of measures onto a history file, as the builder folds its days.
  */
+import { isEvery, partsOf, slotsPerDay, type Every } from './calendar.js';
 import { canonicalJSON } from './canonical.js';
 import { hashOf, utf8 } from './hash.js';
 import { timeOf, type HistoryFile, type ValueHistory } from './history.js';
@@ -31,10 +32,10 @@ export interface CheckRules {
  */
 export interface Measures {
   smaltflMeasures: 0;
-  /** The watched source's id, and the slot the load covers (a day). */
+  /** The watched source's id, the slot the load covers (a day, or a slot of one, ADR 0010 §7) and its length. */
   source: string;
   slot: string;
-  every: 'day';
+  every: Every;
   /** The E1 sha256 of the load's bytes (null for a source read from a table), and its snapshot's dataset/0 hash. */
   file: string | null;
   snapshot: string;
@@ -50,7 +51,8 @@ export interface Measures {
   p50: (number | null)[];
   quantiles: (number[] | null)[];
   sample: number;
-  /** The rows in each part of the slot: a day's 24 hours, by its time column; none without one. */
+  /** The rows in each part of the slot, by its time column (calendar.ts `partsOf`): a day's 24 hours, a slot's own hours
+   * (3 hours or more) or quarter hours; none without one. A row whose time is outside the slot is in no part. */
   parts: number[];
   /** Each counted or followed column's values (each as JSON), and each pair's (`a|b`), with their rows, sorted by
    * the value's text. */
@@ -66,7 +68,7 @@ export interface Measures {
 export interface MeasureSettings {
   source: string;
   slot: string;
-  every: 'day';
+  every: Every;
   /** The checks as the document writes them (what the record names), and each one's text as the run counts it, its
    * parameters bound (the plan's). */
   checks: CheckRules | null;
@@ -137,7 +139,7 @@ export function settingsFor(plan: Pick<FlowPlan, 'nodes' | 'parameters' | 'publi
     paired = [];
   }
   const c = checksOf(plan, node, steps);
-  return { source: plan.nodes[node]!.origin, slot, every: 'day', checks: c?.checks ?? null, counting: c?.counting ?? null, counted, followed, paired, time: st?.time ?? (base ? timeOf(base) : null), zone: st?.zone ?? base?.zone ?? null, sample: base?.sample ?? SAMPLE };
+  return { source: plan.nodes[node]!.origin, slot, every: st?.every ?? 'day', checks: c?.checks ?? null, counting: c?.counting ?? null, counted, followed, paired, time: st?.time ?? (base ? timeOf(base) : null), zone: st?.zone ?? base?.zone ?? null, sample: base?.sample ?? SAMPLE };
 }
 
 /** What the engine counted of a load, for `measuresOf`. */
@@ -167,6 +169,26 @@ export function hourOf(t: unknown, zone: string | null): number | null {
   if (!Number.isFinite(ms)) return null;
   const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: 'numeric', hourCycle: 'h23' }).format(ms));
   return Number.isInteger(h) && h >= 0 && h < 24 ? h : null;
+}
+
+/**
+ * The minute of the day of a time in a zone, or as the text writes it (characters 12–16) with no zone, with the date
+ * it falls on; null when it has none. What a slot's parts are counted by.
+ */
+export function minuteOf(t: unknown, zone: string | null): { day: string; minute: number } | null {
+  if (zone === null) {
+    if (typeof t !== 'string' || t.length < 16) return null;
+    const h = Number(t.slice(11, 13));
+    const m = Number(t.slice(14, 16));
+    return Number.isInteger(h) && h >= 0 && h < 24 && Number.isInteger(m) && m >= 0 && m < 60 ? { day: t.slice(0, 10), minute: h * 60 + m } : null;
+  }
+  const ms = typeof t === 'number' ? t : typeof t === 'string' ? Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t : `${t.replace(' ', 'T')}Z`) : NaN;
+  if (!Number.isFinite(ms)) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(ms);
+  const at = (k: string) => parts.find((p) => p.type === k)?.value ?? '';
+  const h = Number(at('hour'));
+  const m = Number(at('minute'));
+  return Number.isInteger(h) && h >= 0 && h < 24 && Number.isInteger(m) ? { day: `${at('year')}-${at('month')}-${at('day')}`, minute: h * 60 + m } : null;
 }
 
 const byText = (a: readonly [string, number], b: readonly [string, number]) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
@@ -199,8 +221,13 @@ export function measuresOf(s: MeasureSettings, x: MeasureInput): Measures {
   const paired = s.paired.filter((c) => at(c) >= 0);
   const pairs = new Map<string, Map<string, number>>();
   for (let a = 0; a < paired.length; a++) for (let b = a + 1; b < paired.length; b++) pairs.set(`${paired[a]}|${paired[b]}`, new Map());
-  const parts = s.time && at(s.time) >= 0 ? new Array<number>(24).fill(0) : [];
+  // A day's parts are its hours, whatever the date its times say (a time of another day is the checks' to drop); a
+  // slot's are its own hours or quarter hours, of its own day: a row outside the slot is in none (ADR 0010 §7).
+  const slotted = s.every !== 'day';
+  const part = partsOf(s.slot, s.every);
+  const parts = s.time && at(s.time) >= 0 ? new Array<number>(part.count).fill(0) : [];
   const time = s.time ? at(s.time) : -1;
+  const slotDay = s.slot.slice(0, 10);
   // Each column's values as JSON, each text made once: a value's id is its place in its column's list, and a pair's
   // rows are counted by the two ids, its text made at the end. The same counts as one text a cell.
   const cols = [...singles.keys()];
@@ -237,8 +264,14 @@ export function measuresOf(s: MeasureSettings, x: MeasureInput): Measures {
       m.set(key, (m.get(key) ?? 0) + 1);
     }
     if (time >= 0) {
-      const h = hourOf(r[time], s.zone);
-      if (h !== null) parts[h]!++;
+      if (!slotted) {
+        const h = hourOf(r[time], s.zone);
+        if (h !== null) parts[h]!++;
+      } else {
+        const t = minuteOf(r[time], s.zone);
+        const k = t && t.day === slotDay ? Math.floor((t.minute - part.start) / part.width) : -1;
+        if (k >= 0 && k < part.count) parts[k]!++;
+      }
     }
   }
   cols.forEach((c, k) => {
@@ -308,7 +341,7 @@ export function measuresProblem(m: unknown): string | null {
   if (typeof m !== 'object' || m === null || Array.isArray(m)) return "isn't a record";
   const r = m as Record<string, unknown>;
   if (r.smaltflMeasures !== 0) return "isn't measures/0";
-  if (typeof r.source !== 'string' || typeof r.slot !== 'string' || r.every !== 'day') return 'names no source and slot';
+  if (typeof r.source !== 'string' || typeof r.slot !== 'string' || !isEvery(r.every)) return 'names no source and slot';
   if (!Number.isSafeInteger(r.rows) || (r.rows as number) < 0) return 'counts no rows';
   for (const k of ['columns', 'types', 'kinds', 'failed', 'present', 'p50', 'quantiles', 'parts'] as const) if (!Array.isArray(r[k])) return `has no ${k}`;
   for (const k of ['values', 'pairs'] as const) if (typeof r[k] !== 'object' || r[k] === null || Array.isArray(r[k])) return `has no ${k}`;
@@ -386,7 +419,7 @@ export function samePeriod(file: HistoryFile, k: number, m: Measures): string | 
 
 /** A history file with no periods yet, for a source whose base is empty: its header from the settings and the first
  * load's columns, its counted and followed columns and pairs declared. */
-export function emptyHistory(o: { flow: string; source: string; settings: Pick<MeasureSettings, 'checks' | 'counted' | 'followed' | 'paired' | 'time' | 'zone' | 'sample'>; columns: string[]; types: string[]; kinds: Kind[]; warmup?: number; built?: string }): HistoryFile {
+export function emptyHistory(o: { flow: string; source: string; settings: Pick<MeasureSettings, 'checks' | 'counted' | 'followed' | 'paired' | 'time' | 'zone' | 'sample'> & Partial<Pick<MeasureSettings, 'every'>>; columns: string[]; types: string[]; kinds: Kind[]; warmup?: number; built?: string }): HistoryFile {
   const s = o.settings;
   const have = new Set(o.columns);
   const vh = (counted: boolean): ValueHistory => ({ values: [], first: [], last: [], days: [], rows: [], fresh: [], ...(counted ? { counts: [] } : {}) });
@@ -397,10 +430,10 @@ export function emptyHistory(o: { flow: string; source: string; settings: Pick<M
   const pairs: Record<string, ValueHistory> = {};
   for (let a = 0; a < paired.length; a++) for (let b = a + 1; b < paired.length; b++) pairs[`${paired[a]}|${paired[b]}`] = vh(false);
   return {
-    format: 'smaltfl-history/3', built: o.built ?? '', flow: o.flow, source: o.source, every: 'day', time: s.time, zone: s.zone, skipped: [],
+    format: 'smaltfl-history/3', built: o.built ?? '', flow: o.flow, source: o.source, every: s.every ?? 'day', time: s.time, zone: s.zone, skipped: [],
     step: s.checks?.step ?? '', rules: s.checks?.rules.map((r) => ({ ...r })) ?? [],
     columns: [...o.columns], types: [...o.types], kinds: [...o.kinds], sample: s.sample,
-    days: [], rows: [], dropped: [], failed: [], present: [], p50: [], missing: [], quantiles: [], hours: [], warmup: o.warmup ?? 28, values, pairs,
+    days: [], rows: [], dropped: [], failed: [], present: [], p50: [], missing: [], quantiles: [], hours: [], warmup: o.warmup ?? 28 * slotsPerDay(s.every ?? 'day'), values, pairs,
   };
 }
 
@@ -423,6 +456,7 @@ export function appendPeriods(file: HistoryFile, ms: readonly Measures[]): Histo
   for (const m of ms) {
     const last = out.days.at(-1);
     if (last !== undefined && m.slot <= last) throw new Error(`the tail's ${m.slot} isn't after the history's ${last}`);
+    if ((m.every ?? 'day') !== (out.every ?? 'day')) throw new Error(`the tail's ${m.slot} is a load of ${m.every}, the history's of ${out.every ?? 'day'}`);
     if (canonicalJSON(m.columns) !== canonicalJSON(out.columns) || canonicalJSON(m.types) !== canonicalJSON(out.types)) throw new Error(`the tail's ${m.slot} has other columns than the history`);
     const d = out.days.length;
     // A period counted with other checks than the latest starts their segment (ADR 0010 §6): the checks' numbers are

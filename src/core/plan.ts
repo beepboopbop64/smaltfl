@@ -6,7 +6,7 @@
  * Nobody needs to read it. It is canonical JSON with positional references, built for hashing, optimizing and
  * replaying, and its format is versioned (`smaltflPlan`).
  */
-import { calendarListProblems, calendarProblems, resolveCalendar, type Calendar } from './calendar.js';
+import { calendarListProblems, calendarProblems, EVERIES, isEvery, isSlotOf, resolveCalendar, type Calendar, type Every } from './calendar.js';
 import type { DonorRule, FlowDocument, HoldKind, Meanwhile, Missing, ParameterDef, StepDef, Until, WatchDef } from './document.js';
 import { DONOR_RULES, HOLD_KINDS, isGeneralWatch, MEANWHILES, missingProblem, periodOf, UNTILS, validateDocument, withoutDisplay } from './document.js';
 import { hashOf } from './hash.js';
@@ -139,7 +139,8 @@ export interface PlanPublish {
 export interface WatchPlan {
   history: string;
   period: string | null;
-  every: 'day';
+  /** What one load covers (ADR 0010 §7): a day, or a slot of it, its period parameter naming the slot. */
+  every: Every;
   pattern: 'weekly' | 'none' | 'monthly';
   donor: 'weekday' | 'nearest';
   time: string | null;
@@ -484,7 +485,11 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never): void {
     if (Object.keys(w).sort().join() !== WATCH_PLAN_FIELDS.join()) fail(`${at} has ${Object.keys(w).sort().join(', ')}; a watch has exactly ${WATCH_PLAN_FIELDS.join(', ')}`);
     if (typeof w.history !== 'string' || w.history === '') fail(`${at}.history is a file`);
     if (w.period === null ? period === null : !text(w.period)) fail(`${at}.period ${String(w.period)} is not one of the plan's text parameters`);
-    if (w.every !== 'day') fail(`${at}.every ${String(w.every)} is not one this version can judge (day)`);
+    if (!isEvery(w.every)) fail(`${at}.every ${String(w.every)} is not one this version can judge (${EVERIES.join(', ')})`);
+    // A slot's period names a slot of its length (ADR 0010 §7): `2024-09-10T06` for a load of 6h.
+    const value: unknown = p.parameters?.[(w.period ?? period) as string];
+    if (w.every !== 'day' && typeof value === 'string' && !isSlotOf(value, w.every as Every)) fail(`${at}: ${String(w.period ?? period)} is ${value}, not a slot of ${String(w.every)} (such as ${String(value).slice(0, 10)}T00)`);
+    if (w.every !== 'day' && w.time === null) fail(`${at}.time: a load of ${String(w.every)} is counted by its time column`);
     if (!['weekly', 'none', 'monthly'].includes(w.pattern as string)) fail(`${at}.pattern ${String(w.pattern)} is not one this version can judge (weekly, none, monthly)`);
     if (w.donor !== 'weekday' && w.donor !== 'nearest') fail(`${at}.donor is weekday or nearest`);
     if (w.time !== null && typeof w.time !== 'string') fail(`${at}.time is a column or null`);

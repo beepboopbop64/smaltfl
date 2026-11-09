@@ -461,3 +461,102 @@ export function dayLastYear(day: string, cal: Calendar = US_NYC_1): string | und
   }
   return undefined;
 }
+
+// ------------------------------------------------------------------ slots (ADR 0010 §7)
+
+/**
+ * What one load of a watched source covers (ADR 0010 §7): a day (the default), or a part of it, aligned to midnight in
+ * the calendar's zone. Longest first.
+ */
+export const EVERIES = ['day', '12h', '8h', '6h', '4h', '3h', '2h', '1h'] as const;
+export type Every = (typeof EVERIES)[number];
+
+/** Whether a value is a slot's length this build reads. */
+export const isEvery = (v: unknown): v is Every => (EVERIES as readonly unknown[]).includes(v);
+
+/** A slot's length in hours: 24 for a day. */
+export const slotHours = (every: Every): number => (every === 'day' ? 24 : Number(every.slice(0, -1)));
+
+/** How many slots make a day. */
+export const slotsPerDay = (every: Every): number => 24 / slotHours(every);
+
+const SLOT = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}))?$/;
+
+/**
+ * A slot's id (ADR 0010 §7): its day, `2024-03-12`, for a source loaded once a day; else its day and its first hour,
+ * `2024-03-12T06`. Ids sort as text in time order.
+ */
+export function slotId(day: string, hour: number, every: Every): string {
+  if (every === 'day') return day;
+  const h = Math.floor(hour / slotHours(every)) * slotHours(every);
+  return `${day}T${String(h).padStart(2, '0')}`;
+}
+
+/** Whether a text is the id of a slot of that length: a day, or a day and an hour the slots of the day start at. */
+export function isSlotOf(id: unknown, every: Every): id is string {
+  if (typeof id !== 'string') return false;
+  const m = SLOT.exec(id);
+  if (!m || !validYMD(m[1])) return false;
+  if (every === 'day') return m[2] === undefined;
+  return m[2] !== undefined && Number(m[2]) < 24 && Number(m[2]) % slotHours(every) === 0;
+}
+
+/** The day a slot is of (its date in the calendar's zone). */
+export const dayOfSlot = (slot: string): string => slot.slice(0, 10);
+
+/** The hour a slot starts at: 0 for a day. */
+export const slotStart = (slot: string): number => (slot.length > 10 ? Number(slot.slice(11, 13)) : 0);
+
+/** The slot after one. */
+export function nextSlot(slot: string, every: Every): string {
+  if (every === 'day') return plusDays(slot, 1);
+  const h = slotStart(slot) + slotHours(every);
+  return h >= 24 ? slotId(plusDays(dayOfSlot(slot), 1), 0, every) : slotId(dayOfSlot(slot), h, every);
+}
+
+/** The slots of a day, in order. */
+export function slotsOfDay(day: string, every: Every): string[] {
+  return Array.from({ length: slotsPerDay(every) }, (_, k) => slotId(day, k * slotHours(every), every));
+}
+
+/** A slot's id as its day's other slots: the same slot on another day (`2024-09-03T06` for `2024-09-10T06`). */
+export const sameSlotOn = (slot: string, day: string): string => `${day}${slot.slice(10)}`;
+
+/**
+ * A slot's parts (ADR 0010 §7), what its rows are counted in by their time: a day's 24 hours, a slot's own hours when it
+ * is 3 hours or more, its quarter hours under that. `start` and `width` are in minutes of the day.
+ */
+export function partsOf(slot: string, every: Every): { start: number; width: number; count: number } {
+  const hours = slotHours(every);
+  const width = hours >= 3 ? 60 : 15;
+  return { start: slotStart(slot) * 60, width, count: (hours * 60) / width };
+}
+
+/** A slot as the screens say it, its hours: "06–12" (the day itself for a day). */
+export function slotLabel(slot: string, every: Every): string {
+  if (every === 'day') return slot;
+  const a = slotStart(slot);
+  return `${String(a).padStart(2, '0')}–${String(a + slotHours(every)).padStart(2, '0')}`;
+}
+
+/**
+ * The slot a time falls in (its zone's date and hour; with no zone, the date and hour as its text writes them), or null
+ * for a value that isn't a time.
+ */
+export function slotOf(time: unknown, every: Every, zone: string | null): string | null {
+  let day: string;
+  let hour: number;
+  if (zone === null) {
+    if (typeof time !== 'string' || time.length < 13 || !validYMD(time.slice(0, 10))) return null;
+    day = time.slice(0, 10);
+    hour = Number(time.slice(11, 13));
+  } else {
+    const ms = typeof time === 'number' ? time : typeof time === 'string' ? Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(time) ? time : `${time.replace(' ', 'T')}Z`) : NaN;
+    if (!Number.isFinite(ms)) return null;
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: 'numeric', hourCycle: 'h23' }).formatToParts(ms);
+    const at = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+    day = `${at('year')}-${at('month')}-${at('day')}`;
+    hour = Number(at('hour'));
+  }
+  return Number.isInteger(hour) && hour >= 0 && hour < 24 ? slotId(day, hour, every) : null;
+}

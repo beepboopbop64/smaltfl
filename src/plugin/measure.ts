@@ -11,6 +11,7 @@
  * file is measured again every time.
  */
 import type { Database } from 'smaltdb/engine';
+import { isEvery, isSlotOf } from '../core/calendar.js';
 import { canonicalJSON } from '../core/canonical.js';
 import { createTable, emitColumnFacts, emitRuleCounts, emitSample } from '../core/emit.js';
 import { hex } from '../core/hash.js';
@@ -42,14 +43,15 @@ function remember(key: string, m: Measures): void {
 export function settingsOf(v: unknown): MeasureSettings {
   const s = v as MeasureSettings;
   const names = (x: unknown) => Array.isArray(x) && x.every((c) => typeof c === 'string');
-  if (typeof s !== 'object' || s === null || typeof s.source !== 'string' || typeof s.slot !== 'string' || s.every !== 'day'
+  if (typeof s !== 'object' || s === null || typeof s.source !== 'string' || typeof s.slot !== 'string' || !isEvery(s.every) || (s.every !== 'day' && !isSlotOf(s.slot, s.every))
     || !names(s.counted) || !names(s.followed) || !names(s.paired) || !(s.time === null || typeof s.time === 'string') || !(s.zone === null || typeof s.zone === 'string')
     || !Number.isSafeInteger(s.sample) || s.sample < 1
     || !(s.counting === null || (names(s.counting) && s.checks !== null && s.counting.length === s.checks.rules.length))
     || !(s.checks === null || (typeof s.checks === 'object' && typeof s.checks.step === 'string' && Array.isArray(s.checks.rules) && s.checks.rules.every((r) => typeof r?.name === 'string' && typeof r.check === 'string' && typeof r.onFail === 'string')))) {
-    throw new MeasureError('measure needs its settings: { source, slot, every: "day", checks, counting, counted, followed, paired, time, zone, sample }');
+    throw new MeasureError('measure needs its settings: { source, slot, every (day, or a slot of it: 12h … 1h), checks, counting, counted, followed, paired, time, zone, sample }, its slot one of that length');
   }
-  return { source: s.source, slot: s.slot, every: 'day', checks: s.checks ? { step: s.checks.step, rules: s.checks.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })) } : null, counting: s.counting ? [...s.counting] : null, counted: [...s.counted], followed: [...s.followed], paired: [...s.paired], time: s.time, zone: s.zone, sample: s.sample };
+  if (s.every !== 'day' && s.time === null) throw new MeasureError(`a load of ${s.every} is counted by its time column: its settings name none`);
+  return { source: s.source, slot: s.slot, every: s.every, checks: s.checks ? { step: s.checks.step, rules: s.checks.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })) } : null, counting: s.counting ? [...s.counting] : null, counted: [...s.counted], followed: [...s.followed], paired: [...s.paired], time: s.time, zone: s.zone, sample: s.sample };
 }
 
 /** A snapshot's measures: its rows counted where a count is kept, an even sample for the medians and quantiles. */

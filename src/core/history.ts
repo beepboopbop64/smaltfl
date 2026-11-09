@@ -3,7 +3,7 @@
  * branch), and the series a day's normal range is drawn from (normal.ts). The numbers count the checks named here, as
  * they were published: a range for what the checks drop holds only while the checks are the same. No DOM, no engine.
  */
-import { plusDays, daysBetween, US_NYC_1, type Calendar } from './calendar.js';
+import { plusDays, daysBetween, partsOf, slotsPerDay, US_NYC_1, type Calendar, type Every } from './calendar.js';
 import { canonicalJSON } from './canonical.js';
 import { NormalRanges, type DailySeries, type NormalRange, type Pattern, type Scale } from './normal.js';
 import type { Kind } from './quality.js';
@@ -58,7 +58,7 @@ export interface HistoryFile {
   /** /3: the watched source, its slot's length, and the time column its parts are counted by, in its zone (null: as the
    * text writes it). A /2 file has a day a period, by its pickup time. */
   source?: string;
-  every?: 'day';
+  every?: Every;
   time?: string | null;
   zone?: string | null;
   /** /3: the columns it couldn't count, and why ("2.1M values"). */
@@ -87,8 +87,11 @@ export interface HistoryFile {
   missing: DayError[];
   /** Each day's quantiles of each measure or time (p01, p10, p25, p50, p75, p90, p99; a time's in minutes of the day). */
   quantiles: (number[] | null)[][];
-  /** Each day's trips by pickup hour. */
+  /** Each day's trips by pickup hour; a slot's rows by its parts (`parts`). */
   hours: number[][];
+  /** A slot's own series (`slotSeries`, ADR 0010 §7): where its parts start in the day and how long each is, in minutes.
+   * None for a day's history, whose parts are its 24 hours. Never in a file: made when a slot is judged. */
+  parts?: { start: number; width: number };
   /** Days at the start before a value counts as never seen. */
   warmup: number;
   /** The coded and zone columns' values, and the coded columns' pairs (`a|b`). */
@@ -337,4 +340,69 @@ export function daysFrom(from: string, to: string): string[] {
   const out: string[] = [];
   for (let d = from; d <= to; d = plusDays(d, 1)) out.push(d);
   return out;
+}
+
+/**
+ * A slot's own series (ADR 0010 §7): the periods of a history kept by slot (`every` other than a day) that are the same
+ * slot of the day, each named by its day, with the slot's parts placed in the day (`parts`). A slot is judged from it as a
+ * day is from a day's history, so the bands are per slot: the weekly pattern compares the same slot of the same weekday,
+ * none the same slot of the days before, monthly the same slot of the same day of the month; last year's guess is the
+ * same slot 52 weeks back; windows count days; a special day is special in every slot; floors scale with the slot's own
+ * rows, so a quiet night slot isn't held to a busy afternoon's. A value is new only when the source never had it, in any
+ * slot: one first seen in another slot of the day reads as seen before (its first and last places fall between this
+ * series' periods). A day's history is its own series. The file itself is left as it was.
+ */
+export function slotSeries(file: HistoryFile, slot: string): HistoryFile {
+  const every = file.every ?? 'day';
+  if (every === 'day') return file;
+  const at = slot.slice(10);
+  const idx: number[] = [];
+  file.days.forEach((d, k) => {
+    if (d.slice(10) === at) idx.push(k);
+  });
+  const pos = new Map(idx.map((k, j) => [k, j]));
+  // Places before `f` in this series; a place not in it falls half way between the periods around it.
+  const below = (f: number) => {
+    let lo = 0;
+    let hi = idx.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (idx[mid]! < f) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const place = (f: number) => pos.get(f) ?? below(f) - 0.5;
+  const pick = <T>(xs: readonly T[]) => idx.map((k) => xs[k]!);
+  const remap = (vh: ValueHistory): ValueHistory => {
+    const counts = vh.counts ? pick(vh.counts) : undefined;
+    return {
+      values: [...vh.values],
+      first: vh.first.map(place),
+      last: vh.last.map(place),
+      days: counts ? vh.values.map((_, i) => counts.filter((r) => (r[i] ?? 0) > 0).length) : [...vh.days],
+      rows: counts ? vh.values.map((_, i) => counts.reduce((t, r) => t + (r[i] ?? 0), 0)) : [...vh.rows],
+      fresh: vh.fresh.filter(([d]) => pos.has(d)).map(([d, n]): [number, number] => [pos.get(d)!, n]),
+      ...(counts ? { counts } : {}),
+    };
+  };
+  const { start, width } = partsOf(slot, every);
+  const per = slotsPerDay(every);
+  return {
+    ...file,
+    days: idx.map((k) => file.days[k]!.slice(0, 10)),
+    rows: pick(file.rows),
+    dropped: pick(file.dropped),
+    failed: pick(file.failed),
+    present: pick(file.present),
+    p50: pick(file.p50),
+    quantiles: idx.map((k) => file.quantiles[k] ?? []),
+    hours: idx.map((k) => file.hours[k] ?? []),
+    missing: file.missing.filter((m) => m.day.slice(10) === at).map((m) => ({ ...m, day: m.day.slice(0, 10) })),
+    ...(file.checks ? { checks: file.checks.map((c) => ({ ...c, from: below(c.from) })) } : {}),
+    warmup: Math.ceil(file.warmup / per),
+    values: Object.fromEntries(Object.entries(file.values ?? {}).map(([c, vh]) => [c, remap(vh)])),
+    pairs: Object.fromEntries(Object.entries(file.pairs ?? {}).map(([c, vh]) => [c, remap(vh)])),
+    parts: { start, width },
+  };
 }

@@ -18,6 +18,12 @@
  * Variant M (phase 3, `monthEnd`, `patchTuesday`): a batch on each month's last day, and Patch Tuesday's rows (the second
  * Tuesday), each as a multiple of the day's rows, with the same mix: what a flow's own recurring days are for. And a
  * step in rows that stays (`step`): what Accept the new level is for.
+ *
+ * Variant E (phase 4, ADR 0010 §7, `edr`): a second source, endpoint events (`edr`), loaded every 6 hours, its own
+ * history kept by slot (`edrHistory`) and its slots as rows (`edrRows`). The collector's outage is then edr's, not the
+ * sign-ins': down 06:00-10:00 on Tue Sep 10, 2024, a 2% trickle inside the 06-12 slot, the day's other slots calm, and
+ * the sign-ins that day calm too (`securityDays({ edr: true })`). `twoSourceDoc` watches both: only the off file's slot
+ * pauses (Q-55).
  */
 import { plusDays } from '../../src/core/calendar.js';
 import type { FlowDocument } from '../../src/core/document.js';
@@ -68,6 +74,8 @@ export interface SecurityOptions {
   patchTuesday?: number;
   /** A step in rows that stays (phase 3, ADR 0010 §5): from a day on, every day's rows times `by`, the same mix. */
   step?: { from: string; by: number };
+  /** Variant E (phase 4): the collector's outage is the endpoint events', so the sign-ins have none. */
+  edr?: boolean;
 }
 
 /** Whether a day is its month's last, and whether it is Patch Tuesday (the Tuesday between the 8th and the 14th). */
@@ -128,7 +136,7 @@ function planDays(o: SecurityOptions, rnd: () => number): SecurityDay[] {
     const segs: Segment[] = [{ n: n * (mfaGone ? 0.75 : 1), hours: norm(HUMAN), dist }];
     if (inc && day === PLANTED.burst) segs.push({ n: 150_000 * scale, hours: onlyHours([2, 3, 4]), dist: { result: { fail: 0.97, locked: 0.03 }, method: { password: 1 }, country: { RU: 1 }, ua_family: { 'python-requests': 1 } } });
     if (inc && day === PLANTED.hydra) segs.push({ n: 40_000 * scale, hours: onlyHours([20, 21, 22]), dist: { result: { fail: 0.99, locked: 0.01 }, method: { password: 1 }, country: { BR: 1 }, ua_family: { hydra: 1 } } });
-    days.push({ day, segs, outage: inc && day === PLANTED.outage ? [6, 7, 8, 9, 10, 11] : undefined });
+    days.push({ day, segs, outage: inc && !o.edr && day === PLANTED.outage ? [6, 7, 8, 9, 10, 11] : undefined });
   }
   return days;
 }
@@ -323,5 +331,144 @@ export function securityDoc(): FlowDocument {
       ],
     },
     publish: { hold: ['checks', 'wrong'], period: 'day', watch: { auth: { history: 'auth-history.json', time: 'event_time' } } },
+  };
+}
+
+// ------------------------------------------------------------------ variant E: endpoint events every 6 hours (phase 4)
+
+/** The columns of an endpoint events file, as its CSV header has them. */
+export const EDR_COLUMNS = ['event_time', 'host', 'action', 'severity'] as const;
+/** How often edr is loaded, and the hours its collector was down on the outage day (inside the 06-12 slot). */
+export const EDR_EVERY = '6h';
+export const EDR_OUTAGE = [6, 7, 8, 9];
+const EDR_BASE: Record<'action' | 'severity', Dist> = {
+  action: { process: 0.5, network: 0.3, file: 0.18, registry: 0.02 },
+  severity: { info: 0.9, low: 0.08, high: 0.02 },
+};
+/** Machines log around the clock, a little more in working hours; a little less at weekends. */
+const EDR_HOURS = norm(Array.from({ length: 24 }, (_, h) => 0.8 + 0.4 * Math.max(0, Math.sin(((h - 7) / 12) * Math.PI))));
+const EDR_WD = [0.92, 1, 1, 1, 1, 1, 0.92];
+
+/** One edr slot's plan: its id (`2024-09-10T06`), the rows expected in each of its hours, and its values' shares. */
+export interface EdrSlot {
+  slot: string;
+  hours: number[];
+  dist: Record<'action' | 'severity', Dist>;
+}
+
+/** Every edr slot's plan, from the seed, over the sign-ins' days: 40,000 events a day at scale 1. */
+export function edrSlots(o: { seed?: number; scale?: number; incidents?: boolean } = {}): EdrSlot[] {
+  const rnd = random((o.seed ?? 7) + 1000);
+  const scale = o.scale ?? 1;
+  const out: EdrSlot[] = [];
+  for (const [k, day] of SECURITY_DAYS.entries()) {
+    const n = 40_000 * scale * EDR_WD[new Date(`${day}T12:00:00Z`).getUTCDay()]! * (1 + 0.05 * (k / 365)) * Math.exp(0.03 * gauss(rnd));
+    for (let s = 0; s < 24; s += 6) {
+      const dist = Object.fromEntries((['action', 'severity'] as const).map((c) => {
+        const d: Dist = {};
+        for (const [v, p] of Object.entries(EDR_BASE[c])) d[v] = p * Math.exp(0.03 * gauss(rnd));
+        const t = Object.values(d).reduce((a, b) => a + b, 0);
+        for (const v in d) d[v]! /= t;
+        return [c, d];
+      })) as EdrSlot['dist'];
+      const down = o.incidents !== false && day === PLANTED.outage;
+      const hours = Array.from({ length: 6 }, (_, j) => n * EDR_HOURS[s + j]! * (down && EDR_OUTAGE.includes(s + j) ? 0.02 : 1));
+      out.push({ slot: `${day}T${String(s).padStart(2, '0')}`, hours, dist });
+    }
+  }
+  return out;
+}
+
+/**
+ * edr's history kept by slot (smaltfl-history/3, `every: 6h`): each slot's rows, its six hours, each action's and
+ * severity's rows, the time's quantiles in minutes of the day, as the general builder would measure them. No checks
+ * read edr alone. Up to `to` (a slot id) when given: a base that ends before the slots a test runs.
+ */
+export function edrHistory(o: { seed?: number; scale?: number; incidents?: boolean; to?: string } = {}): HistoryFile {
+  const rnd = random((o.seed ?? 7) + 2000);
+  const slots = edrSlots(o).filter((p) => o.to === undefined || p.slot <= o.to);
+  const rows: number[] = [];
+  const hours: number[][] = [];
+  const present: number[][] = [];
+  const p50: (number | null)[][] = [];
+  const quantiles: (number[] | null)[][] = [];
+  const singles: Record<string, [string, number][][]> = { action: [], severity: [] };
+  for (const p of slots) {
+    const hr = p.hours.map((m) => poisson(m, rnd));
+    const n = hr.reduce((a, b) => a + b, 0);
+    rows.push(n);
+    hours.push(hr);
+    present.push([n, n, n, n]);
+    for (const c of ['action', 'severity'] as const) singles[c]!.push(Object.entries(p.dist[c]).map(([v, sh]): [string, number] => [JSON.stringify(v), poisson(n * sh, rnd)]).filter(([, x]) => x > 0));
+    const start = Number(p.slot.slice(11, 13)) * 60;
+    const minuteAt = (q: number) => {
+      let acc = 0;
+      for (let x = 0; x < 6; x++) {
+        if (hr[x]! > 0 && acc + hr[x]! >= q * n) return start + x * 60 + (60 * (q * n - acc)) / hr[x]!;
+        acc += hr[x]!;
+      }
+      return start + 360;
+    };
+    const tq = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99].map((q) => Number(minuteAt(q).toPrecision(6)));
+    quantiles.push([tq, null, null, null]);
+    p50.push([tq[3]!, null, null, null]);
+  }
+  return {
+    format: 'smaltfl-history/3', built: '2025-01-01T00:00:00Z', flow: 'signins', source: 'edr', every: EDR_EVERY, time: 'event_time', zone: null, skipped: [],
+    step: '', rules: [], columns: [...EDR_COLUMNS], types: ['text', 'text', 'text', 'text'], kinds: ['time', 'category', 'code', 'code'], sample: 2000,
+    days: slots.map((p) => p.slot), rows, dropped: rows.map(() => 0), failed: rows.map(() => []), present, p50, missing: [], quantiles, hours, warmup: 28 * 4,
+    values: { action: followed(singles.action!, true, 28 * 4), severity: followed(singles.severity!, true, 28 * 4) }, pairs: {},
+  };
+}
+
+/** One edr slot as rows, drawn from its plan, seeded by the slot: each hour's rows a Poisson count, a time in its hour,
+ * a host of a few hundred. */
+export function edrRows(plan: EdrSlot, seed = 7): string[][] {
+  let h = seed;
+  for (const ch of plan.slot) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  const rnd = random(h);
+  const pick = (d: Dist) => {
+    let x = rnd();
+    for (const [v, p] of Object.entries(d)) if ((x -= p) <= 0) return v;
+    return Object.keys(d).at(-1)!;
+  };
+  const two = (n: number) => String(n).padStart(2, '0');
+  const day = plan.slot.slice(0, 10);
+  const start = Number(plan.slot.slice(11, 13));
+  const out: string[][] = [];
+  plan.hours.forEach((m, j) => {
+    const n = poisson(m, rnd);
+    for (let i = 0; i < n; i++) out.push([`${day} ${two(start + j)}:${two(Math.floor(rnd() * 60))}:${two(Math.floor(rnd() * 60))}`, `h${Math.floor(rnd() * 300)}`, pick(plan.dist.action), pick(plan.dist.severity)]);
+  });
+  return out.sort((a, b) => (a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0));
+}
+
+/**
+ * The sign-in flow with endpoint events beside it (variant E, ADR 0010 §7): auth judged a day at a time, edr a 6-hour
+ * slot at a time under its own period parameter (`slot`), each with its own history (machines keep no holidays: the
+ * calendar is the sign-ins' alone); a check on the sign-ins; one
+ * output of each source and one that reads both; `together: false`, so a held load keeps back only what reads it.
+ */
+export function twoSourceDoc(): FlowDocument {
+  const d = securityDoc();
+  return {
+    ...d,
+    id: 'signins-edr', name: 'Sign-ins and endpoint events',
+    parameters: [{ name: 'day', type: 'text', default: null }, { name: 'slot', type: 'text', default: null }],
+    sources: [{ id: 'auth', table: 'auth_file' }, { id: 'edr', table: 'edr_file' }],
+    steps: [
+      ...d.steps,
+      { id: 'auth_results', kind: 'aggregate', inputs: ['auth_valid'], groupBy: ['result'], measures: [{ name: 'signins', expr: 'count(*)' }], dataset: {} },
+      { id: 'edr_actions', kind: 'aggregate', inputs: ['edr'], groupBy: ['action'], measures: [{ name: 'events', expr: 'count(*)' }], dataset: {} },
+      { id: 'edr_hosts_signing_in', kind: 'sql', inputs: ['auth_results', 'edr_actions'], sql: 'SELECT (SELECT sum(signins) FROM auth_results) AS signins, (SELECT sum(events) FROM edr_actions) AS events', dataset: {} },
+    ],
+    ontology: { ...d.ontology!, nouns: { ...d.ontology!.nouns, edr: { one: 'endpoint event', many: 'endpoint events' } } },
+    publish: {
+      hold: ['checks', 'wrong'], period: 'day', together: false,
+      watch: {
+        auth: { history: 'auth-history.json', time: 'event_time' },
+        edr: { history: 'edr-history.json', period: 'slot', every: EDR_EVERY, time: 'event_time', calendar: false },
+      },
+    },
   };
 }

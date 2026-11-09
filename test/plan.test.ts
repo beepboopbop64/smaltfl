@@ -333,9 +333,10 @@ describe('a document that says how its days are judged (format 3, ADR 0010 §10)
 
   it('refuses a watch setting it can’t judge yet, and any field it doesn’t know', () => {
     const issues = (w: Record<string, unknown>) => validateDocument(general(w as Partial<WatchDef>));
-    const later = 'not something this version can judge yet: refused rather than ignored';
-    expect(issues({ every: '6h' })).toEqual([{ path: '$.publish.watch.trips.every', message: `6h: ${later}` }]);
-    expect(issues({ every: 'week' })).toEqual([{ path: '$.publish.watch.trips.every', message: 'day' }]);
+    // A slot of a day is judged from phase 4 (ADR 0010 §7), counted by the time column it names; any other length is refused.
+    expect(issues({ every: '6h' })).toEqual([{ path: '$.publish.watch.trips.time', message: 'a load of 6h is counted by its time column, which falls in its slot: name it' }]);
+    expect(issues({ every: '6h', time: 'tpep_pickup_datetime' })).toEqual([]);
+    expect(issues({ every: 'week' })).toEqual([{ path: '$.publish.watch.trips.every', message: 'one of day, 12h, 8h, 6h, 4h, 3h, 2h, 1h' }]);
     // The patterns none and monthly are judged from phase 3 (ADR 0010 §3); any other is refused.
     expect(issues({ pattern: 'none' })).toEqual([]);
     expect(issues({ pattern: 'monthly' })).toEqual([]);
@@ -812,7 +813,10 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
     expect(bad({ ...pub, calendar: { ...pub.calendar, base: 'uk/1' } })).toThrow('publish.calendar is { base: none, us/1 or us-nyc/1, zone, days, windows, dates }');
     expect(bad({ ...pub, calendar: { ...pub.calendar, days: [{ name: 'Patch Tuesday' }] } })).toThrow('publish.calendar.days[0]: a day of the month (day) or a weekday between two days of it (weekday, between): one of them');
     expect(() => validatePlan({ ...plan, publish: { ...pub, calendar: { ...pub.calendar, days: [{ name: 'Patch Tuesday', weekday: 'tue', between: [8, 14] }] } } } as FlowPlan)).not.toThrow();
-    expect(bad({ ...pub, watch: [[0, { ...w, every: '6h' }]] })).toThrow('publish.watch[0].every 6h is not one this version can judge (day)');
+    expect(bad({ ...pub, watch: [[0, { ...w, every: 'week' }]] })).toThrow('publish.watch[0].every week is not one this version can judge (day, 12h, 8h, 6h, 4h, 3h, 2h, 1h)');
+    // A slot's period names a slot of its length, and its time column counts it (ADR 0010 §7).
+    expect(bad({ ...pub, watch: [[0, { ...w, every: '6h' }]] })).toThrow('publish.watch[0]: day is 2023-09-21, not a slot of 6h (such as 2023-09-21T00)');
+    expect(() => validatePlan({ ...plan, parameters: { ...plan.parameters, day: '2023-09-21T06' }, publish: { ...pub, watch: [[0, { ...w, every: '6h', time: null }]] } } as FlowPlan)).toThrow('publish.watch[0].time: a load of 6h is counted by its time column');
     expect(bad({ ...pub, watch: [[0, { ...w, pattern: 'yearly' }]] })).toThrow('publish.watch[0].pattern yearly is not one this version can judge (weekly, none, monthly)');
     expect(() => validatePlan({ ...plan, publish: { ...pub, watch: [[0, { ...w, pattern: 'none' }]] } } as FlowPlan)).not.toThrow();
     const { zone: _z, ...short } = w;

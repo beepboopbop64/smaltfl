@@ -17,7 +17,8 @@ import { canonicalJSON } from './canonical.js';
 import type { DayState, PauseState } from './days.js';
 import { isGeneralWatch, sourceOf, type FlowDocument, type HoldKind, type WatchDef } from './document.js';
 import type { Repair } from './fill.js';
-import { HistoryRanges, rangeSettings, type HistoryFile, type Level, type RangeOptions } from './history.js';
+import { dayOfSlot, isEvery, type Every } from './calendar.js';
+import { HistoryRanges, rangeSettings, slotSeries, type HistoryFile, type Level, type RangeOptions } from './history.js';
 import { appendPeriods, emptyHistory, measuresHash, samePeriod, tailBefore, tailRef, type MeasureSettings, type Measures, type TailRef } from './measures.js';
 import { rootOf } from './log.js';
 import type { JSONValue, LogEntry } from './log.js';
@@ -83,7 +84,8 @@ export interface StoryClaim2 {
   v: 2;
   source: string;
   slot: string;
-  every: 'day';
+  /** What the load covers (ADR 0010 §7): a day, or a slot of one, as its watch says. */
+  every: Every;
   state: Story['state'];
   below: boolean;
   head: string;
@@ -255,9 +257,11 @@ export interface LoadClaimInput {
  */
 export async function loadClaim(o: LoadClaimInput): Promise<{ claim: StoryClaim2; ranges: HistoryRanges; tail: Measures[] } | null> {
   const slot = o.measures.slot;
+  const every = o.measures.every;
   const ms = tailBefore(o.tail, slot);
   const k = o.base ? o.base.days.indexOf(slot) : -1;
   let file: HistoryFile;
+  if (o.base && (o.base.every ?? 'day') !== every) return null;
   if (o.base && k >= 0) {
     if (samePeriod(o.base, k, o.measures) !== null) return null;
     file = ms.length ? appendPeriods(o.base, ms) : o.base;
@@ -272,10 +276,14 @@ export async function loadClaim(o: LoadClaimInput): Promise<{ claim: StoryClaim2
   }
   const skip = [...new Set(o.skip)].filter((d) => d < slot).sort();
   const levels = (o.levels ?? []).filter((l) => l.from < slot);
-  const ranges = new HistoryRanges(file, { ...rangesFor(o.doc, o.source), recorded: new Set(skip), levels });
-  const s = flowStory(ranges, slot, o.doc, o.source);
+  // A slot is judged from its own series, as a day (ADR 0010 §7): the same slot of the day, named by its day, the days
+  // left out and the levels of that slot too.
+  const slotted = every !== 'day';
+  const own = (d: string) => !slotted || d.slice(10) === slot.slice(10);
+  const ranges = new HistoryRanges(slotted ? slotSeries(file, slot) : file, { ...rangesFor(o.doc, o.source), recorded: new Set(skip.filter(own).map(dayOfSlot)), levels: levels.filter((l) => own(l.from)).map((l) => ({ ...l, from: dayOfSlot(l.from) })) });
+  const s = flowStory(ranges, dayOfSlot(slot), o.doc, o.source);
   const claim: StoryClaim2 = {
-    by: 'story', v: 2, source: o.source, slot, every: 'day', state: s.state, below: belowOf(s), head: s.head, build: o.build, flow: o.flow,
+    by: 'story', v: 2, source: o.source, slot, every, state: s.state, below: belowOf(s), head: s.head, build: o.build, flow: o.flow,
     history: { base: o.baseRef ? { path: o.baseRef.path, sha256: o.baseRef.sha256, bytes: o.baseRef.bytes } : null, tail: tailRef(ms) },
     measured: await measuresHash(o.measures), rows: o.measures.rows, skip, levels: claimLevels(levels, slot),
   };
@@ -335,7 +343,9 @@ function claimProblem(c: Record<string, unknown>): string | null {
 const isLevels = (v: unknown): v is ClaimLevel[] => Array.isArray(v) && v.every((l) => isRecord(l) && typeof l.from === 'string' && DAY.test(l.from) && Array.isArray(l.metrics) && l.metrics.every((m) => typeof m === 'string') && Number.isInteger(l.decision));
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const isDays = (v: unknown): v is string[] => Array.isArray(v) && v.every((d) => typeof d === 'string' && DAY.test(d));
+/** A day, or a slot of one (ADR 0010 §7): what the record leaves out of learning. */
+const PERIOD = /^\d{4}-\d{2}-\d{2}(T\d{2})?$/;
+const isDays = (v: unknown): v is string[] => Array.isArray(v) && v.every((d) => typeof d === 'string' && PERIOD.test(d));
 const isRef = (h: unknown): h is HistoryRef => isRecord(h) && typeof h.path === 'string' && typeof h.sha256 === 'string' && HEX64.test(h.sha256) && Number.isSafeInteger(h.bytes) && (h.bytes as number) >= 0;
 
 /** Why a value isn't shaped as a claim/2, or null when it is. */
@@ -343,7 +353,7 @@ function claim2Problem(c: Record<string, unknown>): string | null {
   if (c.by !== 'story') return "isn't a story's claim";
   if (c.v !== 2) return "isn't claim/2, which plan/2 needs";
   if (typeof c.slot !== 'string' || c.slot === '') return 'names no slot';
-  if (c.every !== 'day') return 'names a slot this build reads no slots of but days';
+  if (!isEvery(c.every)) return "names a slot's length this build doesn't read";
   if (!STATES.includes(c.state as string)) return 'has no story state';
   if (typeof c.below !== 'boolean') return "doesn't say whether its rows are below their range";
   if (typeof c.head !== 'string') return 'has no head';
@@ -373,6 +383,8 @@ export interface ClaimAt {
   plan?: 1 | 2;
   /** claim/2: the watched source whose tail the claim was told from (a donor's is its source's). */
   tailOf?: string;
+  /** claim/2: what a load of the source covers, as its watch says (ADR 0010 §7): a day unless it names a slot. */
+  every?: Every;
 }
 
 /**
@@ -412,6 +424,7 @@ function judgeClaim2(c: Record<string, unknown>, at: ClaimAt, facts: ClaimFacts)
   if (problem) return { node, unjudged: `the claim for ${origin} ${problem}` };
   const claim = c as unknown as StoryClaim2;
   if (facts.flow === undefined || claim.flow !== facts.flow) return { node, unjudged: `the claim was told under another flow than the run's` };
+  if (claim.every !== (at.every ?? 'day')) return { node, unjudged: `the claim is of a load of ${claim.every}, and the watch's loads are of ${at.every ?? 'day'}` };
   if (typeof day !== 'string' || claim.slot !== day) return { node, unjudged: `the claim is of ${claim.slot}, the run of ${day === undefined ? 'no day' : String(day)}` };
   const pin = facts.pinned(file);
   const base = claim.history.base;
@@ -440,7 +453,7 @@ function judgeClaim2(c: Record<string, unknown>, at: ClaimAt, facts: ClaimFacts)
   return {
     node,
     claim: {
-      by: 'story', v: 2, source: claim.source, slot: claim.slot, every: 'day', state: claim.state, below: claim.below, head: claim.head, build: claim.build, flow: claim.flow,
+      by: 'story', v: 2, source: claim.source, slot: claim.slot, every: claim.every, state: claim.state, below: claim.below, head: claim.head, build: claim.build, flow: claim.flow,
       history: { base: base ? { path: base.path, sha256: base.sha256, bytes: base.bytes } : null, tail: claim.history.tail ? { size: claim.history.tail.size, root: claim.history.tail.root } : null },
       measured: claim.measured, rows: claim.rows, skip: [...claim.skip], levels: copyLevels(claim.levels),
     },
@@ -456,13 +469,13 @@ const copyLevels = (ls: readonly ClaimLevel[]): ClaimLevel[] => ls.map((l) => ({
  */
 export function judgeClaims(plan: Pick<FlowPlan, 'nodes' | 'parameters' | 'publish'>, claims: readonly unknown[] | undefined, facts: ClaimFacts): Judged[] {
   const format = plan.publish && isPublish2(plan.publish) ? 2 : 1;
-  return watchesOf(plan.publish).map(({ node, history: file, period }): Judged => {
+  return watchesOf(plan.publish).map(({ node, history: file, period, settings }): Judged => {
     const day = period === null ? undefined : plan.parameters[period];
     const origin = plan.nodes[node]!.origin;
     const mine = (claims ?? []).filter((c): c is Record<string, unknown> => isRecord(c) && typeof c.source === 'string' && c.source.toLowerCase() === origin.toLowerCase());
     if (mine.length === 0) return { node, unjudged: `no claim for ${origin}` };
     if (mine.length > 1) return { node, unjudged: `${mine.length} claims for ${origin}` };
-    return judgeClaim(mine[0]!, { node, origin, file, day, plan: format }, facts);
+    return judgeClaim(mine[0]!, { node, origin, file, day, plan: format, every: settings?.every ?? 'day' }, facts);
   });
 }
 
@@ -506,7 +519,8 @@ export function judgeDonors(plan: Pick<FlowPlan, 'nodes' | 'publish'>, claims: r
     const mine = (claims ?? []).filter((c): c is Record<string, unknown> => isRecord(c) && typeof c.source === 'string' && c.source.toLowerCase() === origin.toLowerCase());
     if (mine.length === 0) return out.push({ node: donor, unjudged: `no claim for ${origin}` });
     if (mine.length > 1) return out.push({ node: donor, unjudged: `${mine.length} claims for ${origin}` });
-    out.push(judgeClaim(mine[0]!, { node: donor, origin, file, day: n.from, plan: format, tailOf: plan.nodes[source]!.origin }, facts));
+    const every = watchesOf(plan.publish).find((w) => w.node === source)?.settings?.every ?? 'day';
+    out.push(judgeClaim(mine[0]!, { node: donor, origin, file, day: n.from, plan: format, tailOf: plan.nodes[source]!.origin, every }, facts));
   });
   return out;
 }

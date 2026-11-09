@@ -5,7 +5,7 @@
  * Expressions are SQL expression text (smaltdb's SQL), so a visual step reads the way its SQL would. Steps refer to
  * their inputs, and SQL steps to their inputs' data, by the inputs' ids.
  */
-import { calendarProblems, type CalendarDef } from './calendar.js';
+import { calendarProblems, EVERIES, isEvery, type CalendarDef, type Every } from './calendar.js';
 import { marksVerdicts, type Ontology } from './ontology.js';
 import { DECIDE, DECIDE_OPTIONS, type Policies } from './policy.js';
 import type { ParamType, ParamValue } from './sqltext.js';
@@ -44,16 +44,17 @@ export type HoldKind = (typeof HOLD_KINDS)[number];
 
 /**
  * A watch in the general form (ADR 0010 §10): its history, and how its source is judged, every setting but the history
- * optional. This build judges a day a load (`every: day`), with the patterns `weekly`, `none` and `monthly` (ADR 0010 §3);
- * any other is refused, never ignored.
+ * optional. A load covers a day (`every: day`) or a slot of it (`6h`, ADR 0010 §7), judged with the patterns `weekly`,
+ * `none` and `monthly` (ADR 0010 §3); any other is refused, never ignored.
  */
 export interface WatchDef {
   /** The history's file, a file in the data's list. */
   history: string;
   /** The text parameter whose value is the load's period (default `publish.period`). */
   period?: string;
-  /** What one load covers (default `day`). */
-  every?: 'day';
+  /** What one load covers (default `day`): a day, or a slot of it aligned to midnight (`12h` … `1h`, ADR 0010 §7), its
+   * period parameter then naming the slot (`2024-09-10T06`). A slot is counted by its time column, so it names `time`. */
+  every?: Every;
   /** What a load is compared with: the same weekday over the weeks before (`weekly`, the default), the periods before
    * whatever the weekday (`none`), or those and the same day of the month (`monthly`). */
   pattern?: 'weekly' | 'none' | 'monthly';
@@ -530,7 +531,8 @@ function validateWatch(w: Record<string, unknown>, at: string, add: (path: strin
   for (const k of Object.keys(w)) if (!WATCH_FIELDS.includes(k)) add(`${at}.${k}`, `not a field this version reads (${WATCH_FIELDS.join(', ')}): refused rather than ignored`);
   if (typeof w.history !== 'string' || w.history === '') add(`${at}.history`, "the history's file, a file in the data's list");
   if (w.period !== undefined) textParam(w.period, `${at}.period`, 'the period is a text parameter, such as a day');
-  if (w.every !== undefined && w.every !== 'day') add(`${at}.every`, typeof w.every === 'string' && /^(12|8|6|4|3|2|1)h$/.test(w.every) ? `${w.every}: ${later}` : 'day');
+  if (w.every !== undefined && !isEvery(w.every)) add(`${at}.every`, `one of ${EVERIES.join(', ')}`);
+  else if (w.every !== undefined && w.every !== 'day' && w.time === undefined) add(`${at}.time`, `a load of ${w.every} is counted by its time column, which falls in its slot: name it`);
   if (w.pattern !== undefined && !['weekly', 'none', 'monthly'].includes(w.pattern as string)) add(`${at}.pattern`, 'weekly, none or monthly');
   if (w.donor !== undefined && w.donor !== 'weekday' && w.donor !== 'nearest') add(`${at}.donor`, 'weekday or nearest');
   if (w.time !== undefined && (typeof w.time !== 'string' || w.time === '')) add(`${at}.time`, 'a time column');

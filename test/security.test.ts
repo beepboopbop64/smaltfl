@@ -5,13 +5,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import { validateDocument } from '../src/core/document.js';
-import { HistoryRanges } from '../src/core/history.js';
-import { claimHolds, dayClaim, rangesFor, type StoryClaim } from '../src/core/hold.js';
-import { judgeOf, newsOf, type Names } from '../src/core/news.js';
+import { HistoryRanges, slotSeries } from '../src/core/history.js';
+import { claimHolds, dayClaim, flowStory, rangesFor, type StoryClaim } from '../src/core/hold.js';
+import { flowNames, judgeOf, newsOf, type Names } from '../src/core/news.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
 import { translate, type PlanPublish2 } from '../src/core/plan.js';
 import { ACT_VERB, glanceStrings, storyOf, type Story } from '../src/core/story.js';
-import { isMonthEnd, isPatchTuesday, PLANTED, securityDoc, securityHistory } from './fixtures/security.js';
+import { edrHistory, isMonthEnd, isPatchTuesday, PLANTED, securityDoc, securityHistory, twoSourceDoc } from './fixtures/security.js';
 
 const doc = securityDoc();
 const ref = { path: 'auth-history.json', sha256: '0'.repeat(64), bytes: 0 };
@@ -149,4 +149,25 @@ describe('a step in rows that stays: a +60% step, accepted and not (phase 3, ADR
     expect(rangesFor(relearning, 'auth').relearn).toBe(true);
     expect(new HistoryRanges(file, rangesFor(relearning, 'auth')).of({ of: 'trips' })!.relearned('2024-03-31')).toEqual([]);
   }, 60_000);
+});
+
+describe('variant E: endpoint events every 6 hours beside the sign-ins (phase 4, ADR 0010 §7)', () => {
+  const two = twoSourceDoc();
+  it('is a format-3 flow of two watched sources with their own cadences, edr\'s calendar off', async () => {
+    expect(validateDocument(two)).toEqual([]);
+    const pub = (await translate(two, { day: '2024-09-10', slot: '2024-09-10T06' })).publish as PlanPublish2;
+    expect(pub.watch.map(([, w]) => [w.period, w.every, w.calendar])).toEqual([['day', 'day', true], ['slot', '6h', false]]);
+    expect(pub.together).toBe(false);
+  });
+
+  it('moves the collector\'s outage to edr: the sign-ins of Sep 10 calm, its 06–12 slot alone wrong', () => {
+    const e = new HistoryRanges(securityHistory({ edr: true }), { ...rangesFor(doc, 'auth') });
+    const s = storyOf(e, PLANTED.outage, newsOf(e, PLANTED.outage, names, { judge }), { names, judge });
+    expect(s.state).not.toBe('wrong');
+    const file = edrHistory();
+    const sub = slotSeries(file, `${PLANTED.outage}T06`);
+    expect(flowStory(new HistoryRanges(sub, rangesFor(two, 'edr')), PLANTED.outage, two, 'edr')).toMatchObject({ state: 'wrong', head: 'Gap in endpoint events, 06:00–10:00', primary: 'incident' });
+    // Its noun is edr's own.
+    expect(flowNames(two, 'edr').noun?.(2)).toBe('endpoint events');
+  });
 });

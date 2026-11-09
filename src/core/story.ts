@@ -560,7 +560,7 @@ function badDay(h: HistoryRanges, day: string, names: Names, hidden: ReadonlySet
   const n = file.rows[k]!;
   const hours = hoursShort(h, k, r.expected);
   const noun = nounFor(names);
-  if (hours && n >= MATERIAL.blank * r.expected) return { hour: hours.hours && hours.hours.to === 23 ? hours.hours.from : null, name: hours.hours && hours.hours.from === 0 ? 'late start' : `${noun} fell` };
+  if (hours && n >= MATERIAL.blank * r.expected) return { hour: hours.hours && hours.hours.to === 23 ? hours.hours.from : null, name: hours.hours && hours.hours.from === 0 && hours.hours.start === undefined ? 'late start' : `${noun} fell` };
   const s = n >= r.low && n <= r.high ? null : splitOf(h, day, names, hidden, judge);
   const said = (x: string) => (wordsIn(x) <= 3 ? x : null);
   if (s && s.kind === 'held') return { hour: null, name: s.rest.today < 0.1 * s.rest.usual ? said(`only ${s.name}`) : said(`${noun} short`) };

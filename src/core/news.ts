@@ -52,7 +52,7 @@ export interface Finding {
   because?: string;
   /** Trips by pickup hour today and on a day like it, and the hours short of trips (an hours finding): for its bars;
    * `fall`, how far short those hours are in percent, as its title says it. */
-  hours?: { got: number[]; usual: number[]; from: number; to: number; fall: number };
+  hours?: { got: number[]; usual: number[]; from: number; to: number; fall: number; start?: number; width?: number };
   /** The findings told together as one (the same trips seen through several columns): each with its own numbers. */
   members?: { column: string; value: string; label: string; share: number; range: NormalRange; rows: number }[];
   /** About a value the ontology marks bad (ADR 0010 §4): never folded under a cause, never marked as expected. */
@@ -693,12 +693,15 @@ export function usualHours(h: HistoryRanges, k: number, expected: number): numbe
   const file = h.file;
   const day = file.days[k];
   if (!day) return null;
-  const shares: number[][] = Array.from({ length: 24 }, () => []);
+  // A day's 24 hours, or a slot's own parts (ADR 0010 §7, `slotSeries`).
+  const n = file.parts ? (file.hours[k]?.length ?? 0) : 24;
+  if (n === 0) return null;
+  const shares: number[][] = Array.from({ length: n }, () => []);
   for (let w = 1; w <= 10 && shares[0]!.length < 6; w++) {
     const d = plusDays(day, -7 * w);
     const j = file.days.indexOf(d);
-    if (j < 0 || specialOf(d, h.calendar) || !file.rows[j] || !file.hours?.[j]) continue;
-    file.hours[j]!.forEach((n, hr) => shares[hr]!.push(n / file.rows[j]!));
+    if (j < 0 || specialOf(d, h.calendar) || !file.rows[j] || !file.hours?.[j] || file.hours[j]!.length !== n) continue;
+    file.hours[j]!.forEach((x, hr) => shares[hr]!.push(x / file.rows[j]!));
   }
   if (shares[0]!.length < 3) return null;
   const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1]!;
@@ -711,30 +714,43 @@ export function hoursShort(h: HistoryRanges, k: number, expected: number, materi
   if (!want || !file.hours?.[k]) return null;
   const got = file.hours[k]!;
   const noun = (n?: number) => nounFor(names, n);
-  const short = got.map((n, hr) => want[hr]! >= material.hourRows && n < material.hourShare * want[hr]!);
-  // The longest run of short hours.
+  // A day's parts are its hours; a slot's its own hours or quarter hours (ADR 0010 §7): the floor that makes a part count
+  // is a part's share of the hour's.
+  const { start, width } = file.parts ?? { start: 0, width: 60 };
+  const last = got.length - 1;
+  const floor = material.hourRows * (width / 60);
+  const short = got.map((n, hr) => want[hr]! >= floor && n < material.hourShare * want[hr]!);
+  // The longest run of short parts.
   let best = [0, -1];
-  for (let a = 0; a < 24; a++) {
+  for (let a = 0; a <= last; a++) {
     if (!short[a]) continue;
     let b = a;
-    while (b + 1 < 24 && (short[b + 1] || want[b + 1]! < material.hourRows)) b++;
+    while (b + 1 <= last && (short[b + 1] || want[b + 1]! < floor)) b++;
     while (b > a && !short[b]) b--;
     if (b - a > best[1]! - best[0]!) best = [a, b];
     a = b;
   }
   const [a, b] = best as [number, number];
-  if (b - a < 1) return null;
+  // Two hours or more in a row: two parts of an hour, or eight of a quarter hour.
+  if ((b - a + 1) * width < 120) return null;
   const had = got.slice(a, b + 1).reduce((t, n) => t + n, 0);
   const usual = want.slice(a, b + 1).reduce((t, n) => t + n, 0);
-  const span = b === 23 ? `from ${clockText(a * 60)} on` : a === 0 ? `until ${clockText((b + 1) * 60)}` : `from ${clockText(a * 60)} to ${clockText((b + 1) * 60)}`;
+  const from = start + a * width;
+  const to = start + (b + 1) * width;
+  const slot = !!file.parts;
+  // A slot whose every part is short is a gap in the day, whatever its ends; a day's runs to its end or from its start
+  // say so.
+  const toEnd = b === last && !slot;
+  const fromStart = a === 0 && !slot;
+  const span = toEnd ? `from ${clockText(from)} on` : fromStart ? `until ${clockText(to)}` : `from ${clockText(from)} to ${clockText(to)}`;
   // Pickup times, not arrival times: the trips fall to a trickle, they don't end (Sep 21, 2023: 3,679 after 13:00).
   const fall = Math.round((1 - had / Math.max(1, usual)) * 100);
   return {
-    key: 'hours', kind: 'hours', severity: 'alert', score: 50 + (b - a),
-    title: b === 23 ? `${sentence(noun())} fall ${fall}% from ${clockText(a * 60)}` : a === 0 ? `${sentence(noun())} start late, at ${clockText((b + 1) * 60)}` : `Gap in ${noun()}, ${clockText(a * 60)}–${clockText((b + 1) * 60)}`,
-    detail: `${fmtInt(had)} ${noun(had)} ${span}, where a day like it has about ${fmtInt(usual)}.`,
+    key: 'hours', kind: 'hours', severity: 'alert', score: 50 + (b - a) * (width / 60),
+    title: toEnd ? `${sentence(noun())} fall ${fall}% from ${clockText(from)}` : fromStart ? `${sentence(noun())} start late, at ${clockText(to)}` : `Gap in ${noun()}, ${clockText(from)}–${clockText(to)}`,
+    detail: `${fmtInt(had)} ${noun(had)} ${span}, where ${slot ? 'a slot' : 'a day'} like it has about ${fmtInt(usual)}.`,
     look: 'history', rows: Math.round(usual - had), acts: ['incident', 'notify', 'expected'],
-    hours: { got: [...got], usual: want.map((x) => Math.round(x)), from: a, to: b, fall },
+    hours: { got: [...got], usual: want.map((x) => Math.round(x)), from: a, to: b, fall, ...(slot ? { start, width } : {}) },
   };
 }
 
