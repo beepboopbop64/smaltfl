@@ -71,7 +71,11 @@ match smaltdb's `CLAUDE.md`.
   The taxi example is format 3 (Election Day; 25 days under `wrong`; `exampleLegacy()` in `test/helpers/example.ts`
   is its legacy form, 28 days), and `test/backtest-real.test.ts` (`SMALTFL_REAL=all`) prints the variants. Accept the
   new level (`accept`, Q-57): `fill.ts` `acceptable`/`levelMetrics`/`levelWays`, `hold.ts` `levelsOf`/`levelFor`, a
-  decide entry's `level`, a claim's `levels`, the step mark `g-level` in `viz.ts`.
+  decide entry's `level`, a claim's `levels`, the step mark `g-level` in `viz.ts`. Phase 4: a watch's `every` (a slot of a
+  day, `slotOf`, `partsOf` in calendar.ts; `slotSeries` in history.ts judges a slot from the same slot of each day);
+  several watched sources hold, decide and release by load (`Load`, `loadsOf`, `carry`, `decisionForLoad`,
+  `standingForLoad` in hold.ts; a release's `loads`); variant E of the sign-in log (`edrHistory`, `twoSourceDoc`) and
+  `test/several.test.ts` through the engine.
 
 ## Rules for this repository
 

@@ -542,6 +542,54 @@ so moves the vector (Q-52):
 - **When it ships:** after §1–§6, first on a synthetic security fixture of several sources, one of them loaded four
   times a day.
 
+**Phase 4 as built** (2026-11-09). Where the build settled what this section leaves open, or differs from it:
+
+- **A slot is judged from its own series** (`slotSeries`, history.ts; Q-83). A history kept by slot (`every: 6h`, its
+  days slot ids) gives, for a slot, the same slot of each day, named by its day, its parts placed in the day (`parts`:
+  start and width in minutes). The story is told on it as on a day's history, so every rule above holds with no change
+  to normal.ts: the weekly pattern compares the same slot of the same weekday, none the same slot of the days before,
+  monthly the same slot of the same day of the month; last year's guess is the same slot 52 weeks back; windows count
+  days; a special day is special in every slot; floors scale with the slot's own rows. A value first seen in another
+  slot of the day reads as seen before, not new. The design's `PeriodSeries` (lags of 7·per slots) isn't built.
+- **A slot's parts** are its own hours from 3 hours, its quarter hours under that (`partsOf`); a row whose time falls
+  outside the slot is in no part. The hours finding reads them ("Gap in endpoint events, 06:00–10:00", "where a slot
+  like it has about …"); a slot whose every part is short is a gap, not a fall to the end of the day.
+- **The document and the plan.** A watch's `every` is any of day, 12h, 8h, 6h, 4h, 3h, 2h and 1h; a slot names its
+  `time`; its period parameter's value must be a slot of its length (`2024-09-10T06`). plan/2 already filled `every` in
+  as day, so no vector moves. measures/0 and claim/2 carry `every`; a claim of another length than its watch's isn't
+  judged.
+- **Loads.** With more than one watched source each hold of a source, and each check that reads one watched source,
+  names its load (`{ source, slot, sha256 }`, `loadsOf`); a load an earlier run of the flow held is carried, citing the
+  run that first held it (`carried`, from the engine's own holds: verify and the audit tell it again the same way). A
+  run's record entry names every load it read (`loads`), so a load that holds no more passes its pause.
+- **Pauses, decisions and releases by load.** `pausesOf` keys a load's pause by the load; a decide entry names its
+  `load` and no keys; `decisionForLoad` finds the decision every later run carrying the load applies again;
+  `standingForLoad` lets a decision not to publish, to fill or to publish the part stand for the source's later loads
+  until one passes; `skipOf(entries, period, source)` leaves out a source's own slots. A release of such a run cites a
+  decision for each load holding what it names (`loads`), each about a load the run read and held, allowed, publishing,
+  with a reason; a name waiting for a load it doesn't cite stays back. It never moves a name back past a later load,
+  every watched period compared. The record's release lists every decision it cites (`decisions`); the engine keeps
+  the first's leaf (Q-85).
+- **Only the off file's slot pauses** (the owner, Q-55): with `together: false`, outputs that don't read a held load
+  publish, and the next slot of the held source publishes its outputs again; a release of the held slot after a later
+  one published is refused, as any release that would move a name back is.
+- **Fills per load.** A slot's missing hours are named as the day's (06:00–10:00 of the 06–12 slot is hours 6 to 9); a
+  fill takes the same slot of another day (`from` and `to` are slot ids), its rows moved by the days between. Fills are
+  off when two loads hold the run (amendment 1 S2), and for a slot under 3 hours (Q-84). A slot gets no Accept (a level
+  starts on a day, Q-84).
+- **The day line** names the loads that pause it: "Paused by edr 06–12, auth" (`pauseReasons`, a check by its source,
+  "auth checks").
+- **Variant E** (test/fixtures/security.ts): endpoint events every 6 hours with their own history (`edrHistory`) and
+  rows (`edrRows`), the collector down 06:00–10:00 on Sep 10, 2024 inside the 06–12 slot (the sign-ins calm that day),
+  watched beside the sign-ins in `twoSourceDoc` with `calendar: false` (machines keep no holidays: with the US days,
+  MLK Day's 00–06 and 06–12 slots read 7–8% low against last year's). Over 2023–24 the 06–12 slot of Sep 10 is the
+  only slot held. Through the engine (test/several.test.ts, I16): a daily load held at 08:00 carried across three later
+  runs and decided once, each run released by that decision; the 06–12 slot filled from the day before's, released and
+  verified; the audit telling the carried holds and the load decisions again.
+- **Not built:** the app's lanes, one a source, and stepping load by load (the app still runs one watched source's story
+  a run, ADR 0010 phase 2); "+N sources" past three lanes; a fill or Accept for a slot under the limits above; the rows a
+  file spans outside its slot as a finding of their own (they are in no part, so the parts fall short of the rows).
+
 ### 8. Nouns, and the taxi shortcuts removed (h)
 
 - **Nouns.** `ontology.nouns` names what a row is, by source or step id (Q-59):
@@ -905,3 +953,5 @@ Each is recorded in docs/OPEN_QUESTIONS.md.
   plan/2), **Q-80** (legacy watches and `skip`).
 - **Raised by phase 3:** **Q-81** (re-learning on its own off unless the watch asks, §5), **Q-82** (`relearn` added to
   plan/2 without a new tag, E13).
+- **Raised by phase 4:** **Q-83** (a slot judged from its own series, §7), **Q-84** (no Accept on a slot, no fill under
+  3 hours), **Q-85** (the engine keeps a release's first decision's leaf, the record all of them).

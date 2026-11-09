@@ -224,6 +224,15 @@ the levels from the record, `HistoryRanges` learns from each as a break (the wee
 claim names them (`levels`), and a later day held by the story alone, off only on the level's metrics and the same
 way, publishes under it (`levelFor`), recorded as a decision under the Accept.
 
+**Several watched sources, each with its own cadence** (ADR 0010 phase 4). A watch's `every` is a day or a slot of it
+(12h down to 1h, aligned to midnight), its period parameter naming the slot (`2024-09-10T06`); a slot is counted in its
+own hours (quarter hours under 3 hours) and judged from its own series, the same slot of each day, as a day is
+(`slotSeries`). With more than one watched source, holds and decisions are about loads (a source's file for a slot):
+each hold names its load, a load an earlier run held is carried, citing that run, and a pause is keyed by its load, so
+a daily load held at 08:00 is decided once whatever slots of another source arrive after it. A release cites a decision
+for each load holding what it names, and with `together: false` only the off file's slot pauses (Q-55). A load can be
+filled from the same slot of another day.
+
 **Releasing** (`src/plugin/release.ts`). A person decides what becomes of a held day: wait (nothing to do), publish
 it as is, accept its new level (released as publishing as is, with a reason), or don't publish it, for that day or
 until a day publishes (`smaltfl:decide`, a rule in the flow's policies;
@@ -412,8 +421,9 @@ plugin, and the app built as a static site.
 src/
   core/       flow model, validation, compiler, hashes, lineage, policies, ontology, packages; data quality (profiles,
               odd rows, drift), the holiday calendar, each day's normal range, the news (a day's, a table's), what
-              holds a run and what became of a held day, and filling one (fill.ts: what is missing, the donor, the
-              derived document, a day's versions), a load's measures and a source's tail (measures.ts)
+              holds a run and what became of a held day (by load, with several watched sources), and filling one
+              (fill.ts: what is missing, the donor, the derived document, a day's versions), a load's measures and a
+              source's tail (measures.ts), slots of a day (calendar.ts)
   plugin/     the runtime plugin (engine worker): running and holding a plan, staging a derived run, releasing a
               held or derived run and withdrawing a fill, measuring a load, verifying
   worker.ts   the app's worker entry
