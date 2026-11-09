@@ -4499,8 +4499,10 @@ function healthRow(story: Story, card: string, paused = false): HTMLElement {
     h('nav', { class: 'vf-health', 'aria-label': `${HEALTH_HEAD}: five measures of the day’s ${NEWS_NAMES.noun()}` }, ...story.health.map((c) => {
       const m: VizMark | null = c.explained ? 'explained' : c.severity === 'alert' ? 'alert' : c.severity === 'warn' ? 'warn' : c.severity === 'note' ? 'note' : c.cell === 'file' && sealed ? 'seal' : c.unjudged ? 'unlearned' : null;
       const said = c.explained ? `${c.follows} grouped under the day’s cause${c.sameDay ? `, ${c.sameDay} more came the same day` : ''}` : c.severity === 'alert' ? 'something’s wrong' : c.severity === 'warn' ? 'unusual' : c.severity === 'note' ? 'a note' : c.cell === 'file' && sealed ? 'matches the source’s list' : m === 'unlearned' ? `${c.unjudged} not judged` : 'normal';
+      // A cell that shows a finding's mark still says what it couldn't judge, as the health line counts it.
+      const also = m !== 'unlearned' && c.unjudged ? `, ${c.unjudged} not judged` : '';
       // A cell whose numbers had no range carries ◌ with their count (ADR 0010 §1), never a blank that reads as normal.
-      return h('button', { type: 'button', class: `vf-cell ${c.explained ? 'explained' : c.severity ?? (m === 'unlearned' ? 'unlearned' : 'ok')}${m === 'seal' ? ' sealed' : ''}`, 'aria-label': `${CELL_NAMES[c.cell]}: ${said}. Open.`, onclick: () => healthDetail(story, c.cell, card) }, m === 'unlearned' && c.cell !== 'amount' ? h('span', { class: 'vf-ring-n', 'aria-hidden': 'true' }, glyphEl('unlearned', 20), h('span', {}, c.unjudged > 99 ? '99+' : String(c.unjudged))) : m ? glyphEl(m, 14) : '', h('span', { 'aria-hidden': 'true' }, CELL_NAMES[c.cell]));
+      return h('button', { type: 'button', class: `vf-cell ${c.explained ? 'explained' : c.severity ?? (m === 'unlearned' ? 'unlearned' : 'ok')}${m === 'seal' ? ' sealed' : ''}`, 'aria-label': `${CELL_NAMES[c.cell]}: ${said}${also}. Open.`, onclick: () => healthDetail(story, c.cell, card) }, m === 'unlearned' && c.cell !== 'amount' ? h('span', { class: 'vf-ring-n', 'aria-hidden': 'true' }, glyphEl('unlearned', 20), h('span', {}, c.unjudged > 99 ? '99+' : String(c.unjudged))) : m ? glyphEl(m, 14) : '', h('span', { 'aria-hidden': 'true' }, CELL_NAMES[c.cell]));
     })));
 }
 
@@ -4551,14 +4553,16 @@ function healthDetail(story: Story, cell: Cell, card: string): void {
       body.push(svgNode(hourBars({ got, usual, ...(story.hours ? { cut: story.hours.from, to: story.hours.to, cutLabel: clockText(story.hours.from * 60) } : {}), ghostLabel: `usual ${wd}`, aria: `${RowsWord()} by hour on ${dayLabel(day)}, against a usual ${wd}${story.hours ? `: short from ${clockText(story.hours.from * 60)}` : ''}.` })));
     }
   }
-  if (mine.length) body.push(h('div', { class: 'vf-list' }, ...shownRows(mine, card, 6, true)));
-  // Nothing found: said in words only where no visual above says it.
-  else {
-    // Numbers that had no usual range that day are said so, never as usual (ADR 0010 §1).
-    const unjudged = story.health.find((c) => c.cell === cell)?.unjudged ?? 0;
-    const none = cell === 'values' ? `${unjudged} ${unjudged === 1 ? 'value' : 'values'} had no usual range today: not judged; the others as usual.` : cell === 'shape' ? `${unjudged} ${unjudged === 1 ? 'spread' : 'spreads'} had no usual range today: not judged; the others as usual.` : null;
-    body.push(oneLine(unjudged && none ? none : cell === 'file' || cell === 'amount' ? null : { hours: `${RowsWord()} every hour.`, values: 'Values as usual.', shape: 'Spreads and times as usual.' }[cell]));
+  // Numbers that had no usual range that day are said so, never as usual (ADR 0010 §1), beside what was found too: the
+  // health line counts them whatever else the cell shows.
+  const unjudged = story.health.find((c) => c.cell === cell)?.unjudged ?? 0;
+  const none = cell === 'values' ? `${unjudged} ${unjudged === 1 ? 'value' : 'values'} had no usual range today: not judged` : cell === 'shape' ? `${unjudged} ${unjudged === 1 ? 'spread' : 'spreads'} had no usual range today: not judged` : null;
+  if (mine.length) {
+    body.push(h('div', { class: 'vf-list' }, ...shownRows(mine, card, 6, true)));
+    if (unjudged && none) body.push(oneLine(`${none}.`));
   }
+  // Nothing found: said in words only where no visual above says it.
+  else body.push(oneLine(unjudged && none ? `${none}; the others as usual.` : cell === 'file' || cell === 'amount' ? null : { hours: `${RowsWord()} every hour.`, values: 'Values as usual.', shape: 'Spreads and times as usual.' }[cell]));
   const sev: Severity = c.explained ? 'ok' : c.severity ?? 'ok';
   openDetail(CELL_NAMES[cell], sev, body);
 }
