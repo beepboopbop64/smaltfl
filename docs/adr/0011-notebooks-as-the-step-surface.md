@@ -49,10 +49,12 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
    runtime creates each step's version as a typed table named by its key, hashes it, holds or points its name, as today.
    A notebook's `action()` cells never run in a flow run: that follows smaltnb's rule for imports, and a flow run is an
    import of the notebook's exports. What smaltfl cannot hash, hold and verify, it does not publish.
-3. **Check cells carry smaltfl's rules.** (Q-90) A check is a cell with a `check` option: the `warn`, `drop` and `fail`
-   rules and `maxDropped` the `expectations` step has today, counted by the engine as today, so the plan's expect node
-   and what holds a run (ADR 0009) do not change. The shape is offered to smaltnb as its `expect` cell; until smaltnb
-   has one, it is an option smaltnb's parser keeps and smaltfl reads.
+3. **Check cells carry smaltfl's rules.** (Q-90) A check is a cell that calls `check(input, { rules, maxDropped })`
+   from `smaltfl/notebook`: the `warn`, `drop` and `fail` rules and `maxDropped` the `expectations` step has today,
+   counted by the engine as today, so the plan's expect node and what holds a run (ADR 0009) do not change. The
+   maintainer asked for a cell option; smaltnb's parser refuses an option it doesn't know (`cell-options`), so the
+   rules are a call it can run as plain TypeScript, read by smaltfl without running it. The shape is offered to
+   smaltnb as its `expect` cell.
 4. **`sql` and `df` cells from the first slice.** (Q-91) A `sql` cell's statement is the step's plan node, as a SQL
    step's is; a `df` cell's statement is what smaltdf's `explain()` gives for the frame, with the same static types the
    plugin reads from the engine. Both are opaque SQL in the plan until the plan API (ADR 0004 consequences); then both
@@ -82,10 +84,27 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
 ## Consequences
 
 - **The translator gains a front end and loses none of its back.** `src/core/notebook.ts` parses a notebook with
-  smaltnb's format and graph (smaltty passed in, never imported), takes the exported cells in graph order, and emits the
-  plan nodes the translator already keys, folds, emits and runs. Keys, snapshots, manifests, the record, verify and
-  the audit do not learn what a notebook is: they see plan/3, which differs from plan/2 by how its query nodes were
-  written down, not by what they are.
+  smaltnb's format and graph (smaltty passed in, never imported), takes the cells in graph order, and derives the
+  steps the document already has (`sql`, `expectations`, `fill`): `expandNotebooks` keeps them on the document, so
+  everything that reads steps (the translator, hold, fill, the news, the app) reads them as before, and a stored
+  document is complete without a parser. The flow hash covers the notebooks' sources and the derived steps. Keys,
+  snapshots, manifests, the record, verify and the audit do not learn what a notebook is: they see plan/3, which
+  differs from plan/2 by how its query nodes were written down, not by what they are. A *notebooks* check that
+  derives the steps again from the stored sources, with smaltty in the worker, is left for the verify slice.
+- **What a cell means** (as built in slice 2, `src/core/notebook.ts`): `source('id')` binds a name to a source;
+  `param({...})` is the notebook's parameters and `${params.day}` in SQL the flow's `:day`; a `sql` cell is a `sql`
+  step whose `${x}` are its inputs, by id; `check(x, {...})` the `expectations` step; `fill(x, { time, shift })` the
+  `fill` step; a `df` cell a `sql` step whose statement the caller's frame compiler gives (§4); an `md` cell the
+  description of the step after it; an exported cell a dataset, an unexported one an intermediate; `action()` cells are
+  left out; `import { x } from './other.nb.js'` reads another listed notebook's exports. On disk a flow is a folder:
+  `flow.json` with `notebooks: ["checks.nb.ts", …]`, loaded by `loadNotebooks` and expanded by `expandNotebooks`.
+- **E14, plan/3's vector** (`test/notebook.test.ts`): a format-4 document `v` with one source `auth` (`auth_file`) and
+  one notebook `v.nb.ts` (`const auth = source('auth')`, `export const rows = sql\`SELECT * FROM ${auth}\``), no
+  parameters: flow hash `314572a5…f36726`; plan
+  `{"flow":{"hash":"314572a5…","id":"v"},"nodes":[{"inputs":[],"op":"table","origin":"auth","table":"auth_file"},{"inputs":[0],"names":["auth"],"op":"sql","origin":"rows","sql":"SELECT * FROM auth"}],"outputs":[{"name":"rows","node":1}],"parameters":{},"smaltflPlan":3}`;
+  plan/3 hash `724148bc9b4ebafc71d5977ac2e878d94228acef66353c19e93576977b1caf3a`. The sign-ins example in both forms
+  (`examples/security-signins.smaltfl.json`, `examples/security-signins/`) gives the same expect node, the same
+  publish block and the same rows on a generated day.
 - **The example's keys change; its verdicts do not.** An aggregate step rewritten as a `sql` cell is a different plan
   node, so the taxi example's keys and plan hash change with format 4; the days it holds come from the history and the
   story, which the surface does not touch. `test/hold-real.test.ts` and `test/fill-real.test.ts` must give the same
@@ -102,7 +121,14 @@ family's pieces, notebooks first, so the pipeline angle is what smaltfl adds and
   1. this record, Q-87 to Q-95, format 4 and plan/3 named, the pins asked for (done with this record's PR, except the
      pins);
   2. `src/core/notebook.ts` and the pins: parse, graph order, exported cells to plan nodes, check cells, the notebook
-     hash in the flow hash; plan/3's vector; the sign-ins example as notebooks (`test/security.test.ts` on both forms);
+     hash in the flow hash; plan/3's vector; the sign-ins example as notebooks (`test/notebook.test.ts` on both forms).
+     Built 2026-11-09, the `df` hook in place and tested with a stub compiler. **The real compiler waits on a plan
+     node:** the smaltdf smaltnb pins (`37555d8`) is the rebuild on plans, whose `frame.plan(db)` gives a smaltdb plan
+     statement, not SQL, and smaltfl's plan carries SQL text per node until the plan API lands (ADR 0004). So a df
+     cell is translated once the flow plan has a node that carries a smaltdb plan and the runtime appends from it
+     (`queryPlan`), the step ADR 0004 already names; until then a df cell in a flow is refused, named. The older
+     smaltdf that compiled to SQL (`explain()`) is not used: the notebook page runs the pinned one, and a flow and the
+     page must take the statement from the same code;
   3. the taxi example as notebooks (`sql` and `df` cells, the fill step as a cell), the hold and donor tables unmoved;
   4. the app: notebook groups, the cell sheet with smaltkit's editor, everything else as it is;
   5. a headless run (`node scripts/run.mjs --flow DIR --day D`) on the in-process engine, ahead of `smaltnb run`;

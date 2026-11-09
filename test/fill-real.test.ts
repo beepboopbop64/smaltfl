@@ -156,7 +156,7 @@ describe.skipIf(!files)('a day filled on the real files, through the engine (ame
     const raw = readFileSync(new URL(path, DATA));
     return new Uint8Array(path.endsWith('.parquet.txt') ? Buffer.from(raw.toString('utf8'), 'base64') : raw);
   };
-  const loads = new Map([...list.episodes.flatMap((e) => e.loads), ...donorDays].map((l) => [l.day, l]));
+  const loads = new Map((list ? [...list.episodes.flatMap((e) => e.loads), ...donorDays] : []).map((l) => [l.day, l]));
 
   async function engine() {
     const db = Database.openMemory({ plugins: [io, external, parquet, smaltfl] });

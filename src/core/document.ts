@@ -15,7 +15,7 @@ import { renameIdentifier, SqlTextError, tokens } from './sqltext.js';
  * The formats this version reads: 1; 2 for a document that says what holds its publication (ADR 0009 §2); 3 for one
  * that says how its days are judged (ADR 0010 §10).
  */
-export const DOCUMENT_FORMATS = [1, 2, 3] as const;
+export const DOCUMENT_FORMATS = [1, 2, 3, 4] as const;
 export type DocumentFormat = (typeof DOCUMENT_FORMATS)[number];
 
 /** Whether a watch is given in the general form, as an object of its settings, not as a history's file name. */
@@ -24,9 +24,11 @@ export const isGeneralWatch = (w: unknown): w is WatchDef => typeof w === 'objec
 /**
  * The format a document must say it is, so an older build refuses a flow it would judge differently rather than judge
  * it (Q-47, ADR 0010 §10): 3 with a calendar block, a watch given as an object, or an ontology mark that changes verdicts
- * (`bad`, `newValues`, `after`); else 2 with a publish block; else 1. Decided here and in `planKind`.
+ * (`bad`, `newValues`, `after`); else 2 with a publish block; else 1. 4 for a document whose steps are its notebooks'
+ * exported cells (ADR 0011 §1), whatever else it has. Decided here and in `planKind`.
  */
-export const documentFormat = (doc: { publish?: unknown; calendar?: unknown; ontology?: unknown }): DocumentFormat => {
+export const documentFormat = (doc: { publish?: unknown; calendar?: unknown; ontology?: unknown; notebooks?: unknown }): DocumentFormat => {
+  if (doc.notebooks !== undefined) return 4;
   const watch = typeof doc.publish === 'object' && doc.publish !== null ? (doc.publish as { watch?: unknown }).watch : undefined;
   const general = typeof watch === 'object' && watch !== null && Object.values(watch).some(isGeneralWatch);
   if (doc.calendar !== undefined || general || marksVerdicts(doc.ontology as Ontology | undefined)) return 3;
@@ -141,7 +143,16 @@ export interface FlowDocument {
   description?: string;
   parameters?: ParameterDef[];
   sources: SourceDef[];
+  /**
+   * The steps. In a format-4 document they are derived from its notebooks (`notebook.ts`, `expandNotebooks`) and kept
+   * here, so everything that reads steps reads them the same way, and a stored document is complete without a parser.
+   */
   steps: StepDef[];
+  /**
+   * The notebooks whose exported cells are the steps (ADR 0011 §1, §5): a document with them is format 4. Each is a
+   * smaltnb `.nb.ts` notebook, by its path (relative to the document) and its source as loaded (`loadNotebooks`).
+   */
+  notebooks?: NotebookDef[];
   /** The object, link and action types over the flow's datasets (ontology.ts). */
   ontology?: Ontology;
   /** Who may read which rows and columns, and run which actions (policy.ts). */
@@ -160,6 +171,12 @@ export interface FlowDocument {
   profiles?: ProfileDef[];
   /** Display only: where each card sits on the canvas. Not part of any hash. */
   layout?: Record<string, [number, number]>;
+}
+
+/** A notebook of a format-4 document: its path, relative to the document, and its source as loaded. */
+export interface NotebookDef {
+  path: string;
+  source: string;
 }
 
 export interface GroupDef {
@@ -335,7 +352,9 @@ export function validateDocument(doc: unknown): Issue[] {
   else if (doc.smaltfl !== documentFormat(doc)) {
     const want = documentFormat(doc);
     const three = 'a calendar, a watch given as an object, or a mark that changes verdicts (bad, newValues, after)';
-    add('$.smaltfl', want === 3 ? `expected 3: a document with ${three} is format 3`
+    add('$.smaltfl', want === 4 ? 'expected 4: a document with notebooks is format 4'
+      : doc.smaltfl === 4 ? `expected ${want}: format 4 is for a document with notebooks`
+      : want === 3 ? `expected 3: a document with ${three} is format 3`
       : doc.smaltfl === 3 ? `expected ${want}: format 3 is for a document with ${three}`
       : doc.publish === undefined ? 'expected 1: format 2 is for a document with a publish block' : 'expected 2: a document with a publish block is format 2');
   }
@@ -381,7 +400,21 @@ export function validateDocument(doc: unknown): Issue[] {
     });
 
   const steps: Record<string, unknown>[] = [];
-  if (!Array.isArray(doc.steps)) add('$.steps', 'an array');
+  if (doc.notebooks !== undefined) {
+    if (!Array.isArray(doc.notebooks) || doc.notebooks.length === 0) add('$.notebooks', 'a non-empty array of notebooks, each { path, source }');
+    else {
+      const paths = new Set<string>();
+      doc.notebooks.forEach((n: unknown, i: number) => {
+        if (!isRecord(n) || typeof n.path !== 'string' || n.path === '' || typeof n.source !== 'string') return add(`$.notebooks[${i}]`, '{ path, source }: a notebook by its path, with its source loaded (loadNotebooks)');
+        if (paths.has(n.path)) add(`$.notebooks[${i}].path`, `listed twice: ${n.path}`);
+        paths.add(n.path);
+      });
+    }
+    if (doc.steps === undefined) add('$.steps', "a format-4 document's steps are derived from its notebooks: expand them first (expandNotebooks)");
+  }
+  if (doc.steps === undefined && doc.notebooks !== undefined) {
+    // Said above.
+  } else if (!Array.isArray(doc.steps)) add('$.steps', 'an array');
   else
     doc.steps.forEach((s: unknown, i: number) => {
       const at = `$.steps[${i}]`;

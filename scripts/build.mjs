@@ -8,9 +8,9 @@ import { createRequire } from 'node:module';
 
 rmSync('dist', { recursive: true, force: true });
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-const external = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {}), 'smaltdb/*'];
+const external = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {}), 'smaltdb/*', 'smaltnb', 'smaltnb/*'];
 await build({
-  entryPoints: { index: 'src/index.ts', 'plugin/index': 'src/plugin/index.ts' },
+  entryPoints: { index: 'src/index.ts', 'plugin/index': 'src/plugin/index.ts', notebook: 'src/notebook.ts' },
   outdir: 'dist',
   bundle: true,
   format: 'esm',

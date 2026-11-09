@@ -33,6 +33,10 @@
       "types": "./dist/plugin/index.d.ts",
       "default": "./dist/plugin/index.js"
     },
+    "./notebook": {
+      "types": "./dist/notebook.d.ts",
+      "default": "./dist/notebook.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

@@ -14,6 +14,7 @@
     "noEmit": true,
     "types": ["node"],
     "paths": {
+      "smaltfl/notebook": ["./src/notebook.ts"],
       "smaltdb": ["./node_modules/smaltdb/src/client/index.ts"],
       "smaltdb/engine": ["./node_modules/smaltdb/src/engine/index.ts"],
       "smaltdb/worker-runtime": ["./node_modules/smaltdb/src/engine/worker-runtime.ts"],

@@ -125,7 +125,7 @@ describe('translating into the flow plan', () => {
 
   it('checks plans from elsewhere before trusting them', async () => {
     const plan = await translate(visualFlow());
-    expect(() => validatePlan({ ...plan, smaltflPlan: 3 } as unknown as FlowPlan)).toThrow('format 3, expected 0 or 1 or 2');
+    expect(() => validatePlan({ ...plan, smaltflPlan: 4 } as unknown as FlowPlan)).toThrow('format 4, expected 0 or 1 or 2 or 3');
     expect(() => validatePlan({ ...plan, smaltflPlan: 2 } as unknown as FlowPlan)).toThrow('a format-2 plan says what holds it');
     const forward = structuredClone(plan);
     forward.nodes[2]!.inputs = [5];
@@ -262,7 +262,8 @@ describe('a document that says what holds its publication (ADR 0009 §2)', () =>
     expect(documentFormat(visualFlow())).toBe(1);
     expect(validateDocument({ ...holding(PUBLISH), smaltfl: 1 })).toEqual([{ path: '$.smaltfl', message: 'expected 2: a document with a publish block is format 2' }]);
     expect(validateDocument({ ...visualFlow(), smaltfl: 2 })).toEqual([{ path: '$.smaltfl', message: 'expected 1: format 2 is for a document with a publish block' }]);
-    expect(validateDocument({ ...visualFlow(), smaltfl: 4 as never })).toEqual([{ path: '$.smaltfl', message: 'expected 1, 2, 3, the formats this version reads' }]);
+    expect(validateDocument({ ...visualFlow(), smaltfl: 5 as never })).toEqual([{ path: '$.smaltfl', message: 'expected 1, 2, 3, 4, the formats this version reads' }]);
+    expect(validateDocument({ ...visualFlow(), smaltfl: 4 as never })).toEqual([{ path: '$.smaltfl', message: 'expected 1: format 4 is for a document with notebooks' }]);
   });
 
   it('says each problem with its block', () => {

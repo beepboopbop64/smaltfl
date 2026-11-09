@@ -16,9 +16,12 @@ import { bindParameters, quoteIdent, SqlTextError, withoutTrailingSemicolons } f
 
 /**
  * The formats this version runs: 0; 1 for a plan that says what holds its publication (ADR 0009, E10 plan/1); 2 for one
- * that also says how its watched sources are judged (ADR 0010 §11, E13 plan/2).
+ * that also says how its watched sources are judged (ADR 0010 §11, E13 plan/2); 3 for the plan of a format-4 document,
+ * whose steps are its notebooks' cells (ADR 0011 §1, E14 plan/3): the shape of plan/2, its publish block optional and
+ * always in plan/2's form, so a build that doesn't read notebooks refuses it rather than verify a document it can't
+ * derive.
  */
-export const PLAN_FORMATS = [0, 1, 2] as const;
+export const PLAN_FORMATS = [0, 1, 2, 3] as const;
 export type PlanFormat = (typeof PLAN_FORMATS)[number];
 
 /** A column's static type, as smaltdb reports it (`Statement.columnTypes`). */
@@ -212,7 +215,7 @@ export function planPeriod(pub: PlanPublish | PlanPublish2 | undefined): string 
 
 export interface FlowPlan {
   /** 1 exactly when the plan has plan/1's `publish`, 2 when it has plan/2's; a plan without it is format 0, hashed as
-   * plan/0 byte for byte. */
+   * plan/0 byte for byte. 3 for the plan of a format-4 document, with or without a publish block (plan/2's form). */
   smaltflPlan: PlanFormat;
   /** The document's id, and its hash without display fields (the flow hash). */
   flow: { id: string; hash: string };
@@ -287,15 +290,18 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   outputs.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const parameters: Record<string, string | number | null> = {};
   for (const [k, p] of Object.entries(params)) parameters[k] = typeof p.value === 'bigint' ? p.value.toString() : p.value;
-  const plan: FlowPlan = { smaltflPlan: 0, flow: { id: doc.id, hash: await flowHash(doc) }, parameters, nodes, outputs };
+  // A format-4 document's plan is plan/3 (ADR 0011 §1, E14), with or without a publish block.
+  const notebooks = doc.smaltfl === 4;
+  const plan: FlowPlan = { smaltflPlan: notebooks ? 3 : 0, flow: { id: doc.id, hash: await flowHash(doc) }, parameters, nodes, outputs };
   // Without a publish block the plan is what it always was, so every plan/0 hash holds (ADR 0009, E10).
   if (!doc.publish) return plan;
   const p = doc.publish;
   const hold = [...new Set(p.hold)].sort();
   const entries = Object.entries(p.watch ?? {}).map(([id, w]) => ({ id, node: index.get(id.toLowerCase())!, w })).sort((a, b) => a.node - b.node);
   // plan/1 byte for byte unless the document says how a source is judged (ADR 0010 §11): a calendar, a watch given as
-  // an object, or a watched source with a mark that changes verdicts (Q-79), which an older plugin must refuse.
-  if (!judgesItsOwnWay(doc, entries.map((e) => e.id))) {
+  // an object, or a watched source with a mark that changes verdicts (Q-79), which an older plugin must refuse. A
+  // format-4 document's publish block is always in plan/2's form.
+  if (!notebooks && !judgesItsOwnWay(doc, entries.map((e) => e.id))) {
     const watch = entries.map((e): [number, string] => [e.node, typeof e.w === 'string' ? e.w : e.w.history]);
     // The fills' settings only when the document sets them, so every plan/1 hash made before them holds (C1).
     const fills = { ...(p.donor !== undefined ? { donor: p.donor } : {}), ...(p.meanwhile !== undefined ? { meanwhile: p.meanwhile } : {}), ...(p.until !== undefined ? { until: p.until } : {}) };
@@ -306,7 +312,7 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   const legacy = doc.smaltfl < 3 && doc.calendar === undefined && entries.every((e) => !isGeneralWatch(e.w));
   const calendar = resolveCalendar(doc.calendar, legacy);
   const watch = entries.map((e): [number, WatchPlan] => [e.node, watchPlan(e.w, e.id, p.period ?? null, doc.ontology)]);
-  return { ...plan, smaltflPlan: 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: p.meanwhile ?? 'last', until: p.until ?? 'decision' } };
+  return { ...plan, smaltflPlan: notebooks ? 3 : 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: p.meanwhile ?? 'last', until: p.until ?? 'decision' } };
 }
 
 /** Whether a document judges its watched sources other than every flow did before ADR 0010: a plan/2. */
@@ -453,6 +459,8 @@ export function validatePlan(plan: unknown): asserts plan is FlowPlan {
   if (p.smaltflPlan === 0 && p.publish !== undefined) fail('a format-0 plan has no publish block: a plan that holds is format 1');
   if (p.smaltflPlan === 1) validatePublish(p, fail);
   if (p.smaltflPlan === 2) validatePublish2(p, fail);
+  // A format-3 plan (ADR 0011 E14) holds, or not, as its document says: its publish block, when it has one, is plan/2's.
+  if (p.smaltflPlan === 3 && p.publish !== undefined) validatePublish2(p, fail);
 }
 
 const WATCH_PLAN_FIELDS = ['after', 'bad', 'calendar', 'count', 'donor', 'every', 'follow', 'history', 'holds', 'newValues', 'pattern', 'period', 'relearn', 'scale', 'time', 'zone'];

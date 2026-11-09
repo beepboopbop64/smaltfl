@@ -18,6 +18,7 @@ export type {
   DatasetDef,
   DocumentFormat,
   DonorRule,
+  NotebookDef,
   ExpectationRule,
   ExpectationsStep,
   FillStep,
@@ -81,6 +82,8 @@ export type { DecideAbout, Decided, DerivedAbout, HeldAbout, Inputs, Load, Pause
 export { DONOR_WINDOW, dayVersions, donorChoices, donorFor, donorIdOf, donorRuleOf, donorSourceOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument } from './core/fill.js';
 export type { Direction, DonorPick, DonorQuery, FillCounts, NoDonor, Offer, OfferInput, Repair, Version } from './core/fill.js';
 export { PLUGIN_NAME } from './core/protocol.js';
+export { expandNotebooks, loadNotebooks, NOTEBOOK_MODULE, stepsOfNotebooks } from './core/notebook.js';
+export type { CellStep, DfCompiler, Expanded, ExpandOptions, NotebookRef } from './core/notebook.js';
 // One load's numbers, and a source's tail (ADR 0010 §6, E11, E12).
 export { appendPeriods, checksOf, emptyHistory, hourOf, measuresHash, measuresLeaf, measuresOf, measuresProblem, periodOf, periodOfMeasures, samePeriod, scanColumns, settingsFor, tailBefore, tailRef, SAMPLE } from './core/measures.js';
 export type { CheckRules, HistoryHeader, MeasureInput, MeasureSettings, Measures, Period, TailRef } from './core/measures.js';
