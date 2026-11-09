@@ -280,6 +280,13 @@ const SMALL = /^(and|or|of|the|a|an|for|to|in|on|at|with|than)$/i;
 export function cardWords(head: string, room: number): string {
   const text = head.replace(/\s*\([^)]*\)\s*$/, '');
   if (text.length <= room) return text;
+  // A combination's head ("TLS Passing with Encryption at rest Failing: 47", ADR 0013) keeps its start: the pair is
+  // the point, the count is on the card's sheet.
+  if (/ with /.test(text)) {
+    const words = text.split(/\s+/);
+    while (words.length > 1 && words.join(' ').length + 1 > room) words.pop();
+    return `${words.join(' ')}…`;
+  }
   const at = text.indexOf(': ');
   if (at > 0) {
     const tail = text.slice(at);

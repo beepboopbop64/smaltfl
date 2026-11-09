@@ -441,7 +441,8 @@ function heldElsewhere(r: RunRecord | undefined): { origin: string; said: string
   if (!r) return null;
   const judged = loadSource();
   const day = dayOfRun(r);
-  const own = day ? verdictOf(day) : undefined;
+  // The judged dataset's own story (not verdictOf, which asks this function): is its day wrong on its own?
+  const own = day && history && historyOpen() && history.file.days.includes(day) ? storyFor(day) : null;
   const holds = r.result.holds.filter((x) => (x.by === 'story' || x.by === 'unjudged') && x.origin !== judged && (isOwner() || visible(x.origin)));
   // The cause before the symptom: a load upstream of the judged dataset that held (a control's file with no rows) is
   // what went wrong; the judged dataset's own verdict (its column blank) follows from it. Another load, unrelated,
@@ -5426,7 +5427,8 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     const now = viewedDay();
     const refused = state.failed.file;
     const origin = state.failed.origin;
-    const after = !origin || downstreamOf(origin).includes(dataOf(card));
+    // The node it stopped at says so first, and every node after it.
+    const after = !origin || origin === dataOf(card) || downstreamOf(origin).includes(dataOf(card));
     const g = storyDay ? storyFor(storyDay)?.gate : null;
     const said = g?.held && g.step === origin ? gateLabels(g) : null;
     if (after) box.append(h('div', { class: 'verdict alert stopped' },
@@ -7883,7 +7885,7 @@ function renderLoads(): void {
       h('span', { class: 'ld-marks', 'aria-hidden': 'true' }, sev === 'alert' || sev === 'warn' ? glyphEl(sev, 14) : top?.kind === 'unlearned' ? glyphEl('unlearned', 14) : '',
         // A mark about the values or the hours, under a bar within its range, says so (the two-minute test, round 1):
         // the bar is the amount; the mark is the day's story.
-        (sev === 'alert' || sev === 'warn') && top && cellOfKind(top.kind) && cellOfKind(top.kind) !== 'amount' && cellOfKind(top.kind) !== 'file' ? h('span', { class: 'ld-cell' }, CELL_NAMES[cellOfKind(top.kind)!].toLowerCase()) : '', held ? glyphEl('held', 14) : pm ? glyphEl(PAUSE_MARK[pm], 14) : ''));
+        (sev === 'alert' || sev === 'warn') && top && cellOfKind(top.kind) && cellOfKind(top.kind) !== 'amount' ? h('span', { class: 'ld-cell' }, CELL_NAMES[cellOfKind(top.kind)!].toLowerCase()) : '', held ? glyphEl('held', 14) : pm ? glyphEl(PAUSE_MARK[pm], 14) : ''));
   });
   const at = list.indexOf(loads.at);
   const last = at >= list.length - 1;
