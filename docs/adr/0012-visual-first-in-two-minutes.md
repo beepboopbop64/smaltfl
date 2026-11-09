@@ -101,8 +101,14 @@ What the survey found (sources in §7):
   line of a day with something to say opens it over the page: the status pill and day, the sentence (editable, the
   person's words kept in this browser until the record's `note` entry is specified), the cause's own visual, the
   impact, the cause, the fix's options with the proposed or decided one marked and *Decide ›* while the day waits,
-  and *Copy as text*. Not yet: the incident page's full order for the News tab (§2), sharing as an image or link, the
-  two-minute test (§7).
+  and *Copy as text*. **Second pass, the same day,** on the maintainer's review: the brief moved into the input
+  card's News (`briefSections` inside the cause card): under the head, the status word and the sentence (editable);
+  after the card's visual and the pause row, the impact, the cause and the fix, whose options are tappable while the
+  day waits, a tap proposing another ("Your proposal.", kept in this browser); then *Copy as text*, *Copy as image*
+  (the first screen drawn as SVG with the page's styles inlined, rasterised, to the clipboard, or shown to save from
+  where the clipboard takes no images) and *Copy link* (`#brief-YYYY-MM-DD`, which loads the day and opens the
+  input's News). The day line's separate *Brief ›* is gone: *The news ›* is the way in. The two-minute test is
+  written (`tools/judges/two-minute.md`) and run once on this build (docs/HANDOFF.md).
 
 ## Consequences
 

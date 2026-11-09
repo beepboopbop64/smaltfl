@@ -53,6 +53,8 @@ export interface BriefIn {
   picked: DecisionOption | null;
   /** The sentence as a person edited it, when they did: shown in place of the generated one, never changed. */
   edited?: string | null;
+  /** The option a person proposes instead of the app's pick, when they picked one that can go. */
+  prefer?: DecisionOption | null;
 }
 
 export interface Brief {
@@ -185,11 +187,13 @@ export function causeOf(o: Pick<BriefIn, 'story' | 'file' | 'noun'>): { facts: s
 
 /** The fix: the options on offer, the one proposed (a remedy that can go; else keep the last good day while something
  * is wrong; else publish as is), and the one picked once a decision was taken. */
-export function fixOf(o: Pick<BriefIn, 'options' | 'picked' | 'story' | 'pause'>, status: BriefStatus): Brief['fix'] {
+export function fixOf(o: Pick<BriefIn, 'options' | 'picked' | 'story' | 'pause' | 'prefer'>, status: BriefStatus): Brief['fix'] {
   const open = o.options.filter((x) => !x.off);
   const prefer: DecisionOption[] = o.story?.state === 'wrong' || o.story?.state === 'refused' ? ['fill', 'complete', 'dont', 'accept', 'asis'] : ['asis', 'accept', 'fill', 'complete', 'dont'];
-  const proposed = o.picked ?? prefer.find((p) => open.some((x) => x.option === p)) ?? null;
-  const why = o.picked ? null : proposed === 'fill' ? 'A good day near it fills what is missing; readers get a whole day, marked.' : proposed === 'complete' ? 'The part that arrived goes out alone, marked as partial.' : proposed === 'dont' ? 'Something is wrong in the rows: readers keep the last good day until a corrected file arrives.' : proposed === 'accept' ? 'The change has lasted: accept it, and later days are judged at the new level.' : proposed === 'asis' ? 'Unusual, not wrong: publish it, marked.' : status === 'no action' ? 'Nothing to decide.' : null;
+  // A person's own proposal first, when it can go; else the app's.
+  const own = o.prefer && open.some((x) => x.option === o.prefer) ? o.prefer : null;
+  const proposed = o.picked ?? own ?? prefer.find((p) => open.some((x) => x.option === p)) ?? null;
+  const why = o.picked ? null : own ? 'Your proposal.' : proposed === 'fill' ? 'A good day near it fills what is missing; readers get a whole day, marked.' : proposed === 'complete' ? 'The part that arrived goes out alone, marked as partial.' : proposed === 'dont' ? 'Something is wrong in the rows: readers keep the last good day until a corrected file arrives.' : proposed === 'accept' ? 'The change has lasted: accept it, and later days are judged at the new level.' : proposed === 'asis' ? 'Unusual, not wrong: publish it, marked.' : status === 'no action' ? 'Nothing to decide.' : null;
   return { options: o.options, proposed, picked: o.picked, why };
 }
 

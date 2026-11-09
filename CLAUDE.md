@@ -86,8 +86,10 @@ match smaltdb's `CLAUDE.md`.
   is a box (a section folded, `notebookSectionId`), and tapping it opens the notebook read top to bottom
   (`renderNotebookSheet`, `notebookElements`), each cell a tap from its own sheet; `cells`, `groups` and `outline` are
   the display fields `expandNotebooks` fills for it. `packed.json` pins smaltnb and smaltkit beside smaltdb.
-- The brief (ADR 0012 §1): `src/core/brief.ts` orders a day's facts in SBAR order (`briefOf`, `briefText`, the glance
-  budget `briefWords`, `briefBanned`); `briefPage` in `src/app/main.ts` draws it from the day line's *Brief ›*.
+- The brief (ADR 0012 §1, §2): `src/core/brief.ts` orders a day's facts in SBAR order (`briefOf`, `briefText`, the
+  glance budget `briefWords`, `briefBanned`); `briefSections` in `src/app/main.ts` puts it in the input card's News on
+  a day with something to say (status, the sentence, impact, cause, the fix with a tap to propose another, copy as
+  text, image or link; `#brief-YYYY-MM-DD` opens a day's). `tools/judges/two-minute.md` is the test it is judged by.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
