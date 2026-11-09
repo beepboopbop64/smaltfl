@@ -91,7 +91,9 @@ match smaltdb's `CLAUDE.md`.
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
 - **State of the work:** [docs/HANDOFF.md](docs/HANDOFF.md) says what is built, how to check it and what is left, in
   priority order. Read it before starting. **What comes next:** [ADR 0011](docs/adr/0011-notebooks-as-the-step-surface.md),
-  notebooks (smaltnb's `.nb.ts`) as the only step surface, in slices; its §"The slices" is the order of work.
+  notebooks (smaltnb's `.nb.ts`) as the only step surface, in slices; its §"The slices" is the order of work. Then
+  [ADR 0012](docs/adr/0012-visual-first-in-two-minutes.md): the brief and the incident page first, then the drill by
+  the biggest driver, then the phone canvas read sideways, then the notebook as a page behind the visuals.
 
 ## Rules for this repository
 

@@ -16,3 +16,4 @@ records start from the answers to the questions in [../OPEN_QUESTIONS.md](../OPE
 | [0009](0009-paused-not-published.md) | A day that is off is paused, not published | accepted (Q-47, Q-51, Q-52 open); [amendment 1](0009-paused-not-published.md#amendment-1-filling-a-paused-day-slice-2), filling a paused day: proposed |
 | [0010](0010-any-dataset.md) | The news, the story and the pause, for any dataset | proposed (Q-59, Q-68–Q-80 open) |
 | [0011](0011-notebooks-as-the-step-surface.md) | Notebooks as the step surface | proposed (Q-87–Q-95 answered 2026-11-09; nothing built) |
+| [0012](0012-visual-first-in-two-minutes.md) | Visual first, in two minutes: the brief, the incident page, the drill and the phone canvas | proposed (Q-96–Q-103 answered 2026-11-09; nothing built) |

@@ -7,7 +7,8 @@ Decided questions are recorded in ADRs: round 1 in [adr/0001-initial-decisions.m
 [adr/0004-the-flow-plan.md](adr/0004-the-flow-plan.md), the licence in [adr/0005-licence.md](adr/0005-licence.md), pausing
 a day that is off in [adr/0009-paused-not-published.md](adr/0009-paused-not-published.md) and filling one in its
 amendment 1, the news and the pause for any dataset in [adr/0010-any-dataset.md](adr/0010-any-dataset.md), notebooks as
-the step surface in [adr/0011-notebooks-as-the-step-surface.md](adr/0011-notebooks-as-the-step-surface.md). The research
+the step surface in [adr/0011-notebooks-as-the-step-surface.md](adr/0011-notebooks-as-the-step-surface.md), the brief, the
+incident page, the drill and the phone canvas in [adr/0012-visual-first-in-two-minutes.md](adr/0012-visual-first-in-two-minutes.md). The research
 behind the proposals is in [research/ecosystem-survey.md](research/ecosystem-survey.md).
 
 **Who decides:** the maintainers, together (ADR 0001 §1).
@@ -49,6 +50,22 @@ behind the proposals is in [research/ecosystem-survey.md](research/ecosystem-sur
 | Q-2 | Who is the first user? | Data engineers build; analysts use and extend. The canvas must stay readable for both | open |
 | Q-15 | Lineage granularity in v1? | Dataset-level and run-level from the start; column-level when the plan API lands | open |
 | Q-18 | Data quality in v1? | Row expectations (warn, drop, fail) and dataset checks (freshness, row count, uniqueness, schema) | open |
+
+## Visual first, in two minutes: the maintainer's answers (ADR 0012)
+
+Asked through the question prompt on 2026-11-09, after the survey ADR 0012 cites. The ADR that records them is
+proposed; nothing in it is built.
+
+| ID | Question | Decision | Status |
+| --- | --- | --- | --- |
+| Q-96 | What does the app produce for leadership at the end of the two minutes: a one-screen brief card, a short narrative with charts, or only the evidence? | The maintainer: "A one-screen brief card": situation, what changed (one chart), impact, cause, the fix proposed, filled in from the day's findings, the words editable, shared as an image or link (ADR 0012 §1) | decided |
+| Q-97 | How should the pipeline read on a phone: a horizontal Alteryx-style flow, a stage stepper, or a zoomed-out map? | The maintainer: "Horizontal flow, Alteryx-style" (ADR 0012 §4) | decided |
+| Q-98 | Which drill-down matters most: which rows and why, what it did downstream, how it compares to before, where the data came from? | The maintainer: all matter; first "which rows and why, but more aggregated for leadership" (ADR 0012 §3) | decided |
+| Q-99 | Should the whole flow fit one screen as glyph nodes with a tap into a stage, or scroll sideways at readable size? | The maintainer: "Readable nodes, scroll sideways", with a mini-map (ADR 0012 §4) | decided |
+| Q-100 | Which lens colours the canvas first: today against usual, the checks, or rows in and out? | The maintainer: "Today against usual", the others a tap away (ADR 0012 §5) | decided |
+| Q-101 | Who picks the dimension the dropped rows are broken down by: the app (the biggest driver), the person from a fixed set, or one configured per check? | The maintainer: "The app picks the biggest driver", the others as chips (ADR 0012 §3) | decided |
+| Q-102 | What role does the notebook play when exploring: behind the visuals, side by side, or its own page? | The maintainer: "Behind the visuals": every visual shows its cell on request; the notebook is where the logic is changed (ADR 0012 §6) | decided |
+| Q-103 | Which comes first: the brief and incident page, the canvas, or the drill-down? | The maintainer: "Brief and incident page first" (ADR 0012, Consequences) | decided |
 
 ## Notebooks as the step surface: the maintainer's answers (ADR 0011)
 
