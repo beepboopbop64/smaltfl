@@ -4308,7 +4308,8 @@ function causeCard(story: Story, card: string): HTMLElement {
   // The brief (ADR 0012 §1, §2): on a day with something to say, or a paused one, the input's News is the brief: the
   // status and the one sentence under the head, then the card's visual, then the impact, the cause and the fix, and the
   // ways to share it, in that order every time.
-  const brief = (!calm || paused) && card === (profiles().find((p) => p.of === src)?.id ?? src) && src ? briefSections(story, card) : null;
+  // On the input's own card and on its profile box alike: whichever tells the day's story.
+  const brief = (!calm || paused) && src && (card === src || card === profiles().find((p) => p.of === src)?.id) ? briefSections(story, card) : null;
   return h('section', { class: `vf-card ${story.state}${paused ? ' paused' : ''}${brief ? ' brief' : ''}`, ...(anchor ? { id: `finding-${anchor.key}` } : {}) },
     h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head', role: 'status', 'aria-live': 'polite' }, story.state === 'unlearned' ? glyphEl('unlearned', 18) : m && !calm ? glyphEl(m, 18) : '', ...head)),
     gloss,
