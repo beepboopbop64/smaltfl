@@ -91,7 +91,21 @@ if (manifest) {
 // another is refused: the files, the list and loads.json can't be swapped together without rebuilding the app.
 const builtData = manifestBytes ? { commit: data, manifest: sha256(manifestBytes), bytes: manifestBytes.length } : null;
 await build({ ...common, define: { ...common.define, __SMALTFL_DATA__: JSON.stringify(builtData) }, entryPoints: { app: 'src/app/main.ts', worker: 'src/app/worker.ts', inline: 'src/app/inline.ts' }, outdir: out });
-copyFileSync('src/app/page.html', `${out}/page.html`);
+// The bundles named by their content (app.3f2a9c1d.js), so a new build is never served from a browser's cache of the
+// last one under the same name: the page's script tag and the page's references to the worker and the in-page engine
+// take the new names.
+const hashed = {};
+for (const name of ['worker', 'inline', 'app']) {
+  let js = readFileSync(`${out}/${name}.js`, 'utf8');
+  for (const [from, to] of Object.entries(hashed)) js = js.split(`./${from}.js`).join(`./${to}`);
+  const to = `${name}.${sha256(Buffer.from(js)).slice(0, 8)}.js`;
+  writeFileSync(`${out}/${to}`, js);
+  rmSync(`${out}/${name}.js`);
+  rmSync(`${out}/${name}.js.map`, { force: true });
+  hashed[name] = to;
+}
+writeFileSync(`${out}/page.html`, readFileSync('src/app/page.html', 'utf8').replace('src="app.js"', `src="${hashed.app}"`));
+writeFileSync(`${out}/bundles.json`, JSON.stringify(hashed, null, 2) + '\n');
 const fromData = (path) => git('show', `${data}:${path}`);
 /** A data file's entry in the published list, checked against the bytes read: the list is what the app trusts. */
 const listed = (path, bytes) => {

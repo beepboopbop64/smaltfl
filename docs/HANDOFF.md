@@ -53,7 +53,8 @@ npm ci && npm run deps                      # then the smaltdb build pinned in p
 git fetch origin data --depth 1             # the real data; without it the app builds on the XS fixtures
 npm run check                               # typecheck + 773 tests (1 skipped)
 npm run build                               # declarations; NOTE: wipes dist/, so build the app again after it
-npm run build:app                           # dist/app from the data branch
+npm run build:app                           # dist/app from the data branch; the bundles are named by content (app.<hash>.js), so a
+                                            # browser never serves a stale build under the old name (bundles.json says which)
 ```
 
 Results on 2026-11-09, at `e42d9ec` on data `0ca4dd1`:
