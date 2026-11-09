@@ -1,0 +1,7 @@
+[
+ {"name":"xs-canvas","full":true,"expect":{"state":"held","title":"^‖ "}},
+ {"name":"xs-trips-news","card":"trips","tab":"News","full":true,"expect":{"text":["Held: not judged","trips: no history to judge it by","Paused · 6 outputs waiting"],"noText":["no claim for"],"count":{".vf-decide":1}}},
+ {"name":"xs-decide","card":"trips","tab":"News","clicks":[".vf-decide"],"full":true,"expect":{"text":["No history"],"disabled":[".vf-go"],"maxWords":45}},
+ {"name":"xs-asis","card":"trips","tab":"News","clicks":[".vf-decide",".vf-option[data-option=asis]",".vf-reason:has-text(\"No history\")",".vf-go"],"full":true,"expect":{"text":["Published as is · Owner","Record #"]}},
+ {"name":"xs-canvas-after","full":true,"expect":{"noTitle":"‖","state":"done"}}
+]

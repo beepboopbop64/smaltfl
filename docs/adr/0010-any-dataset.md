@@ -2,7 +2,8 @@
 
 - **Status:** proposed, 2026-11-08. It records the owner's answers of 2026-11-08, the third set (Q-53 to Q-58, Q-66)
   included. Q-59 and the maintainers' questions Q-68 to Q-80 that touch it are open, each with the default the build
-  starts on (docs/OPEN_QUESTIONS.md).
+  starts on (docs/OPEN_QUESTIONS.md). The owner's answer of 2026-11-09 (Q-86, "keep pausing until accepted") changes
+  §15's "A deliberate change pauses once" and is not built yet (docs/HANDOFF.md).
 - **Date:** 2026-11-08
 - **Builds on:** [ADR 0006](0006-integrity.md) (E1 file digests, run/1, the record, verify, the audit bag),
   [ADR 0008](0008-visual-first-news.md) (the story, marks, word budgets), [ADR 0009](0009-paused-not-published.md)
@@ -850,7 +851,9 @@ app work, for the fills.
 - **The story leads with a bad value only when it surged or vanished.** One that held is no cause; a held part is never
   said as a shortfall when the rest rose ("Sign-ins 2.5× usual; Locked out held"); and a bad value that alerts with no
   clean split heads the day itself ("Failed 14× usual", Open an incident).
-- **A deliberate change pauses once (the owner: "pause until accepted"; Q-57b).** In the general form, a value that was a
+- **A deliberate change pauses once (the owner: "pause until accepted"; Q-57b). Superseded on 2026-11-09 (Q-86): the
+  owner chose "keep pausing until accepted", so every following day at an unaccepted new level pauses; not built yet
+  (docs/HANDOFF.md). As built today:** In the general form, a value that was a
   part of the mix (1% or more), on the first day its lasting change crosses three times its usual share or a third of it,
   within the change's first week, is held instead of lowered to a note, and Accept is offered there: the sign-in
   migration to passkeys holds on Jun 9, 2024, and once accepted holds nothing after it. A change that crossed already,

@@ -6,14 +6,16 @@ smaltfl builds flows visually and runs them in the browser: sources become datas
 ontology, actions, enforced access policies and content hashes attached to everything it produces. A planned member
 of the [smalt family](https://smaltworks.dev).
 
-> **Status: the first slice, and a first app.** The core and the runtime plugin run a flow on smaltdb: snapshots by
-> content hash, keys, reuse, expectations, signed manifests and verification, tested in Node, through the worker
-> protocol and on real data. The app (`src/app/`) runs the example flow on 100,000 real January 2024 trips in the
-> browser.
-> - Decisions so far: [docs/adr/](docs/adr/README.md) (ADR 0001 to 0005)
-> - The architecture (draft): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+> **Status: a working app on real data, and a handoff.** The core and the runtime plugin run flows on smaltdb with
+> content hashes, signed manifests, verification and an audit trail. The app (`src/app/`) runs the taxi example on real
+> January 2024 trips and three real incidents in the browser: the day's news drawn visual-first, a day that is off
+> paused until someone decides (publish as is, keep, fill from another day, the part that arrived, accept a new level),
+> and the same for any dataset (a generated sign-in log is the second example).
+> - **Start here:** [docs/HANDOFF.md](docs/HANDOFF.md) (what is built, how to check it, what is left)
+> - Decisions: [docs/adr/](docs/adr/README.md) (ADR 0001 to 0010)
+> - The architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 > - The example it is built and measured against: [docs/SCENARIO.md](docs/SCENARIO.md)
-> - Questions still open: [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md)
+> - The owner's answers and the questions still open: [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md)
 > - What the family already provides: [docs/research/ecosystem-survey.md](docs/research/ecosystem-survey.md)
 > - Brand: [docs/brand/DECISIONS.md](docs/brand/DECISIONS.md) (the colour is cobalt teal; the mark is on hold after
 >   round 3)
@@ -24,7 +26,7 @@ of the [smalt family](https://smaltworks.dev).
 npm ci && npm run deps   # dependencies, then the smaltdb build pinned in packed.json
 npm run check            # typecheck and tests
 npm run bench            # the scenario benchmarks (bench/results/node.json)
-npm run build:app        # the app, in dist/app (with the data branch's 100k sample when fetched)
+npm run build:app        # the app, in dist/app (with the data branch's loads when fetched: git fetch origin data --depth 1)
 ```
 
 The tests are the worked example: [test/runtime.test.ts](test/runtime.test.ts) runs the reference flow

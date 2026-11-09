@@ -1,0 +1,78 @@
+const http = require('node:http'); const fs = require('node:fs'); const path = require('node:path'); const { chromium } = require('playwright');
+const root = process.argv[2]; const shots = process.argv[3];
+const page = fs.readFileSync(path.join(root, 'page.html'), 'utf8');
+const skeleton = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>[hidden]{display:none!important}body{margin:0}</style></head><body>${page}</body></html>`;
+const types = { '.js': 'text/javascript', '.txt': 'text/plain', '.csv': 'text/csv', '.json': 'application/json' };
+// A tampered day: one byte of Jan 3's file changed on the way.
+const TAMPER = process.env.TAMPER || 'loads/yellow_tripdata_2024-01-03.parquet.txt';
+const server = http.createServer((req, res) => { const url = decodeURIComponent(req.url.split('?')[0]); if (url === '/') return res.writeHead(200, { 'content-type': 'text/html' }).end(skeleton); const file = path.join(root, url); if (!fs.existsSync(file)) return res.writeHead(404).end(); let body = fs.readFileSync(file); if (url.endsWith(TAMPER)) { const t = body.toString(); const i = 4000; body = Buffer.from(t.slice(0, i) + (t[i] === 'A' ? 'B' : 'A') + t.slice(i + 1)); } res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream' }).end(body); });
+const checks = []; const ok = (name, cond, more = '') => { checks.push([name, !!cond]); console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${more ? ` (${String(more).slice(0, 300)})` : ''}`); };
+(async () => {
+  await new Promise((r) => server.listen(0, r));
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, acceptDownloads: true });
+  const p = await ctx.newPage();
+  const problems = [];
+  p.on('pageerror', (e) => problems.push('PAGEERROR ' + e.message));
+  p.on('console', (m) => m.type() === 'error' && problems.push('console ' + m.text()));
+  await p.goto(`http://localhost:${server.address().port}/`);
+  await p.waitForFunction(() => !!document.querySelector('#status').dataset.state, null, { timeout: 180000 });
+  console.log('status:', await p.locator('#status').textContent());
+  await p.waitForTimeout(3000);
+  const seals = await p.$$eval('g.seal', (xs) => xs.map((x) => `${x.closest('g.card').dataset.card}:${x.getAttribute('class').replace('seal ', '')}`));
+  ok('the inputs are sealed: their bytes matched the list and the engine read them', ['trips:ok', 'zones:ok', 'weather:ok'].every((x) => seals.includes(x)), seals.join(', '));
+  // Integrity tab on the trips profile.
+  const open = async (card, tab) => { await p.locator(`g.card[data-card="${card}"]`).focus(); await p.keyboard.press('Enter'); await p.waitForSelector('#sheet.drill:not([hidden]) .tab-panel:not([aria-busy])', { timeout: 60000 }); if (tab) { await p.locator('#sheet .tabs button', { hasText: tab }).click(); await p.waitForSelector('#sheet .tab-panel:not([aria-busy])'); } };
+  await open('zone_hour', 'Integrity');
+  let t = (await p.locator('#sheet .tab-panel').innerText()).replace(/\s+/g, ' ');
+  ok('the Integrity tab traces back to the bytes', /From this card back to the bytes/i.test(t) && /trips\.parquet \([\d,]+ bytes\), hashed by the engine/.test(t), t.slice(0, 400));
+  await p.screenshot({ path: path.join(shots, 'int-tab.png') });
+  await p.locator('#sheet .tab-panel button', { hasText: 'Re-derive from the files' }).click();
+  await p.waitForFunction(() => /re-derived|failed verification/.test(document.querySelector('#status').textContent), null, { timeout: 120000 });
+  console.log('verify:', await p.locator('#status').textContent());
+  ok('the run re-derives from its files', /re-derived/.test(await p.locator('#status').textContent()));
+  await p.waitForTimeout(800);
+  t = (await p.locator('#sheet .tab-panel').innerText()).replace(/\s+/g, ' ');
+  ok('the tab shows the run re-derived and sealed', /Sealed: re-derived from the files. bytes/.test(t) && /✓ file/.test(t), t.slice(0, 300));
+  await p.screenshot({ path: path.join(shots, 'int-tab-verified.png'), fullPage: false });
+  await p.locator('#sheet button.close').click();
+  const seals2 = await p.$$eval('g.seal', (xs) => xs.map((x) => `${x.closest('g.card').dataset.card}:${x.getAttribute('class').replace('seal ', '')}`));
+  ok('after verifying, the steps are sealed too', seals2.includes('zone_hour:ok') && seals2.includes('trips_valid:ok'), seals2.join(', '));
+  await p.screenshot({ path: path.join(shots, 'int-canvas.png'), fullPage: true });
+  // Runs view: the record.
+  await p.goto(p.url().split('#')[0] + '#runs');
+  await p.waitForTimeout(800);
+  const rec = (await p.locator('#record').innerText()).replace(/\s+/g, ' ');
+  ok('the record is intact and signed', /record intact/.test(rec) && /signed by This browser/.test(rec), rec.slice(0, 300));
+  ok('the record has the run, the flow and the verification', /Ran the flow on Mon Jan 1/.test(rec) && /The flow as it first ran here/.test(rec) && /re-derived/.test(rec), rec.slice(0, 600));
+  const runs = (await p.locator('#runs-list').innerText()).replace(/\s+/g, ' ');
+  ok('each run lists the files it read, by hash', /Read, by hash/i.test(runs) && /trips: trips\.parquet, [\d,]+ bytes/.test(runs) && /data's list at commit [0-9a-f]{12}/.test(runs), runs.slice(0, 400));
+  await p.screenshot({ path: path.join(shots, 'int-runs.png'), fullPage: false });
+  // Export for audit.
+  const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 120000 }), p.locator('#record button', { hasText: 'Export for audit' }).click()]);
+  const out = path.join(shots, dl.suggestedFilename());
+  await dl.saveAs(out);
+  ok('an audit bag downloads', /^smaltfl-audit-.*\.zip$/.test(dl.suggestedFilename()) && fs.statSync(out).size > 1000, `${dl.suggestedFilename()} ${fs.statSync(out).size} bytes`);
+  const [cp] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.locator('#record button', { hasText: 'Download a checkpoint' }).click()]);
+  await cp.saveAs(path.join(shots, cp.suggestedFilename()));
+  ok('a checkpoint downloads', /^smaltfl-checkpoint-.*\.json$/.test(cp.suggestedFilename()));
+  // A tampered day: refused, with the reason.
+  await p.goto(p.url().split('#')[0] + '#flow');
+  await p.waitForTimeout(500);
+  await p.locator('#loads button', { hasText: /^Wed\s*3/ }).first().click();
+  await p.waitForFunction(() => /isn.t the file published/.test(document.querySelector('#status').textContent) || (document.querySelector('#status').dataset.state === 'done' && /^Wed Jan 3: /.test(document.querySelector('#status').textContent)), null, { timeout: 120000 });
+  const st = await p.locator('#status').textContent();
+  ok('a tampered day is refused, not run', /isn.t the file published/.test(st), st);
+  await p.waitForTimeout(500);
+  const seals3 = await p.$$eval('g.seal', (xs) => xs.map((x) => `${x.closest('g.card').dataset.card}:${x.getAttribute('class').replace('seal ', '')}`));
+  ok('the trips card shows a broken seal', seals3.includes('trips:bad'), seals3.join(', '));
+  await open('trips', 'News');
+  const more = p.locator('#sheet .tab-panel .vf-more').first();
+  if (await more.count()) await more.click();
+  const news = (await p.locator('#sheet .tab-panel').innerText()).replace(/\s+/g, ' ');
+  ok('its news says the file was refused, with both hash prefixes and what to do', /File refused: bytes don.t match/.test(news) && /listed [0-9a-f]{8} ≠ got [0-9a-f]{8}/.test(news) && /outputs not built/.test(news) && /Fetch it again/.test(news) && /Export for audit/.test(news), news.slice(0, 500));
+  await p.screenshot({ path: path.join(shots, 'int-tampered.png') });
+  console.log('problems:', problems.slice(0, 5).join(' // ') || 'none');
+  console.log(`${checks.filter((c) => c[1]).length}/${checks.length} passed`);
+  await browser.close(); server.close();
+})().catch((e) => { console.error(e); process.exit(1); });

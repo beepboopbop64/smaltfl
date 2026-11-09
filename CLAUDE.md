@@ -76,6 +76,11 @@ match smaltdb's `CLAUDE.md`.
   several watched sources hold, decide and release by load (`Load`, `loadsOf`, `carry`, `decisionForLoad`,
   `standingForLoad` in hold.ts; a release's `loads`); variant E of the sign-in log (`edrHistory`, `twoSourceDoc`) and
   `test/several.test.ts` through the engine.
+- `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
+  with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
+  `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
+- **State of the work:** [docs/HANDOFF.md](docs/HANDOFF.md) says what is built, how to check it and what is left, in
+  priority order. Read it before starting.
 
 ## Rules for this repository
 

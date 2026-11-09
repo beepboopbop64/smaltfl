@@ -1,0 +1,642 @@
+[
+ {
+  "name": "jan01-canvas",
+  "episode": "January 2024",
+  "day": "Mon 1",
+  "expect": {
+   "state": "done",
+   "noTitle": "‖",
+   "loads": {
+    "Mon 1": "!paused"
+   },
+   "cards": {
+    "zone_hour": "-|",
+    "borough_hour": "-|",
+    "weather_effect": "-|"
+   }
+  }
+ },
+ {
+  "name": "jan01-about",
+  "episode": "January 2024",
+  "clicks": [
+   "details.about-flow > summary"
+  ],
+  "expect": {
+   "pageText": [
+    "A day with something wrong is paused, not published",
+    "every day does in the small build"
+   ]
+  }
+ },
+ {
+  "name": "sep20-canvas",
+  "episode": "September 2023",
+  "day": "Wed 20",
+  "expect": {
+   "state": "done",
+   "noTitle": "‖",
+   "loads": {
+    "Wed 20": "!paused"
+   },
+   "cards": {
+    "zone_hour": "-|",
+    "weather_effect": "-|"
+   }
+  }
+ },
+ {
+  "name": "sep21-canvas",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "full": true,
+  "expect": {
+   "state": "held",
+   "title": "^‖ ",
+   "status": "^Thu Sep 21: Only Flex Fare after 13:00",
+   "loads": {
+    "Thu 21": ", paused, waiting on a decision",
+    "Wed 20": "!paused"
+   },
+   "cards": {
+    "zone_hour": "‖|shows Wed 20",
+    "borough_hour": "‖|shows Wed 20",
+    "weather_effect": "‖|shows Wed 20",
+    "zone_list": "-|",
+    "districts": "-|"
+   }
+  }
+ },
+ {
+  "name": "sep21-news",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "full": true,
+  "expect": {
+   "state": "held",
+   "text": [
+    "Only Flex Fare after 13:00",
+    "Paused by trips",
+    "readers see Wed 20",
+    "zone_hour",
+    "borough_hour",
+    "weather_effect"
+   ],
+   "count": {
+    ".vf-decide": 1
+   },
+   "words": {
+    "section.vf-card": 60
+   }
+  }
+ },
+ {
+  "name": "sep21-waiting",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   "section.vf-card .vf-reach"
+  ],
+  "expect": {
+   "text": [
+    "Thu 21 paused · readers see Wed 20",
+    "zone_hour",
+    "borough_hour",
+    "weather_effect",
+    "paused ·"
+   ]
+  }
+ },
+ {
+  "name": "sep21-decide",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "full": true,
+  "expect": {
+   "minCharts": 2,
+   "maxWords": 45,
+   "disabled": [
+    ".vf-go"
+   ],
+   "text": [
+    "Thu Sep 21 · what readers get",
+    "Publish as is",
+    "Keep Wed 20",
+    "37,935 trips",
+    "~77k fewer",
+    "Pick an option"
+   ]
+  }
+ },
+ {
+  "name": "sep21-decide-nochip",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide",
+   ".vf-option[data-option=asis]"
+  ],
+  "expect": {
+   "disabled": [
+    ".vf-go"
+   ],
+   "text": [
+    "Why? (needed)",
+    "Real change",
+    "Pick a reason"
+   ],
+   "count": {
+    ".vf-switch": 0
+   }
+  }
+ },
+ {
+  "name": "sep21-decide-masked",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "mask": "letters",
+  "full": true,
+  "expect": {
+   "minCharts": 2
+  }
+ },
+ {
+  "name": "sep21-asis",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide",
+   ".vf-option[data-option=asis]",
+   ".vf-reason:has-text(\"Real change\")",
+   ".vf-go"
+  ],
+  "full": true,
+  "expect": {
+   "state": "done",
+   "noTitle": "‖",
+   "text": [
+    "Published as is · readers now see Thu 21",
+    "3 outputs released · Owner",
+    "Record #"
+   ],
+   "count": {
+    ".vf-detail .vf-go": 0,
+    ".vf-detail .vf-reason": 0
+   }
+  }
+ },
+ {
+  "name": "sep21-asis-card",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "full": true,
+  "expect": {
+   "text": [
+    "Published as is · Owner"
+   ],
+   "count": {
+    ".vf-decide": 0
+   }
+  }
+ },
+ {
+  "name": "sep21-asis-canvas",
+  "episode": "September 2023",
+  "full": true,
+  "expect": {
+   "noTitle": "‖",
+   "loads": {
+    "Thu 21": ", published as is"
+   },
+   "cards": {
+    "zone_hour": "⚑|as is · Thu 21",
+    "borough_hour": "⚑|as is · Thu 21",
+    "weather_effect": "⚑|as is · Thu 21",
+    "zone_list": "-|"
+   }
+  }
+ },
+ {
+  "name": "sep22-news",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "card": "trips",
+  "tab": "News",
+  "full": true,
+  "expect": {
+   "state": "held",
+   "text": [
+    "Paused by trips, checks",
+    "45.7% of arrived rows dropped",
+    "readers see Thu 21"
+   ],
+   "count": {
+    ".vf-decide": 1
+   },
+   "words": {
+    "section.vf-card": 60
+   }
+  }
+ },
+ {
+  "name": "sep22-dont",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide",
+   ".vf-option[data-option=dont]",
+   ".vf-switch",
+   ".vf-go"
+  ],
+  "full": true,
+  "expect": {
+   "noTitle": "‖",
+   "text": [
+    "Not published · readers keep Thu 21 until a later day publishes",
+    "Record #",
+    "Change decision"
+   ]
+  }
+ },
+ {
+  "name": "sep22-canvas",
+  "episode": "September 2023",
+  "full": true,
+  "expect": {
+   "noTitle": "‖",
+   "loads": {
+    "Fri 22": ", not published"
+   },
+   "cards": {
+    "zone_hour": "✕|still shows Thu 21",
+    "zone_list": "-|"
+   }
+  }
+ },
+ {
+  "name": "sep23-news",
+  "episode": "September 2023",
+  "day": "Sat 23",
+  "card": "trips",
+  "tab": "News",
+  "full": true,
+  "expect": {
+   "noTitle": "‖",
+   "text": [
+    "Not published · under Fri’s decision"
+   ],
+   "count": {
+    ".vf-decide": 0
+   },
+   "words": {
+    "section.vf-card": 60
+   }
+  }
+ },
+ {
+  "name": "sep24-canvas",
+  "episode": "September 2023",
+  "day": "Sun 24",
+  "expect": {
+   "noTitle": "‖",
+   "loads": {
+    "Sun 24": ", not published",
+    "Sat 23": ", not published"
+   }
+  }
+ },
+ {
+  "name": "sep25-news",
+  "episode": "September 2023",
+  "day": "Mon 25",
+  "card": "trips",
+  "tab": "News",
+  "full": true,
+  "expect": {
+   "state": "done",
+   "noTitle": "‖",
+   "text": [
+    "Mon 25 published · Thu as is · Fri–Sun not published"
+   ],
+   "words": {
+    "section.vf-card": 24
+   }
+  }
+ },
+ {
+  "name": "sep25-canvas",
+  "episode": "September 2023",
+  "day": "Mon 25",
+  "expect": {
+   "state": "done",
+   "cards": {
+    "zone_hour": "-|",
+    "weather_effect": "-|"
+   },
+   "loads": {
+    "Mon 25": "!paused"
+   }
+  }
+ },
+ {
+  "name": "sep-runs",
+  "episode": "September 2023",
+  "view": "runs",
+  "viewFirst": true,
+  "clicks": [
+   ".rb-day:has-text(\"21\")"
+  ],
+  "full": true,
+  "expect": {
+   "pageText": [
+    "PAUSED, DECIDED",
+    "Thu Sep 21 · published as is"
+   ],
+   "count": {
+    ".rb-day.asis": 1,
+    ".rb-day.dont": 3,
+    ".rb-day.waiting": 0
+   }
+  }
+ },
+ {
+  "name": "sep-runs-23",
+  "episode": "September 2023",
+  "view": "runs",
+  "viewFirst": true,
+  "clicks": [
+   ".rb-day:has-text(\"23\")",
+   ".rb-where"
+  ],
+  "full": true,
+  "expect": {
+   "pageText": [
+    "Sat Sep 23 · not published",
+    "Under Fri’s decision",
+    "Manifest:"
+   ]
+  }
+ },
+ {
+  "name": "sep21-reload",
+  "reload": true,
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "full": true,
+  "expect": {
+   "noTitle": "‖",
+   "text": [
+    "Published as is · Owner"
+   ],
+   "count": {
+    ".vf-decide": 0
+   }
+  }
+ },
+ {
+  "name": "sep21-reload-canvas",
+  "episode": "September 2023",
+  "full": true,
+  "expect": {
+   "cards": {
+    "zone_hour": "⚑|as is · Thu 21"
+   },
+   "loads": {
+    "Thu 21": ", published as is"
+   }
+  }
+ },
+ {
+  "name": "export-sep",
+  "episode": "September 2023",
+  "view": "runs",
+  "download": "#record button:has-text(\"Export for audit\")",
+  "expect": {}
+ },
+ {
+  "name": "nov14-canvas",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "expect": {
+   "state": "held",
+   "title": "^‖ ",
+   "status": "^Mon Nov 14: Vendor 1 sent almost nothing",
+   "loads": {
+    "Mon 14": ", paused, waiting on a decision"
+   }
+  }
+ },
+ {
+  "name": "nov14-decide",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "full": true,
+  "expect": {
+   "minCharts": 2,
+   "maxWords": 45,
+   "text": [
+    "Vendor 1 · 2",
+    "Keep "
+   ]
+  }
+ },
+ {
+  "name": "nov14-decide-masked",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "mask": "letters",
+  "full": true,
+  "expect": {}
+ },
+ {
+  "name": "nov14-dev",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "select": [
+   "#viewer",
+   "dev"
+  ],
+  "card": "trips",
+  "tab": "News",
+  "full": true,
+  "expect": {
+   "text": [
+    "Paused by trips",
+    "Waits on Owner"
+   ],
+   "count": {
+    ".vf-decide": 0
+   },
+   "words": {
+    "section.vf-card": 60
+   }
+  }
+ },
+ {
+  "name": "nov14-dev-sheet",
+  "select": [
+   "#viewer",
+   "dev"
+  ],
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   "section.vf-card .vf-reach",
+   ".vf-see"
+  ],
+  "full": true,
+  "expect": {
+   "text": [
+    "Mon Nov 14 · what readers get",
+    "until Owner decides",
+    "Ask ›",
+    "Publish as is",
+    "Keep "
+   ],
+   "count": {
+    ".vf-detail .vf-go": 0,
+    ".vf-detail .vf-reason": 0,
+    ".vf-detail .vf-switch": 0
+   },
+   "disabled": [
+    ".vf-option[data-option=asis]",
+    ".vf-option[data-option=dont]"
+   ],
+   "minCharts": 2,
+   "maxWords": 45
+  }
+ },
+ {
+  "name": "export",
+  "episode": "November 2022",
+  "select": [
+   "#viewer",
+   "owner"
+  ],
+  "view": "runs",
+  "download": "#record button:has-text(\"Export for audit\")",
+  "expect": {}
+ },
+ {
+  "name": "sep21-decide-dark",
+  "scheme": "dark",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "full": true,
+  "expect": {
+   "state": "held",
+   "minCharts": 2,
+   "maxWords": 45,
+   "disabled": [
+    ".vf-go"
+   ]
+  }
+ },
+ {
+  "name": "nov14-owner-dark",
+  "scheme": "dark",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "card": "trips",
+  "tab": "News",
+  "full": true,
+  "expect": {
+   "state": "held",
+   "text": [
+    "Paused by trips",
+    "readers see"
+   ],
+   "count": {
+    ".vf-decide": 1
+   }
+  }
+ },
+ {
+  "name": "nov14-dont-dark",
+  "scheme": "dark",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide",
+   ".vf-option[data-option=dont]",
+   ".vf-switch",
+   ".vf-reason:has-text(\"Known outage\")",
+   ".vf-go"
+  ],
+  "full": true,
+  "expect": {
+   "text": [
+    "Not published · readers keep",
+    "until a later day publishes",
+    "Record #"
+   ]
+  }
+ },
+ {
+  "name": "nov15-dark",
+  "scheme": "dark",
+  "episode": "November 2022",
+  "day": "Tue 15",
+  "card": "trips",
+  "tab": "News",
+  "full": true,
+  "expect": {
+   "text": [
+    "Not published · under Mon’s decision"
+   ],
+   "count": {
+    ".vf-decide": 0
+   },
+   "title": "^‖ "
+  }
+ },
+ {
+  "name": "export-dark",
+  "scheme": "dark",
+  "episode": "November 2022",
+  "view": "runs",
+  "download": "#record button:has-text(\"Export for audit\")",
+  "expect": {}
+ }
+]

@@ -1,0 +1,17 @@
+[
+ { "name": "nov14-sheet", "episode": "November 2022", "day": "Mon 14", "card": "trips", "tab": "News",
+   "clicks": [".vf-decide"], "full": true,
+   "expect": { "maxWords": 45, "text": ["Fill from Mon 7", "Without Vendor 1", "Keep Sat 12"] } },
+ { "name": "nov14-fill-later", "episode": "November 2022", "day": "Mon 14", "card": "trips", "tab": "News",
+   "clicks": [".vf-decide", ".vf-option[data-option=fill]", ".vf-switch", ".vf-go"],
+   "expect": { "text": ["Filled from Mon 7", "until a day passes"] } },
+ { "name": "nov15-under-rule", "episode": "November 2022", "day": "Tue 15", "full": true,
+   "expect": { "status": "^Tue Nov 15: filled from Tue 1", "cards": { "zone_hour": "◧|filled · Tue 15" },
+     "loads": { "Tue 15": ", filled from Tue 1" } } },
+ { "name": "nov18-holiday-skipped", "episode": "November 2022", "day": "Fri 18", "full": true,
+   "expect": { "status": "^Fri Nov 18: filled from Fri 4" } },
+ { "name": "nov21-after", "episode": "November 2022", "day": "Mon 21", "full": true,
+   "expect": { "pageText": ["Mon 21 published", "Mon–Sun filled"] } },
+ { "name": "nov-record", "view": "runs", "episode": "November 2022",
+   "expect": { "pageText": ["Tue Nov 15 filled from Tue 1, by #"] } }
+]

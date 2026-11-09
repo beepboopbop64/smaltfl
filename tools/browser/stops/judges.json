@@ -1,0 +1,861 @@
+[
+ {
+  "card": "trips",
+  "tab": "News",
+  "name": "jan01-news",
+  "episode": "January 2024",
+  "day": "Mon 1"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "name": "jan01-news-full",
+  "full": true,
+  "episode": "January 2024",
+  "day": "Mon 1"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "name": "jan01-detail",
+  "click": "#sheet section.vf-card .vf-hero",
+  "full": true,
+  "episode": "January 2024",
+  "day": "Mon 1"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sat 6",
+  "name": "jan06-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sat 6",
+  "name": "jan06-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sun 7",
+  "name": "jan07-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sun 7",
+  "name": "jan07-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sun 7",
+  "name": "jan07-detail",
+  "click": "#sheet section.vf-card .vf-hero",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Mon 15",
+  "name": "jan15-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Mon 15",
+  "name": "jan15-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "name": "sep21-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "name": "sep21-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "name": "sep21-detail",
+  "click": "#sheet section.vf-card .vf-hero",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "name": "sep22-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "name": "sep22-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "name": "sep22-detail",
+  "click": "#sheet section.vf-card .vf-hero",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Sat 23",
+  "name": "sep23-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Sat 23",
+  "name": "sep23-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Sat 23",
+  "name": "sep23-detail",
+  "click": "#sheet section.vf-card .vf-hero",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Mon 25",
+  "name": "sep25-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Mon 25",
+  "name": "sep25-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sat 17",
+  "name": "sep17-22-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sat 17",
+  "name": "sep17-22-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sat 17",
+  "name": "sep17-22-detail",
+  "click": "#sheet section.vf-card .vf-hero",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sun 18",
+  "name": "sep18-22-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sun 18",
+  "name": "sep18-22-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sun 18",
+  "name": "sep18-22-detail",
+  "click": "#sheet section.vf-card .vf-hero",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Sat 12",
+  "name": "nov12-22-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Sat 12",
+  "name": "nov12-22-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "name": "nov14-22-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "name": "nov14-22-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "name": "nov14-22-detail",
+  "click": "#sheet section.vf-card .vf-hero",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Tue 15",
+  "name": "nov15-22-news"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Tue 15",
+  "name": "nov15-22-news-full",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Tue 15",
+  "name": "nov15-22-detail",
+  "click": "#sheet section.vf-card .vf-hero",
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "name": "jan01-news-mask-letters",
+  "mask": "letters",
+  "episode": "January 2024",
+  "day": "Mon 1"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "name": "jan01-news-mask-all",
+  "mask": "all",
+  "episode": "January 2024",
+  "day": "Mon 1"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sat 6",
+  "name": "jan06-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sat 6",
+  "name": "jan06-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sun 7",
+  "name": "jan07-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sun 7",
+  "name": "jan07-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Mon 15",
+  "name": "jan15-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Mon 15",
+  "name": "jan15-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "name": "sep21-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "name": "sep21-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "name": "sep22-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "name": "sep22-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Sat 23",
+  "name": "sep23-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Sat 23",
+  "name": "sep23-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Mon 25",
+  "name": "sep25-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Mon 25",
+  "name": "sep25-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sat 17",
+  "name": "sep17-22-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sat 17",
+  "name": "sep17-22-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sun 18",
+  "name": "sep18-22-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sun 18",
+  "name": "sep18-22-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Sat 12",
+  "name": "nov12-22-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Sat 12",
+  "name": "nov12-22-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "name": "nov14-22-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "name": "nov14-22-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Tue 15",
+  "name": "nov15-22-news-mask-letters",
+  "mask": "letters"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Tue 15",
+  "name": "nov15-22-news-mask-all",
+  "mask": "all"
+ },
+ {
+  "name": "jan01-canvas",
+  "episode": "January 2024",
+  "day": "Mon 1"
+ },
+ {
+  "name": "sep22-canvas",
+  "episode": "September 2023",
+  "day": "Fri 22"
+ },
+ {
+  "name": "nov15-22-canvas",
+  "episode": "November 2022",
+  "day": "Tue 15"
+ },
+ {
+  "name": "sep22-trips_valid-news",
+  "card": "trips_valid",
+  "tab": "News",
+  "full": true,
+  "episode": "September 2023",
+  "day": "Fri 22"
+ },
+ {
+  "name": "sep22-trips_profile-columns",
+  "card": "trips_profile",
+  "tab": "Columns",
+  "full": true,
+  "episode": "September 2023",
+  "day": "Fri 22"
+ },
+ {
+  "name": "sep21-trips_profile-history",
+  "card": "trips_profile",
+  "tab": "History",
+  "full": true,
+  "episode": "September 2023",
+  "day": "Thu 21"
+ },
+ {
+  "name": "jan01-zones-news",
+  "card": "zones",
+  "tab": "News",
+  "full": true,
+  "episode": "January 2024",
+  "day": "Mon 1"
+ },
+ {
+  "name": "jan01-trips_profile-oddrows",
+  "card": "trips_profile",
+  "tab": "Odd rows",
+  "full": true,
+  "episode": "January 2024",
+  "day": "Mon 1"
+ },
+ {
+  "name": "sep18-23-news",
+  "episode": "September 2023",
+  "day": "Mon 18",
+  "card": "trips",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "jan01-canvas-full",
+  "episode": "January 2024",
+  "day": "Mon 1",
+  "full": true
+ },
+ {
+  "name": "jan01-trips_valid-news",
+  "episode": "January 2024",
+  "day": "Mon 1",
+  "card": "trips_valid",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "sep22-trips_valid-news",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "card": "trips_valid",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "jan01-weather_profile-oddrows",
+  "episode": "January 2024",
+  "day": "Mon 1",
+  "card": "weather_profile",
+  "tab": "Odd rows",
+  "full": true
+ },
+ {
+  "name": "sep21-ana-canvas",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "select": [
+   "#viewer",
+   "ana"
+  ]
+ },
+ {
+  "name": "sep21-ana-zone_hour-news",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "select": [
+   "#viewer",
+   "ana"
+  ],
+  "card": "zone_hour",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "nov14-dev-news",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "select": [
+   "#viewer",
+   "dev"
+  ],
+  "card": "trips",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "nov14-owner-news",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "select": [
+   "#viewer",
+   "owner"
+  ],
+  "card": "trips",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "nov14-decide",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "full": true
+ },
+ {
+  "name": "sep22-decide",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "full": true
+ },
+ {
+  "name": "sep21-decide",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "full": true
+ },
+ {
+  "name": "sep21-decide-mask-letters",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "mask": "letters",
+  "full": true
+ },
+ {
+  "name": "sep25-before",
+  "episode": "September 2023",
+  "day": "Mon 25",
+  "card": "trips",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "sep21-asis",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide",
+   ".vf-option[data-option=asis]",
+   ".vf-reason:has-text(\"Real change\")",
+   ".vf-go"
+  ],
+  "full": true
+ },
+ {
+  "name": "sep22-dont",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide",
+   ".vf-option[data-option=dont]",
+   ".vf-seg-b[data-scope=untilPass]",
+   ".vf-go"
+  ],
+  "full": true
+ },
+ {
+  "name": "sep23-after",
+  "episode": "September 2023",
+  "day": "Sat 23",
+  "card": "trips",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "sep25-after",
+  "episode": "September 2023",
+  "day": "Mon 25",
+  "card": "trips",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "sep25-after-canvas",
+  "episode": "September 2023",
+  "day": "Mon 25"
+ },
+ {
+  "name": "sep-runs",
+  "episode": "September 2023",
+  "view": "runs",
+  "viewFirst": true,
+  "full": true
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "name": "jan01-news-dark",
+  "scheme": "dark",
+  "episode": "January 2024",
+  "day": "Mon 1"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sat 6",
+  "name": "jan06-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Sun 7",
+  "name": "jan07-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "January 2024",
+  "day": "Mon 15",
+  "name": "jan15-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "name": "sep21-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Fri 22",
+  "name": "sep22-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Sat 23",
+  "name": "sep23-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2023",
+  "day": "Mon 25",
+  "name": "sep25-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sat 17",
+  "name": "sep17-22-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "September 2022",
+  "day": "Sun 18",
+  "name": "sep18-22-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Sat 12",
+  "name": "nov12-22-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "name": "nov14-22-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "card": "trips",
+  "tab": "News",
+  "episode": "November 2022",
+  "day": "Tue 15",
+  "name": "nov15-22-news-dark",
+  "scheme": "dark"
+ },
+ {
+  "name": "sep21-decide-dark",
+  "scheme": "dark",
+  "episode": "September 2023",
+  "day": "Thu 21",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "full": true
+ },
+ {
+  "name": "nov14-decide-dark",
+  "scheme": "dark",
+  "episode": "November 2022",
+  "day": "Mon 14",
+  "card": "trips",
+  "tab": "News",
+  "clicks": [
+   ".vf-decide"
+  ],
+  "full": true
+ }
+]
