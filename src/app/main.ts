@@ -4462,7 +4462,11 @@ interface Kept {
 }
 function keptOf(theirs: RunRecord, day: string): Kept | null {
   const d = theirs.derived;
-  const rows = d ? (filledRows(theirs.result, d.repair.step) ?? tripsOf(d.from)) : tripsOf(theirs);
+  // A filled day's rows: what its checks were given, past the fill (the fill step itself is a view, uncounted).
+  const src = loadSource();
+  const check = src ? checksOf(src) : undefined;
+  const given = check ? theirs.result.manifest.nodes.find((n) => n.origin === check.id)?.expectations?.rows : undefined;
+  const rows = d ? (filledRows(theirs.result, d.repair.step) ?? given ?? tripsOf(d.from)) : tripsOf(theirs);
   return rows === undefined ? null : { day, rows, ...(d ? { mark: d.repair.kind, repair: d.repair } : {}) };
 }
 
@@ -7373,7 +7377,9 @@ function refreshRanges(): void {
   const settings = rangesFor(state.doc, source);
   flowHistory = new HistoryRanges(file, { ...settings, recorded: new Set(skips), levels });
   history = new HistoryRanges(file, { ...settings, skip: incidentDays(), recorded: new Set(skips), levels });
-  claims.clear();
+  // claim/1 is told from these ranges, so it is told again; claim/2 is what each run was given, told before it from its
+  // load's measures (claimsForRun), and is kept: a remedy staged later judges its day by the same claim.
+  if (!generalForm()) claims.clear();
   storyCache.clear();
   alerts = null;
   backtests.clear();
