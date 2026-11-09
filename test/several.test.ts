@@ -23,6 +23,8 @@ import { flowHash, type FlowPlan } from '../src/core/plan.js';
 import { repairDocument, type Repair } from '../src/core/fill.js';
 import { sha256Hex, utf8 } from '../src/core/hash.js';
 import { loadClaim, tailPath, type StoryClaim2 } from '../src/core/hold.js';
+import { tailFromRecord } from '../src/core/retell.js';
+import { tailRef } from '../src/core/measures.js';
 import { installFakeIndexedDB } from './helpers/fake-idb.js';
 import { settingsFor, tailBefore, type Measures } from '../src/core/measures.js';
 import { measureLoad, pinFile, releaseRun, runFlow, translate, verifyRun, type FlowDocument, type ReleaseInput, type RunResult } from '../src/index.js';
@@ -120,7 +122,7 @@ async function keep(db: Database, rec: FlowRecord, plan: FlowPlan, r: RunResult)
   const row = db.query('SELECT plan FROM _smaltfl_plans WHERE hash = ?', [r.manifest.plan]).rows[0]!;
   const planBlob = await rec.keep('plan', JSON.parse(String(row[0])));
   const loads = [...loadsOf(plan, r.manifest).values()];
-  const base = { run: r.run, manifest: r.hash, blob, plan: planBlob, load: null, files: [], day: String(r.manifest.parameters.day), inputs: inputsOf(r.manifest) as unknown as JSONValue, loads: loads as unknown as JSONValue };
+  const base = { run: r.run, manifest: r.hash, blob, plan: planBlob, load: null, files: [], day: String(r.manifest.parameters.day), inputs: inputsOf(r.manifest) as unknown as JSONValue, loads: loads as unknown as JSONValue, ...(r.measures ? { measures: r.measures as unknown as JSONValue } : {}) };
   if (r.holds.length === 0) return rec.append('run', 'owner', { ...base, outcome: 'ok' });
   const keys = stagedKeys(r.manifest, heldOutputs(JSON.parse(String(row[0])) as FlowPlan, r.holds));
   const held: Omit<HeldAbout, 'run' | 'manifest' | 'outcome' | 'day' | 'inputs' | 'loads'> = { holds: r.holds, waiting: r.waiting, keys };
@@ -282,6 +284,43 @@ describe('two watched sources, each with its own cadence (I16, Q-55)', () => {
       expect(bad).toContainEqual(expect.stringMatching(new RegExp(`^release #${wrong.seq + 1}: 3 outputs of run ${d.run} released, citing decision #${wrong.seq}: its decision, #${wrong.seq}, doesn't hold; its decision, #${wrong.seq}, is about edr's 2024-09-10T12 load, which didn't hold run ${d.run}`)));
     } finally {
       db.close();
+    }
+  }, 120_000);
+
+  it('runs the same loads again in a new engine with the same keys, the fill too, and the tail one leaf a slot run (I2, C5)', async () => {
+    installFakeIndexedDB();
+    const one = await world(true);
+    const two = await world();
+    try {
+      const fillFor = async (w: World, c: RunResult & { claims: StoryClaim2[] }) => {
+        const d = await w.donor('2024-09-09T06');
+        const repair: Repair = { kind: 'fill', step: 'edr_filled', source: 'edr', missing: { time: 'event_time', hours: [6, 9] }, donor: { rule: 'nearest', direction: 'before', day: '2024-09-09T06', file: { path: 'edr_file_donor', sha256: '0'.repeat(64), bytes: 0 }, claim: d as never } };
+        return runFlow(w.db, repairDocument(w.doc, repair), { smaltdb: SMALTDB, parameters: { day: '2024-09-10', slot: '2024-09-10T06' }, claims: [c.claims[0]!, c.holds[0]!.claim!, d], stage: true, from: { run: c.run, manifest: c.hash } });
+      };
+      const runs = async (w: World) => {
+        await w.arrive('2024-09-09', '2024-09-10T00');
+        await w.arrive('2024-09-10', '2024-09-10T00');
+        return w.arrive('2024-09-10', '2024-09-10T06');
+      };
+      const c1 = await runs(one);
+      const f1 = await fillFor(one, c1);
+      const rec = one.rec!;
+      const before = tailFromRecord(rec.entries, rec.entries.length, 'edr', null);
+      expect(before.map((m) => m.slot)).toEqual(['2024-09-10T00', '2024-09-10T06']);
+      // The derived run, kept as the app keeps it, and the held slot run again: neither adds a leaf.
+      await rec.append('run', 'owner', { run: f1.run, manifest: f1.hash, outcome: 'derived', measures: f1.measures as unknown as JSONValue });
+      await one.arrive('2024-09-10', '2024-09-10T06');
+      const after = tailFromRecord(rec.entries, rec.entries.length, 'edr', null);
+      expect(tailRef(after)).toEqual(tailRef(before));
+      // A new engine: the same files and documents give the same keys, the held slot's and its fill's.
+      const c2 = await runs(two);
+      expect(c2.manifest.outputs).toEqual(c1.manifest.outputs);
+      expect(c2.holds.map((h) => h.load)).toEqual(c1.holds.map((h) => h.load));
+      const f2 = await fillFor(two, c2);
+      expect(f2.manifest.outputs).toEqual(f1.manifest.outputs);
+    } finally {
+      one.db.close();
+      two.db.close();
     }
   }, 120_000);
 });

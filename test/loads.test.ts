@@ -6,6 +6,7 @@
  * load: the slot's hours, and none when two loads hold (amendment 1 S2).
  */
 import { describe, expect, it } from 'vitest';
+import { pauseLines, pauseReasons } from '../src/core/decision.js';
 import { offersOf, missingOf } from '../src/core/fill.js';
 import { byLoad, carry, dayState, decisionForLoad, holdsOf, judgeClaims, loadKey, loadsOf, pausesOf, skipOf, standingForLoad, type DecideAbout, type HeldAbout, type Hold, type Inputs, type Load, type ReleaseAbout, type StoryClaim2 } from '../src/core/hold.js';
 import type { LogEntry } from '../src/core/log.js';
@@ -154,6 +155,17 @@ describe('pauses about loads (ADR 0010 §7)', () => {
   });
 });
 
+describe('what a source learns from, by load (ADR 0010 §5, §7, C5, I3)', () => {
+  it('leaves out a load filled, not published or waiting, and learns from one published as is or accepted', () => {
+    seq = 0;
+    const day = AUTH('2024-09-10');
+    const slots = ['2024-09-10T00', '2024-09-10T06', '2024-09-10T12', '2024-09-10T18', '2024-09-11T00'].map((x, i) => EDR(x, String(i + 3)));
+    const entries: LogEntry[] = slots.map((l, i) => run(i + 1, day, l, [story(l)]));
+    entries.push(decideLoad(slots[0]!, 1, 'asis'), decideLoad(slots[1]!, 2, 'fill', 'day', { repair: { kind: 'fill' } as never }), decideLoad(slots[2]!, 3, 'dont'), decideLoad(slots[3]!, 4, 'accept', 'day', { level: { source: 'edr', from: '2024-09-10', metrics: ['trips'] } }));
+    expect(skipOf(entries, 'day', 'edr')).toEqual(['2024-09-10T06', '2024-09-10T12', '2024-09-11T00']);
+  });
+});
+
 describe('fills of a load (ADR 0010 §7, amendment 1 S2)', () => {
   const told = { hero: 'hours' as const, split: null, hours: { got: [3, 2, 4, 3, 900, 950], usual: [880, 900, 910, 920, 900, 950], from: 0, to: 3, fall: 99, start: 360, width: 60 } };
   it('names a slot\'s missing hours as the day\'s, and none in quarter hours', () => {
@@ -170,5 +182,24 @@ describe('fills of a load (ADR 0010 §7, amendment 1 S2)', () => {
     expect(offersOf({ ...base, holding: 2 })).toEqual([]);
     const amount = { state: 'wrong' as const, hero: 'amount' as const, split: null, cause: { kind: 'volume' }, absorbed: [], amount: { value: 10, low: 50, high: 90, expected: 70 } };
     expect(offersOf({ ...base, told: amount as never, holds: [{ by: 'story' }], every: '6h' }).some((o) => o.option === 'accept')).toBe(false);
+  });
+});
+
+describe('the day line of several sources (ADR 0010 §7)', () => {
+  it('names the loads that pause the day, a slot by its hours, within its words', () => {
+    const holds: Pick<Hold, 'by' | 'origin' | 'load'>[] = [
+      { by: 'checks', origin: 'auth_valid', load: AUTH('2024-09-10') },
+      { by: 'story', origin: 'edr', load: EDR('2024-09-10T06') },
+      { by: 'story', origin: 'auth', load: AUTH('2024-09-10') },
+    ];
+    const every = (s: string) => (s === 'edr' ? '6h' : 'day') as never;
+    expect(pauseReasons(holds, () => true, every)).toEqual(['edr 06–12', 'auth', 'auth checks']);
+    expect(pauseReasons(holds.slice(0, 2), () => true, every)).toEqual(['edr 06–12', 'auth checks']);
+    // The design's line: two sources' stories, readers' day and the verb in 10 words.
+    const row = pauseLines({ state: 'waiting', names: ['edr_actions'], by: pauseReasons(holds.slice(1), () => true, every), readers: '2024-09-09', who: null, at: null, under: null, may: true, deciders: 'Owner' });
+    expect(row.reach).toBe('Paused by edr 06–12, auth');
+    expect(`${row.reach} · ${row.see} · ${row.verb}`.split(/\s+/).filter((w) => /\w/.test(w)).length).toBeLessThanOrEqual(10);
+    // One source, as ADR 0009 has it.
+    expect(pauseReasons([{ by: 'story', origin: 'trips' }, { by: 'checks', origin: 'trips_valid' }])).toEqual(['trips', 'checks']);
   });
 });

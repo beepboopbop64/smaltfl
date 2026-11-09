@@ -22,6 +22,7 @@
  *   one switch for later days, the button naming the result; their receipts, a withdrawal's (Q-61), and every line
  *   that says what readers got of the day; and a day's versions (`versionLines`).
  */
+import { slotLabel, type Every } from './calendar.js';
 import { dayMid, dayShort, MARK, readersSee, type DayState, type RemedyMark } from './days.js';
 import type { FillCounts, Missing, Offer, Version } from './fill.js';
 import type { HistoryRanges } from './history.js';
@@ -556,12 +557,18 @@ export function heldLine(x: Pick<Hold, 'by' | 'origin' | 'said'>, history: boole
 /**
  * What paused a day, said for the pause row (ADR 0009 §12): the source its story held ("trips"), its checks ("checks"),
  * a source not judged ("trips not judged"), each once, and only what the viewer may see (`open`, by the holding node):
- * a node closed to them is neither named nor counted.
+ * a node closed to them is neither named nor counted. With several watched sources (ADR 0010 §7), each by its load: a
+ * slot of a day by its hours ("edr 06–12", its length from `every`), a check by its source ("auth checks").
  */
-export function pauseReasons(holds: readonly Pick<Hold, 'by' | 'origin'>[], open: (origin: string) => boolean = () => true): string[] {
+export function pauseReasons(holds: readonly Pick<Hold, 'by' | 'origin' | 'load'>[], open: (origin: string) => boolean = () => true, every: (source: string) => Every = () => 'day'): string[] {
   // The source first, then its checks, whatever order the plugin held them in.
   const order = { story: 0, unjudged: 1, checks: 2 } as const;
-  const said = holds.filter((x) => open(x.origin)).sort((a, b) => order[a.by] - order[b.by]).map((x) => (x.by === 'checks' ? 'checks' : x.by === 'unjudged' ? `${x.origin} not judged` : x.origin));
+  const slot = (x: Pick<Hold, 'load'>) => (x.load && x.load.slot.length > 10 ? ` ${slotLabel(x.load.slot, every(x.load.source))}` : '');
+  const said = holds.filter((x) => open(x.origin)).sort((a, b) => order[a.by] - order[b.by]).map((x) => {
+    const of = x.load?.source ?? x.origin;
+    if (x.by === 'checks') return x.load ? `${x.load.source} checks` : 'checks';
+    return x.by === 'unjudged' ? `${of}${slot(x)} not judged` : `${of}${slot(x)}`;
+  });
   return [...new Set(said)];
 }
 
