@@ -7,9 +7,13 @@
  * Plain DOM and SVG, as the family's apps are. Everything a person typed or a dataset holds is set with textContent.
  */
 import exampleDoc from '../../examples/nyc-taxis-weather.smaltfl.json';
-import { EXAMPLE_DATA, EXAMPLE_SOURCES, pinnedDdl, type Binding } from '../../examples/sources.js';
+import { donorBinding, EXAMPLE_DATA, EXAMPLE_SOURCES, pinnedDdl, type Binding } from '../../examples/sources.js';
 import { namedFiles, readDataList, type DataList } from './datalist.js';
-import { holidayOf, seasonOf } from '../core/calendar.js';
+import { holidayOf, seasonOf, US_NYC_1, type Calendar } from '../core/calendar.js';
+
+/** The calendar the watched source is judged by (ADR 0010 §2): its days marked on the strips and charts, Election Day
+ * among the taxi example's. */
+const calendarNow = (): Calendar => history?.calendar ?? US_NYC_1;
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, periodOf, sourceOf, takeOut, validateDocument, watchHistory, withoutDisplay } from '../core/document.js';
@@ -22,7 +26,7 @@ import { isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, ty
 import { calendarHead, heldLoadLine, dayMid, dayShort, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type PauseState, type RemedyMark } from '../core/days.js';
 import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, type AfterPart, type RemedySaid, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, rangesFor, dayClaim, dayState, flowStory, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
-import { dayVersions, fillCounts, partLabel as remedyPart, type Repair, type Version } from '../core/fill.js';
+import { dayVersions, donorIdOf, fillCounts, partLabel as remedyPart, type Repair, type Version } from '../core/fill.js';
 import { derivedAbout, derivedFails, derivedKeys, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
 import { ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
@@ -2957,6 +2961,12 @@ const NEWS_NAMES = {
     const x = rowNoun(loadSource() ?? '');
     return n === 1 ? x.one : x.many;
   },
+  /** A column whose parts the ontology names (ADR 0010 §8): "Vendor {code}", and whether its parts send the rows. The
+   * flow's verdict reads the same (news.ts flowNames), so a head says "Vendor 1 sent almost nothing" in both. */
+  part: (c: string) => {
+    const p = loadSource() ? propertyOf(state.doc.ontology, loadSource()!, c) : undefined;
+    return p && (p.name || p.role) ? { ...(p.name ? { name: p.name } : {}), ...(p.role ? { role: p.role } : {}) } : undefined;
+  },
 };
 
 /** What a source's or step's rows are called, one and many (ADR 0010 §8, ontology.ts `nounOf`). */
@@ -3788,7 +3798,7 @@ function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): v
   const said = r && day ? (() => {
     const weeks = r.guesses.find((g) => g.by === 'weeks')?.from.map((x) => x.day) ?? [];
     const year = r.guesses.find((g) => g.by === 'year')?.from.map((x) => x.day) ?? [];
-    return judgedWords({ weekday: wd, weeks, year, holiday: holidayOf(day) ?? null, special: !!r.special, band: band.replace(/^usual /, ''), low: r.low, high: r.high, expected: r.expected, holidayIn: weeks.some((d) => !!holidayOf(d) || !!seasonOf(d)) });
+    return judgedWords({ weekday: wd, weeks, year, holiday: holidayOf(day, calendarNow()) ?? null, special: !!r.special, band: band.replace(/^usual /, ''), low: r.low, high: r.high, expected: r.expected, holidayIn: weeks.some((d) => !!holidayOf(d, calendarNow()) || !!seasonOf(d, calendarNow())) });
   })() : null;
   body.push(
     oneLine(said?.[0] ?? 'A day is judged against the same weekday in the weeks before and the day last year, weighted by how well each guesses.'),
@@ -6984,7 +6994,7 @@ function renderLoads(): void {
     const held = !later && !absent && !state.doc.publish && !!(history && historyOpen() && storyFor(l.day)?.gate?.held);
     const range = tripsRanges?.at(l.day);
     const label = later ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: after this day` : absent ? `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}: not run` : `${dayLabel(l.day)}${l.note ? `, ${l.note}` : ''}${counted ? `: ${rowsSaid(l.rows)}` : ''}${top ? (top.kind === 'unlearned' ? `, not judged yet${top.detail ? `: ${top.detail}` : ''}` : `, ${VERDICT_WORD[top.severity]}${saysHead(top) ? `: ${top.title}` : ''}`) : ''}${held ? ', held' : ''}${pm ? pauseSaid(l.day, pm) : ''}${r ? '' : ', not run yet'}`;
-    return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', later ? 'later' : '', absent ? 'notrun' : '', holidayOf(l.day) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
+    return h('button', { type: 'button', class: ['load', `sev-${sev}`, k === loads.at ? 'at' : '', r ? 'ran' : '', later ? 'later' : '', absent ? 'notrun' : '', holidayOf(l.day, calendarNow()) ? 'holiday' : l.note ? 'holiday season' : ''].filter(Boolean).join(' '), 'aria-pressed': String(k === loads.at), 'aria-label': label, title: label, disabled: busy || loads.playing, onclick: () => void useLoad(k) },
       h('span', { class: 'ld-day' }, weekday(l.day)),
       h('span', { class: 'ld-date' }, String(dateOf(l.day).getUTCDate())),
       svgNode(stripBar({ v: later || absent || !counted ? 0 : l.rows, low: range?.low ?? null, high: range?.high ?? null, ymax, sev: sev === 'alert' || sev === 'warn' ? sev : null })),
@@ -7410,8 +7420,8 @@ function keyOf(chips: readonly HTMLElement[], list: readonly number[], notRun: (
   const words: [VizMark, string][] = [['alert', 'wrong'], ['warn', 'unusual'], ['held', 'paused'], ['flag', 'as is'], ['closed', 'not published']];
   const marks = words.filter(([m]) => drawn.has(m)).map(([m, w]) => h('span', { class: 'lk' }, glyphEl(m, 13), w));
   const day = (k: number) => loads.list[k]!;
-  const holiday = list.some((k) => holidayOf(day(k).day));
-  const season = list.some((k) => !holidayOf(day(k).day) && !!day(k).note);
+  const holiday = list.some((k) => holidayOf(day(k).day, calendarNow()));
+  const season = list.some((k) => !holidayOf(day(k).day, calendarNow()) && !!day(k).note);
   const items = [...marks, ...(holiday ? [h('span', { class: 'lk' }, h('i', { class: 'lk-hol' }), 'holiday')] : []), ...(season ? [h('span', { class: 'lk' }, h('i', { class: 'lk-hol season' }), 'holiday season')] : []), ...(list.some(notRun) ? [h('span', { class: 'lk' }, h('i', { class: 'lk-notrun' }), 'not run')] : [])];
   return items.length ? h('p', { class: 'loads-key' }, ...items) : '';
 }
@@ -7489,8 +7499,8 @@ function bandChart(ranges: NormalRanges, days: readonly string[], focus: string,
   flush();
   // Holidays marked under the plot, and the days around them lighter.
   pts.forEach((p, i) => {
-    if (holidayOf(p.d)) svg.append(s('rect', { class: 'hol', x: (X(i) - step * 0.4).toFixed(1), y: H - B + 2, width: (step * 0.8).toFixed(1), height: 3 }));
-    else if (seasonOf(p.d)) svg.append(s('rect', { class: 'hol season', x: (X(i) - step * 0.4).toFixed(1), y: H - B + 2.5, width: (step * 0.8).toFixed(1), height: 2 }));
+    if (holidayOf(p.d, calendarNow())) svg.append(s('rect', { class: 'hol', x: (X(i) - step * 0.4).toFixed(1), y: H - B + 2, width: (step * 0.8).toFixed(1), height: 3 }));
+    else if (seasonOf(p.d, calendarNow())) svg.append(s('rect', { class: 'hol season', x: (X(i) - step * 0.4).toFixed(1), y: H - B + 2.5, width: (step * 0.8).toFixed(1), height: 2 }));
   });
   // The checks' limit, drawn where it applies: the line a share past it crosses.
   if (limit !== undefined) svg.append(s('line', { class: 'limit-line', x1: L, x2: W - R, y1: Y(limit).toFixed(1), y2: Y(limit).toFixed(1) }), s('text', { class: 'tick limit-t', x: W - R, y: (Y(limit) - 3).toFixed(1), 'text-anchor': 'end' }, `limit ${fmt(limit)}`));
@@ -7517,7 +7527,7 @@ function rangeWhy(ranges: NormalRanges, days: readonly string[], day: string, m:
   const r = ranges.at(day);
   const v = ranges.value(day);
   const what = (x: number) => (m.of === 'trips' ? `${fmt(x)} trips` : m.of === 'dropped' ? `${fmt(x)} of its trips dropped by the checks` : `${label?.replace(/^In the news: /, '') ?? 'It'}: ${fmt(x)}`);
-  const note = holidayOf(day) ?? seasonOf(day);
+  const note = holidayOf(day, calendarNow()) ?? seasonOf(day, calendarNow());
   const k = days.indexOf(day);
   const nav = h('div', { class: 'why-nav' },
     h('button', { type: 'button', class: 'btn small', 'aria-label': 'The day before', disabled: k <= 0, onclick: () => pick(days[k - 1]!) }, '‹'),
@@ -7532,12 +7542,12 @@ function rangeWhy(ranges: NormalRanges, days: readonly string[], day: string, m:
   box.append(h('p', {},
     h('b', {}, v === null ? 'Not measured' : what(v)),
     place === null ? ': its normal range is ' : place === 'within' ? ', within its normal range: ' : h('b', { class: 'off' }, `, ${place} its normal range: `),
-    `${fmt(r.low)} to ${fmt(r.high)}, around ${fmt(r.expected)}${r.guesses.length > 1 ? ', from two guesses' : r.special ? (holidayOf(day) ? ', from last year’s holiday alone' : `, from last year’s alone: ${seasonPhrase(r.special)}`) : ''}.`));
+    `${fmt(r.low)} to ${fmt(r.high)}, around ${fmt(r.expected)}${r.guesses.length > 1 ? ', from two guesses' : r.special ? (holidayOf(day, calendarNow()) ? ', from last year’s holiday alone' : `, from last year’s alone: ${seasonPhrase(r.special)}`) : ''}.`));
   const share = (g: NormalRange['guesses'][number]) => (r.guesses.length > 1 ? ` It counts ${pct0(g.weight)}${g.miss !== null ? `: it missed by ${missText(r.scale, g.miss, fmt)} on a typical day of the six weeks before` : ''}.` : '');
   const items = r.guesses.map((g) => {
     if (g.by === 'weeks') return h('li', {}, h('b', {}, fmt(g.value)), ` from the same weekday in the weeks before: the weighted median of ${listed(g.from.map((f) => shortDay(f.day)))}, the latest counting ${pct0(g.from[0]!.weight)}.${share(g)}`);
     const f = g.from[0]!;
-    const fNote = holidayOf(f.day) ?? seasonOf(f.day);
+    const fNote = holidayOf(f.day, calendarNow()) ?? seasonOf(f.day, calendarNow());
     // A share moves by points, a count by a ratio, anything else in its own units.
     const signed = (x: number) => `${x >= 0 ? '+' : '−'}${r.scale === 'share' ? `${(Math.abs(x) * 100).toFixed(1)} points` : fmt(Math.abs(x))}`;
     const moves = [
@@ -8223,7 +8233,11 @@ async function stage(r: RunRecord, repair: Repair, inRun = false): Promise<RunRe
     if (repair.donor) await pinDonor(engine, repair.source, bindingOf(repair.source)!, repair.donor.file, checked);
     const day = dayOfRun(r);
     const data = integrity.data ? { commit: integrity.data.commit, manifest: integrity.data.manifest } : null;
-    const { doc, result } = await stageRepair(engine, { doc: state.doc, held: r.result, repair, claims: claimsFor(day) ?? [], smaltdb: SMALTDB, data, log: recordHead() });
+    // Under plan/2 the donor is judged by a claim/2 (C4, B13): told from the base and the tail before its day, with its
+    // own snapshot's measures, as the derived run measures the donor's table.
+    const told = repair.donor && generalForm() ? await donorClaim2(engine, r, repair) : null;
+    const asked = told && repair.donor ? { ...repair, donor: { ...repair.donor, claim: told as never } } : repair;
+    const { doc, result } = await stageRepair(engine, { doc: state.doc, held: r.result, repair: asked, claims: claimsFor(day) ?? [], smaltdb: SMALTDB, data, log: recordHead() });
     const rec: RunRecord = { result, ms: 0, at: new Date(), inputs: r.inputs, ...(r.load !== undefined ? { load: r.load } : {}), derived: { from: r, repair, doc, seq: null } };
     stagedRuns.set(key, rec);
     derivedRuns.set(result.hash, rec);
@@ -8247,6 +8261,30 @@ async function stage(r: RunRecord, repair: Repair, inRun = false): Promise<RunRe
     setStatus(`Couldn’t prepare ${repair.kind === 'fill' ? `the fill from ${repair.donor ? dayShort(repair.donor.day) : 'another day'}` : 'the part that arrived'}: ${message(e)}`, true);
     return null;
   }
+}
+
+/**
+ * A donor's claim/2 (ADR 0010 §6, C4): the flow's verdict on the donor's day, told as `claimsForRun` tells a load's,
+ * from the base, the tail before that day and the donor's own measures (its table measured with the settings of a run
+ * on that day), named for the donor source. Null when it can't be told: the derived run then holds its donor as not
+ * judged, and the fill can't go.
+ */
+async function donorClaim2(engine: Engine, r: RunRecord, repair: Repair): Promise<Claim | null> {
+  const day = repair.donor!.day;
+  const period = periodOfFlow();
+  const parameters: Record<string, string> = { ...(r.result.manifest.parameters as Record<string, string>) };
+  if (period) parameters[period] = day;
+  if (Object.hasOwn(parameters, 'month')) parameters.month = day.slice(0, 7);
+  const plan = await translate(state.doc, parameters);
+  const node = plan.nodes.findIndex((n) => n.op === 'table' && n.origin === repair.source);
+  const b = bindingOf(repair.source);
+  const w = state.doc.publish?.watch?.[repair.source];
+  const ref = baseHistory && historyPin && w && historyPin.path === watchHistory(w) ? historyPin : null;
+  const settings = node < 0 || !b ? null : settingsFor(plan, node, ref ? baseHistory : null, state.doc.steps);
+  if (!settings || !b) return null;
+  const m = await measureLoad(engine, donorBinding(repair.source, b).table, settings);
+  const told = await loadClaim({ doc: state.doc, source: repair.source, flow: plan.flow.hash, base: ref ? baseHistory : null, baseRef: ref, tail: tails.get(repair.source) ?? [], measures: m, settings, skip: recordedSkips(), build: BUILD_COMMIT });
+  return told ? ({ ...told.claim, source: donorIdOf(repair.source) } as Claim) : null;
 }
 
 /** A derived run in the record (S9): what a held run's entry carries, with the held run it repairs, the repair, its
@@ -8979,7 +9017,7 @@ async function start(): Promise<void> {
     // The month, then each incident: an episode of days each. The app names the holidays itself.
     const month = list.month ? dateOf(`${list.month}-01`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'The loads';
     const tag = (ls: readonly Listed[], episode: string): Load[] => ls.map((l) => {
-      const note = holidayOf(l.day) ?? seasonOf(l.day);
+      const note = holidayOf(l.day, calendarNow()) ?? seasonOf(l.day, calendarNow());
       return { ...l, episode, ...(note ? { note } : {}) };
     });
     loads.list = [...tag(list.loads, month), ...list.episodes.flatMap((e) => tag(e.loads, e.name))];

@@ -324,19 +324,20 @@ export class NormalRanges {
    * that stopped, part way or all day): not learned from, as data-observability tools leave the anomalies they find
    * out of what they learn. Its own day is judged as any other. With the echo fix (ADR 0010 §5), a share far from them
    * (0.6 on the logit) is not learned from either, so last year's oddities don't come back. Under the patterns `none`
-   * and `monthly`, against the three periods before; after a break, only against days since it, so the new level is
-   * never kept out.
+   * and `monthly`, against the three periods before, or the same day of the three months before.
    */
   private outlier(k: number): boolean {
     if (this.scale !== 'count' && !(this.scale === 'share' && this.o.echoes)) return false;
     let out = this.outliers.get(k);
     if (out === undefined) {
       const v = this.val(k);
-      const b = this.breakOf(k + 1)?.from ?? -Infinity;
+      const b = this.breakOf(k + 1)?.from ?? null;
       // Against the same weekday's three weeks before; the patterns' own kind otherwise: the three periods before, or
-      // the same day of the three months before.
+      // the same day of the three months before. After a break, a day before it is moved by the step since, so the new
+      // level is never kept out and an odd day just after the break still is; none, when the step can't be told.
       const near = this.o.pattern === 'weekly' ? [k - 7, k - 14, k - 21] : this.o.pattern === 'monthly' ? this.monthsBefore(k, 3) : [k - 1, k - 2, k - 3];
-      const before = near.filter((j) => j >= b && !this.named(j)).flatMap((j) => (this.val(j) === null ? [] : [this.fwd(this.val(j)!)]));
+      const moved = b !== null && b < k && near.some((j) => j < b) ? this.step(k, b) : null;
+      const before = near.filter((j) => !this.named(j) && (b === null || j >= b || moved !== null)).flatMap((j) => (this.val(j) === null ? [] : [this.fwd(this.val(j)!) + (b !== null && j < b ? moved! : 0)]));
       out = v !== null && before.length >= 2 && Math.abs(this.fwd(v) - median(before)) > (this.scale === 'count' ? Math.log(1.5) : 0.6);
       this.outliers.set(k, out);
     }

@@ -171,12 +171,13 @@ export const calendarFor = (doc: Pick<FlowDocument, 'publish' | 'ontology' | 'ca
 
 /**
  * What a flow's ranges for a watched source must be made with (ADR 0010 §2, §3, §5): its calendar and its watch's
- * pattern; in the general form the echo fix and re-learning on its own, bad values never re-learned. `flowStory`
+ * pattern; in the general form the echo fix, and re-learning on its own when the watch asks for it (bad values never
+ * re-learned). `flowStory`
  * refuses ranges made otherwise. The levels accepted come from the record (`levelsOf`), the days left out from it too.
  */
 export function rangesFor(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calendar'>, source: string): Pick<RangeOptions, 'calendar' | 'pattern' | 'echoes' | 'relearn' | 'bad'> {
   const j = judgeOf(doc, source);
-  return { calendar: j.calendar, pattern: j.pattern, echoes: !j.legacy, relearn: !j.legacy, bad: j.bad };
+  return { calendar: j.calendar, pattern: j.pattern, echoes: !j.legacy, relearn: j.relearn, bad: j.bad };
 }
 
 /**

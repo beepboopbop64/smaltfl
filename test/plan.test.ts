@@ -9,7 +9,7 @@ import { missingSql, nodeSelect, shiftSql } from '../src/core/emit.js';
 import { planHash, planKind } from '../src/core/manifest.js';
 import { canonicalJSON } from '../src/core/canonical.js';
 import { visualFlow } from './fixtures/taxi.js';
-import { exampleDoc, exampleFilled, exampleUnfilled } from './helpers/example.js';
+import { exampleDoc, exampleFilled, exampleLegacy, exampleUnfilled } from './helpers/example.js';
 
 const env = { smaltdb: '0.9.0', smaltfl: '0.0.0' };
 
@@ -340,7 +340,7 @@ describe('a document that says how its days are judged (format 3, ADR 0010 §10)
     expect(issues({ pattern: 'none' })).toEqual([]);
     expect(issues({ pattern: 'monthly' })).toEqual([]);
     expect(issues({ pattern: 'daily' })).toEqual([{ path: '$.publish.watch.trips.pattern', message: 'weekly, none or monthly' }]);
-    expect(issues({ breaks: [] })).toEqual([{ path: '$.publish.watch.trips.breaks', message: 'not a field this version reads (history, period, every, pattern, donor, time, zone, calendar, scale, holds, count, follow): refused rather than ignored' }]);
+    expect(issues({ breaks: [] })).toEqual([{ path: '$.publish.watch.trips.breaks', message: 'not a field this version reads (history, period, every, pattern, donor, time, zone, calendar, scale, holds, relearn, count, follow): refused rather than ignored' }]);
     expect(issues({ history: '' })).toEqual([{ path: '$.publish.watch.trips.history', message: "the history's file, a file in the data's list" }]);
     expect(issues({ donor: 'previous', zone: 'Nowhere/Else', calendar: 'yes', scale: 'log', holds: 1, count: ['a', 'a'], follow: 'user' })).toEqual([
       { path: '$.publish.watch.trips.donor', message: 'weekday or nearest' },
@@ -708,7 +708,7 @@ describe('the fills’ content vectors (ADR 0009 amendment 1, Encodings)', () =>
     expect(await planHash(plan)).toBe('0749ab06d7d6e78fff14b5ff23d4f8641ac315b70764b16881b367ed13074170');
     // The example as it ships has its fill step (step A10): this vector. Taken out again (exampleUnfilled), the plan/1
     // vector it had before the fills (7d7236ea…, which is ccbc4d7b… with those marks).
-    expect(await planHash(await translate(exampleDoc(), values))).toBe('0749ab06d7d6e78fff14b5ff23d4f8641ac315b70764b16881b367ed13074170');
+    expect(await planHash(await translate(exampleLegacy(), values))).toBe('0749ab06d7d6e78fff14b5ff23d4f8641ac315b70764b16881b367ed13074170');
     const before = await translate(exampleUnfilled(), values);
     expect(await planHash(before)).toBe('7d7236ead520908b210b879a16815f4d3a727b6320f620d2821d3f87195fd252');
     const keyed = async (p: FlowPlan) => Object.fromEntries((await keysOf(p)).map((k, i) => [p.nodes[i]!.origin, k]));
@@ -716,6 +716,20 @@ describe('the fills’ content vectors (ADR 0009 amendment 1, Encodings)', () =>
     const same = Object.keys(now).filter((o) => then[o] === now[o]).sort();
     expect(same).toEqual(['districts', 'trips', 'weather', 'weather_hourly', 'zone_list', 'zones']);
     expect(Object.keys(now).filter((o) => !(o in then))).toEqual(['trips_filled']);
+  });
+
+  it('6: the example as it ships, in the general form (plan/2, ADR 0010 §13, Q-54), for Thu Sep 21, 2023', async () => {
+    const values = { month: '2023-09', day: '2023-09-21' };
+    const doc = exampleDoc();
+    expect(validateDocument(doc)).toEqual([]);
+    const plan = await translate(doc, values);
+    expect(planKind(plan)).toBe('plan/2');
+    const pub = plan.publish as PlanPublish2;
+    expect(pub.calendar).toEqual({ base: 'us-nyc/1', zone: 'America/New_York', days: [{ name: 'Election Day', weekday: 'tue', between: [2, 8], month: [11] }], windows: [], dates: [] });
+    expect(pub.watch[0]![1]).toMatchObject({ history: 'history.json', pattern: 'weekly', donor: 'weekday', scale: 'fixed', time: 'tpep_pickup_datetime', relearn: false, bad: [], newValues: [], after: [] });
+    // Checked with sha256sum over its canonical JSON. No node changes: its keys are vector 4's.
+    expect(await planHash(plan)).toBe('668856bd2ec35235a2882e3825a580d0905fa6de8531d89162b2d4d8130240c6');
+    expect(await keysOf(plan)).toEqual(await keysOf(await translate(exampleLegacy(), values)));
   });
 
   it('5: the plans without a fill step hash as they did (fc700fdf…, 32609b0f…, 292c423f…)', async () => {
@@ -738,9 +752,10 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
   it('hashes as plan/2, every setting filled in (vector)', async () => {
     const plan = await translate(v2(), { day: '2023-09-21' });
     expect(plan.flow.hash).toBe('bed47b2e3bece5da61233c8a069710f7cd5c8959d9a4926e99dadc8d9783b56a');
-    expect(canonicalJSON(plan)).toBe('{"flow":{"hash":"bed47b2e3bece5da61233c8a069710f7cd5c8959d9a4926e99dadc8d9783b56a","id":"v"},"nodes":[{"inputs":[],"op":"table","origin":"trips","table":"trips_file"},{"inputs":[0],"maxDropped":0.1,"op":"expect","origin":"trips_valid","rules":[["fare","fare_amount >= 0","drop"]]}],"outputs":[{"name":"trips_valid","node":1}],"parameters":{"day":"2023-09-21"},"publish":{"calendar":{"base":"none","dates":[],"days":[],"windows":[],"zone":"UTC"},"hold":["checks","wrong"],"meanwhile":"last","period":"day","together":true,"until":"decision","watch":[[0,{"after":[],"bad":[],"calendar":true,"count":null,"donor":"nearest","every":"day","follow":null,"history":"history.json","holds":true,"newValues":[],"pattern":"weekly","period":"day","scale":"volume","time":null,"zone":null}]]},"smaltflPlan":2}');
+    expect(canonicalJSON(plan)).toBe('{"flow":{"hash":"bed47b2e3bece5da61233c8a069710f7cd5c8959d9a4926e99dadc8d9783b56a","id":"v"},"nodes":[{"inputs":[],"op":"table","origin":"trips","table":"trips_file"},{"inputs":[0],"maxDropped":0.1,"op":"expect","origin":"trips_valid","rules":[["fare","fare_amount >= 0","drop"]]}],"outputs":[{"name":"trips_valid","node":1}],"parameters":{"day":"2023-09-21"},"publish":{"calendar":{"base":"none","dates":[],"days":[],"windows":[],"zone":"UTC"},"hold":["checks","wrong"],"meanwhile":"last","period":"day","together":true,"until":"decision","watch":[[0,{"after":[],"bad":[],"calendar":true,"count":null,"donor":"nearest","every":"day","follow":null,"history":"history.json","holds":true,"newValues":[],"pattern":"weekly","period":"day","relearn":false,"scale":"volume","time":null,"zone":null}]]},"smaltflPlan":2}');
     expect(planKind(plan)).toBe('plan/2');
-    expect(await planHash(plan)).toBe('144ec790487930eb6d396769aa15e3e961de54e8133491af9e4d7742259d393f');
+    // Recomputed when the watch gained `relearn` (phase 3, ADR 0010 E13), checked with sha256sum.
+    expect(await planHash(plan)).toBe('0c4d833a7aace2590b79d22431cd714063007d4f807f7e7a49b1f75cb2b19224');
     expect(() => validatePlan(plan)).not.toThrow();
     // The same document in the legacy form is E10's, plan/1, byte for byte.
     const { calendar: _c, ...legacy } = v2();
@@ -801,7 +816,7 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
     expect(bad({ ...pub, watch: [[0, { ...w, pattern: 'yearly' }]] })).toThrow('publish.watch[0].pattern yearly is not one this version can judge (weekly, none, monthly)');
     expect(() => validatePlan({ ...plan, publish: { ...pub, watch: [[0, { ...w, pattern: 'none' }]] } } as FlowPlan)).not.toThrow();
     const { zone: _z, ...short } = w;
-    expect(bad({ ...pub, watch: [[0, short]] })).toThrow('publish.watch[0] has after, bad, calendar, count, donor, every, follow, history, holds, newValues, pattern, period, scale, time; a watch has exactly');
+    expect(bad({ ...pub, watch: [[0, short]] })).toThrow('publish.watch[0] has after, bad, calendar, count, donor, every, follow, history, holds, newValues, pattern, period, relearn, scale, time; a watch has exactly');
     expect(bad({ ...pub, watch: [[1, w]] })).toThrow("publish.watch[0] watches node 1, which isn't a source");
     expect(bad({ ...pub, watch: [[0, { ...w, bad: [['result']] }]] })).toThrow('publish.watch[0].bad is a list of [column, …]');
     expect(bad({ ...pub, watch: [[0, { ...w, holds: false }]] })).toThrow('publish.hold judges a source (short or wrong), and no watch holds');

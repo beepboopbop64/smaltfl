@@ -301,7 +301,8 @@ describe('the flow’s verdict on a day (ADR 0009 §3)', () => {
     expect(() => flowStory(new HistoryRanges(historyWith({})), DAY, general, 'trips')).toThrow('the flow judges trips by the none calendar: these ranges were made with us-nyc/1');
     // And with the general form's pattern and re-learning (ADR 0010 §3, §5), which ranges made otherwise don't have.
     expect(() => flowStory(new HistoryRanges(historyWith({}), { calendar: NONE }), DAY, general, 'trips')).toThrow("the flow judges trips by its watch's pattern and re-learning: these ranges were made with other settings");
-    expect(rangesFor(general, 'trips')).toMatchObject({ calendar: NONE, pattern: 'weekly', echoes: true, relearn: true });
+    expect(rangesFor(general, 'trips')).toMatchObject({ calendar: NONE, pattern: 'weekly', echoes: true, relearn: false });
+    expect(rangesFor({ ...general, publish: { ...general.publish, watch: { trips: { history: 'history.json', relearn: true } } } }, 'trips')).toMatchObject({ relearn: true });
     expect(rangesFor(doc, 'trips')).toMatchObject({ pattern: 'weekly', echoes: false, relearn: false });
     expect(dayClaim(new HistoryRanges(historyWith({}), rangesFor(general, 'trips')), general, HISTORY, FIRST_THANKSGIVING, 'trips', 'dev')!.state).not.toBe('unlearned');
   });

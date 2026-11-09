@@ -96,10 +96,12 @@ export interface JudgeSettings {
   after: ReadonlyMap<string, { of: string; minutes: number }>;
   /** What a day is compared with (ADR 0010 §3): the watch's pattern; weekly in the legacy form. */
   pattern: 'weekly' | 'none' | 'monthly';
+  /** Whether a lasting change is re-learned on its own (ADR 0010 §5): only when the watch says so. */
+  relearn: boolean;
 }
 
 /** The legacy form's settings: what every flow was judged by before ADR 0010. */
-export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly' }) as JudgeSettings;
+export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly', relearn: false }) as JudgeSettings;
 
 /**
  * How a document judges a watched source (ADR 0010 §10, §11): its watch's settings and the marks its ontology puts on the
@@ -119,6 +121,7 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
     serious: new Set(m.newValues.map(([column]) => column.toLowerCase())),
     after: new Map(m.after.map(([column, of, minutes]) => [column.toLowerCase(), { of, minutes }])),
     pattern: general?.pattern ?? 'weekly',
+    relearn: general?.relearn ?? false,
   };
 }
 

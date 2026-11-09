@@ -133,9 +133,11 @@ describe('a step in rows that stays: a +60% step, accepted and not (phase 3, ADR
   const STEP = '2024-02-06';
   const file = securityHistory({ incidents: false, step: { from: STEP, by: 1.6 } });
   const first23 = file.days.filter((d) => d >= STEP && d < '2024-02-29');
+  // With re-learning on its own asked for (ADR 0010 §5): the step held a day, so it is never re-learned (X7).
+  const relearning = { ...doc, publish: { ...doc.publish!, watch: { auth: { history: 'auth-history.json', time: 'event_time', relearn: true } } } };
   const heldWith = (levels: { from: string; metrics: string[] }[]) => {
-    const r = new HistoryRanges(file, { ...rangesFor(doc, 'auth'), levels });
-    return first23.filter((d) => claimHolds(doc.publish!.hold, dayClaim(r, doc, ref, d, 'auth', 'dev')!));
+    const r = new HistoryRanges(file, { ...rangesFor(relearning, 'auth'), levels });
+    return first23.filter((d) => claimHolds(doc.publish!.hold, dayClaim(r, relearning, ref, d, 'auth', 'dev')!));
   };
 
   it('holds its first day only, once the new level is accepted on it', () => {
@@ -144,6 +146,7 @@ describe('a step in rows that stays: a +60% step, accepted and not (phase 3, ADR
 
   it('holds nearly all of its first 23 days unaccepted, never re-learned on its own: it held a day (X7)', () => {
     expect(heldWith([]).length).toBeGreaterThanOrEqual(20);
-    expect(new HistoryRanges(file, rangesFor(doc, 'auth')).of({ of: 'trips' })!.relearned('2024-03-31')).toEqual([]);
+    expect(rangesFor(relearning, 'auth').relearn).toBe(true);
+    expect(new HistoryRanges(file, rangesFor(relearning, 'auth')).of({ of: 'trips' })!.relearned('2024-03-31')).toEqual([]);
   }, 60_000);
 });

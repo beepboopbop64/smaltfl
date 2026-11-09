@@ -9,7 +9,7 @@ import { HistoryRanges } from '../src/core/history.js';
 import { dayClaim, flowStory, type HistoryRef } from '../src/core/hold.js';
 import type { RunResult } from '../src/core/protocol.js';
 import { derivedFails, donorsOf, repairOf } from '../src/app/fills.js';
-import { exampleDoc, exampleUnfilled } from './helpers/example.js';
+import { exampleLegacy, exampleUnfilled } from './helpers/example.js';
 import { historyWith } from './helpers/history.js';
 
 const DAY = '2023-09-21';
@@ -18,7 +18,8 @@ const listed = (d: string): HistoryRef => ({ path: `loads/${d}.parquet`, sha256:
 
 describe('the remedies a held day gets in the app (S2, S3, S5)', () => {
   const h = new HistoryRanges(historyWith({ [DAY]: { stopAt: 13 } }));
-  const doc = exampleDoc();
+  // ADR 0009's machinery, on the example in the legacy form it had when the fills came (vector 4).
+  const doc = exampleLegacy();
   const ask = (over: Partial<Parameters<typeof donorsOf>[0]> = {}) => donorsOf({ h, doc, day: DAY, source: 'trips', story: flowStory(h, DAY, doc, 'trips'), claim: dayClaim(h, doc, ref, DAY, 'trips', 'dev'), listed, history: ref, build: 'dev', later: null, readers: null, partFails: false, ...over });
 
   it('offers a fill from the good days the data lists, the watch’s rule first, and the part alone, each with its counts', () => {

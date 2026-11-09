@@ -1,8 +1,11 @@
 /**
  * The flow's verdict on the real history (ADR 0009 §3): the days `wrong` and `short` hold are a test vector, so a change
- * to the story that moves one fails here until it is accepted on purpose (Q-52). Runs when the app has been built from
- * the data branch (npm run build:app writes dist/app/data/history.json and loads.json); skipped otherwise. The same
- * days held through the engine, on the real files: test/pause-real.test.ts.
+ * to the story that moves one fails here until it is accepted on purpose (Q-52). The example judges its trips in the
+ * general form since phase 3 (ADR 0010 §13): Election Day in its calendar and last year's oddities no longer echoing
+ * take 2022-11-08, 2023-11-07 and 2023-11-14 out, as the owner accepted (Q-54: "yes, 25 days"); the legacy form still
+ * holds its 28. Runs when the app has been built from the data branch (npm run build:app writes
+ * dist/app/data/history.json and loads.json); skipped otherwise. The same days held through the engine, on the real
+ * files: test/pause-real.test.ts.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -10,8 +13,8 @@ import { readDataList } from '../src/app/datalist.js';
 import { EXAMPLE_DATA } from '../examples/sources.js';
 import type { FlowDocument } from '../src/core/document.js';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
-import { claimHolds, countedChecks, dayClaim, type StoryClaim } from '../src/core/hold.js';
-import { exampleFilled } from './helpers/example.js';
+import { claimHolds, countedChecks, dayClaim, rangesFor, type StoryClaim } from '../src/core/hold.js';
+import { exampleFilled, exampleLegacy } from './helpers/example.js';
 
 const DATA = new URL('../dist/app/data/', import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, DATA), 'utf8')) as unknown;
@@ -23,18 +26,23 @@ const SHORT = [
   '2022-11-14', '2022-11-15', '2022-11-16', '2022-11-17', '2022-11-18', '2022-11-19', '2022-11-20', '2022-12-22',
   '2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24',
 ];
-/** What `wrong` adds: fare codes coming and going while the trips stay in their range. */
-const WRONG_ONLY = ['2022-11-08', '2022-12-19', '2022-12-20', '2022-12-21', '2023-11-07', '2023-11-14'];
+/** What `wrong` adds: fare codes coming and going while the trips stay in their range (the fare change of Dec 19, 2022). */
+const WRONG_ONLY = ['2022-12-19', '2022-12-20', '2022-12-21'];
+/** What the legacy form adds besides (ADR 0010 §13): Election Day 2022, unknown to its calendar, and its echoes. */
+const LEGACY_ONLY = ['2022-11-08', '2023-11-07', '2023-11-14'];
 
 describe.skipIf(!has)('the flow’s verdict on the real history (ADR 0009 §3)', () => {
   const file = has ? (read('history.json') as HistoryFile) : null;
   const doc = JSON.parse(readFileSync(new URL('../examples/nyc-taxis-weather.smaltfl.json', import.meta.url), 'utf8')) as FlowDocument;
-  const h = file ? new HistoryRanges(file) : null;
+  // The flow's ranges as its document says: the calendar with Election Day, the echo fix (ADR 0010 §2, §5).
+  const h = file ? new HistoryRanges(file, rangesFor(doc, 'trips')) : null;
   const ref = { path: 'history.json', sha256: '0'.repeat(64), bytes: 0 };
+  const span = file ? file.days.filter((d) => d >= '2022-01-01' && d <= '2024-01-31') : [];
+  let told: StoryClaim[] | null = null;
+  const claimsOf = (): StoryClaim[] => (told ??= span.map((day) => dayClaim(h!, doc, ref, day, 'trips', 'dev')!));
 
-  it('holds exactly the 28 days under wrong, and the 22 under short (vector)', () => {
-    const claims: StoryClaim[] = [];
-    for (const day of file!.days) if (day >= '2022-01-01' && day <= '2024-01-31') claims.push(dayClaim(h!, doc, ref, day, 'trips', 'dev')!);
+  it('holds exactly the 25 days under wrong, and the 22 under short (vector, Q-54)', () => {
+    const claims = claimsOf();
     expect(claims).toHaveLength(761);
     const wrong = claims.filter((c) => claimHolds(['checks', 'wrong'], c)).map((c) => c.day);
     const short = claims.filter((c) => claimHolds(['checks', 'short'], c)).map((c) => c.day);
@@ -42,10 +50,19 @@ describe.skipIf(!has)('the flow’s verdict on the real history (ADR 0009 §3)',
     expect(wrong).toEqual([...SHORT, ...WRONG_ONLY].sort());
     // No day of 2023 holds under short but the feed incident of Sep 21–24.
     expect(short.filter((d) => d.startsWith('2023'))).toEqual(['2023-09-21', '2023-09-22', '2023-09-23', '2023-09-24']);
+    // Election Day is judged now against last year's (2022-11-08 against 2021-11-02): unusual, which doesn't hold.
+    expect(claims.find((c) => c.day === '2022-11-08')).toMatchObject({ state: 'unusual', below: false });
+  }, 120_000);
+
+  it('holds the 28 days it held in the legacy form, which keeps today’s rules (ADR 0010 §0)', () => {
+    const legacy = exampleLegacy();
+    const plain = new HistoryRanges(file!);
+    const wrong = span.filter((d) => claimHolds(['checks', 'wrong'], dayClaim(plain, legacy, ref, d, 'trips', 'dev')!));
+    expect(wrong).toEqual([...SHORT, ...WRONG_ONLY, ...LEGACY_ONLY].sort());
   }, 120_000);
 
   it('says the 21 days with nothing to compare against are not judged yet, holds none of them, and finds none under the floor (ADR 0010 §1, Q-53)', () => {
-    const claims = file!.days.filter((d) => d >= '2022-01-01' && d <= '2024-01-31').map((d) => dayClaim(h!, doc, ref, d, 'trips', 'dev')!);
+    const claims = claimsOf();
     const unlearned = claims.filter((c) => c.state === 'unlearned');
     // Every holiday and holiday window of 2022 before the history had a last year to judge it by, and Columbus Day 2022,
     // whose last year the history holds too little of.
@@ -66,7 +83,8 @@ describe.skipIf(!has)('the flow’s verdict on the real history (ADR 0009 §3)',
     // checks read the trips through it, and still count them, so every verdict above stands.
     expect(countedChecks(doc, h!, 'trips')).toBe(true);
     expect(countedChecks(exampleFilled(), h!, 'trips')).toBe(true);
-    for (const day of ['2023-09-21', '2022-11-15', '2023-09-20']) expect(dayClaim(h!, exampleFilled(), ref, day, 'trips', 'dev')).toEqual(dayClaim(h!, doc, ref, day, 'trips', 'dev'));
+    const plain = new HistoryRanges(file!);
+    for (const day of ['2023-09-21', '2022-11-15', '2023-09-20']) expect(dayClaim(plain, exampleFilled(), ref, day, 'trips', 'dev')).toEqual(dayClaim(h!, doc, ref, day, 'trips', 'dev'));
   });
 
   it('tells the owner’s examples by their cause', () => {

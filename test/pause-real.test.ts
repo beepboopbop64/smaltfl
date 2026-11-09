@@ -16,12 +16,13 @@ import parquet from '@smaltdb/parquet';
 import type { FlowDocument } from '../src/core/document.js';
 import { sha256Hex } from '../src/core/hash.js';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
-import { dayClaim } from '../src/core/hold.js';
-import { pinFile, releaseRun, runFlow, verifyRun } from '../src/index.js';
+import { dayClaim, loadClaim } from '../src/core/hold.js';
+import { settingsFor } from '../src/core/measures.js';
+import { measureLoad, pinFile, releaseRun, runFlow, translate, verifyRun } from '../src/index.js';
 import smaltfl from '../src/plugin/index.js';
 import { EXAMPLE_DATA, EXAMPLE_SOURCES, pinnedDdl } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
-import { exampleDoc } from './helpers/example.js';
+import { exampleDoc, exampleLegacy } from './helpers/example.js';
 
 const DATA = new URL('../dist/app/data/', import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, DATA), 'utf8')) as unknown;
@@ -29,8 +30,8 @@ const has = existsSync(new URL('history.json', DATA)) && existsSync(new URL('loa
 describe.skipIf(!has)('the owner’s example, held through the engine on the real files (ADR 0009 §1, §4, §5)', () => {
   const file = has ? (read('history.json') as HistoryFile) : null;
   const h = file ? new HistoryRanges(file) : null;
-  // The example as shipped: a day parameter, and the default publish block of ADR 0009 §2.
-  const doc: FlowDocument = exampleDoc();
+  // The example in the legacy form (plan/1, claim/1): a day parameter, and the default publish block of ADR 0009 §2.
+  const doc: FlowDocument = exampleLegacy();
   const bytes = (path: string) => {
     const raw = readFileSync(new URL(path, DATA));
     return new Uint8Array(path.endsWith('.parquet.txt') ? Buffer.from(raw.toString('utf8'), 'base64') : raw);
@@ -92,4 +93,37 @@ describe.skipIf(!has)('the owner’s example, held through the engine on the rea
     // Fri 22, held, verifies too, its outputs still staged.
     expect((await verifyRun(db, fri.r.run, { smaltdb: SMALTDB, level: 'stored' })).checks.filter((c) => !c.ok)).toEqual([]);
   }, 120_000);
+
+  it('as it ships, in the general form: each load measured, judged by claim/2 from the base history (ADR 0010 §6, §13)', async () => {
+    const shipped = exampleDoc();
+    const db = Database.openMemory({ plugins: [io, external, parquet, smaltfl] });
+    const list = readDataList(read('loads.json'), EXAMPLE_DATA) as unknown as { files: Record<string, { path: string; sha256: string; bytes: number }>; episodes: { loads: { day: string; file: string; sha256: string; rows: number }[] }[] };
+    for (const src of EXAMPLE_SOURCES.filter((x) => x.file !== 'trips.parquet')) await pinFile(db, src.file, bytes(src.file), list.files[src.file.split('.')[0]!]!.sha256);
+    const history = list.files.history!;
+    await pinFile(db, 'history.json', bytes(history.path), history.sha256);
+    const loads = new Map(list.episodes.flatMap((e) => e.loads).map((l) => [l.day, l]));
+    const trips = EXAMPLE_SOURCES.find((x) => x.file === 'trips.parquet')!;
+    let made = false;
+    const runDay = async (day: string) => {
+      const load = loads.get(day)!;
+      await pinFile(db, 'trips.parquet', bytes(`${load.file}.txt`), load.sha256);
+      if (!made) for (const src of EXAMPLE_SOURCES) await db.execAsync(pinnedDdl(src));
+      made = true;
+      const parameters = { month: day.slice(0, 7), day };
+      const plan = await translate(shipped, parameters);
+      const settings = settingsFor(plan, 0, file!, shipped.steps)!;
+      const measures = await measureLoad(db, trips.table, settings);
+      // No tail and no skips: every day of the span is in the base history, and the record is empty.
+      const told = (await loadClaim({ doc: shipped, source: 'trips', flow: plan.flow.hash, base: file!, baseRef: history, tail: [], measures, settings, skip: [], build: 'dev' }))!;
+      return { claim: told.claim, r: await runFlow(db, shipped, { smaltdb: SMALTDB, parameters, claims: [told.claim] }) };
+    };
+    const wed = await runDay('2023-09-20');
+    expect(wed.claim).toMatchObject({ v: 2, slot: '2023-09-20', below: false, levels: [], skip: [] });
+    expect(wed.r.holds).toEqual([]);
+    const thu = await runDay('2023-09-21');
+    // The same verdict the legacy form gave, now told under plan/2 from the load's own measures.
+    expect(thu.claim).toMatchObject({ v: 2, state: 'wrong', below: true, head: 'Trips fall to trickle from 13:00', rows: 41_939 });
+    expect(thu.r.holds.map((x) => [x.by, x.origin, x.said])).toEqual([['story', 'trips', 'Trips fall to trickle from 13:00']]);
+    expect(thu.r.measures).toHaveLength(1);
+  }, 180_000);
 });

@@ -147,6 +147,9 @@ export interface WatchPlan {
   calendar: boolean;
   scale: 'fixed' | 'volume';
   holds: boolean;
+  /** Whether a change told as a note that has lasted 14 days is re-learned on its own (ADR 0010 §5, X7): off unless
+   * the watch says so. */
+  relearn: boolean;
   count: string[] | null;
   follow: string[] | null;
   bad: [column: string, ...codes: string[]][];
@@ -329,6 +332,7 @@ function watchPlan(w: string | WatchDef, source: string, period: string | null, 
     calendar: g?.calendar ?? true,
     scale: g ? (g.scale ?? 'volume') : 'fixed',
     holds: g?.holds ?? true,
+    relearn: g?.relearn ?? false,
     count: sorted(g?.count),
     follow: sorted(g?.follow),
     ...marksOn(ontology, source),
@@ -447,7 +451,7 @@ export function validatePlan(plan: unknown): asserts plan is FlowPlan {
   if (p.smaltflPlan === 2) validatePublish2(p, fail);
 }
 
-const WATCH_PLAN_FIELDS = ['after', 'bad', 'calendar', 'count', 'donor', 'every', 'follow', 'history', 'holds', 'newValues', 'pattern', 'period', 'scale', 'time', 'zone'];
+const WATCH_PLAN_FIELDS = ['after', 'bad', 'calendar', 'count', 'donor', 'every', 'follow', 'history', 'holds', 'newValues', 'pattern', 'period', 'relearn', 'scale', 'time', 'zone'];
 
 /** plan/2's publish block: every field there, each one this version reads, each value one it can judge. */
 function validatePublish2(p: FlowPlan, fail: (message: string) => never): void {
@@ -485,7 +489,7 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never): void {
     if (w.donor !== 'weekday' && w.donor !== 'nearest') fail(`${at}.donor is weekday or nearest`);
     if (w.time !== null && typeof w.time !== 'string') fail(`${at}.time is a column or null`);
     if (w.zone !== null && (typeof w.zone !== 'string' || calendarProblems({ zone: w.zone }).length)) fail(`${at}.zone is a time zone or null`);
-    if (typeof w.calendar !== 'boolean' || typeof w.holds !== 'boolean') fail(`${at}.calendar and holds are true or false`);
+    if (typeof w.calendar !== 'boolean' || typeof w.holds !== 'boolean' || typeof w.relearn !== 'boolean') fail(`${at}.calendar, holds and relearn are true or false`);
     if (w.scale !== 'fixed' && w.scale !== 'volume') fail(`${at}.scale is fixed or volume`);
     for (const k of ['count', 'follow'] as const) if (w[k] !== null && (!Array.isArray(w[k]) || (w[k] as unknown[]).some((v) => typeof v !== 'string'))) fail(`${at}.${k} is a list of columns or null`);
     const rows = (k: string, ok: (r: unknown[]) => boolean) => {

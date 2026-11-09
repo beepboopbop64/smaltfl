@@ -1,5 +1,5 @@
 {
-  "smaltfl": 2,
+  "smaltfl": 3,
   "id": "nyc-taxis-weather",
   "name": "NYC taxis and weather",
   "description": "How weather changes taxi demand by borough: January 2024 yellow taxi trips, a day at a time, cleaned and enriched, against hourly weather.",
@@ -1186,17 +1186,39 @@
       "description": "What the weather holds: each district's hours on record, and the day's rain, snow and temperatures in the city's history. It only looks: no data changes here."
     }
   ],
+  "calendar": {
+    "base": "us-nyc",
+    "zone": "America/New_York",
+    "days": [
+      {
+        "name": "Election Day",
+        "weekday": "tue",
+        "between": [
+          2,
+          8
+        ],
+        "month": [
+          11
+        ]
+      }
+    ]
+  },
   "publish": {
     "hold": [
       "checks",
       "wrong"
     ],
     "watch": {
-      "trips": "history.json"
+      "trips": {
+        "history": "history.json",
+        "pattern": "weekly",
+        "donor": "weekday",
+        "scale": "fixed",
+        "time": "tpep_pickup_datetime"
+      }
     },
     "period": "day",
-    "together": true,
-    "donor": "weekday"
+    "together": true
   },
   "layout": {}
 }

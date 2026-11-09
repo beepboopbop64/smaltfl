@@ -3,9 +3,10 @@
  * each rule picks (the amendment's table is a test vector, so a change that moves one fails here until it is accepted
  * on purpose, Q-52), how close each rule's fill lands, and, on the real files through the engine, Thu Sep 21, 2023
  * filled from Thu 14 and released, Mon Nov 14, 2022 filled from Mon 7, and Fri Sep 22, 2023's part that arrived, whose
- * checks trip. On the example with its fill step (test/helpers/example.ts exampleFilled). Runs when the app has been
- * built from the data branch (npm run build:app); the engine part needs its loads and donor days too. Skipped
- * otherwise.
+ * checks trip. The history's part on the example as it ships (the general form since ADR 0010 §13: 25 days held, the
+ * same 17 fillable, and the same donors, Nov 8 now a calendar day); the engine's on the example in the legacy form it had
+ * when the fills came (test/helpers/example.ts exampleFilled, plan/1 and claim/1). Runs when the app has been built from
+ * the data branch (npm run build:app); the engine part needs its loads and donor days too. Skipped otherwise.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -18,12 +19,12 @@ import { dayMid, dayShort } from '../src/core/days.js';
 import { donorChoices, donorFor, fillable, fillCounts, missingOf, repairDocument, type DonorPick, type DonorQuery, type Repair } from '../src/core/fill.js';
 import { sha256Hex } from '../src/core/hash.js';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
-import { claimHolds, dayClaim, flowStory, type HistoryRef } from '../src/core/hold.js';
+import { claimHolds, dayClaim, flowStory, rangesFor, type HistoryRef } from '../src/core/hold.js';
 import { pinFile, releaseRun, runFlow, verifyRun, type FlowDocument } from '../src/index.js';
 import smaltfl from '../src/plugin/index.js';
 import { EXAMPLE_DATA, DONOR_SOURCE, EXAMPLE_SOURCES, pinnedDdl } from '../examples/sources.js';
 import { SMALTDB } from './helpers/engine.js';
-import { exampleFilled } from './helpers/example.js';
+import { exampleDoc, exampleFilled } from './helpers/example.js';
 
 const DATA = new URL('../dist/app/data/', import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, DATA), 'utf8')) as unknown;
@@ -43,8 +44,8 @@ const CHANGES = ['2022-01-04', '2022-01-29', '2022-12-22'];
 
 describe.skipIf(!has)('filling a paused day on the real history (amendment 1 S2, S3)', () => {
   const file = has ? (read('history.json') as HistoryFile) : null;
-  const h = file ? new HistoryRanges(file) : null;
-  const doc = exampleFilled();
+  const doc = exampleDoc();
+  const h = file ? new HistoryRanges(file, rangesFor(doc, 'trips')) : null;
   const ref: HistoryRef = { path: 'history.json', sha256: '0'.repeat(64), bytes: 0 };
   const all = loadsJson ? [...loadsJson.loads, ...loadsJson.episodes.flatMap((e) => e.loads), ...donorDays] : [];
   const listed = (d: string): HistoryRef | null => {
@@ -62,7 +63,8 @@ describe.skipIf(!has)('filling a paused day on the real history (amendment 1 S2,
 
   it('fills the 17 days with a missing part on a short day, and no other held day', () => {
     const held = file!.days.filter((d) => d >= '2022-01-01' && d <= '2024-01-31').filter((d) => claimHolds(['checks', 'wrong'], dayClaim(h!, doc, ref, d, 'trips', 'dev')!));
-    expect(held).toHaveLength(28);
+    // 25 held in the general form (Q-54): 17 to fill, and 8 with nothing to fill.
+    expect(held).toHaveLength(25);
     const fills = held.filter((d) => fillable(dayClaim(h!, doc, ref, d, 'trips', 'dev'), flowStory(h!, d, doc, 'trips'), 'tpep_pickup_datetime'));
     expect(fills).toEqual(FILLABLE);
     // Dec 19–21, 2022: a code gone while the trips stayed in their range. Their rows were coded another way.
@@ -78,17 +80,19 @@ describe.skipIf(!has)('filling a paused day on the real history (amendment 1 S2,
       const { picks } = donorChoices(query(day), 'weekday');
       return picks.map((p: DonorPick) => `${dayShort(p.day)} ${(off(day, p.day).off * 100).toFixed(1).replace(/^(?!-)/, '+')}%`).join(', ');
     };
+    // The picks are the amendment's table's. Their figures against November 2022's usual moved a little with the general
+    // form (ADR 0010 §13, Q-54): Election Day isn't learned from now, so Tue Nov 15's weeks leave Nov 8 out.
     expect(Object.fromEntries(FILLABLE.filter((d) => listed(d)).map((d) => [dayMid(d), said(d)]))).toEqual({
       'Sat Sep 17': 'Sat 10 +16.6%, Fri 16 +20.3%, Mon 19 +9.8%',
       'Sun Sep 18': 'Sun 11 +14.8%, Fri 16 +42.5%, Mon 19 +21.2%',
-      'Mon Nov 14': 'Mon 7 -1.3%, Sun 13 -2.2%, Mon 21 -1.5%',
-      'Tue Nov 15': 'Tue 1 +1.8%, Sun 13 -0.6%, Mon 21 +0.1%',
-      'Wed Nov 16': 'Wed 9 -1.8%, Sun 13 -5.4%, Mon 21 -4.8%',
-      'Thu Nov 17': 'Thu 10 -2.4%, Sun 13 -6.9%, Mon 21 -6.3%',
-      'Fri Nov 18': 'Fri 4 -0.8%, Sun 13 -5.7%, Mon 21 -5.1%',
-      'Sat Nov 19': 'Sat 12 -3.1%, Sun 13 -6.1%, Mon 21 -5.5%',
+      'Mon Nov 14': 'Mon 7 -1.4%, Sun 13 -2.4%, Mon 21 -1.7%',
+      'Tue Nov 15': 'Tue 1 +2.9%, Sun 13 +0.5%, Mon 21 +1.2%',
+      'Wed Nov 16': 'Wed 9 -1.7%, Sun 13 -5.3%, Mon 21 -4.7%',
+      'Thu Nov 17': 'Thu 10 -2.2%, Sun 13 -6.8%, Mon 21 -6.2%',
+      'Fri Nov 18': 'Fri 4 -0.7%, Sun 13 -5.6%, Mon 21 -5.0%',
+      'Sat Nov 19': 'Sat 12 -3.0%, Sun 13 -6.1%, Mon 21 -5.5%',
       // Sun 13 is both the same weekday and the nearest good day before: one chip.
-      'Sun Nov 20': 'Sun 13 +1.3%, Mon 21 +2.1%',
+      'Sun Nov 20': 'Sun 13 +1.1%, Mon 21 +1.8%',
       'Thu Sep 21': 'Thu 14 +2.1%, Wed 20 -7.2%, Mon 25 -17.9%',
       'Fri Sep 22': 'Fri 15 +1.4%, Wed 20 -5.3%, Mon 25 -19.7%',
       'Sat Sep 23': 'Sat 16 +2.5%, Wed 20 +0.8%, Mon 25 -14.3%',
@@ -137,9 +141,9 @@ describe.skipIf(!has)('filling a paused day on the real history (amendment 1 S2,
       return off(d, 'none' in p ? d : p.day);
     });
     const said = (xs: ReturnType<typeof by>) => [`${(median(xs.map((x) => Math.abs(x.off))) * 100).toFixed(1)}%`, xs.filter((x) => x.within).length];
-    expect(said(by('weekday', 'before'))).toEqual(['2.2%', 12]);
-    expect(said(by('nearest', 'before'))).toEqual(['5.6%', 12]);
-    expect(said(by('nearest', 'after'))).toEqual(['5.3%', 13]);
+    // In the general form (Q-54): Election Day left out of learning moves November 2022's usual a little (2.2%, 5.6% and
+    // 5.3% in the legacy form); the order is the same.
+    expect([said(by('weekday', 'before')), said(by('nearest', 'before')), said(by('nearest', 'after'))]).toEqual([['2.4%', 12], ['5.5%', 12], ['5.2%', 13]]);
   }, 120_000);
 });
 

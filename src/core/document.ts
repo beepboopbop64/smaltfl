@@ -68,6 +68,9 @@ export interface WatchDef {
   scale?: 'fixed' | 'volume';
   /** Whether its story holds (default true; false: told and recorded, never holding). */
   holds?: boolean;
+  /** Whether a change told as a note that has lasted 14 days is re-learned on its own (ADR 0010 §5): off unless chosen,
+   * since on the taxi history it learned an outage that came on top of a lasting dip (B18's backtest). */
+  relearn?: boolean;
   /** Columns counted value by value, and columns followed for new values only (default from the ontology). */
   count?: string[];
   follow?: string[];
@@ -90,7 +93,7 @@ const isRecordLike = (v: unknown): v is Record<string, unknown> => typeof v === 
 export const watchHistory = (w: string | WatchDef): string => (typeof w === 'string' ? w : w.history);
 
 /** A watch's fields this version knows: any other is refused, never ignored. */
-const WATCH_FIELDS = ['history', 'period', 'every', 'pattern', 'donor', 'time', 'zone', 'calendar', 'scale', 'holds', 'count', 'follow'];
+const WATCH_FIELDS = ['history', 'period', 'every', 'pattern', 'donor', 'time', 'zone', 'calendar', 'scale', 'holds', 'relearn', 'count', 'follow'];
 
 /**
  * What holds a flow's publication, and what waits while it holds (ADR 0009 §2, §4). A run that holds is built, checked,
@@ -532,7 +535,7 @@ function validateWatch(w: Record<string, unknown>, at: string, add: (path: strin
   if (w.donor !== undefined && w.donor !== 'weekday' && w.donor !== 'nearest') add(`${at}.donor`, 'weekday or nearest');
   if (w.time !== undefined && (typeof w.time !== 'string' || w.time === '')) add(`${at}.time`, 'a time column');
   if (w.zone !== undefined && (typeof w.zone !== 'string' || calendarProblems({ zone: w.zone }).length > 0)) add(`${at}.zone`, 'a time zone, such as UTC or America/New_York');
-  for (const k of ['calendar', 'holds'] as const) if (w[k] !== undefined && typeof w[k] !== 'boolean') add(`${at}.${k}`, 'true or false');
+  for (const k of ['calendar', 'holds', 'relearn'] as const) if (w[k] !== undefined && typeof w[k] !== 'boolean') add(`${at}.${k}`, 'true or false');
   if (w.scale !== undefined && w.scale !== 'fixed' && w.scale !== 'volume') add(`${at}.scale`, 'fixed or volume');
   for (const k of ['count', 'follow'] as const)
     if (w[k] !== undefined && (!Array.isArray(w[k]) || (w[k] as unknown[]).some((c) => typeof c !== 'string' || c === '') || new Set(w[k] as string[]).size !== (w[k] as unknown[]).length)) add(`${at}.${k}`, 'a list of columns, each once');
