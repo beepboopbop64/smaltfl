@@ -13,8 +13,8 @@ import { readDataList } from '../src/app/datalist.js';
 import { EXAMPLE_DATA } from '../examples/sources.js';
 import type { FlowDocument } from '../src/core/document.js';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
-import { levelMetrics } from '../src/core/fill.js';
-import { claimHolds, countedChecks, dayClaim, flowStory, rangesFor, type StoryClaim } from '../src/core/hold.js';
+import { levelMetrics, levelWays } from '../src/core/fill.js';
+import { claimHolds, countedChecks, dayClaim, flowStory, levelFor, rangesFor, type StoryClaim } from '../src/core/hold.js';
 import { exampleFilled, exampleLegacy } from './helpers/example.js';
 
 const DATA = new URL('../dist/app/data/', import.meta.url);
@@ -100,10 +100,27 @@ describe.skipIf(!has)('the flow’s verdict on the real history (ADR 0009 §3)',
     const dec = after('2022-12-19', ['2022-12-20', '2022-12-21']);
     expect(dec.map((c) => claimHolds(['checks', 'wrong'], c))).toEqual([false, false]);
     expect(dec[0]!.levels).toEqual([expect.objectContaining({ from: '2022-12-19', decision: 1 })]);
-    // Vendor 1 gone, accepted: Tue 15 and Wed 16 publish; Mon 21, the vendor back, is a change again and pauses.
-    const nov = after('2022-11-14', ['2022-11-15', '2022-11-16', '2022-11-21']);
-    expect(nov.map((c) => claimHolds(['checks', 'wrong'], c))).toEqual([false, false, true]);
-    expect(nov[2]!.head).toMatch(/^More trips/);
+    // Vendor 1 gone, accepted: Tue 15 to Sun 20 publish (Q-57b: one acceptance covers the days while the numbers stay
+    // at the new level, its column's mix and the extras it moved learned from Mon 14); Mon 21, the vendor back, is a
+    // change again and pauses.
+    const week = ['2022-11-15', '2022-11-16', '2022-11-17', '2022-11-18', '2022-11-19', '2022-11-20', '2022-11-21'];
+    const nov = after('2022-11-14', week);
+    const mon = flowStory(h!, '2022-11-14', doc, 'trips');
+    const metrics = levelMetrics(mon);
+    const log = [
+      { seq: 0, kind: 'decide', at: '', by: { as: 'owner' }, reason: 'Vendor 1 off', amends: null, about: { day: '2022-11-14', run: 1, manifest: 'm', inputs: { flow: 'f', parameters: {}, files: {} }, outputs: {}, option: 'accept', scope: 'day', policies: 'p', rule: null, level: { source: 'trips', from: '2022-11-14', metrics } } },
+      { seq: 1, kind: 'release', at: '', by: { as: 'owner' }, reason: null, amends: null, about: { run: 1, manifest: 'm', outputs: {}, decision: 0, leaf: 'l', outcome: 'applied', why: null } },
+    ];
+    const hl = new HistoryRanges(file!, { ...rangesFor(doc, 'trips'), levels: [{ from: '2022-11-14', metrics, decision: 0 }] });
+    const published = nov.map((c, i) => {
+      if (!claimHolds(['checks', 'wrong'], c)) return 'published';
+      const told = flowStory(hl, week[i]!, doc, 'trips');
+      return levelFor(log as never, 'trips', week[i]!, () => levelWays(told, mon), () => levelWays(mon)) ? 'under the level' : 'paused';
+    });
+    expect(published).toEqual(['published', 'published', 'published', 'published', 'published', 'published', 'paused']);
+    expect(nov[6]!.head).toMatch(/^More trips/);
+    // The extras Vendor 1's absence moved, notes on Mon 14's news, are part of the level it accepted.
+    expect(metrics).toEqual(expect.arrayContaining(['value:extra=0', 'value:extra=0.5', 'value:extra=3.5']));
   }, 120_000);
 
   it('tells the owner’s examples by their cause', () => {

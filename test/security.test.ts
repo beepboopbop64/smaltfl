@@ -11,6 +11,7 @@ import { flowNames, judgeOf, newsOf, type Names } from '../src/core/news.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
 import { translate, type PlanPublish2 } from '../src/core/plan.js';
 import { ACT_VERB, glanceStrings, storyOf, type Story } from '../src/core/story.js';
+import { acceptable, levelMetrics } from '../src/core/fill.js';
 import { edrHistory, isMonthEnd, isPatchTuesday, PLANTED, securityDoc, securityHistory, twoSourceDoc } from './fixtures/security.js';
 
 const doc = securityDoc();
@@ -39,7 +40,7 @@ describe('the sign-in flow (ADR 0010 §10)', () => {
     expect(plan.smaltflPlan).toBe(2);
     const pub = plan.publish as PlanPublish2;
     expect(pub.calendar.base).toBe('us/1');
-    expect(pub.watch[0]![1]).toMatchObject({ history: 'auth-history.json', time: 'event_time', scale: 'volume', donor: 'weekday', bad: [['result', 'fail', 'locked']], newValues: [['country', 'alert'], ['result', 'alert']] });
+    expect(pub.watch[0]![1]).toMatchObject({ history: 'auth-history.json', time: 'event_time', scale: 'volume', donor: 'weekday', bad: [['result', 'fail', 'locked']], newValues: [['country', 'alert'], ['result', 'alert'], ['ua_family', 'alert']] });
     expect(judge).toMatchObject({ legacy: false, scale: 'volume', calendar: { base: 'us/1' } });
   });
 });
@@ -51,6 +52,9 @@ describe('the planted incidents, as the flow judges them (phase 1)', () => {
       [PLANTED.burst, 'result fail 15× usual'],
       [PLANTED.mfa[0], 'method mfa_push almost gone'],
       [PLANTED.mfa[1], 'method mfa_push almost gone'],
+      // The migration to passkeys, a deliberate change: it pauses the day passkey's share first crosses three times its
+      // usual, once, and Accept the new level is offered there (the owner: "pause until accepted").
+      [PLANTED.migrationHeld, 'Method passkey: 9.0% (usually 2.6–3.4%)'],
       [PLANTED.outage, 'Gap in sign-ins, 06:00–12:00'],
       [PLANTED.hydra, 'result fail 4.7× usual'],
     ]);
@@ -92,6 +96,55 @@ describe('the planted incidents, as the flow judges them (phase 1)', () => {
       if (s.labels.amount[0]) expect(s.labels.amount[0]).toMatch(/ sign-ins$/);
     }
   });
+});
+
+describe('a deliberate change: the migration from password to passkey (the owner: pause until accepted, Q-57b)', () => {
+  it('holds once, the day it crosses, offers Accept there, and holds nothing after it once accepted', () => {
+    const s = story(PLANTED.migrationHeld);
+    expect(s).toMatchObject({ state: 'wrong' });
+    expect(acceptable(s, { state: 'wrong' }, [{ by: 'story' }])).toBe(true);
+    const days = h.file.days.filter((d) => d >= PLANTED.migration && d <= '2024-08-31');
+    const held = (r: HistoryRanges) => days.filter((d) => claimHolds(doc.publish!.hold, dayClaim(r, doc, ref, d, 'auth', 'dev')!));
+    expect(held(h)).toEqual([PLANTED.migrationHeld]);
+    // Accepted on it: the column's mix is learned from that day, and the month it goes on moving holds nothing more.
+    const accepted = new HistoryRanges(securityHistory(), { ...rangesFor(doc, 'auth'), levels: [{ from: PLANTED.migrationHeld, metrics: levelMetrics(s) }] });
+    expect(held(accepted)).toEqual([PLANTED.migrationHeld]);
+  }, 60_000);
+});
+
+describe('rare but serious values with no range, and an attack that also signs in (the owner: always alert)', () => {
+  const stuffing = { n: 150_000, hours: [2, 3, 4], dist: { result: { fail: 0.97, locked: 0.03 }, method: { password: 1 }, country: { RU: 1 }, ua_family: { 'python-requests': 1 } } };
+  const told = (file: ReturnType<typeof securityHistory>, day: string) => {
+    const r = new HistoryRanges(file, { ...rangesFor(doc, 'auth') });
+    return { s: storyOf(r, day, newsOf(r, day, names, { judge }), { names, judge, step: 'auth_valid', limit: 0.05 }), c: dayClaim(r, doc, ref, day, 'auth', 'dev')! };
+  };
+
+  it('holds a burst of failures on a holiday in the feed’s first year, by the failures, not as a day not judged yet', () => {
+    for (const day of ['2023-07-04', '2023-05-29']) {
+      const { s, c } = told(securityHistory({ extra: { [day]: [stuffing] } }), day);
+      expect([s.state, s.primary, s.head]).toEqual(['wrong', 'incident', expect.stringMatching(/^Failed \d+(\.\d)?× usual$/)]);
+      expect(s.findings.find((f) => f.key === 'share:result="fail"')).toMatchObject({ was: 'alert', bad: true });
+      expect(claimHolds(doc.publish!.hold, c)).toBe(true);
+    }
+    // The same holiday with nothing planted is still not judged yet, and published (Q-53).
+    expect(told(securityHistory(), '2023-07-04').s.state).toBe('unlearned');
+  }, 60_000);
+
+  it('tells an attack whose successes rose too by its failures, never as a shortfall with lockouts that held', () => {
+    const day = '2024-04-17';
+    const { s, c } = told(securityHistory({ extra: { [day]: [{ n: 400_000, hours: [...Array(24).keys()], dist: { result: { success: 0.3, fail: 0.7 }, method: { password: 1 }, country: { RU: 1 }, ua_family: { 'python-requests': 1 } } }] } }), day);
+    expect([s.state, s.primary]).toEqual(['wrong', 'incident']);
+    expect(s.head).toMatch(/^Failed \d+(\.\d)?× usual$/);
+    expect(c.head).not.toMatch(/short/);
+    expect(claimHolds(doc.publish!.hold, c)).toBe(true);
+  }, 60_000);
+
+  it('holds a client never seen before, however few sign-ins bring it (Q-56: country and tool)', () => {
+    const day = '2024-04-17';
+    const { s, c } = told(securityHistory({ extra: { [day]: [{ n: 300, hours: [3], dist: { result: { success: 1 }, method: { password: 1 }, country: { US: 1 }, ua_family: { sqlmap: 1 } } }] } }), day);
+    expect(s.findings.find((f) => f.key === 'new:ua_family')).toMatchObject({ was: 'alert', acts: ['incident', 'quarantine', 'notify'] });
+    expect(claimHolds(doc.publish!.hold, c)).toBe(true);
+  }, 60_000);
 });
 
 describe('the same log with no incidents (variant C)', () => {

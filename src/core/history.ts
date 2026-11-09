@@ -233,7 +233,11 @@ const HELD: Partial<Record<Metric['of'], (r: NormalRange, v: number, d: number) 
 };
 
 /** Whether a level applies to a metric: it names it, or it names the rows and the metric counts rows. */
-const levelOn = (l: Level, m: Metric): boolean => l.metrics.includes(metricKey(m)) || (l.metrics.includes('trips') && SCALES[m.of] === 'count');
+/** Whether a level applies to a metric: one it names; every count, for a level of the rows; and every value of a column
+ * one of whose values' shares it names, share and count, since a column's shares move together (a migration from
+ * password to passkey moves both, at its own pace). */
+const levelOn = (l: Level, m: Metric): boolean =>
+  l.metrics.includes(metricKey(m)) || (l.metrics.includes('trips') && SCALES[m.of] === 'count') || ((m.of === 'value' || m.of === 'count') && l.metrics.some((k) => k.startsWith(`value:${m.column}=`)));
 
 /** Each metric's normal ranges over a history, made once a metric. */
 export class HistoryRanges {

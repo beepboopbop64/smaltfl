@@ -429,7 +429,10 @@ export class NormalRanges {
    * after a break is measured with, on every day since it. */
   private weeksUnder(k: number, b: number): Inner | null {
     const key = `${k}|${b}`;
-    if (!this.underAt.has(key)) this.underAt.set(key, this.o.pattern !== 'weekly' ? this.periods(k, b, 1) : this.sameWeekday(k, b, k) ?? this.stepped(k, b));
+    // A share or a level after a break follows the days since it, each weekday as it was before moved by the step, the
+    // latest days counting most: a change that goes on moving at its own pace (a migration) is followed, not left to the
+    // same weekday's three weeks, which lag it. A count keeps its weekdays' own since the break once it has three.
+    if (!this.underAt.has(key)) this.underAt.set(key, this.o.pattern !== 'weekly' ? this.periods(k, b, 1) : this.scale !== 'count' ? (this.stepped(k, b) ?? this.sameWeekday(k, b, k)) : (this.sameWeekday(k, b, k) ?? this.stepped(k, b)));
     return this.underAt.get(key)!;
   }
 

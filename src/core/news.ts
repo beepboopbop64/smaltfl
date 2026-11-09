@@ -12,7 +12,7 @@
  * enough change: MATERIAL), and findings that are one thing seen through several columns (the same rows missing a
  * passenger count, a rate code and a surcharge) are told once. A day with nothing to tell says so. No DOM, no engine.
  */
-import { namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
+import { daysBetween, namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
 import { HistoryRanges, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
@@ -107,11 +107,12 @@ export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calenda
  * How a document judges a watched source (ADR 0010 §10, §11): its watch's settings and the marks its ontology puts on the
  * source's columns. A source the flow doesn't watch is judged in the legacy form.
  */
-export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calendar'>, source: string): JudgeSettings {
+export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calendar'> & Partial<Pick<FlowDocument, 'smaltfl'>>, source: string): JudgeSettings {
   const watches = Object.entries(doc.publish?.watch ?? {});
   const w = watches.find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1];
   const general = isGeneralWatch(w) ? w : null;
-  const legacyFlow = doc.calendar === undefined && watches.every(([, x]) => !isGeneralWatch(x));
+  // New York's calendar is a format-2 flow's, as before ADR 0010; a format-3 document has its block's or none (Q-58).
+  const legacyFlow = (doc.smaltfl ?? 2) < 3 && doc.calendar === undefined && watches.every(([, x]) => !isGeneralWatch(x));
   const m = marksOn(doc.ontology, source);
   return {
     legacy: !general,
@@ -350,6 +351,21 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   const quiet = (f: Finding, j: Parameters<typeof lasting>[0]): Finding => {
     const since = lasting(j);
     if (!since) return f;
+    // A deliberate change pauses (the owner: "pause until accepted"; ADR 0009 amendment 1 S6, Q-57b: "the change pauses
+    // once"): in the general form a value that was a part of the mix (1% or more), on the first day its lasting change
+    // crosses three times its usual share or a third of it (the relative rule), within the change's first week, is never
+    // lowered to a note but held as something wrong, so Accept the new level is offered: a migration from password to
+    // passkey holds the day it crosses. Once accepted, the ranges learn it from its day (a break, the column's mix with
+    // it), and it is no longer outside them. A change that crossed already (told, or held, that day), codes under 1%
+    // coming and going, smaller lasting changes and the legacy form's are told as notes: the taxi example's 25 days stay
+    // as the owner accepted them (Q-54).
+    if (!judge.legacy && f.metric?.of === 'value' && f.value !== undefined && f.range && f.range.expected >= 0.01 && daysBetween(since, day) <= 7) {
+      const crosses = (value: number | null, expected: number | undefined) => value !== null && expected !== undefined && expected > 0 && (value / expected >= 3 || value / expected <= 1 / 3);
+      // The first day it crosses: a day of the change before it that crossed already paused, or was told, then.
+      let first = true;
+      for (let d = since; d < day && first; d = plusDays(d, 1)) if (crosses(j.ranges.value(d), j.ranges.at(d)?.expected)) first = false;
+      if (first && crosses(f.value, f.range.expected) && Math.abs(f.value - f.range.expected) * rows >= M.rows) return { ...f, severity: 'alert', lasting: since };
+    }
     // Told as a note, without its first day in words: which day a change began is for its chart to show (ADR 0008).
     return { ...f, severity: 'note', score: f.score / 10, lasting: since };
   };
@@ -407,14 +423,47 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     }
   }
 
+  /** A bad value's burst on a day its share has no range (`newsOf`'s rule for bad values with none): its share against
+   * the median of the last seven days before it that aren't special in the calendar, at least three of them. */
+  const badWithoutRange = (column: string, vh: ValueHistory, i: number, key: string): Finding | null => {
+    const shares: number[] = [];
+    for (let x = k - 1; x >= 0 && shares.length < 7; x--) {
+      if (!file.rows[x] || specialOf(file.days[x]!, cal)) continue;
+      shares.push((vh.counts![x]?.[i] ?? 0) / file.rows[x]!);
+    }
+    if (shares.length < 3 || !rows) return null;
+    const usual = [...shares].sort((a, b) => a - b)[shares.length >> 1]!;
+    const today = vh.counts![k]?.[i] ?? 0;
+    const usualRows = usual * rows;
+    if (today < 2 * usualRows || today - usualRows < M.rows) return null;
+    const times = usualRows > 0 ? today / usualRows : Infinity;
+    const w = shareWords(today / rows, usual, usual);
+    return {
+      key: `share:${column}=${key}`, kind: 'share', severity: 'alert', score: Number.isFinite(times) ? Math.min(99, times) : 99, bad: true,
+      title: `${sentence(names.column(column))} ${label(column, key)}: ${w.value} (usually ${w.range})`,
+      detail: `${fmtInt(today)} ${noun(today)} with it today${Number.isFinite(times) ? `, ${times.toFixed(1).replace(/\.0$/, '')}× the median of the last ${shares.length} days` : ''}: a value marked bad, with no range for a day like it yet.`,
+      look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: today / rows, rows: Math.round(today - usualRows), acts: ['incident', 'notify'],
+    };
+  };
+
   // Each coded value's share: one usually there and gone, or one whose share is unusual.
   for (const [column, vh] of Object.entries(file.values ?? {})) {
     if (!vh.counts) continue;
     const badCodes = judge.bad.get(column.toLowerCase());
     vh.values.forEach((key, i) => {
       if (vh.first[i]! > k) return;
+      const bad = key !== 'null' && !!badCodes?.has(String(parse(key)));
       const j = judged({ of: 'value', column, value: key });
-      if (!j) return;
+      if (!j) {
+        // A value marked bad with no range to judge it by (a first-year holiday, a flow's first weeks): something wrong
+        // at twice its median share over the last seven ordinary days or more, past its floor, as the rows' own floor
+        // needs no range (the owner: rare but serious values always alert).
+        if (bad) {
+          const f = badWithoutRange(column, vh, i, key);
+          if (f) out.push(f);
+        }
+        return;
+      }
       const delta = j.value - j.range.expected;
       const said = label(column, key);
       const w = shareWords(j.value, j.range.low, j.range.high);
@@ -422,7 +471,6 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       // A value marked bad (ADR 0010 §4): something wrong above its range at twice its usual rows past its floor, however
       // few points it moved; good news below it; else told as any value is. Never marked as expected, never folded
       // (story.ts).
-      const bad = key !== 'null' && !!badCodes?.has(String(parse(key)));
       if (bad && place !== 'within') {
         const usualRows = j.range.expected * (trips?.range.expected ?? rows);
         const today = j.value * rows;
@@ -477,7 +525,12 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     const serious = judge.serious.has(column.toLowerCase());
     if (!serious && n < M.newRows && n < MATERIAL.newShare * rows) continue;
     const said = fresh.keys.slice(0, 5).map((key) => names.value(column, parse(key)));
-    out.push({ key: `new:${column}`, kind: 'new', severity: serious ? 'alert' : n >= M.newUnusual || n >= 0.001 * rows ? 'warn' : 'note', score: serious ? 60 : Math.min(99, n / Math.max(1, rows) * 1000), title: fresh.keys.length === 1 ? `New ${names.column(column)}: ${label(column, fresh.keys[0]!)} · ${fmtInt(n)} ${noun(n)}` : `New ${names.column(column)} values: ${fresh.keys.length} · ${fmtInt(n)} ${noun(n)}`, detail: `${listed(said)}${fresh.keys.length > 5 ? ` and ${fresh.keys.length - 5} more` : ''}: never in ${daysSeen(file, k)} days of history.`, look: 'columns', columns: [column], values: fresh.keys, rows: n, acts: serious ? ['incident', 'quarantine', 'notify', 'expected'] : ['expected', 'quarantine', 'rule', 'notify'] });
+    // A new value the ontology marks bad is something wrong, and never marked as expected (C9); so is any new value in
+    // a serious column: marking it expected is for the column's owner to do in the ontology, not on a paused day.
+    const badCodes = judge.bad.get(column.toLowerCase());
+    const bad = fresh.keys.some((key) => key !== 'null' && !!badCodes?.has(String(parse(key))));
+    const alert = serious || bad;
+    out.push({ key: `new:${column}`, kind: 'new', severity: alert ? 'alert' : n >= M.newUnusual || n >= 0.001 * rows ? 'warn' : 'note', score: alert ? 60 : Math.min(99, n / Math.max(1, rows) * 1000), title: fresh.keys.length === 1 ? `New ${names.column(column)}: ${label(column, fresh.keys[0]!)} · ${fmtInt(n)} ${noun(n)}` : `New ${names.column(column)} values: ${fresh.keys.length} · ${fmtInt(n)} ${noun(n)}`, detail: `${listed(said)}${fresh.keys.length > 5 ? ` and ${fresh.keys.length - 5} more` : ''}: never in ${daysSeen(file, k)} days of history.`, look: 'columns', columns: [column], values: fresh.keys, rows: n, acts: alert ? ['incident', 'quarantine', 'notify'] : ['expected', 'quarantine', 'rule', 'notify'], ...(bad ? { bad: true } : {}) });
   }
   for (const [pair, vh] of Object.entries(file.pairs ?? {})) {
     const fresh = newOn(vh, k);
@@ -785,7 +838,7 @@ function schemaCount(changes: readonly string[]): string {
  * 5.3% (usually 2.1–4.6%)", the others blank on the same trips), with its own numbers; else as the fields blank.
  */
 function together(findings: Finding[], rows: number, names: Names): Finding[] {
-  const groupable = (f: Finding) => (f.kind === 'share' || f.kind === 'missing' || f.kind === 'gone') && f.rows !== undefined && f.rows > 0;
+  const groupable = (f: Finding) => (f.kind === 'share' || f.kind === 'missing' || f.kind === 'gone') && f.rows !== undefined && f.rows > 0 && f.range !== undefined && f.value !== undefined;
   const out: Finding[] = [];
   const used = new Set<Finding>();
   for (const f of findings) {

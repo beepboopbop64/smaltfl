@@ -155,7 +155,8 @@
       {
         "column": "ua_family",
         "title": "Client",
-        "description": "The software that signed in"
+        "description": "The software that signed in",
+        "newValues": "alert"
       },
       {
         "column": "latency_ms",

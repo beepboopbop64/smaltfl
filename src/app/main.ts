@@ -8062,7 +8062,7 @@ async function applyDecided(r: RunRecord): Promise<void> {
     // held by the story alone. Published under it, recorded as a decision under the Accept, unless a later day is current.
     const src = loadSource();
     const told = day && src ? flowStoryOf(day) : null;
-    const lv = day && src && told?.state === 'wrong' ? levelFor(ledger.entries, src, day, levelWays(told), (from) => { const then = flowStoryOf(from); return then ? levelWays(then) : new Map(); }, r.result.holds.every((x) => x.by === 'story')) : null;
+    const lv = day && src && told?.state === 'wrong' ? levelFor(ledger.entries, src, day, (from) => levelWays(told, flowStoryOf(from) ?? undefined), (from) => { const then = flowStoryOf(from); return then ? levelWays(then) : new Map(); }, r.result.holds.every((x) => x.by === 'story')) : null;
     const shownNow = readersDay(r);
     if (lv && day && lv.about.level && !(shownNow && shownNow > day)) {
       const may = checkDecision(policies(), lv.by, 'accept');

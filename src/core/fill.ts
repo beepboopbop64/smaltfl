@@ -362,7 +362,7 @@ function keysOf(m: Metric | undefined): string[] {
  * finding's metric (a share, a level, a new value's share); and those of the findings it absorbed, that follow from it,
  * or are off on the day besides (wrong or unusual): the day as it came becomes what is usual. Sorted, each once.
  */
-export function levelMetrics(story: Pick<Story, 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'> & Partial<Pick<Story, 'findings'>>): string[] {
+export function levelMetrics(story: Pick<Story, 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'> & Partial<Pick<Story, 'findings'>>, notes = true): string[] {
   const out = new Set<string>();
   const outside = !!story.amount && (story.amount.value < story.amount.low || story.amount.value > story.amount.high);
   if (story.hero === 'amount' || outside) out.add('trips');
@@ -371,7 +371,10 @@ export function levelMetrics(story: Pick<Story, 'hero' | 'split' | 'cause' | 'ab
   // What the cause absorbed, what follows from it (a vendor gone moves the mix of the extras it fills), and anything else
   // off on the day, wrong or unusual (a fare change moves two surcharges at once): the day as it is becomes what is
   // usual, so all of it is learned anew from it.
-  const off = (x: { tier: string; was: string; severity: string }) => x.tier === 'follows' || x.severity === 'alert' || x.severity === 'warn' || x.was === 'alert' || x.was === 'warn';
+  // A note counts too when its number is outside its range (Mon Nov 14, 2022's extras, moved by Vendor 1's absence): the
+  // news shows it, and the days after would pause on it again, though it is the same change (Q-57b).
+  const outsideRange = (x: { value?: number; range?: { low: number; high: number } }) => x.value !== undefined && !!x.range && (x.value < x.range.low || x.value > x.range.high);
+  const off = (x: { tier: string; was: string; severity: string; value?: number; range?: { low: number; high: number } }) => x.tier === 'follows' || x.severity === 'alert' || x.severity === 'warn' || x.was === 'alert' || x.was === 'warn' || (notes && outsideRange(x));
   for (const f of [...(story.absorbed ?? []), ...(story.findings ?? []).filter(off)]) for (const k of keysOf(f.metric)) out.add(k);
   if (story.cause?.kind === 'new') for (const v of story.cause.values ?? []) for (const c of story.cause.columns ?? []) for (const k of keysOf({ of: 'value', column: c, value: v })) out.add(k);
   return [...out].sort();
@@ -381,8 +384,14 @@ export function levelMetrics(story: Pick<Story, 'hero' | 'split' | 'cause' | 'ab
  * The way each metric a level names is off on a day (`levelMetrics`): up (true) or down, as its finding's number stands
  * against what a day like it has; a split's part as it vanished or surged; the rows as the amount stands. What
  * `levelFor` compares a later day with, so a metric going back the other way is a change again, never the new level.
+ *
+ * Of a later day (`then`, the level's own day's story, given): only what is off on it loud enough to matter (wrong,
+ * unusual, or following its cause), and a metric off the other way than on the level's day is said off the level's way,
+ * still at it, until it has gone back a quarter of the way to where it was before the level: a vendor that sent nothing
+ * sending a trickle is still at the new level (Sun Nov 20, 2022); one back at a quarter of its trips is a change again
+ * (Mon Nov 21).
  */
-export function levelWays(story: Pick<Story, 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'> & Partial<Pick<Story, 'findings'>>): Map<string, boolean> {
+export function levelWays(story: Pick<Story, 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'> & Partial<Pick<Story, 'findings'>>, then?: Pick<Story, 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'> & Partial<Pick<Story, 'findings'>>): Map<string, boolean> {
   const out = new Map<string, boolean>();
   const put = (keys: string[], up: boolean) => {
     for (const k of keys) if (!out.has(k)) out.set(k, up);
@@ -393,8 +402,32 @@ export function levelWays(story: Pick<Story, 'hero' | 'split' | 'cause' | 'absor
     if (f.value === undefined || !f.range) continue;
     put(keysOf(f.metric), f.value > f.range.expected);
   }
-  const keep = new Set(levelMetrics(story));
+  const keep = new Set(levelMetrics(story, !then));
   for (const k of [...out.keys()]) if (!keep.has(k)) out.delete(k);
+  if (then) {
+    const was = levelWays(then);
+    const before = levelValues(then);
+    const now = levelValues(story);
+    for (const [k, up] of [...out]) {
+      const w = was.get(k);
+      const a = before.get(k);
+      const b = now.get(k);
+      if (w === undefined || w === up || !a || !b) continue;
+      const step = a.usual - a.value;
+      if (step !== 0 && (b.value - a.value) / step < 0.25) out.set(k, w);
+    }
+  }
+  return out;
+}
+
+/** Each metric's number on a day and what a day like it has, as `levelWays` reads them: the rows, and each finding's. */
+function levelValues(story: Pick<Story, 'cause' | 'absorbed' | 'amount'> & Partial<Pick<Story, 'findings'>>): Map<string, { value: number; usual: number }> {
+  const out = new Map<string, { value: number; usual: number }>();
+  if (story.amount) out.set('trips', { value: story.amount.value, usual: story.amount.expected });
+  for (const f of [...(story.cause ? [story.cause] : []), ...(story.absorbed ?? []), ...(story.findings ?? [])]) {
+    if (f.value === undefined || !f.range) continue;
+    for (const k of keysOf(f.metric)) if (!out.has(k)) out.set(k, { value: f.value, usual: f.range.expected });
+  }
   return out;
 }
 

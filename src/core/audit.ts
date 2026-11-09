@@ -727,7 +727,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
         say(false, `${where}: ${!now ? 'its day' : `#${a.under}'s own day`} wasn't told again, so whether the level stands for it can't be checked`);
         continue;
       }
-      const stray = levelStray(levelWays(now), levelWays(then), root.level.metrics);
+      const stray = levelStray(levelWays(now, then), levelWays(then), root.level.metrics);
       if (stray === null) say(false, `${where}: told again, nothing the level names is off on its day: it is back to the old level, a change again`);
       else say(stray.length === 0, stray.length ? `${where}: told again, it is off besides the level: ${stray.join('; ')}` : `${where}: told again, every metric off on its day is one the level names, off the same way`);
     }

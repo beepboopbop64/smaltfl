@@ -779,8 +779,8 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
     const plan = await translate(marked, { day: '2024-01-15' });
     expect(plan.smaltflPlan).toBe(2);
     const pub = plan.publish as PlanPublish2;
-    // A watch given as a file name keeps today's calendar and fixed floors.
-    expect(pub.calendar).toEqual({ base: 'us-nyc/1', zone: 'America/New_York', days: [], windows: [], dates: [] });
+    // A watch given as a file name keeps fixed floors; a format-3 document with no calendar block has none (Q-58).
+    expect(pub.calendar).toEqual({ base: 'none', zone: 'UTC', days: [], windows: [], dates: [] });
     expect(pub.watch[0]![1]).toMatchObject({ history: 'history.json', scale: 'fixed', donor: 'weekday', pattern: 'weekly', bad: [['payment_type', '4']], newValues: [['country', 'alert'], ['payment_type', 'alert']], after: [['tpep_dropoff_datetime', 'tpep_pickup_datetime', 15]] });
     expect(() => validatePlan(plan)).not.toThrow();
     // A mark on another dataset only: the document is format 3, and its plan stays plan/1.

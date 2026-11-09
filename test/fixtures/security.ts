@@ -76,6 +76,9 @@ export interface SecurityOptions {
   step?: { from: string; by: number };
   /** Variant E (phase 4): the collector's outage is the endpoint events', so the sign-ins have none. */
   edr?: boolean;
+  /** Rows added on chosen days, as a planted incident's are: each its rows (times `scale`), its hours and every coded
+   * column's shares. What a test plants on a day of its own (a burst on a first-year holiday, a new tool). */
+  extra?: Record<string, { n: number; hours: number[]; dist: Record<string, Dist> }[]>;
 }
 
 /** Whether a day is its month's last, and whether it is Patch Tuesday (the Tuesday between the 8th and the 14th). */
@@ -88,6 +91,8 @@ export const PLANTED = {
   mfa: ['2024-05-15', '2024-05-16'],
   firstHoliday: '2022-12-26',
   migration: '2024-06-03',
+  /** The day the migration's passkey share first crosses three times its usual: the day it pauses. */
+  migrationHeld: '2024-06-09',
   outage: '2024-09-10',
   hydra: '2024-11-29',
 } as const;
@@ -136,6 +141,7 @@ function planDays(o: SecurityOptions, rnd: () => number): SecurityDay[] {
     const segs: Segment[] = [{ n: n * (mfaGone ? 0.75 : 1), hours: norm(HUMAN), dist }];
     if (inc && day === PLANTED.burst) segs.push({ n: 150_000 * scale, hours: onlyHours([2, 3, 4]), dist: { result: { fail: 0.97, locked: 0.03 }, method: { password: 1 }, country: { RU: 1 }, ua_family: { 'python-requests': 1 } } });
     if (inc && day === PLANTED.hydra) segs.push({ n: 40_000 * scale, hours: onlyHours([20, 21, 22]), dist: { result: { fail: 0.99, locked: 0.01 }, method: { password: 1 }, country: { BR: 1 }, ua_family: { hydra: 1 } } });
+    for (const x of o.extra?.[day] ?? []) segs.push({ n: x.n * scale, hours: onlyHours(x.hours), dist: x.dist });
     days.push({ day, segs, outage: inc && !o.edr && day === PLANTED.outage ? [6, 7, 8, 9, 10, 11] : undefined });
   }
   return days;
@@ -311,7 +317,8 @@ const SECURITY_RULES = [
 
 /**
  * The sign-in flow at work, in the general form (format 3): the US federal days as its calendar, its rows called
- * sign-ins, `result`'s failures and lockouts marked bad, and a country never seen before something wrong (Q-56).
+ * sign-ins, `result`'s failures and lockouts marked bad, and a country or a client never seen before something wrong
+ * (the owner, Q-56: "(country, tool)").
  */
 export function securityDoc(): FlowDocument {
   return {
@@ -327,7 +334,7 @@ export function securityDoc(): FlowDocument {
         { column: 'result', title: 'Result', description: 'How the sign-in ended', values: { success: 'Signed in', fail: 'Failed', locked: 'Locked out' }, bad: ['fail', 'locked'] },
         { column: 'method', title: 'Method', description: 'How the user proved who they are', values: { password: 'Password', sso: 'Single sign-on', mfa_push: 'MFA push', passkey: 'Passkey', api_key: 'API key' } },
         { column: 'country', title: 'Country', description: 'Where the sign-in came from', newValues: 'alert' },
-        { column: 'ua_family', title: 'Client', description: 'The software that signed in' },
+        { column: 'ua_family', title: 'Client', description: 'The software that signed in', newValues: 'alert' },
       ],
     },
     publish: { hold: ['checks', 'wrong'], period: 'day', watch: { auth: { history: 'auth-history.json', time: 'event_time' } } },

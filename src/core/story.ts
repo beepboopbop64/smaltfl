@@ -391,11 +391,12 @@ export function splitOf(h: HistoryRanges, day: string, names: Names, hidden: Rea
       else if (steady(rs) && Math.abs(dr) >= 0.4 * Math.abs(change) && Math.abs(dr) >= floor) kind = 'held';
       if (!kind) return;
       const score = Math.abs(Math.log((rs + 1e-4) / (rr + 1e-4)));
-      // A value marked bad that moved is the day's cause before any other part (ADR 0010 §4): a burst of failed sign-ins
-      // is told by its failures, not by the country it came from.
+      // A value marked bad that surged or vanished is the day's cause before any other part (ADR 0010 §4): a burst of
+      // failed sign-ins is told by its failures, not by the country it came from. One that held while the rest moved is
+      // no cause of its own, and comes first of nothing.
       let bad = false;
       try {
-        bad = !!badCodes?.has(String(JSON.parse(value)));
+        bad = kind !== 'held' && !!badCodes?.has(String(JSON.parse(value)));
       } catch {
         bad = false;
       }
@@ -587,13 +588,17 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const hoursF = live.find((f) => f.kind === 'hours') ?? null;
   const loud = (f: Finding) => (f.severity === 'alert' || f.severity === 'warn') && !ack.has(f.key);
   const valueStories = live.filter((f) => VALUE_KINDS.has(f.kind) && loud(f)).length;
-  const split = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden, judge) : null;
+  // A value marked bad that is something wrong leads the day (ADR 0010 §4, the owner: always alert, an incident): told
+  // by its own finding unless a split leads with that value surging or vanishing.
+  const badLead = live.filter((f) => f.bad && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  const splitFound = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden, judge) : null;
+  const split = splitFound && (!badLead || (splitFound.bad && splitFound.kind !== 'held')) ? splitFound : null;
   const gate = k >= 0 && o.step ? gateOf(h, day, o.step, o.limit ?? null) : null;
   if (gate && o.held !== undefined) (gate.held = o.held), gate.held && (gate.near = false);
   const blankDay = !!volume && volume.value !== undefined && !!volume.range && volume.value < MATERIAL.blank * volume.range.expected;
   // A population seen through its blanks (a value and the fields blank on its rows, told together): the day's cause
   // when nothing else is, named by the value and not by a blank or a symptom (Mon Sep 18, 2023's Flex Fare trips).
-  const popFinding = k >= 0 && !o.refused && !split && !hoursF && !(volume && loud(volume)) && !gate?.held
+  const popFinding = k >= 0 && !o.refused && !split && !badLead && !hoursF && !(volume && loud(volume)) && !gate?.held
     ? (live.filter((f) => f.members && loud(f)).sort((a, b) => b.score - a.score).find((f) => populationOf(h, day, names, f, hidden, judge)) ?? null)
     : null;
   const population = popFinding ? populationOf(h, day, names, popFinding, hidden, judge) : null;
@@ -605,7 +610,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     : hoursF ? (hoursF.rows ?? 0)
     : volume && volume.range && volume.value !== undefined ? Math.abs(volume.value - volume.range.expected) : 0;
   const caused = !!(basis || hoursF || (volume && loud(volume)));
-  const hero: Hero = o.refused ? 'refused' : hoursF ? 'hours' : split ? 'split' : volume && loud(volume) ? 'amount' : gate?.held ? 'gate' : 'finding';
+  const hero: Hero = o.refused ? 'refused' : hoursF ? 'hours' : split ? 'split' : badLead ? 'finding' : volume && loud(volume) ? 'amount' : gate?.held ? 'gate' : 'finding';
 
   // Tier each finding.
   const n = k >= 0 ? file.rows[k]! : 0;
@@ -684,7 +689,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const byRank = (a: Told, b: Told) => RANK[a.severity] - RANK[b.severity] || b.score - a.score;
   const standalone = told.filter((f) => f.tier === 'standalone').sort(byRank);
   // The finding the head is about: the cause, or with none, the first standalone one.
-  const cause = told.find((f) => f.tier === 'cause') ?? (hero === 'finding' ? (standalone[0] ?? null) : null);
+  const cause = told.find((f) => f.tier === 'cause') ?? (hero === 'finding' ? (standalone.find((f) => f.key === badLead?.key) ?? standalone[0] ?? null) : null);
   const absorbed = told.filter((f) => f.tier === 'absorbed');
   const follows = told.filter((f) => f.tier === 'follows').sort((a, b) => RANK[a.was] - RANK[b.was] || b.score - a.score);
   const sameDay = told.filter((f) => f.tier === 'sameDay').sort((a, b) => RANK[a.was] - RANK[b.was] || b.score - a.score);
@@ -798,11 +803,19 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     const part = split.trips ? `${split.name} records` : split.name;
     // A bad value that surged takes its own name as the head: "Failed 4.5× usual" (ADR 0010 §4).
     const surged = split.bad ? split.name : part;
+    // A part that held while the rest rose is never said as a shortfall: the rest is what moved.
+    const rose = restRatio >= 1.95 ? `${Noun()} ${restRatio.toFixed(1).replace(/\.0$/, '')}× usual` : `${Noun()} up ${pctShort(restRatio - 1)}`;
     head = split.kind === 'held'
-      ? restRatio < 0.1 ? `Only ${part} arrived` : `${Noun()} ${pctShort(1 - restRatio)} short; ${split.name} held`
+      ? restRatio < 0.1 ? `Only ${part} arrived` : restRatio > 1 ? `${rose}; ${split.name} held` : `${Noun()} ${pctShort(1 - restRatio)} short; ${split.name} held`
       : split.kind === 'vanished'
         ? partRatio < 0.1 ? (split.sender ? `${split.name} sent almost nothing` : `${part} almost gone`) : `${part} ${pctShort(1 - partRatio)} short`
         : partRatio >= 1.95 ? `${surged} ${partRatio.toFixed(1).replace(/\.0$/, '')}× usual` : `${surged} up ${pctShort(partRatio - 1)}`;
+  } else if (hero === 'finding' && badLead && cause?.key === badLead.key && cause.metric?.of === 'value' && cause.value !== undefined && k >= 0) {
+    // A bad value that leads with no clean split: its own name and how many times its usual rows ("Failed 14× usual").
+    const usualRows = cause.range ? cause.range.expected * (tripsRange?.expected ?? file.rows[k]!) : cause.value * file.rows[k]! - (cause.rows ?? 0);
+    const times = usualRows > 0 ? (cause.value * file.rows[k]!) / usualRows : Infinity;
+    const name = partName(cause.metric.column, cause.metric.value, names, judge).name;
+    head = Number.isFinite(times) && times >= 1.95 ? `${name} ${times.toFixed(1).replace(/\.0$/, '')}× usual` : cause.title.replace(/\s*\(usually [^)]*\)$/, '');
   } else if (hero === 'amount' && volume) head = volume.title;
   else if (hero === 'gate' && gate) head = gateHead(gate);
   else if (population && popShare) {

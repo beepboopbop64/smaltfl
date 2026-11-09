@@ -287,7 +287,12 @@ describe('a day’s news on any dataset (ADR 0010 §1, §4, §8)', () => {
     const h = new HistoryRanges(historyWith({ '2023-10-04': { newValue: true } }));
     expect(newsOf(h, '2023-10-04', names).find((x) => x.kind === 'new')!.severity).toBe('warn');
     const f = newsOf(h, '2023-10-04', names, { judge: general({ serious: new Set(['vendorid']) }) }).find((x) => x.kind === 'new')!;
-    expect(f).toMatchObject({ severity: 'alert', acts: ['incident', 'quarantine', 'notify', 'expected'] });
+    // Never "Mark as expected" on it (C9): a new value in a serious column is the column owner's to accept, in the ontology.
+    expect(f).toMatchObject({ severity: 'alert', acts: ['incident', 'quarantine', 'notify'] });
+    expect(f.bad).toBeUndefined();
+    // A new value the ontology marks bad: something wrong, and flagged bad, serious column or not.
+    const bad = newsOf(h, '2023-10-04', names, { judge: general({ bad: new Map([['vendorid', new Set(f.values!.map((v) => String(JSON.parse(v))))]]) }) }).find((x) => x.kind === 'new')!;
+    expect(bad).toMatchObject({ severity: 'alert', bad: true, acts: ['incident', 'quarantine', 'notify'] });
   });
 
   it('scales its floors with the day’s expected rows in the general form, and keeps them fixed in the legacy one', () => {

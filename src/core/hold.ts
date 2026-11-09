@@ -1167,11 +1167,14 @@ export function levelsOf(entries: readonly EntryLike[], source: string): ClaimLe
  * that day's story), and nothing else holds the day (`only`: the story alone). Null when none stands: a new change,
  * another metric off, a metric going back the other way (a vendor that returns), or a check, pauses the day again.
  */
-export function levelFor(entries: readonly EntryLike[], source: string, day: string, off: ReadonlyMap<string, boolean>, ways: (from: string) => ReadonlyMap<string, boolean>, only = true): Decided | null {
-  if (!only || off.size === 0) return null;
+export function levelFor(entries: readonly EntryLike[], source: string, day: string, offAt: ReadonlyMap<string, boolean> | ((from: string) => ReadonlyMap<string, boolean>), ways: (from: string) => ReadonlyMap<string, boolean>, only = true): Decided | null {
+  if (!only) return null;
   const levels = levelsOf(entries, source).filter((l) => l.from < day);
   const latest = levels.at(-1);
   if (!latest) return null;
+  // What is off on the day, told against the level's own day when the caller can (fill.ts levelWays with `then`).
+  const off = typeof offAt === 'function' ? offAt(latest.from) : offAt;
+  if (off.size === 0) return null;
   const was = ways(latest.from);
   if (![...off].every(([m, up]) => latest.metrics.includes(m) && was.get(m) === up)) return null;
   const e = entries.find((x) => x.seq === latest.decision)!;

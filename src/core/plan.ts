@@ -301,9 +301,9 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
     const fills = { ...(p.donor !== undefined ? { donor: p.donor } : {}), ...(p.meanwhile !== undefined ? { meanwhile: p.meanwhile } : {}), ...(p.until !== undefined ? { until: p.until } : {}) };
     return { ...plan, smaltflPlan: 1, publish: { hold, watch, period: p.period ?? null, together: p.together ?? true, ...fills } };
   }
-  // A flow whose watches are all given as file names keeps the calendar it always had; any other has its block's, or
-  // none (Q-58).
-  const legacy = doc.calendar === undefined && entries.every((e) => !isGeneralWatch(e.w));
+  // A format-2 flow whose watches are all given as file names keeps the calendar it always had; a format-3 document has
+  // its block's, or none (the owner, Q-58: "None unless chosen"), whatever form its watches take.
+  const legacy = doc.smaltfl < 3 && doc.calendar === undefined && entries.every((e) => !isGeneralWatch(e.w));
   const calendar = resolveCalendar(doc.calendar, legacy);
   const watch = entries.map((e): [number, WatchPlan] => [e.node, watchPlan(e.w, e.id, p.period ?? null, doc.ontology)]);
   return { ...plan, smaltflPlan: 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: p.meanwhile ?? 'last', until: p.until ?? 'decision' } };

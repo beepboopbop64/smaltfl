@@ -63,7 +63,7 @@ describe('claim/2 (ADR 0010 §6)', () => {
   it('measures from the doc\'s checks, its bad and serious columns, with no base', async () => {
     const plan = await translate(doc, { day: DAY });
     const s = settingsFor(plan, 0, null, doc.steps)!;
-    expect(s).toMatchObject({ source: 'auth', slot: DAY, counted: ['result'], followed: ['country'], paired: [], time: 'event_time', zone: null, sample: 2000 });
+    expect(s).toMatchObject({ source: 'auth', slot: DAY, counted: ['result'], followed: ['country', 'ua_family'], paired: [], time: 'event_time', zone: null, sample: 2000 });
     expect(s.checks!.rules.find((r) => r.name === 'in_day')!.check).toBe('substr(event_time, 1, 10) = :day');
     expect(s.counting![1]).toBe(`substr(event_time, 1, 10) = '${DAY}'`);
   });
