@@ -1151,6 +1151,9 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 /* ◧ filled and ◐ the part alone (ADR 0009 amendment 1 S12): half a box, half a disc, the half that arrived solid. */
 .g-fillbox { fill: none; stroke: var(--ink-2); stroke-width: 1.4; } .g-half { fill: var(--ink-2); } .g-stip { fill: url(#viz-stipple); }
 .vf-option:disabled .g-half, .viz.off .g-half { fill: var(--muted); } .vf-option:disabled .g-fillbox, .viz.off .g-fillbox { stroke: var(--muted); }
+/* A new level accepted (ADR 0010 §12): a step in the ink, never a severity's colour. */
+.g-level { fill: none; stroke: var(--ink-2); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; } .g-levdot { fill: var(--ink-2); }
+.vf-option:disabled .g-level, .viz.off .g-level { stroke: var(--muted); } .vf-option:disabled .g-levdot, .viz.off .g-levdot { fill: var(--muted); }
 .vf-option:disabled .g-pub, .viz.off .g-pub { stroke: var(--muted); }
 .viz .cut-t { stroke: var(--ink-2); stroke-width: 1.2; }
 .vf-opt-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px; margin-top: 4px; font-size: 12.5px; }

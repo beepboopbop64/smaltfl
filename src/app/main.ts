@@ -25,8 +25,8 @@ import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.
 import { isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type PauseState, type RemedyMark } from '../core/days.js';
 import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, type AfterPart, type RemedySaid, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
-import { countedChecks, rangesFor, dayClaim, dayState, flowStory, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
-import { dayVersions, donorIdOf, fillCounts, partLabel as remedyPart, type Repair, type Version } from '../core/fill.js';
+import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
+import { dayVersions, donorIdOf, fillCounts, levelOf as acceptedLevel, levelWays, partLabel as remedyPart, type Offer, type Repair, type Version } from '../core/fill.js';
 import { derivedAbout, derivedFails, derivedKeys, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
 import { ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
@@ -250,13 +250,13 @@ const pct = (x: number) => (x > 0 && x < 0.0005 ? '<0.1%' : x < 1 && x >= 0.9995
 /** Short counts for cards: 9,555 · 12.3k · 456k · 1.2M. */
 const fmtCompact = (n: number) => (Math.abs(n) < 10000 ? fmtInt(n) : Math.abs(n) < 1e6 ? `${(n / 1000).toFixed(Math.abs(n) < 1e5 ? 1 : 0)}k` : `${(n / 1e6).toFixed(1)}M`);
 
-/** A held day's mark (ADR 0009 §12, amendment 1 S12): ‖ paused, ⚑ published as is, ✕ not published, ◧ filled, ◐ the
- * part that arrived alone. */
-const PAUSE_MARK: Record<DayState, VizMark> = { waiting: 'held', asis: 'flag', dont: 'closed', fill: 'fill', complete: 'part' };
+/** A held day's mark (ADR 0009 §12, amendment 1 S12): ‖ paused, ⚑ published as is (and accepted as a new level:
+ * readers got the day as it came), ✕ not published, ◧ filled, ◐ the part that arrived alone. */
+const PAUSE_MARK: Record<DayState, VizMark> = { waiting: 'held', asis: 'flag', dont: 'closed', fill: 'fill', complete: 'part', accepted: 'flag' };
 /** What a held day's mark says, for its accessible name. */
-const PAUSE_WORD: Record<DayState, string> = { waiting: 'paused', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only' };
+const PAUSE_WORD: Record<DayState, string> = { waiting: 'paused', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only', accepted: 'new level' };
 /** What a card's mark says to a screen reader, before its line. */
-const CARD_SAID: Record<DayState, string> = { waiting: 'Paused, ', asis: 'Published as is, ', dont: 'Not published, ', fill: 'Filled, ', complete: 'Part only, ' };
+const CARD_SAID: Record<DayState, string> = { waiting: 'Paused, ', asis: 'Published as is, ', dont: 'Not published, ', fill: 'Filled, ', complete: 'Part only, ', accepted: 'New level, ' };
 
 function setStatus(text: string, bad = false, run?: { n: number; state: 'done' | 'held' | 'failed' | 'refused'; mark?: DayState | null }): void {
   const el = $('status');
@@ -310,7 +310,7 @@ function sayRun(r: RunRecord): void {
   const top = day ? verdictOf(day) : undefined;
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
   const said = day
-    ? daySentence({ day, head: top?.title ?? null, wrong: top?.severity === 'alert', pause: pause ? { state: pause.state, readers: readersAsOf(r).day, past: readersAsOf(r).past, standing: standsOn(pause.pause?.decision), may, deciders: deciders(), remedy: pause.remedy, withdrawn: pause.withdrawn } : null })
+    ? daySentence({ day, head: top?.title ?? null, wrong: top?.severity === 'alert', pause: pause ? { state: pause.state, readers: readersAsOf(r).day, past: readersAsOf(r).past, standing: standsOn(pause.pause?.decision), may, deciders: deciders(), remedy: pause.remedy, withdrawn: pause.withdrawn, level: pause.pause?.decision?.about.level?.from ?? null, under: levelUnder(pause.pause?.decision) } : null })
     : pause ? `Held${result.holds.every((x) => sightOf(x.origin) === 'all') ? `: ${result.holds[0]!.said}` : ''}` : figures;
   setStatus(said, false, { n: attempts, state: pause && !isOut(pause.state) ? 'held' : 'done', mark: pause?.state ?? null });
   $('status').title = figures;
@@ -444,7 +444,13 @@ function withdrawnOf(p: Pause | null): RemedyMark | null {
 }
 
 /** Whether readers got a day: as is, filled, or with the part that arrived. */
-const isOut = (s: DayState | null | undefined): boolean => s === 'asis' || s === 'fill' || s === 'complete';
+/** The day word of the Accept a day was published under (a standing level, Q-57b), for "By Mon’s new level". */
+function levelUnder(d: Decided | null | undefined): string | null {
+  if (!d || d.about.option !== 'accept' || d.about.under === undefined) return null;
+  const day = (ledger?.entries[d.about.under]?.about as { day?: string } | undefined)?.day;
+  return day ? dayShort(day).split(' ')[0]! : null;
+}
+const isOut = (s: DayState | null | undefined): boolean => s === 'asis' || s === 'fill' || s === 'complete' || s === 'accepted';
 
 /**
  * What became of a held run's day (ADR 0009 §6): waiting for a decision, published as is (released here, or every held
@@ -4274,6 +4280,7 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
   if (withdraws && back?.day === day) can.dont = { allowed: false, reason: 'a refill is replaced by another fill, not withdrawn' };
   const readers = withdraws ? (back?.day === day ? null : back) : readersOn(r, shown);
   const rem = remediesFor(r);
+  const accept = acceptFor(r);
   const donors = rem ? rem.picks.map((p) => ({ day: p.day, counts: rem.counts.get(p.day)! })) : [];
   const draw = decisionDrawing(history, story, day ?? '', readers?.day ?? null, { day: rows, readers: readers?.rows ?? null }, rem ? { missing: rem.missing, donors: rem.picks.map((p) => p.day) } : null);
   // The staged run of the remedy picked, once made (S4): whether it passes its checks, and the hash of what goes out.
@@ -4285,7 +4292,7 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     day, waited: opened && first?.state === 'waiting' ? (Date.now() - Date.parse(opened)) / 60000 : null, since: opened && new Date(opened).toDateString() === new Date().toDateString() ? clock(opened) : null, otherBuild: !!pause?.otherBuild, outputs: n, rows, reach: tripsKept(r) ?? null, readers, later, checks: heldChecks(r, story),
     part: draw.part, missing: draw.cause === 'hours' ? (story?.hoursLabels?.missing ?? null) : null, cut: draw.cut?.[1] ?? null, ticks: draw.ticks.map(([, x]) => x),
     unjudged: r.result.holds.some((x) => x.by === 'unjudged'), hash: r.result.hash, may: anyone, deciders: deciders(), head: story?.head ?? null,
-    offers: (rem?.offers ?? []).filter((o) => o.option === 'fill' || o.option === 'complete'), donors, partOnly: rem?.part ?? null, staged, withdraws,
+    offers: [...(rem?.offers ?? []).filter((o) => o.option === 'fill' || o.option === 'complete'), ...(accept && !withdraws ? [accept.offer] : [])], donors, partOnly: rem?.part ?? null, staged, withdraws,
   });
   let t = textOf();
   // Each option a row drawn as what readers would get, on one scale: Publish as is the day's own rows, Keep another
@@ -4299,6 +4306,9 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
       return { mark: 'fill' as VizMark, rows: f?.rows ?? draw.asis, usual: null, short: draw.short, other: false, missing: null, cut: null, part: null, filled: f?.filled ?? null };
     }
     if (o.option === 'complete') return { mark: 'part' as VizMark, rows: draw.complete?.rows ?? draw.asis, usual: draw.complete?.usual ?? null, short: draw.complete?.short ?? null, other: false, missing: null, cut: null, part: null, filled: null };
+    // Accept the new level (amendment 1 S6, X6): the day's own rows as they came, with nothing drawn absent, so they read
+    // as what is usual now; marked by the step. The part is named once, on Publish as is's row.
+    if (o.option === 'accept') return { mark: 'level' as VizMark, rows: draw.asis, usual: null, short: null, other: false, missing: null, cut: null, part: null, filled: null };
     return { mark: (readers ? 'keep' : 'closed') as VizMark, rows: draw.dont, usual: null, short: draw.short, other: true, missing: null, cut: null, part: null, filled: null };
   };
   const rowOf = (o: SheetText['options'][number], last: boolean, still = false) => {
@@ -4306,8 +4316,10 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     const g = drawingOf(o);
     const d = donorPicked(o, pick);
     // Before a pick every row says its number; after one, only the row picked (amendment 1 S12).
-    const number = !pick.option || pick.option === o.option || still ? (d?.number ?? o.number) : '';
-    const svg = svgNode(decisionRow({ mark: g.mark, label: d?.label ?? o.label, number, cause: draw.cause, rows: g.rows, usual: g.usual, short: g.short, other: g.other, scale: draw.scale, part: g.part, ticks: last ? draw.ticks : [], missing: g.missing, cut: g.cut, filled: g.filled, off: off && !still, aria: d?.aria ?? o.aria }));
+    // Accept's number is the day as it came, Publish as is's, said once it is picked (decision.ts sheetShown).
+    const own = o.option === 'accept' && !o.off ? (t.options.find((x) => x.option === 'asis')?.number ?? '') : (d?.number ?? o.number);
+    const number = pick.option === o.option || still ? own : !pick.option ? (d?.number ?? o.number) : '';
+    const svg = svgNode(decisionRow({ mark: g.mark, label: d?.label ?? o.label, number, cause: draw.cause, rows: g.rows, usual: g.usual, short: g.short, other: g.other, scale: draw.scale, part: g.part, ticks: last ? draw.ticks.filter(([, x]) => t.ticks.includes(x)) : [], missing: g.missing, cut: g.cut, filled: g.filled, off: off && !still, aria: d?.aria ?? o.aria }));
     const line = !pick.option ? (o.option === 'asis' && anyone ? o.warn : null) : pick.option === o.option ? (o.option === 'asis' ? (o.warnPicked ?? o.sub) : d ? (d.fails ? 'fails its checks' : d.sub) : o.sub) : null;
     const warns = (o.option === 'asis' && !!o.warn && !pick.option) || line === 'fails its checks';
     const more = line ? h('span', { class: 'vf-opt-more' }, warns ? h('span', { class: 'vf-opt-warn' }, glyphEl('alert', 13), line) : h('span', { class: 'vf-opt-sub' }, line)) : null;
@@ -4349,7 +4361,7 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
   };
   const choose = (option: DecisionOption) => {
     pick.option = option;
-    if (option === 'asis') pick.scope = 'day';
+    if (option === 'asis' || option === 'accept') pick.scope = 'day';
     if (pick.reason && !t.chips[option].includes(pick.reason)) pick.reason = null;
     if (option === 'fill' || option === 'complete') void prepare();
     else (pick.preparing = false), sync();
@@ -4364,9 +4376,10 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
         h('button', { type: 'button', role: 'radio', class: 'vf-reason', 'aria-checked': String(x === pick.reason), onclick: () => ((pick.reason = pick.reason === x ? null : x), sync()) }, x))));
       why.hidden = false;
     } else why.hidden = true;
-    scopes.hidden = !t.switch || !o || o === 'asis' || (o === 'dont' && !!withdraws);
+    // Publish as is covers one day; an Accept stands by its level (Q-57b): neither has the switch.
+    scopes.hidden = !t.switch || !o || o === 'asis' || o === 'accept' || (o === 'dont' && !!withdraws);
     scopes.setAttribute('aria-checked', String(pick.scope === 'untilPass'));
-    go.disabled = !o || (o === 'asis' && !pick.reason) || !!pick.preparing || pickFails(t, pick) || ((o === 'fill' || o === 'complete') && !stagedRun);
+    go.disabled = !o || ((o === 'asis' || o === 'accept') && !pick.reason) || !!pick.preparing || pickFails(t, pick) || ((o === 'fill' || o === 'complete') && !stagedRun);
     go.textContent = goShown(t, pick);
     go.title = `What goes out: manifest ${stagedRun && (o === 'fill' || o === 'complete') ? `${stagedRun.result.hash.slice(0, 4)} ${stagedRun.result.hash.slice(4, 8)}` : t.hash}`;
     if (status) status.hidden = !!o;
@@ -4389,7 +4402,7 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     // who and when, the record's entry, Versions for a remedy, and Change decision where it can still change.
     const had = readersAsOf(r);
     const out = isOut(st);
-    const l = receiptLines({ state: st, day, readers: out ? day : had.day, past: !out && had.past, released: out ? n : 0, who: personName(entry.by.as), at: clock(entry.at), seq: entry.seq, under: null, standing: (entry.about as { scope?: unknown }).scope === 'untilPass', remedy: now?.remedy ? { ...now.remedy, ...remedyCounts(now.pause) } : null, withdrawn: now?.withdrawn ?? null });
+    const l = receiptLines({ state: st, day, readers: out ? day : had.day, past: !out && had.past, released: out ? n : 0, who: personName(entry.by.as), at: clock(entry.at), seq: entry.seq, under: null, standing: (entry.about as { scope?: unknown }).scope === 'untilPass', remedy: now?.remedy ? { ...now.remedy, ...remedyCounts(now.pause) } : null, withdrawn: now?.withdrawn ?? null, level: (entry.about as { level?: { from?: string } }).level?.from ?? null });
     const kept = t.options.find((o) => o.option === option);
     const sheetEl = document.querySelector('.vf-detail');
     for (const el of [status, rowsEl, why, scopes, foot]) el?.remove();
@@ -4432,7 +4445,7 @@ function receiptOf(r: RunRecord, may: boolean): HTMLElement | null {
   const day = dayOfRun(r) ?? null;
   const kept = readersAsOf(r);
   const out = isOut(now.state);
-  const l = receiptLines({ state: now.state, day, readers: out ? day : kept.day, past: !out && kept.past, released: out ? (now.pause?.waiting ?? r.result.waiting).length : 0, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, seq: d?.seq ?? null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, standing: standsOn(d), remedy: now.remedy ? { ...now.remedy, ...remedyCounts(now.pause) } : null, withdrawn: now.withdrawn });
+  const l = receiptLines({ state: now.state, day, readers: out ? day : kept.day, past: !out && kept.past, released: out ? (now.pause?.waiting ?? r.result.waiting).length : 0, who: d ? personName(d.by) : null, at: d && !underDay ? clock(d.at) : null, seq: d?.seq ?? null, under: underDay ? dayShort(underDay).split(' ')[0]! : null, standing: standsOn(d), remedy: now.remedy ? { ...now.remedy, ...remedyCounts(now.pause) } : null, withdrawn: now.withdrawn, level: d?.about.level?.from ?? null });
   const box = receiptBox(l, now.state, d?.seq ?? null, null, l.change && may ? () => decisionSheet(r, day ? storyFor(day) : null) : null, day, l.versions && day ? () => versionsSheet(day) : null);
   box.classList.add('loads-receipt');
   // Under the loads strip, its links are the canvas's: the sheet's and the card's keep their own names.
@@ -7026,7 +7039,7 @@ function renderLoads(): void {
   const held = own ? pauseOf(own) : null;
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
   const kept = own && held ? readersAsOf(own) : null;
-  const pl = own && held ? dayPausedLine({ state: held.state, readers: kept!.day, past: kept!.past, may, standing: standsOn(held.pause?.decision), day: now!.day, remedy: held.remedy, withdrawn: held.withdrawn }) : null;
+  const pl = own && held ? dayPausedLine({ state: held.state, readers: kept!.day, past: kept!.past, may, standing: standsOn(held.pause?.decision), day: now!.day, remedy: held.remedy, withdrawn: held.withdrawn, level: held.pause?.decision?.about.level?.from ?? null, under: levelUnder(held.pause?.decision) }) : null;
   // The status line just above says the day by its pause where the viewer's story doesn't head it (core/decision.ts
   // daySentence, as sayRun says it): its date and, with no Decide to go with it, its pause aren't said again here.
   const statusPause = !!held && (!isOut(held.state) ? !(top?.title && top.severity === 'alert') : !top?.title);
@@ -7097,7 +7110,7 @@ function episodeWorst(name: string): 'alert' | 'warn' | null {
 const episodeMarks = { busy: false };
 
 /** What a day's chip says of its pause, after its trips and verdict. */
-const PAUSE_SAID: Record<DayState, string> = { waiting: ', paused, waiting on a decision', asis: ', published as is', dont: ', not published', fill: ', filled', complete: ', published with the part that arrived' };
+const PAUSE_SAID: Record<DayState, string> = { waiting: ', paused, waiting on a decision', asis: ', published as is', dont: ', not published', fill: ', filled', complete: ', published with the part that arrived', accepted: ', published as a new level' };
 /** The same, said of a day's pause now: a fill names its donor (", filled from Thu 14"). */
 function pauseSaid(day: string, s: DayState): string {
   if (s !== 'fill' && s !== 'complete') return PAUSE_SAID[s];
@@ -7303,13 +7316,16 @@ function refreshRanges(): void {
   if (!baseHistory || !source) return;
   const tail = tailBefore(tails.get(source) ?? [], '\uffff');
   const skips = recordedSkips();
-  const key = JSON.stringify([tail.map((m) => m.slot), skips]);
+  // The levels accepted (ADR 0010 §5, C6): from each, the metrics it names are learned anew, in the flow's verdict and
+  // in what this browser shows.
+  const levels = levelsOf(ledger?.entries ?? [], source);
+  const key = JSON.stringify([tail.map((m) => m.slot), skips, levels]);
   if (key === rangesKey && flowHistory) return;
   rangesKey = key;
   const file = tail.length ? appendPeriods(baseHistory, tail) : baseHistory;
   const settings = rangesFor(state.doc, source);
-  flowHistory = new HistoryRanges(file, { ...settings, recorded: new Set(skips) });
-  history = new HistoryRanges(file, { ...settings, skip: incidentDays(), recorded: new Set(skips) });
+  flowHistory = new HistoryRanges(file, { ...settings, recorded: new Set(skips), levels });
+  history = new HistoryRanges(file, { ...settings, skip: incidentDays(), recorded: new Set(skips), levels });
   claims.clear();
   storyCache.clear();
   alerts = null;
@@ -7364,7 +7380,7 @@ async function claimsForRun(engine: Engine, day: string | undefined, parameters:
     if (!settings) continue;
     const m = await measureLoad(engine, b.table, settings);
     measuring.push(m);
-    const told = await loadClaim({ doc: state.doc, source, flow: plan.flow.hash, base: ref ? base : null, baseRef: ref, tail: tails.get(source) ?? [], measures: m, settings, skip: recordedSkips(), build: BUILD_COMMIT });
+    const told = await loadClaim({ doc: state.doc, source, flow: plan.flow.hash, base: ref ? base : null, baseRef: ref, tail: tails.get(source) ?? [], measures: m, settings, skip: recordedSkips(), levels: levelsOf(ledger?.entries ?? [], source), build: BUILD_COMMIT });
     await pinFile(engine, tailPath(source), told?.tail.length ? utf8(canonicalJSON(told.tail as unknown as Parameters<typeof canonicalJSON>[0])) : null);
     const key = `${day}|${source}|${flowHistory ? countedChecks(state.doc, flowHistory, source) : false}`;
     claims.set(key, told?.claim ?? null);
@@ -7743,7 +7759,7 @@ function renderRuns(): void {
 }
 
 /** A held run in the run list (ADR 0009 §12): waiting for a decision (built, not published), then what became of it. */
-const PAUSE_PILL: Record<DayState, string> = { waiting: 'waiting', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only' };
+const PAUSE_PILL: Record<DayState, string> = { waiting: 'waiting', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only', accepted: 'new level' };
 
 /** The record's run entries by manifest, read again as the record grows. */
 const runSeqCache = { size: -1, byManifest: new Map<string, number>() };
@@ -7997,10 +8013,10 @@ const heldRunOf = (day: string): RunRecord | undefined => {
  * the policies stored with it, then the record keeps what came of it, citing the decision by its leaf. A refusal is
  * kept too.
  */
-async function release(r: RunRecord, decision: RecordEntry, keys: Record<string, string>): Promise<ReleaseResult | null> {
+async function release(r: RunRecord, decision: RecordEntry, keys: Record<string, string>, option: 'asis' | 'accept' = 'asis'): Promise<ReleaseResult | null> {
   if (!ledger || !state.engine) return null;
   const leaf = entryLeaf(decision);
-  const out = await releaseRun(state.engine, { run: r.result.run, manifest: r.result.hash, keys, option: 'asis', actor: decision.by.as, reason: decision.reason, decision: leaf });
+  const out = await releaseRun(state.engine, { run: r.result.run, manifest: r.result.hash, keys, option, actor: decision.by.as, reason: decision.reason, decision: leaf });
   r.release = out;
   noteShown(r, out.published);
   const about: ReleaseAbout = { run: r.result.run, manifest: r.result.hash, outputs: keys, decision: decision.seq, leaf, outcome: out.outcome, why: out.why };
@@ -8028,12 +8044,26 @@ async function applyDecided(r: RunRecord): Promise<void> {
       const shown = readersDay(r);
       const later = !!(day && shown && shown > day);
       const o = found.decision.about.option;
-      if (o === 'asis' && !later) await release(r, ledger.entries[found.decision.seq]!, keys);
+      if ((o === 'asis' || o === 'accept') && !later) await release(r, ledger.entries[found.decision.seq]!, keys, o);
       if ((o === 'fill' || o === 'complete') && found.decision.about.repair && !later) await applyRemedy(r, found.decision);
       return;
     }
     if (found) return;
     const day = await periodDay(r);
+    // A level accepted before it that still stands (Q-57b): the day's story off by nothing but the metrics it names, and
+    // held by the story alone. Published under it, recorded as a decision under the Accept, unless a later day is current.
+    const src = loadSource();
+    const told = day && src ? flowStoryOf(day) : null;
+    const lv = day && src && told?.state === 'wrong' ? levelFor(ledger.entries, src, day, levelWays(told), (from) => { const then = flowStoryOf(from); return then ? levelWays(then) : new Map(); }, r.result.holds.every((x) => x.by === 'story')) : null;
+    const shownNow = readersDay(r);
+    if (lv && day && lv.about.level && !(shownNow && shownNow > day)) {
+      const may = checkDecision(policies(), lv.by, 'accept');
+      if (!may.allowed) return;
+      const about: DecideAbout = { day, run: r.result.run, manifest: r.result.hash, inputs, outputs: keys, option: 'accept', scope: 'day', policies: await policiesHash(policies() ?? null), rule: may.rule ?? null, under: lv.seq, level: lv.about.level };
+      const entry = await ledger.append('decide', lv.by, about as unknown as JSONValue, lv.reason);
+      await release(r, entry, keys, 'accept');
+      return;
+    }
     const standing = day ? standingFor(ledger.entries, day, periodOfPlan(await planFor(r))) : null;
     if (!standing || !day) return;
     // A fill (or the part alone) that stands until a day passes (Q-64): this day filled by the same rule and direction,
@@ -8088,8 +8118,8 @@ async function decideNow(target: RunRecord | string, option: DecisionOption, sco
     setStatus(`${may.reason.replace(/^./, (c) => c.toUpperCase())}.`, true);
     return null;
   }
-  if (option === 'asis' && !reason?.trim()) {
-    setStatus('Publishing a held day as is needs a reason.', true);
+  if ((option === 'asis' || option === 'accept') && !reason?.trim()) {
+    setStatus(option === 'accept' ? 'Accepting a new level needs a reason.' : 'Publishing a held day as is needs a reason.', true);
     return null;
   }
   let r = typeof target === 'string' ? heldRunOf(target) : (target.derived?.from ?? target);
@@ -8112,7 +8142,7 @@ async function decideNow(target: RunRecord | string, option: DecisionOption, sco
   }
   if (!r) return null;
   // Readers have a day published as is: no decision takes it back.
-  if (pauseOf(r)?.state === 'asis') {
+  if (pauseOf(r)?.state === 'asis' || pauseOf(r)?.state === 'accepted') {
     setStatus(`${dayOfRun(r) ? dayMid(dayOfRun(r)!) : 'This run'} is published as is: readers have it, and no decision takes it back.`, true);
     return null;
   }
@@ -8136,14 +8166,22 @@ async function decideNow(target: RunRecord | string, option: DecisionOption, sco
     return null;
   }
   const dkeys = derived ? derivedKeys(await planFor(derived), derived.result) : null;
+  // Accept the new level records the level its cause moved (amendment 1 S6, C6), and covers later days by it, not by a
+  // scope (Q-57b).
+  const level = option === 'accept' ? acceptFor(r)?.level ?? null : null;
+  if (option === 'accept' && !level) {
+    setStatus(`${day ? dayMid(day) : 'This run'} can't be accepted as a new level: its cause isn't one.`, true);
+    return null;
+  }
   const about: DecideAbout = {
-    day, run: r.result.run, manifest: r.result.hash, inputs: inputsOf(r.result.manifest), outputs: keys, option, scope: option === 'asis' || remedy.withdraw || !day || passed ? 'day' : scope, policies: await policiesHash(policies() ?? null), rule: may.rule ?? null,
+    day, run: r.result.run, manifest: r.result.hash, inputs: inputsOf(r.result.manifest), outputs: keys, option, scope: option === 'asis' || option === 'accept' || remedy.withdraw || !day || passed ? 'day' : scope, policies: await policiesHash(policies() ?? null), rule: may.rule ?? null,
     ...(derived && dkeys ? { repair: derived.derived!.repair, derived: { run: derived.result.run, manifest: derived.result.hash, keys: dkeys } } : {}),
+    ...(level ? { level } : {}),
   };
   const entry = await ledger.append('decide', state.viewer, about as unknown as JSONValue, reason?.trim() || null, p?.decision?.seq ?? null);
   let refused: string | null = null;
-  if (option === 'asis') {
-    const out = await release(r, entry, keys);
+  if (option === 'asis' || option === 'accept') {
+    const out = await release(r, entry, keys, option);
     if (out?.outcome === 'refused') refused = out.why;
   } else if (derived && dkeys) {
     const out = await releaseDerived(derived, entry, dkeys);
@@ -8187,6 +8225,25 @@ function flowStoryOf(day: string): Story | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a held run's day may be accepted as a new level (amendment 1 S6), with the level it would record: by the
+ * flow's verdict on the day (its cause and what it absorbed), the claim it was held on, and what holds it. Off while a
+ * later day is current, as publish as is is. Null on a derived run, or where the day can't be accepted.
+ */
+function acceptFor(r: RunRecord): { offer: Offer; level: { source: string; from: string; metrics: string[] } } | null {
+  const day = dayOfRun(r);
+  const src = loadSource();
+  if (!day || !src || r.derived) return null;
+  const story = flowStoryOf(day);
+  if (!story) return null;
+  const claim = claimsFor(day)?.find((c) => c.source === src) ?? null;
+  const level = acceptedLevel(story, claim, r.result.holds, day, src);
+  if (!level) return null;
+  const shown = readersDay(r);
+  const later = shown && shown > day ? shown : null;
+  return { offer: { option: 'accept', label: 'Accept the new level', ...(later ? { off: `${dayShort(later)} is published` } : {}) }, level };
 }
 
 /**
@@ -8283,7 +8340,7 @@ async function donorClaim2(engine: Engine, r: RunRecord, repair: Repair): Promis
   const settings = node < 0 || !b ? null : settingsFor(plan, node, ref ? baseHistory : null, state.doc.steps);
   if (!settings || !b) return null;
   const m = await measureLoad(engine, donorBinding(repair.source, b).table, settings);
-  const told = await loadClaim({ doc: state.doc, source: repair.source, flow: plan.flow.hash, base: ref ? baseHistory : null, baseRef: ref, tail: tails.get(repair.source) ?? [], measures: m, settings, skip: recordedSkips(), build: BUILD_COMMIT });
+  const told = await loadClaim({ doc: state.doc, source: repair.source, flow: plan.flow.hash, base: ref ? baseHistory : null, baseRef: ref, tail: tails.get(repair.source) ?? [], measures: m, settings, skip: recordedSkips(), levels: levelsOf(ledger?.entries ?? [], repair.source), build: BUILD_COMMIT });
   return told ? ({ ...told.claim, source: donorIdOf(repair.source) } as Claim) : null;
 }
 
@@ -8720,6 +8777,11 @@ const KIND_WORD: Record<string, (e: { seq: number; about: Record<string, unknown
     const repair = a.repair as Repair | undefined;
     const was = amends !== null && amends !== undefined ? (ledger?.entries[amends]?.about as { option?: string } | undefined)?.option : undefined;
     const remedy = repair ? (repair.kind === 'fill' && repair.donor ? `${was === 'fill' ? 'refilled' : 'filled'} from ${dayShort(repair.donor.day)}` : `published ${remedyPart(repair.missing, a.day ? storyFor(String(a.day))?.split?.name : undefined).replace(/^(Before|Without|From) /, (m) => m.toLowerCase())}`) : null;
+    // Accept the new level (amendment 1 S6): "Mon Nov 14: new level from Mon 14 · decision #24"; a later day under it,
+    // "Tue Nov 15 published, by #24’s new level".
+    const level = a.level as { from?: string } | undefined;
+    if (a.option === 'accept' && typeof a.under === 'number') return `${day} published, by #${a.under}’s new level`;
+    if (a.option === 'accept') return `${day}: new level from ${level?.from ? dayShort(level.from) : 'the day'}${reason ? ` (${reason})` : ''}`;
     if (typeof a.under === 'number') return `${day} ${remedy ?? 'not published'}, by #${a.under}’s rule`;
     if (remedy) return `${day} ${remedy}${a.scope === 'untilPass' ? ', and later days until one passes' : ''}${amends !== null && amends !== undefined ? ` · amends #${amends}` : ''}`;
     if (a.option === 'dont' && (was === 'fill' || was === 'complete')) return `${day} ${was === 'fill' ? 'fill' : 'part'} withdrawn · amends #${amends}${reason ? ` (${reason})` : ''}`;
@@ -8763,7 +8825,7 @@ function recordMark(e: { kind: string; about: unknown }): VizMark | null {
     const now = heldNow(e.about as Record<string, unknown>);
     return now && now !== 'waiting' ? PAUSE_MARK[now] : null;
   }
-  if (e.kind === 'decide') return a.option === 'asis' ? 'flag' : a.option === 'fill' ? 'fill' : a.option === 'complete' ? 'part' : 'closed';
+  if (e.kind === 'decide') return a.option === 'asis' ? 'flag' : a.option === 'accept' ? 'level' : a.option === 'fill' ? 'fill' : a.option === 'complete' ? 'part' : 'closed';
   if (e.kind === 'release' && a.outcome === 'applied') {
     const r = (e.about as { repair?: Repair; withdraws?: number }).repair;
     return (e.about as { withdraws?: number }).withdraws !== undefined ? 'closed' : r ? (r.kind === 'fill' ? 'fill' : 'part') : 'flag';

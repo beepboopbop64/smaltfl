@@ -18,7 +18,8 @@ import { canonicalJSON } from './canonical.js';
 import { dayShort } from './days.js';
 import { fillStepOf, isGeneralWatch, type DonorRule, type FillStep, type FlowDocument, type Missing } from './document.js';
 import type { HistoryRanges } from './history.js';
-import { calendarFor, dayClaim, donorDefault, donorGood, type FlowFor, type HistoryRef, type StoryClaim } from './hold.js';
+import { metricKey, type Metric } from './history.js';
+import { calendarFor, dayClaim, donorDefault, donorGood, type FlowFor, type Hold, type HistoryRef, type StoryClaim } from './hold.js';
 import type { JSONValue, LogEntry } from './log.js';
 import type { DecisionOption } from './policy.js';
 import type { Story } from './story.js';
@@ -310,6 +311,10 @@ export interface OfferInput {
   partFails?: boolean;
   /** What readers have of this day now, from a release of it. */
   readers?: 'fill' | 'complete' | null;
+  /** The story's own (`acceptable` reads its cause and what it absorbed), and what holds the day: Accept the new level is
+   * offered by them (S6). Without them, no Accept. */
+  told?: Pick<Story, 'state' | 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'>;
+  holds?: readonly Pick<Hold, 'by'>[];
 }
 
 /**
@@ -328,7 +333,87 @@ export function offersOf(o: OfferInput): Offer[] {
     out.push({ option: 'complete', label: partLabel(missing, o.story.split?.name), ...(later ? { off: later } : {}), ...(o.partFails ? { note: 'fails its checks' } : {}) });
   }
   if (o.readers === 'fill' || o.readers === 'complete') out.push({ option: 'dont', label: o.readers === 'fill' ? 'Withdraw the fill' : 'Withdraw the part', withdraws: true });
+  // Accept the new level (S6): off while a later day is current, as publish as is is.
+  if (!o.readers && o.told && o.holds && acceptable(o.told, o.claim, o.holds)) out.push({ option: 'accept', label: 'Accept the new level', ...(o.later ? { off: `${dayShort(o.later)} is published` } : {}) });
   return out;
+}
+
+// ------------------------------------------------------------------ Accept the new level
+
+/** A finding's metric, as a level names it (`metricKey`), and for a coded value its count too: a level learns both. */
+function keysOf(m: Metric | undefined): string[] {
+  if (!m) return [];
+  if (m.of === 'value') return [metricKey(m), metricKey({ of: 'count', column: m.column, value: m.value })];
+  return [metricKey(m)];
+}
+
+/**
+ * The metrics a day's cause moved (ADR 0009 amendment 1 S6, X6), as a level names them: for an amount, the rows; for a
+ * split, the part's share and count, and the rows when the day's amount is off its range too; for any other cause, its
+ * finding's metric (a share, a level, a new value's share); and those of the findings it absorbed, that follow from it,
+ * or are off on the day besides (wrong or unusual): the day as it came becomes what is usual. Sorted, each once.
+ */
+export function levelMetrics(story: Pick<Story, 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'> & Partial<Pick<Story, 'findings'>>): string[] {
+  const out = new Set<string>();
+  const outside = !!story.amount && (story.amount.value < story.amount.low || story.amount.value > story.amount.high);
+  if (story.hero === 'amount' || outside) out.add('trips');
+  if (story.hero === 'split' && story.split) for (const k of keysOf({ of: 'value', column: story.split.column, value: story.split.value })) out.add(k);
+  else for (const k of keysOf(story.cause?.metric)) out.add(k);
+  // What the cause absorbed, what follows from it (a vendor gone moves the mix of the extras it fills), and anything else
+  // off on the day, wrong or unusual (a fare change moves two surcharges at once): the day as it is becomes what is
+  // usual, so all of it is learned anew from it.
+  const off = (x: { tier: string; was: string; severity: string }) => x.tier === 'follows' || x.severity === 'alert' || x.severity === 'warn' || x.was === 'alert' || x.was === 'warn';
+  for (const f of [...(story.absorbed ?? []), ...(story.findings ?? []).filter(off)]) for (const k of keysOf(f.metric)) out.add(k);
+  if (story.cause?.kind === 'new') for (const v of story.cause.values ?? []) for (const c of story.cause.columns ?? []) for (const k of keysOf({ of: 'value', column: c, value: v })) out.add(k);
+  return [...out].sort();
+}
+
+/**
+ * The way each metric a level names is off on a day (`levelMetrics`): up (true) or down, as its finding's number stands
+ * against what a day like it has; a split's part as it vanished or surged; the rows as the amount stands. What
+ * `levelFor` compares a later day with, so a metric going back the other way is a change again, never the new level.
+ */
+export function levelWays(story: Pick<Story, 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'> & Partial<Pick<Story, 'findings'>>): Map<string, boolean> {
+  const out = new Map<string, boolean>();
+  const put = (keys: string[], up: boolean) => {
+    for (const k of keys) if (!out.has(k)) out.set(k, up);
+  };
+  if (story.hero === 'split' && story.split) put(keysOf({ of: 'value', column: story.split.column, value: story.split.value }), story.split.kind === 'surged');
+  if (story.amount) put(['trips'], story.amount.value > story.amount.expected);
+  for (const f of [...(story.cause ? [story.cause] : []), ...(story.absorbed ?? []), ...(story.findings ?? [])]) {
+    if (f.value === undefined || !f.range) continue;
+    put(keysOf(f.metric), f.value > f.range.expected);
+  }
+  const keep = new Set(levelMetrics(story));
+  for (const k of [...out.keys()]) if (!keep.has(k)) out.delete(k);
+  return out;
+}
+
+/** The causes a level can be accepted for (X6): an amount, a split whose part vanished or surged, a share, a level (a
+ * quantile or a blank share), or a new value that stayed. */
+const LEVEL_KINDS = new Set(['volume', 'share', 'gone', 'missing', 'shape', 'new']);
+
+/**
+ * Whether a held day may be accepted as a new level (ADR 0009 amendment 1 S6, X6, Q-73): the story says something wrong,
+ * by a cause that is a level (`LEVEL_KINDS`, or the amount or a split's vanished or surged part), and nothing but the
+ * story holds the day. Never for an hours cause (a gap is not a level), a part that held while the rest vanished, a
+ * value the ontology marks bad (always alert), a refused file, a source not judged or a day not judged yet, or the
+ * checks alone.
+ */
+export function acceptable(story: Pick<Story, 'state' | 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'>, claim: Pick<StoryClaim, 'state'> | null, holds: readonly Pick<Hold, 'by'>[]): boolean {
+  if (story.state !== 'wrong' || (claim && claim.state !== 'wrong')) return false;
+  if (holds.length === 0 || holds.some((h) => h.by !== 'story')) return false;
+  if (story.hero === 'hours' || story.hero === 'refused' || story.hero === 'gate') return false;
+  if (story.split?.kind === 'held' || story.split?.bad || story.cause?.bad) return false;
+  if (story.hero === 'split') return !!story.split;
+  if (story.hero === 'amount') return true;
+  return !!story.cause && LEVEL_KINDS.has(story.cause.kind) && levelMetrics(story).length > 0;
+}
+
+/** The level an Accept records (S6, C6): the source, the held day it starts, the metrics its cause moved. Null for a
+ * day that can't be accepted. */
+export function levelOf(story: Pick<Story, 'state' | 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'>, claim: Pick<StoryClaim, 'state'> | null, holds: readonly Pick<Hold, 'by'>[], day: string, source: string): { source: string; from: string; metrics: string[] } | null {
+  return acceptable(story, claim, holds) ? { source, from: day, metrics: levelMetrics(story) } : null;
 }
 
 // ------------------------------------------------------------------ a day's versions

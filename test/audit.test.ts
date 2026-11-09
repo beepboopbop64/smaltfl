@@ -286,9 +286,9 @@ async function decide(s: { doc: FlowDocument; rec: FlowRecord }, r: RunResult, k
 }
 
 /** The release of a decision: the plugin's, then its entry in the record. */
-async function release(s: { db: Engine; rec: FlowRecord }, r: RunResult, decision: LogEntry, keys: Record<string, string>, about: Partial<ReleaseAbout> = {}) {
+async function release(s: { db: Engine; rec: FlowRecord }, r: RunResult, decision: LogEntry, keys: Record<string, string>, about: Partial<ReleaseAbout> = {}, option: 'asis' | 'accept' = 'asis') {
   const leaf = entryLeaf(decision);
-  const out = await releaseRun(s.db, { run: r.run, manifest: r.hash, keys, option: 'asis', actor: 'owner', reason: 'Real change', decision: leaf });
+  const out = await releaseRun(s.db, { run: r.run, manifest: r.hash, keys, option, actor: 'owner', reason: option === 'accept' ? 'Planned change' : 'Real change', decision: leaf });
   const entry: ReleaseAbout = { run: r.run, manifest: r.hash, outputs: keys, decision: decision.seq, leaf, outcome: out.outcome, why: out.why, ...about };
   return { out, entry: await s.rec.append('release', 'owner', entry as unknown as JSONValue) };
 }
@@ -686,5 +686,38 @@ describe('an audit bag with a day filled (amendment 1 S11, Q-61)', () => {
     const again = await decide(t, t.thu.r, t.thu.keys, 'owner', { option: 'fill', repair: t.repair, derived: { run: t.r.run, manifest: t.r.hash, keys: t.keys } }, null, t.decision.seq);
     const late = await t.rec.append('release', 'owner', { run: t.r.run, manifest: t.r.hash, outputs: t.keys, decision: again.seq, leaf: LEAF(again), outcome: 'applied', why: null, from: { run: t.thu.r.run, manifest: t.thu.r.hash }, repair: t.repair } as unknown as JSONValue);
     expect(failed(await auditBag(await withRepairs(t)))).toContain(`release #${late.seq}: 1 output of run ${t.r.run} released, citing decision #${again.seq}: it moved the names back past 2024-01-12, published before it`);
+  });
+});
+
+describe('an audit bag with a new level accepted (ADR 0009 amendment 1 S6, C6)', () => {
+  const level = { source: 'trips', from: '2024-02-01', metrics: ['trips'] };
+
+  it('takes an Accept with its reason and level, released as publish as is is; fails a day under it held by more than its story', async () => {
+    const s = await holdingRecord();
+    await day(s, '2024-01-31', '2024-01');
+    const thu = await day(s, '2024-02-01', '2024-02');
+    const accept = await decide(s, thu.r, thu.keys, 'owner', { option: 'accept', level }, 'Planned change');
+    const rel = await release(s, thu.r, accept, thu.keys, {}, 'accept');
+    expect(rel.out.outcome).toBe('applied');
+    // Fri, held on its checks: a level never stands for a day something besides its story holds.
+    const fri = await day(s, '2024-02-02', '2024-02');
+    const under = await decide(s, fri.r, fri.keys, 'owner', { option: 'accept', under: accept.seq, level }, 'Planned change');
+    const report = await auditBag(await pausedBag(s));
+    expect(report.lines.map((l) => l.what)).toContain(`decision #${accept.seq}: accept the new level from 2024-02-01 for 2024-02-01, by owner, on run ${thu.r.run}'s keys`);
+    expect(report.lines.find((l) => l.what.startsWith(`release #${rel.entry.seq}:`))).toMatchObject({ ok: true });
+    expect(failed(report)).toEqual([`decision #${under.seq}: publish by #${accept.seq}'s new level for 2024-02-02, by owner, under #${accept.seq}: #${accept.seq}'s new level doesn't stand for its day: something besides its story holds it`]);
+  });
+
+  it('fails an Accept with no reason or no level, one by a role whose rule doesn’t list accept, and the plugin refuses one with no reason', async () => {
+    const s = await holdingRecord();
+    await day(s, '2024-01-31', '2024-01');
+    const thu = await day(s, '2024-02-01', '2024-02');
+    const bare = await decide(s, thu.r, thu.keys, 'owner', { option: 'accept' }, null);
+    const ana = await decide(s, thu.r, thu.keys, 'ana', { option: 'accept', level, rule: 'stewards' }, 'Planned change', bare.seq);
+    const f = failed(await auditBag(await pausedBag(s)));
+    expect(f).toContain(`decision #${bare.seq}: accept the new level from the day for 2024-02-01, by owner: it accepts a new level with no reason; it accepts a new level and names none (its source, the day it starts and its metrics)`);
+    expect(f).toContain(`decision #${ana.seq}: accept the new level from 2024-02-01 for 2024-02-01, by ana: ana may not decide it: only Owner may accept the new level`);
+    const out = await releaseRun(s.db, { run: thu.r.run, manifest: thu.r.hash, keys: thu.keys, option: 'accept', actor: 'owner', reason: null, decision: entryLeaf(bare) });
+    expect(out).toMatchObject({ outcome: 'refused', why: 'accept the new level needs a reason' });
   });
 });

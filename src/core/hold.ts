@@ -60,6 +60,16 @@ export interface StoryClaim {
   /** The days before it the record left out of learning (ADR 0010 §5, Q-80), when there are any: so the verdict can be
    * told again. */
   skip?: string[];
+  /** The levels accepted before it (ADR 0010 §5, C6), when there are any: what it learned anew from each. */
+  levels?: ClaimLevel[];
+}
+
+/** An accepted level as a claim names it (C6): the day it starts, the metrics it names, and the decide entry that
+ * accepted it, by its seq. */
+export interface ClaimLevel {
+  from: string;
+  metrics: string[];
+  decision: number;
 }
 
 /**
@@ -83,7 +93,7 @@ export interface StoryClaim2 {
   measured: string;
   rows: number;
   skip: string[];
-  levels: unknown[];
+  levels: ClaimLevel[];
 }
 
 /** A watched source's claim, either version: claim/1 under plan/1, claim/2 under plan/2. */
@@ -201,7 +211,14 @@ export function dayClaim(h: HistoryRanges, doc: FlowFor, file: HistoryRef, day: 
   // The days before it the record left out of learning, named when there are any (Q-80): a claim made with none is as
   // it always was.
   const skip = h.recordedSkips.filter((d) => d < day);
-  return { by: 'story', source, day, state: s.state, below: belowOf(s), head: s.head, build, history: { path: file.path, sha256: file.sha256, bytes: file.bytes }, rows: h.file.rows[k]!, ...(skip.length ? { skip } : {}) };
+  const levels = claimLevels(h.levels, day);
+  return { by: 'story', source, day, state: s.state, below: belowOf(s), head: s.head, build, history: { path: file.path, sha256: file.sha256, bytes: file.bytes }, rows: h.file.rows[k]!, ...(skip.length ? { skip } : {}), ...(levels.length ? { levels } : {}) };
+}
+
+/** The levels a claim names (C6): those the ranges learned that start before its day, each with the decision that
+ * accepted it, in order. */
+function claimLevels(levels: readonly Level[], day: string): ClaimLevel[] {
+  return levels.filter((l) => l.from < day && Number.isInteger(l.decision)).map((l) => ({ from: l.from, metrics: [...l.metrics], decision: l.decision! })).sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : a.decision - b.decision));
 }
 
 /** Whether a story's day is below its range; or, with no range, under the floor that needs none (ADR 0010 §1), which
@@ -224,6 +241,8 @@ export interface LoadClaimInput {
   settings: MeasureSettings;
   /** The days the record leaves out of learning (`skipOf`). */
   skip: readonly string[];
+  /** The levels the record accepted for the source (`levelsOf`). */
+  levels?: readonly ClaimLevel[];
   build: string;
 }
 
@@ -252,12 +271,13 @@ export async function loadClaim(o: LoadClaimInput): Promise<{ claim: StoryClaim2
     }
   }
   const skip = [...new Set(o.skip)].filter((d) => d < slot).sort();
-  const ranges = new HistoryRanges(file, { ...rangesFor(o.doc, o.source), recorded: new Set(skip) });
+  const levels = (o.levels ?? []).filter((l) => l.from < slot);
+  const ranges = new HistoryRanges(file, { ...rangesFor(o.doc, o.source), recorded: new Set(skip), levels });
   const s = flowStory(ranges, slot, o.doc, o.source);
   const claim: StoryClaim2 = {
     by: 'story', v: 2, source: o.source, slot, every: 'day', state: s.state, below: belowOf(s), head: s.head, build: o.build, flow: o.flow,
     history: { base: o.baseRef ? { path: o.baseRef.path, sha256: o.baseRef.sha256, bytes: o.baseRef.bytes } : null, tail: tailRef(ms) },
-    measured: await measuresHash(o.measures), rows: o.measures.rows, skip, levels: [],
+    measured: await measuresHash(o.measures), rows: o.measures.rows, skip, levels: claimLevels(levels, slot),
   };
   return { claim, ranges, tail: ms };
 }
@@ -307,8 +327,12 @@ function claimProblem(c: Record<string, unknown>): string | null {
   if (!isRecord(h) || typeof h.path !== 'string' || typeof h.sha256 !== 'string' || !HEX64.test(h.sha256) || !Number.isSafeInteger(h.bytes) || (h.bytes as number) < 0) return "doesn't name its history's file, sha256 and size";
   if (!Number.isSafeInteger(c.rows) || (c.rows as number) < 0) return 'counts no rows';
   if (c.skip !== undefined && !isDays(c.skip)) return "names days left out that aren't days";
+  if (c.levels !== undefined && !isLevels(c.levels)) return "names levels that aren't levels: a day, metrics and a decision";
   return null;
 }
+
+/** Whether a value lists accepted levels as a claim names them (`ClaimLevel`). */
+const isLevels = (v: unknown): v is ClaimLevel[] => Array.isArray(v) && v.every((l) => isRecord(l) && typeof l.from === 'string' && DAY.test(l.from) && Array.isArray(l.metrics) && l.metrics.every((m) => typeof m === 'string') && Number.isInteger(l.decision));
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const isDays = (v: unknown): v is string[] => Array.isArray(v) && v.every((d) => typeof d === 'string' && DAY.test(d));
@@ -332,7 +356,7 @@ function claim2Problem(c: Record<string, unknown>): string | null {
   if (typeof c.measured !== 'string' || !HEX64.test(c.measured)) return "doesn't name the measures it was told from";
   if (!Number.isSafeInteger(c.rows) || (c.rows as number) < 0) return 'counts no rows';
   if (!isDays(c.skip)) return "doesn't list the days left out";
-  if (!Array.isArray(c.levels)) return "doesn't list its levels";
+  if (!isLevels(c.levels)) return "doesn't list its levels: a day, metrics and a decision each";
   return null;
 }
 
@@ -372,7 +396,7 @@ export function judgeClaim(c: Record<string, unknown>, at: ClaimAt, facts: Claim
   const rows = facts.rows(node);
   if (rows !== claim.rows) return { node, unjudged: `the claim counts ${fmt(claim.rows)} rows of ${origin}, the snapshot holds ${fmt(rows)}` };
   // A clean copy: only the claim's own fields reach the record.
-  return { node, claim: { by: 'story', source: claim.source, day: claim.day, state: claim.state, below: claim.below, head: claim.head, build: claim.build, history: { path: claim.history.path, sha256: claim.history.sha256, bytes: claim.history.bytes }, rows: claim.rows, ...(claim.skip?.length ? { skip: [...claim.skip] } : {}) } };
+  return { node, claim: { by: 'story', source: claim.source, day: claim.day, state: claim.state, below: claim.below, head: claim.head, build: claim.build, history: { path: claim.history.path, sha256: claim.history.sha256, bytes: claim.history.bytes }, rows: claim.rows, ...(claim.skip?.length ? { skip: [...claim.skip] } : {}), ...(claim.levels?.length ? { levels: copyLevels(claim.levels) } : {}) } };
 }
 
 /**
@@ -418,10 +442,13 @@ function judgeClaim2(c: Record<string, unknown>, at: ClaimAt, facts: ClaimFacts)
     claim: {
       by: 'story', v: 2, source: claim.source, slot: claim.slot, every: 'day', state: claim.state, below: claim.below, head: claim.head, build: claim.build, flow: claim.flow,
       history: { base: base ? { path: base.path, sha256: base.sha256, bytes: base.bytes } : null, tail: claim.history.tail ? { size: claim.history.tail.size, root: claim.history.tail.root } : null },
-      measured: claim.measured, rows: claim.rows, skip: [...claim.skip], levels: structuredClone(claim.levels),
+      measured: claim.measured, rows: claim.rows, skip: [...claim.skip], levels: copyLevels(claim.levels),
     },
   };
 }
+
+/** Levels as a clean copy keeps them: only their own fields. */
+const copyLevels = (ls: readonly ClaimLevel[]): ClaimLevel[] => ls.map((l) => ({ from: l.from, metrics: [...l.metrics], decision: l.decision }));
 
 /**
  * Each watched source of a plan judged by its claim (ADR 0009 §3, `judgeClaim`), or not judged when there is no claim
@@ -714,6 +741,9 @@ export interface DecideAbout {
   repair?: Repair;
   /** The derived run whose versions go out, with their keys; null for a backfill whose donor hasn't come yet. */
   derived?: (RunRef & { keys: Record<string, string> }) | null;
+  /** Accept the new level (amendment 1 S6, C6): the source, the day the level starts and the metrics it names, as
+   * `metricKey` does. A day published under a standing level (`under`) names the same level. */
+  level?: { source: string; from: string; metrics: string[] };
 }
 
 /** A release's record entry (`release`), citing the decision it applies. */
@@ -797,8 +827,16 @@ const isKeys = (v: unknown): v is Record<string, string> => isRecord(v) && Objec
 function isDecide(a: unknown): a is DecideAbout {
   return isRecord(a) && isInputs(a.inputs) && isKeys(a.outputs) && (DECIDE_OPTIONS as readonly unknown[]).includes(a.option) && (a.scope === 'day' || a.scope === 'untilPass')
     && (a.day === null || typeof a.day === 'string') && (a.under === undefined || Number.isInteger(a.under))
-    && ((a.option !== 'fill' && a.option !== 'complete') || isRecord(a.repair));
+    && ((a.option !== 'fill' && a.option !== 'complete') || isRecord(a.repair))
+    && (a.option !== 'accept' || isLevel(a.level));
 }
+
+/** Whether a value is a decision's level: its source, the day it starts and the metrics it names. */
+export const isLevel = (v: unknown): v is NonNullable<DecideAbout['level']> =>
+  isRecord(v) && typeof v.source === 'string' && typeof v.from === 'string' && DAY.test(v.from) && Array.isArray(v.metrics) && v.metrics.length > 0 && v.metrics.every((m) => typeof m === 'string');
+
+/** Whether an option publishes the held run as it came: publish as is, or accept the new level (S6). */
+const asCame = (o: unknown): boolean => o === 'asis' || o === 'accept';
 
 const isRemedy = (o: unknown): o is 'fill' | 'complete' => o === 'fill' || o === 'complete';
 
@@ -859,7 +897,7 @@ export function pausesOf(entries: readonly EntryLike[], period?: string | null):
       p.otherBuild = !sameKeys(a.outputs, p.keys);
       p.state = p.otherBuild ? 'open' : 'decided';
       pauses.set(key, p);
-      if (a.option === 'asis') asis.set(key, (asis.get(key) ?? new Map()).set(e.seq, a.outputs));
+      if (asCame(a.option)) asis.set(key, (asis.get(key) ?? new Map()).set(e.seq, a.outputs));
       decisions.set(e.seq, { key, about: a });
     } else if (e.kind === 'flow') {
       flows.add(e.seq);
@@ -903,15 +941,51 @@ export function skipOf(entries: readonly EntryLike[], period?: string | null): s
   const out = new Set<string>();
   for (const p of pausesOf(entries, period)) {
     if (p.day === null || p.state === 'passed') continue;
-    if (p.state === 'decided' && p.decision?.about.option === 'asis') continue;
+    if (p.state === 'decided' && asCame(p.decision?.about.option)) continue;
     out.add(p.day);
   }
   return [...out].sort();
 }
 
-/** The levels a source was accepted at (ADR 0010 §5, C6), which a claim/2 names: none until Accept the new level. */
-export function levelsOf(_entries: readonly EntryLike[], _source: string): unknown[] {
-  return [];
+/**
+ * The levels a source was accepted at (ADR 0010 §5, C6), which its claims name and its ranges learn from: each Accept
+ * the new level of the source whose release applied (a decision taken under a standing level names the same level,
+ * and adds none), never amended since; with the decide entry's seq. In the order they start.
+ */
+export function levelsOf(entries: readonly EntryLike[], source: string): ClaimLevel[] {
+  const amended = new Set(entries.filter((e) => e.kind === 'decide' && e.amends !== null).map((e) => e.amends));
+  const applied = new Set<number>();
+  for (const e of entries) {
+    const a = e.about as JSONValue;
+    if (e.kind === 'release' && isRecord(a) && a.outcome === 'applied' && Number.isInteger(a.decision)) applied.add(a.decision as number);
+  }
+  const out: ClaimLevel[] = [];
+  for (const e of entries) {
+    const a = e.about as JSONValue;
+    if (e.kind !== 'decide' || !isDecide(a) || a.option !== 'accept' || a.under !== undefined || amended.has(e.seq) || !applied.has(e.seq)) continue;
+    if (a.level!.source.toLowerCase() !== source.toLowerCase()) continue;
+    out.push({ from: a.level!.from, metrics: [...a.level!.metrics], decision: e.seq });
+  }
+  return out.sort((x, y) => (x.from < y.from ? -1 : x.from > y.from ? 1 : x.decision - y.decision));
+}
+
+/**
+ * The accepted level a later held day publishes under (ADR 0009 amendment 1 S6, the owner, Q-57b: one acceptance
+ * covers the following days while the numbers stay at the new level): the source's latest Accept that starts before
+ * the day, its release applied, when every metric that is off on the day (`off`: each with the way it is off, up or
+ * down; fill.ts `levelWays`) is one the level names and off the way it was on the level's own day (`ways`, the same of
+ * that day's story), and nothing else holds the day (`only`: the story alone). Null when none stands: a new change,
+ * another metric off, a metric going back the other way (a vendor that returns), or a check, pauses the day again.
+ */
+export function levelFor(entries: readonly EntryLike[], source: string, day: string, off: ReadonlyMap<string, boolean>, ways: (from: string) => ReadonlyMap<string, boolean>, only = true): Decided | null {
+  if (!only || off.size === 0) return null;
+  const levels = levelsOf(entries, source).filter((l) => l.from < day);
+  const latest = levels.at(-1);
+  if (!latest) return null;
+  const was = ways(latest.from);
+  if (![...off].every(([m, up]) => latest.metrics.includes(m) && was.get(m) === up)) return null;
+  const e = entries.find((x) => x.seq === latest.decision)!;
+  return decided(e, e.about as unknown as DecideAbout);
 }
 
 /**
@@ -1046,19 +1120,21 @@ export function dayState(run: { holds: number; waiting: number; released: boolea
     if (!r || d?.about.option === 'dont') return null;
     return r.meanwhile && !(d && isRemedy(d.about.option)) ? null : r.option;
   };
+  // Published as it came by an Accept (S6): the day readers got is the new level's first.
+  const came = (): DayState => (pause?.decision?.about.option === 'accept' ? 'accepted' : 'asis');
   if (!run) {
     if (!pause || pause.state === 'passed') return null;
-    if (pause.released === true) return 'asis';
+    if (pause.released === true) return came();
     const d = pause.state === 'decided' ? pause.decision : null;
     return remedy(d) ?? (d?.about.option === 'dont' ? 'dont' : 'waiting');
   }
   if (run.holds === 0) return null;
-  if (run.released || pause?.released === true) return 'asis';
+  if (run.released || pause?.released === true) return came();
   const d = pause?.state === 'decided' ? pause.decision : null;
   const r = remedy(d);
   if (r) return r;
   if (d?.about.option === 'dont') return 'dont';
-  if (d?.about.option === 'asis' && run.waiting === 0) return 'asis';
+  if (asCame(d?.about.option) && run.waiting === 0) return came();
   return run.waiting === 0 ? null : 'waiting';
 }
 
@@ -1068,5 +1144,5 @@ export function dayState(run: { holds: number; waiting: number; released: boolea
  */
 export function pauseState(run: { holds: number; waiting: number; released: boolean } | null, pause: (Pick<Pause, 'state' | 'decision' | 'released'> & Partial<Pick<Pause, 'repaired'>>) | null): PauseState | null {
   const s = dayState(run, pause);
-  return s === 'fill' || s === 'complete' ? 'asis' : s;
+  return s === 'fill' || s === 'complete' || s === 'accepted' ? 'asis' : s;
 }

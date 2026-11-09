@@ -68,7 +68,8 @@ export async function retellClaims(entries: readonly EntryLike[], runs: readonly
           if (!s) throw new Error(`the flow doesn't watch ${c.source} by a period`);
           file = appendPeriods(emptyHistory({ flow: r.doc.id, source: c.source, settings: s, columns: own.columns, types: own.types, kinds: own.kinds }), [...tail, own]);
         }
-        const story = flowStory(new HistoryRanges(file, { ...rangesFor(r.doc, c.source), recorded: new Set(c.skip) }), c.slot, r.doc, c.source);
+        // The levels the claim names (C6) are learned anew from their days, as the page told it.
+        const story = flowStory(new HistoryRanges(file, { ...rangesFor(r.doc, c.source), recorded: new Set(c.skip), levels: c.levels }), c.slot, r.doc, c.source);
         const below = story.amount ? story.amount.value < story.amount.low : story.state === 'wrong' && story.hero === 'amount' && story.cause?.kind === 'volume';
         if (story.state !== c.state || story.head !== c.head || below !== c.below) problems.push(`told again, its story says ${story.state} "${story.head}", and the claim ${c.state} "${c.head}"`);
       } catch (e) {

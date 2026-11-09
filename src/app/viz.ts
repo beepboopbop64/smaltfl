@@ -14,7 +14,7 @@
 
 import type { DrawCause, ReaderRows } from '../core/decision.js';
 
-export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack' | 'publish' | 'keep' | 'unlearned' | 'fill' | 'part';
+export type Mark = 'alert' | 'warn' | 'note' | 'held' | 'flag' | 'closed' | 'explained' | 'info' | 'chev' | 'more' | 'seal' | 'ack' | 'publish' | 'keep' | 'unlearned' | 'fill' | 'part' | 'level';
 
 export const esc = (s: unknown): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
@@ -50,6 +50,10 @@ export function glyph(kind: Mark, size = 16): string {
       return `<svg ${a}><rect class="g-fillbox" x="2.2" y="2.2" width="11.6" height="11.6" rx="2"/><rect class="g-stip" x="8" y="2.9" width="5.1" height="10.2" rx="1"/><path class="g-half" d="M4.2 2.2H8v11.6H4.2a2 2 0 0 1-2-2V4.2a2 2 0 0 1 2-2z"/></svg>`;
     case 'part':
       return `<svg ${a}><circle class="g-fillbox" cx="8" cy="8" r="5.9"/><path class="g-half" d="M8 2.1a5.9 5.9 0 0 0 0 11.8z"/></svg>`;
+    // A new level accepted (ADR 0010 §12, amendment 1 S6): a line that steps up and carries on at its new height, in the
+    // ink, never a severity's colour; a dot where the step was taken.
+    case 'level':
+      return `<svg ${a}><path class="g-level" d="M1.5 12.2h5V4.6h8"/><circle class="g-levdot" cx="6.5" cy="12.2" r="1.6"/></svg>`;
     case 'explained':
       return `<svg ${a}><path class="g-arrow" d="M4 2.5v6.5h8M9.2 6.2L12 9l-2.8 2.8"/></svg>`;
     case 'note':

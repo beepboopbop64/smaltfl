@@ -13,7 +13,8 @@ import { readDataList } from '../src/app/datalist.js';
 import { EXAMPLE_DATA } from '../examples/sources.js';
 import type { FlowDocument } from '../src/core/document.js';
 import { HistoryRanges, type HistoryFile } from '../src/core/history.js';
-import { claimHolds, countedChecks, dayClaim, rangesFor, type StoryClaim } from '../src/core/hold.js';
+import { levelMetrics } from '../src/core/fill.js';
+import { claimHolds, countedChecks, dayClaim, flowStory, rangesFor, type StoryClaim } from '../src/core/hold.js';
 import { exampleFilled, exampleLegacy } from './helpers/example.js';
 
 const DATA = new URL('../dist/app/data/', import.meta.url);
@@ -86,6 +87,24 @@ describe.skipIf(!has)('the flow’s verdict on the real history (ADR 0009 §3)',
     const plain = new HistoryRanges(file!);
     for (const day of ['2023-09-21', '2022-11-15', '2023-09-20']) expect(dayClaim(plain, exampleFilled(), ref, day, 'trips', 'dev')).toEqual(dayClaim(h!, doc, ref, day, 'trips', 'dev'));
   });
+
+  it('learns a level accepted from its day on: the fare change of Dec 19, 2022, and the vendor gone on Nov 14 (I15)', () => {
+    // Each day after an Accept told with the level its cause moved (amendment 1 S6, C6): what the day was off by, learned
+    // anew from it.
+    const after = (from: string, days: string[]) => {
+      const level = { from, metrics: levelMetrics(flowStory(h!, from, doc, 'trips')), decision: 1 };
+      const hl = new HistoryRanges(file!, { ...rangesFor(doc, 'trips'), levels: [level] });
+      return days.map((d) => dayClaim(hl, doc, ref, d, 'trips', 'dev')!);
+    };
+    // The TLC's new surcharges: Dec 20 and 21 publish, as the new level they are, and name it.
+    const dec = after('2022-12-19', ['2022-12-20', '2022-12-21']);
+    expect(dec.map((c) => claimHolds(['checks', 'wrong'], c))).toEqual([false, false]);
+    expect(dec[0]!.levels).toEqual([expect.objectContaining({ from: '2022-12-19', decision: 1 })]);
+    // Vendor 1 gone, accepted: Tue 15 and Wed 16 publish; Mon 21, the vendor back, is a change again and pauses.
+    const nov = after('2022-11-14', ['2022-11-15', '2022-11-16', '2022-11-21']);
+    expect(nov.map((c) => claimHolds(['checks', 'wrong'], c))).toEqual([false, false, true]);
+    expect(nov[2]!.head).toMatch(/^More trips/);
+  }, 120_000);
 
   it('tells the owner’s examples by their cause', () => {
     expect(dayClaim(h!, doc, ref, '2023-09-21', 'trips', 'dev')).toMatchObject({ state: 'wrong', below: true, head: 'Trips fall to trickle from 13:00', rows: 41_939 });

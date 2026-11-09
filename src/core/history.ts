@@ -207,6 +207,8 @@ export interface RangeOptions {
 export interface Level {
   from: string;
   metrics: readonly string[];
+  /** The decide entry that accepted it, by its seq: what a claim names it by. */
+  decision?: number;
 }
 
 /** The settings a flow's ranges are made with, as one text: what `flowStory` checks against the flow's own. */

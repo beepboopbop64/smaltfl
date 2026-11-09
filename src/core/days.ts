@@ -214,7 +214,7 @@ export function heldLoadLine(holds: readonly { by: string; claim?: { state: stri
 export type PauseState = 'waiting' | 'asis' | 'dont';
 /** The same with the remedies (amendment 1 S5): not published also once a fill is withdrawn; filled from another day;
  * or published with the part that arrived. The screens draw these from step A9 on. */
-export type DayState = PauseState | RemedyMark;
+export type DayState = PauseState | RemedyMark | 'accepted';
 
 /**
  * The outputs row on a day with something wrong: never "published" alone, which reads as good news. Held: "Outputs

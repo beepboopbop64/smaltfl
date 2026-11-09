@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { isSpecial, NONE, US_1 } from '../src/core/calendar.js';
 import type { FlowDocument } from '../src/core/document.js';
 import { validateDocument } from '../src/core/document.js';
-import { dayVersions, donorChoices, donorFor, donorRuleOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument, type DonorQuery, type Repair } from '../src/core/fill.js';
+import { acceptable, dayVersions, donorChoices, donorFor, donorRuleOf, fillable, fillCounts, levelMetrics, levelOf, levelWays, missingOf, offersOf, partLabel, partRows, repairDocument, type DonorQuery, type Repair } from '../src/core/fill.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { donorGood, flowStory, rangesFor, type HistoryRef } from '../src/core/hold.js';
 import type { LogEntry } from '../src/core/log.js';
@@ -357,5 +357,52 @@ describe('a day’s versions (S7)', () => {
     const e = entry('run', { run: 1, manifest: 'm', outcome: 'held', inputs: inputs('2023-09-21') });
     expect(dayVersions([e], '2023-09-21', 'day').map((x) => x.kind)).toEqual(['arrived']);
     expect(dayVersions([e], '2023-09-21')).toEqual([]);
+  });
+});
+
+describe('Accept the new level: when it is offered, and the level it records (amendment 1 S6, X6, Q-73)', () => {
+  const DAY = '2023-10-11';
+  const told = (trouble: Parameters<typeof historyWith>[0]) => {
+    const h = new HistoryRanges(historyWith(trouble));
+    return flowStory(h, DAY, doc(), 'trips');
+  };
+  const story = { by: 'story' as const };
+
+  it('is offered for a part that vanished, with its share and count and the rows, and for an amount', () => {
+    const gone = told({ [DAY]: { vendorGone: true } });
+    expect(gone).toMatchObject({ state: 'wrong', hero: 'split', split: { kind: 'vanished' } });
+    expect(acceptable(gone, { state: 'wrong' }, [story])).toBe(true);
+    expect(levelMetrics(gone)).toEqual(expect.arrayContaining(['count:VendorID=1', 'value:VendorID=1']));
+    expect(levelOf(gone, null, [story], DAY, 'trips')).toEqual({ source: 'trips', from: DAY, metrics: levelMetrics(gone) });
+    const blank = told({ [DAY]: { more: 1.8 } });
+    if (blank.state === 'wrong' && blank.hero === 'amount') expect(levelMetrics(blank)).toContain('trips');
+    // As offersOf puts it on the sheet, last; off while a later day is current.
+    expect(offersOf({ story: gone, claim: { state: 'wrong', below: true }, fill: undefined, donors: [], told: gone, holds: [story] })).toEqual([{ option: 'accept', label: 'Accept the new level' }]);
+    expect(offersOf({ story: gone, claim: { state: 'wrong', below: true }, fill: undefined, donors: [], told: gone, holds: [story], later: '2023-10-16' })).toEqual([{ option: 'accept', label: 'Accept the new level', off: 'Mon 16 is published' }]);
+  });
+
+  it('is never offered for an hours cause, a part that held, a bad value, the checks, a source not judged, or a day not wrong', () => {
+    const hours = told({ [DAY]: { stopAt: 13 } });
+    expect(hours.hero).toBe('hours');
+    expect(acceptable(hours, null, [story])).toBe(false);
+    const heldPart = told({ [DAY]: { onlyVendor1: true } });
+    if (heldPart.split) expect([heldPart.split.kind, acceptable(heldPart, null, [story])]).toEqual(['held', false]);
+    const gone = told({ [DAY]: { vendorGone: true } });
+    expect(acceptable({ ...gone, split: { ...gone.split!, bad: true } }, null, [story])).toBe(false);
+    expect(acceptable(gone, null, [story, { by: 'checks' }])).toBe(false);
+    expect(acceptable(gone, null, [{ by: 'unjudged' }])).toBe(false);
+    expect(acceptable(gone, { state: 'unlearned' }, [story])).toBe(false);
+    expect(acceptable(told({}), null, [story])).toBe(false);
+    expect(offersOf({ story: gone, claim: null, fill: undefined, donors: [], told: gone, holds: [story], readers: 'fill' }).map((o) => o.option)).toEqual(['dont']);
+  });
+});
+
+describe('the way a level’s metrics were off (amendment 1 S6, Q-57b)', () => {
+  it('says each down for a part that vanished on a short day, so a day it comes back on is a change again', () => {
+    const s = flowStory(new HistoryRanges(historyWith({ '2023-10-11': { vendorGone: true } })), '2023-10-11', doc(), 'trips');
+    const ways = levelWays(s);
+    expect(ways.get('value:VendorID=1')).toBe(false);
+    expect(ways.get('count:VendorID=1')).toBe(false);
+    expect([...ways.keys()].every((k) => levelMetrics(s).includes(k))).toBe(true);
   });
 });

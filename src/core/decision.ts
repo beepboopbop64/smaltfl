@@ -278,7 +278,7 @@ export interface SheetText {
    * and for a withdrawal. */
   switch: string | null;
   /** The button: what is missing while it can't go (an option, a reason), else the result it names. */
-  go: { rest: string; reason: string; asis: string; dont: string; until: string; complete: string; withdraw: string; fails: string };
+  go: { rest: string; reason: string; asis: string; dont: string; until: string; complete: string; withdraw: string; fails: string; accept: string };
   /** The first 8 hex of the manifest, in two groups of four. */
   hash: string;
 }
@@ -299,7 +299,7 @@ const lowerLead = (part: string) => part.replace(/^(Before|Without|From) /, (m) 
 /**
  * The button, naming the result: "Publish as is · 3 outputs", "Publish over the checks · 3 outputs" (when the checks
  * held the day too), "Don’t publish Thu 21", "Don’t publish from Thu 21", "Fill from Thu 14", "Publish before 13:00
- * only", "Withdraw the fill".
+ * only", "Withdraw the fill", "Accept from Mon 14".
  */
 export function goLabel(option: DecisionOption | null, scope: 'day' | 'untilPass', outputs: number, day: string | null, checks = false, remedy: { donor?: string | null; part?: string | null; withdraws?: RemedyMark | null } = {}): string {
   if (option === 'asis') return `${checks ? 'Publish over the checks' : 'Publish as is'} · ${outputs} output${outputs === 1 ? '' : 's'}`;
@@ -307,6 +307,7 @@ export function goLabel(option: DecisionOption | null, scope: 'day' | 'untilPass
   if (option === 'dont') return `Don’t publish ${scope === 'untilPass' && day ? 'from ' : ''}${day ? dayShort(day) : 'this run'}`;
   if (option === 'fill') return remedy.donor ? `Fill from ${dayShort(remedy.donor)}` : 'Fill';
   if (option === 'complete') return remedy.part ? `Publish ${lowerLead(remedy.part)}` : 'Publish the part that arrived';
+  if (option === 'accept') return day ? `Accept from ${dayShort(day)}` : 'Accept the new level';
   return 'Pick an option';
 }
 
@@ -376,6 +377,15 @@ export function sheetText(o: SheetIn): SheetText {
       aria: part.off ? `${part.label}: not possible, ${part.off}` : `${part.label}: readers get ${name} with only the part that arrived${n ? `, ${trips(n.total)}, ${fmtInt(n.setAside)} set aside` : ''}${fails ? '; it fails its checks, so it can’t be published' : ''}`,
     });
   }
+  // Accept the new level (amendment 1 S6, X6): readers get the day as it came, and normal is learned from it on. Its
+  // number is Publish as is's, said once that row is picked; its line, once picked, from when it learns.
+  const accept = offers.find((x) => x.option === 'accept');
+  if (accept) {
+    options.push({
+      option: 'accept', label: accept.label, number: accept.off ?? '', sub: accept.off || !o.day ? null : `learns from ${dayShort(o.day)}`, warn: null, off: !!accept.off,
+      aria: accept.off ? `Accept the new level: not possible, ${accept.off}` : `Accept the new level: readers get ${name} as it came, ${trips(o.rows)}, and what is usual is learned from ${o.day ? dayMid(o.day) : 'it'} on`,
+    });
+  }
   return {
     title: `${o.day ? `${dayMid(o.day)} · w` : 'W'}hat readers get`,
     status: o.may ? (o.otherBuild ? 'Other build’s decision' : o.since && o.waited !== null ? `Paused since ${o.since}` : waitedLabel(o.waited)) : null,
@@ -385,17 +395,20 @@ export function sheetText(o: SheetIn): SheetText {
     part: o.part,
     missing: o.missing ?? null,
     cut: o.cut ?? null,
-    ticks: o.ticks,
+    // With five rows (a fill, the part alone and Accept, amendment 1 S12's order of what gives way), the axis keeps its
+    // zero and loses its end: the rows still share one scale.
+    ticks: options.length >= 5 ? o.ticks.slice(0, 1) : o.ticks,
     // Only Publish as is needs a reason; Don't publish keeps its optional chips without a heading; a remedy's reason
     // is its cause, which the record keeps with the claim's head.
-    why: { asis: 'Why? (needed)', dont: '', fill: '', complete: '' },
-    chips: { asis: [...(o.unjudged ? ['No history'] : []), 'Real change', 'Source confirmed'], dont: withdraws ? [] : ['Known outage', 'Re-send expected'], fill: [], complete: [] },
+    why: { asis: 'Why? (needed)', dont: '', fill: '', complete: '', accept: 'Why? (needed)' },
+    chips: { asis: [...(o.unjudged ? ['No history'] : []), 'Real change', 'Source confirmed'], dont: withdraws ? [] : ['Known outage', 'Re-send expected'], fill: [], complete: [], accept: ['Planned change', 'Source confirmed'] },
     // Once readers see a later day, one has passed: "until a later day passes" would stand already ended, and close the
     // days between on their next run while they still say they wait. Only this day is offered.
     switch: o.day && !o.later && !withdraws ? 'Later days too' : null,
     go: {
       rest: goLabel(null, 'day', o.outputs, o.day), reason: 'Pick a reason', asis: goLabel('asis', 'day', o.outputs, o.day, !!o.checks), dont: goLabel('dont', 'day', o.outputs, o.day), until: goLabel('dont', 'untilPass', o.outputs, o.day),
       complete: goLabel('complete', 'day', o.outputs, o.day, false, { part: part?.label ?? null }), withdraw: goLabel('dont', 'day', o.outputs, o.day, false, { withdraws: withdraws ?? 'fill' }), fails: 'Fails its checks',
+      accept: goLabel('accept', 'day', o.outputs, o.day),
     },
     hash: `${o.hash.slice(0, 4)} ${o.hash.slice(4, 8)}`,
   };
@@ -419,6 +432,7 @@ export function pickFails(t: SheetText, pick: Pick<SheetPick, 'option' | 'donor'
 export function goShown(t: SheetText, pick: SheetPick): string {
   if (!pick.option) return t.go.rest;
   if (pick.option === 'asis') return pick.reason ? t.go.asis : t.go.reason;
+  if (pick.option === 'accept') return pick.reason ? t.go.accept : t.go.reason;
   const withdraws = !!t.options.find((o) => o.option === 'dont')?.withdraws;
   if (pick.option === 'dont') return withdraws ? t.go.withdraw : pick.scope === 'untilPass' && t.switch ? t.go.until : t.go.dont;
   if (pickFails(t, pick)) return t.go.fails;
@@ -448,13 +462,17 @@ export function sheetShown(t: SheetText, pick: SheetPick): string[] {
       continue;
     }
     if (pick.option !== x.option) continue;
-    out.push(d?.number ?? x.number, x.option === 'asis' ? (x.warnPicked ?? x.sub ?? '') : d ? (d.fails ? 'fails its checks' : d.sub) : (x.sub ?? ''));
+    // Accept's number is the day as it came: Publish as is's, said here once Accept is picked.
+    const number = x.option === 'accept' && !x.off ? (t.options.find((y) => y.option === 'asis')?.number ?? '') : (d?.number ?? x.number);
+    out.push(number, x.option === 'asis' ? (x.warnPicked ?? x.sub ?? '') : d ? (d.fails ? 'fails its checks' : d.sub) : (x.sub ?? ''));
     if (d) out.push(...x.donors!.filter((y) => y !== d).map((y) => y.chip));
   }
   out.push(t.part ?? '', t.missing ?? '', t.cut ?? '', ...t.ticks);
   if (t.waitsOn) return out.filter(Boolean);
   if (pick.option) out.push(t.why[pick.option], ...t.chips[pick.option]);
-  if (pick.option && pick.option !== 'asis' && t.switch) out.push(t.switch);
+  // The switch is for a decision that stands until a day passes; an Accept stands by its level (Q-57b), publish as is
+  // for one day.
+  if (pick.option && pick.option !== 'asis' && pick.option !== 'accept' && t.switch) out.push(t.switch);
   out.push(goShown(t, pick));
   return out.filter(Boolean);
 }
@@ -491,13 +509,22 @@ const remedySaid = (r: RemedySaid): string => (r.option === 'fill' ? remedyHead(
  * can still be changed (a day not published can be published later, a fill replaced or withdrawn; one published as is
  * can't be taken back); and, for a remedy, that the day's versions are a tap away.
  */
-export function receiptLines(o: { state: DayState; day: string | null; readers: string | null; past?: boolean; released: number; who: string | null; at: string | null; seq: number | null; under: string | null; standing: boolean; remedy?: (RemedySaid & { filled: number | null; setAside: number | null }) | null; withdrawn?: RemedyMark | null }): { head: string; sub: string; change: string | null; versions?: true } {
+export function receiptLines(o: { state: DayState; day: string | null; readers: string | null; past?: boolean; released: number; who: string | null; at: string | null; seq: number | null; under: string | null; standing: boolean; remedy?: (RemedySaid & { filled: number | null; setAside: number | null }) | null; withdrawn?: RemedyMark | null; level?: string | null }): { head: string; sub: string; change: string | null; versions?: true } {
   const by = o.under ? `Under ${o.under}’s decision` : o.who ? `${o.who}${o.at ? ` · ${o.at}` : ''}` : null;
   const rec = o.seq !== null ? `record #${o.seq}` : null;
   const released = o.released ? `${o.released} output${o.released === 1 ? '' : 's'} released` : null;
   // Once a later day has published, the day readers kept then (days.readersOf), never the later day.
   const keep = o.past ? (o.readers ? `readers kept ${dayShort(o.readers)}` : '') : o.readers ? `readers keep ${dayShort(o.readers)}` : 'nothing published yet';
   if (o.state === 'asis') return { head: `Published as is${o.day ? ` · readers now see ${dayShort(o.day)}` : ''}`, sub: [released, by, rec].filter(Boolean).join(' · '), change: null };
+  // Accept (amendment 1 S6, X6): the new level's first day, what it learns from, and its decision, never undone. A day
+  // published under a standing level names the Accept it came under.
+  if (o.state === 'accepted') {
+    const from = o.level ?? o.day;
+    return {
+      head: `${o.under ? `By ${o.under}’s new level` : `New level from ${from ? dayShort(from) : 'this day'}`}${o.day && !o.past ? ` · readers now see ${dayShort(o.day)}` : ''}`,
+      sub: [from && !o.under ? `learns from ${dayShort(from)}` : null, released, o.under ? null : by, rec].filter(Boolean).join(' · '), change: null,
+    };
+  }
   if ((o.state === 'fill' || o.state === 'complete') && o.remedy) {
     const r = o.remedy;
     const head = r.option === 'fill' ? remedyHead(r) : `Published ${lowerLead(r.part ?? 'the part that arrived only')}`;
@@ -569,6 +596,7 @@ export function pauseLines(o: { state: DayState; names: readonly string[]; by?: 
     return { reach: reasons.length ? `Paused by ${reasons.join(', ')}` : 'Paused', see, names: o.names, verb: o.may ? 'Decide' : null, waits: o.may ? null : `${o.deciders} decides` };
   }
   if (o.state === 'asis') return { reach: `Published as is${by}`, see: null, names: o.names, verb: null, waits: null };
+  if (o.state === 'accepted') return { reach: `${o.under ? `By ${o.under}’s new level` : 'New level'}${o.under ? '' : by}`, see: null, names: o.names, verb: null, waits: null };
   // A remedy readers have (amendment 1 S12): "Filled from Thu 14 · Owner · 09:40", "Filled from Tue 1 · under Mon’s
   // decision"; the day itself is what readers see.
   if ((o.state === 'fill' || o.state === 'complete') && o.remedy) return { reach: `${remedyHead(o.remedy)}${o.under ? ` · under ${o.under}’s decision` : by}`, see: null, names: o.names, verb: null, waits: null };
@@ -618,12 +646,13 @@ export function pausedGlance(s: Story, row: PauseRow, decided = false): string[]
  * readers see meanwhile, its age when it is stale ("readers see Mon 18 · 3 days old", `day` being the day held), with
  * Decide for someone who may decide; once decided, what became of the day.
  */
-export function dayPausedLine(o: { state: DayState; readers: string | null; past?: boolean; may: boolean; standing: boolean; day?: string | null; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null }): { text: string; verb: string | null } {
+export function dayPausedLine(o: { state: DayState; readers: string | null; past?: boolean; may: boolean; standing: boolean; day?: string | null; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null; level?: string | null; under?: string | null }): { text: string; verb: string | null } {
   // Its age while it waits, when what readers see is stale (two days or more before it); once decided, the line keeps
   // to its ten words. Once a later day has published, the day readers kept then, naming no later day.
   const see = readersSee(o.readers, o.state === 'waiting' ? o.day : null, o.past);
   if (o.state === 'waiting') return { text: see ? `Paused · ${see}` : 'Paused', verb: o.may ? 'Decide' : null };
   if (o.state === 'asis') return { text: 'Published as is', verb: null };
+  if (o.state === 'accepted') return { text: o.under ? `⚑ By ${o.under}’s new level` : `⚑ New level from ${dayShort(o.level ?? o.day ?? '')}`.replace(/ from $/, ''), verb: null };
   if ((o.state === 'fill' || o.state === 'complete') && o.remedy) return { text: `${MARK[o.state]} ${remedyHead(o.remedy)}`, verb: null };
   if (o.withdrawn) return { text: `${o.withdrawn === 'fill' ? 'Fill' : 'Part'} withdrawn${see ? ` · ${keeps(see)}` : ''}`, verb: null };
   return { text: `Not published${o.standing ? ' until a day passes' : ''}${see ? ` · ${keeps(see)}` : ''}`, verb: null };
@@ -637,8 +666,10 @@ export function dayPausedLine(o: { state: DayState; readers: string | null; past
  * closed to them) is said by its pause too, never by a calm head beside its mark. The run's own figures go to the
  * line's title (`runFigures`).
  */
-export function daySentence(o: { day: string; head: string | null; wrong: boolean; pause: { state: DayState; readers: string | null; past?: boolean; standing: boolean; may: boolean; deciders: string; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null } | null }): string {
+export function daySentence(o: { day: string; head: string | null; wrong: boolean; pause: { state: DayState; readers: string | null; past?: boolean; standing: boolean; may: boolean; deciders: string; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null; level?: string | null; under?: string | null } | null }): string {
   const d = dayMid(o.day);
+  // A day accepted as a new level, or published under one: said so, whoever reads it.
+  if (o.pause?.state === 'accepted') return `${d}: ${o.pause.under ? `published by ${o.pause.under}’s new level` : `new level from ${dayShort(o.pause.level ?? o.day)}`}`;
   // A day readers got by a remedy is said by it, whoever reads it: "Thu Sep 21: filled from Thu 14".
   if (o.pause?.remedy && (o.pause.state === 'fill' || o.pause.state === 'complete')) return `${d}: ${remedySaid(o.pause.remedy)}`;
   const held = !!o.pause && o.pause.state !== 'asis';
@@ -673,6 +704,7 @@ export function runFigures(o: { day: string | null; run: number | string; ms: st
 export function outputPausedLine(o: { state: DayState; may: boolean; deciders: string; standing: boolean; remedy?: RemedySaid | null; withdrawn?: RemedyMark | null }): { text: string; verb: string | null } {
   if (o.state === 'waiting') return o.may ? { text: 'Waits for a decision', verb: 'Decide' } : { text: `Waits on ${o.deciders}`, verb: null };
   if (o.state === 'asis') return { text: 'Published as is', verb: null };
+  if (o.state === 'accepted') return { text: 'Published as a new level', verb: null };
   if ((o.state === 'fill' || o.state === 'complete') && o.remedy) return { text: remedySaid(o.remedy).replace(/^./, (c) => c.toUpperCase()), verb: null };
   if (o.withdrawn) return { text: `${o.withdrawn === 'fill' ? 'Fill' : 'Part'} withdrawn`, verb: null };
   return { text: o.standing ? 'Not published until a day passes' : 'Not published', verb: null };
@@ -709,7 +741,7 @@ export function afterLine(days: readonly { day: string; state: DayState | 'publi
   const of = (s: DayState | 'published') => known.filter((d) => d.state === s).map((d) => d.day);
   const waiting = of('waiting');
   if (waiting.length) return line([lead, { state: 'waiting', text: `${spans(waiting)} still wait${waiting.length === 1 ? 's' : ''}` }], o.may === false ? null : 'Decide');
-  const words: [DayState | 'published', string][] = [['asis', 'as is'], ['fill', 'filled'], ['complete', 'part only'], ['dont', 'unpublished'], ['published', 'published']];
+  const words: [DayState | 'published', string][] = [['asis', 'as is'], ['accepted', 'new level'], ['fill', 'filled'], ['complete', 'part only'], ['dont', 'unpublished'], ['published', 'published']];
   return line([lead, ...words.map(([s, w]) => [s, of(s), w] as const).filter(([, ds]) => ds.length).map(([s, ds, w]) => ({ state: s, text: `${spans(ds)} ${w}` }))], null);
 }
 
@@ -729,7 +761,7 @@ export function ribbonOf(days: readonly { day: string; state: DayState }[]): { m
   return out;
 }
 
-const STATE_SAID: Record<DayState, string> = { waiting: 'waiting', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only' };
+const STATE_SAID: Record<DayState, string> = { waiting: 'waiting', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only', accepted: 'new level' };
 
 /**
  * A paused day's card in the Runs view: its head, who decided how long after it was held and why (a day closed under a
@@ -740,7 +772,7 @@ const STATE_SAID: Record<DayState, string> = { waiting: 'waiting', asis: 'publis
 export function decidedLines(o: { day: string; state: DayState; who: string | null; minutes: number | null; reason: string | null; run: string | null; seq: number | null; release?: number | null; under: string | null; remedy?: RemedySaid | null }): { head: string; who: string | null; where: string | null } {
   const who = o.state === 'waiting' ? waitedLabel(o.minutes) : o.under ? `Under ${o.under}’s decision` : o.who ? [o.who, o.minutes !== null ? afterLabel(o.minutes) : null, o.reason].filter(Boolean).join(' · ') : null;
   // A day readers got (as is, or by a remedy: its derived run) names the run released and the release's entry.
-  const out = o.state === 'asis' || o.state === 'fill' || o.state === 'complete';
+  const out = o.state === 'asis' || o.state === 'accepted' || o.state === 'fill' || o.state === 'complete';
   const rec = out && o.release != null ? o.release : o.seq;
   const run = o.run === null ? null : out && o.release != null ? `Released run ${o.run}` : o.state === 'waiting' ? `Run ${o.run}` : null;
   const where = [run, rec !== null && rec !== undefined ? `record #${rec} ✓` : null].filter(Boolean).join(' · ') || null;

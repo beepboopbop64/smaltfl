@@ -126,8 +126,8 @@ describe('the decision sheet’s words (ADR 0009 §12: 45 at a glance)', () => {
 
   it('shows the reasons that fit the option picked, the switch for later days, and a button that says what is missing (amendment 1 S12)', () => {
     const t = sheetText(thu);
-    expect(t.why).toEqual({ asis: 'Why? (needed)', dont: '', fill: '', complete: '' });
-    expect(t.chips).toEqual({ asis: ['Real change', 'Source confirmed'], dont: ['Known outage', 'Re-send expected'], fill: [], complete: [] });
+    expect(t.why).toEqual({ asis: 'Why? (needed)', dont: '', fill: '', complete: '', accept: 'Why? (needed)' });
+    expect(t.chips).toEqual({ asis: ['Real change', 'Source confirmed'], dont: ['Known outage', 'Re-send expected'], fill: [], complete: [], accept: ['Planned change', 'Source confirmed'] });
     expect(t.switch).toBe('Later days too');
     expect(t.go).toMatchObject({ rest: 'Pick an option', reason: 'Pick a reason', asis: 'Publish as is · 3 outputs', dont: 'Don’t publish Thu 21', until: 'Don’t publish from Thu 21' });
     // At rest: each row its label and number, and only Publish as is's override under it; the status; no reasons, no
@@ -515,5 +515,46 @@ describe('the remedies on the sheet (ADR 0009 amendment 1 S12)', () => {
     expect(v.title).toBe('Thu Sep 21 · versions');
     expect(v.lines.map((l) => l.text)).toEqual(['Arrived · 41,939 trips · held · run #13', 'Filled from Thu 14 · 121,931 trips · run #15', 'Refilled from Wed 20 · 110,842 trips · run #18 ✓', 'Corrected file · 118,250 trips · run #31']);
     expect([v.title, ...v.lines.map((l) => l.text)].reduce((n, x) => n + wordsIn(x), 0)).toBeLessThanOrEqual(45);
+  });
+});
+
+describe('Accept the new level on the sheet and after it (amendment 1 S6, S12, X6)', () => {
+  const nov: SheetIn = {
+    day: '2022-11-14', waited: 120, otherBuild: false, outputs: 3, rows: 82_278, reach: 78_000, readers: { day: '2022-11-12', rows: 98_000 }, later: null, checks: null, part: 'Vendor 1 · 2', missing: null, cut: null, ticks: ['0', '130k'],
+    unjudged: false, hash: '8324c8f4ab', may: true, deciders: 'Owner', head: 'Vendor 1 sent almost nothing', noun: { one: 'trip', many: 'trips' },
+    offers: [{ option: 'fill', label: 'Fill from Mon 7' }, { option: 'complete', label: 'Without Vendor 1' }, { option: 'accept', label: 'Accept the new level' }],
+    donors: [{ day: '2022-11-07', counts: { arrived: 82_278, setAside: 2, taken: 22_000, total: 104_276 } }],
+    partOnly: { arrived: 82_278, setAside: 2, taken: 0, total: 82_276 },
+  };
+  const at = (t: SheetText, p: Partial<SheetPick>) => sheetShown(t, { option: null, scope: 'day', reason: null, ...p });
+
+  it('is the last of five rows: its label alone before a pick, then the day as it came and from when it learns', () => {
+    const t = sheetText(nov);
+    expect(t.options.map((o) => o.option)).toEqual(['asis', 'dont', 'fill', 'complete', 'accept']);
+    expect(t.options[4]).toMatchObject({ label: 'Accept the new level', number: '', sub: 'learns from Mon 14', off: false });
+    // With five rows the axis keeps its zero (S12's order of what gives way).
+    expect(t.ticks).toEqual(['0']);
+    expect(at(t, {})).toContain('Accept the new level');
+    const picked = at(t, { option: 'accept' });
+    expect(picked).toEqual(expect.arrayContaining(['82,278 trips', 'learns from Mon 14', 'Why? (needed)', 'Planned change', 'Source confirmed', 'Pick a reason']));
+    // It stands by its level, not by a switch (Q-57b).
+    expect(picked).not.toContain('Later days too');
+    expect(goShown(t, { option: 'accept', scope: 'day', reason: 'Planned change' })).toBe('Accept from Mon 14');
+    expect(goLabel('accept', 'day', 3, '2022-11-14')).toBe('Accept from Mon 14');
+    expect(sheetWords(t)).toBeLessThanOrEqual(45);
+    expect(sheetWords(sheetText({ ...nov, may: false }))).toBeLessThanOrEqual(45);
+    // Off while a later day is current, as publish as is is.
+    expect(sheetText({ ...nov, later: '2022-11-21', offers: [{ option: 'accept', label: 'Accept the new level', off: 'Mon 21 is published' }] }).options.at(-1)).toMatchObject({ off: true, number: 'Mon 21 is published', sub: null });
+  });
+
+  it('says the new level once decided, and a later day published under it', () => {
+    expect(receiptLines({ state: 'accepted', day: '2022-11-14', readers: '2022-11-14', released: 3, who: 'Owner', at: '09:40', seq: 24, under: null, standing: false, level: '2022-11-14' })).toEqual({ head: 'New level from Mon 14 · readers now see Mon 14', sub: 'learns from Mon 14 · 3 outputs released · Owner · 09:40 · record #24', change: null });
+    expect(receiptLines({ state: 'accepted', day: '2022-11-15', readers: '2022-11-15', released: 3, who: 'Owner', at: '09:41', seq: 27, under: 'Mon', standing: false, level: '2022-11-14' }).head).toBe('By Mon’s new level · readers now see Tue 15');
+    expect(dayPausedLine({ state: 'accepted', readers: null, may: true, standing: false, day: '2022-11-14', level: '2022-11-14' }).text).toBe('⚑ New level from Mon 14');
+    expect(dayPausedLine({ state: 'accepted', readers: null, may: true, standing: false, day: '2022-11-15', level: '2022-11-14', under: 'Mon' }).text).toBe('⚑ By Mon’s new level');
+    expect(daySentence({ day: '2022-11-14', head: 'Vendor 1 sent almost nothing', wrong: true, pause: { state: 'accepted', readers: null, standing: false, may: true, deciders: 'Owner', level: '2022-11-14' } })).toBe('Mon Nov 14: new level from Mon 14');
+    expect(outputPausedLine({ state: 'accepted', may: true, deciders: 'Owner', standing: false }).text).toBe('Published as a new level');
+    expect(decidedLines({ day: '2022-11-14', state: 'accepted', who: 'Owner', minutes: 30, reason: 'Planned change', run: '#13', seq: 24, release: 25, under: null }).head).toBe('Mon Nov 14 · new level');
+    expect(afterLine([{ day: '2022-11-14', state: 'accepted' }, { day: '2022-11-15', state: 'accepted' }])!.text).toBe('Mon–Tue new level');
   });
 });

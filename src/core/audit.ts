@@ -32,7 +32,7 @@ import type { FlowDocument } from './document.js';
 import { sha256Hex } from './hash.js';
 import { daysBetween } from './calendar.js';
 import { DONOR_WINDOW, repairDocument, type Repair } from './fill.js';
-import { claimBase, claimHolds, donorGood, factsFromClaims, heldOutputs, holdsOf, inputsKey, isClaim2, judgeClaims, lastPublished, sameKeys, standingFor, type Claim, type DecideAbout, type DerivedAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type RunHold } from './hold.js';
+import { claimBase, claimHolds, donorGood, factsFromClaims, heldOutputs, holdsOf, inputsKey, isClaim2, isLevel, judgeClaims, lastPublished, sameKeys, standingFor, type Claim, type DecideAbout, type DerivedAbout, type HeldAbout, type Hold, type Judged, type ReleaseAbout, type RunHold } from './hold.js';
 import { canonicalJSON } from './canonical.js';
 import { consistencyProof, entryLeaf, parseCheckpoint, rootOf, verifyCheckpoint, verifyConsistency, verifyInclusion, verifyRecord, type JSONValue, type LogEntry, type SignedCheckpoint } from './log.js';
 import { manifestHash, planHash, policiesHash, type IdentityCard, type RunManifest } from './manifest.js';
@@ -427,10 +427,29 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       rule = may.rule ?? null;
     }
     if (a.option === 'asis' && (typeof e.reason !== 'string' || e.reason.trim() === '')) problems.push('it publishes as is with no reason');
+    // Accept the new level (amendment 1 S6, C6): a reason and the level it records; under a standing level, the Accept it
+    // applies, earlier and released, of the same source and metrics, starting before the day, and a day held by its story
+    // alone (a check, or a source not judged, pauses the day again).
+    if (a.option === 'accept') {
+      if (typeof e.reason !== 'string' || e.reason.trim() === '') problems.push('it accepts a new level with no reason');
+      if (!isLevel(a.level)) problems.push('it accepts a new level and names none (its source, the day it starts and its metrics)');
+      else if (a.under === undefined && a.level.from !== a.day) problems.push(`its level starts ${a.level.from}, not on the day it accepts, ${a.day ?? 'a day with no date'}`);
+      if (a.under !== undefined) {
+        const root = entries[a.under];
+        const was = root?.about as unknown as DecideAbout | undefined;
+        const level = isLevel(a.level) ? a.level : null;
+        const released = entries.slice(0, e.seq).some((x) => x.kind === 'release' && isRecord(x.about) && x.about.decision === a.under && x.about.outcome === 'applied');
+        if (!root || root.kind !== 'decide' || root.seq >= e.seq || was?.option !== 'accept' || was.under !== undefined || !isLevel(was.level)) problems.push(`it applies #${a.under}, which isn't an earlier Accept of a new level`);
+        else if (!released) problems.push(`it applies #${a.under}, whose new level was never published`);
+        else if (!level || level.source !== was.level.source || level.from !== was.level.from || canonicalJSON(level.metrics) !== canonicalJSON(was.level.metrics)) problems.push(`it names another level than #${a.under}'s`);
+        else if (typeof a.day !== 'string' || !(was.level.from < a.day)) problems.push(`#${a.under}'s new level doesn't stand for ${a.day ?? 'a day with no date'}: it starts ${was.level.from}`);
+        if (heldAbout && Array.isArray(heldAbout.holds) && heldAbout.holds.some((h) => h.by !== 'story')) problems.push(`#${a.under}'s new level doesn't stand for its day: something besides its story holds it`);
+      }
+    }
     const remedy = a.option === 'fill' || a.option === 'complete';
     if (remedy && (!isRecord(a.repair) || (a.repair as Repair).kind !== a.option)) problems.push(`it ${a.option === 'fill' ? 'fills' : 'publishes the part that arrived'} with no repair of that kind`);
     const period = planPeriod(held?.plan?.publish);
-    if (a.under !== undefined) {
+    if (a.under !== undefined && a.option !== 'accept') {
       const stands = typeof a.day === 'string' ? standingFor(entries.slice(0, e.seq), a.day, period) : null;
       if (a.option === 'asis' || stands?.seq !== a.under || stands.about.option !== a.option) problems.push(`it applies decision #${a.under}, which doesn't stand for ${a.day ?? 'a day with no date'}`);
     }
@@ -440,7 +459,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       if (!amended || amended.kind !== 'decide' || amended.seq >= e.seq || !isInputs(was?.inputs) || inputsKey(was.inputs) !== inputsKey(a.inputs)) problems.push(`it amends #${e.amends}, which isn't an earlier decision of the same day`);
     }
     allowed.set(e.seq, problems.length === 0);
-    const option = a.option === 'asis' ? 'publish as is' : a.option === 'fill' ? `fill from ${(a.repair as Repair | undefined)?.donor?.day ?? 'another day'}` : a.option === 'complete' ? 'publish the part that arrived' : e.amends !== null && remedyOf(entries[e.amends]) ? "don't publish (withdraws the fill)" : "don't publish";
+    const option = a.option === 'accept' ? (a.under !== undefined ? `publish by #${a.under}'s new level` : `accept the new level from ${isLevel(a.level) ? a.level.from : 'the day'}`) : a.option === 'asis' ? 'publish as is' : a.option === 'fill' ? `fill from ${(a.repair as Repair | undefined)?.donor?.day ?? 'another day'}` : a.option === 'complete' ? 'publish the part that arrived' : e.amends !== null && remedyOf(entries[e.amends]) ? "don't publish (withdraws the fill)" : "don't publish";
     say(problems.length === 0, `${where}: ${option}${a.scope === 'untilPass' ? ' until a later day passes' : ''} for ${a.day ?? `run ${a.run}`}, by ${e.by.as}${a.under !== undefined ? `, under #${a.under}` : ''}${problems.length ? `: ${problems.join('; ')}` : `${rule ? ` (rule ${rule})` : ''}, on run ${a.run}'s keys`}`);
   }
 
@@ -464,7 +483,7 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
       if (allowed.get(cited.seq) === false) problems.push(`its decision, #${a.decision}, doesn't hold`);
       problems.push(...(decision.option === 'dont' ? withdrawalProblems(e, a, cited) : remedyReleaseProblems(e, a, cited, decision)));
     } else {
-      if (decision?.option !== 'asis') problems.push(`its decision, #${a.decision}, doesn't publish`);
+      if (decision?.option !== 'asis' && decision?.option !== 'accept') problems.push(`its decision, #${a.decision}, doesn't publish`);
       if (allowed.get(cited.seq) === false) problems.push(`its decision, #${a.decision}, doesn't hold`);
       // Still the day's decision when it is released: none amends it, and no other decision of its day follows it.
       const since = entries.slice(cited.seq + 1, e.seq).find((x) => x.kind === 'decide' && (x.amends === cited.seq || (isRecord(x.about) && isInputs(x.about.inputs) && isInputs(decision?.inputs) && inputsKey(x.about.inputs) === inputsKey(decision.inputs))));

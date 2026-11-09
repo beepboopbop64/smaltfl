@@ -26,7 +26,10 @@ import {
   judgeDonors,
   lastPublished,
   pausesOf,
+  levelFor,
+  levelsOf,
   pauseState,
+  skipOf,
   reachOf,
   sameKeys,
   stagedKeys,
@@ -753,5 +756,66 @@ describe('a fill that stands until a day passes (amendment 1 S5, Q-64)', () => {
     // A refill amends it too: the new decision stands if it says so.
     const refill = fillDecide('2022-11-14', '2022-11-13', 'untilPass', {}, { amends: mon.seq });
     expect(standingFor([...log, refill], '2022-11-16')!.seq).toBe(refill.seq);
+  });
+});
+
+describe('a new level accepted, read from the record (ADR 0009 amendment 1 S6, ADR 0010 §5, C6)', () => {
+  const LEVEL = { source: 'trips', from: '2022-11-14', metrics: ['count:VendorID=1', 'trips', 'value:VendorID=1'] };
+  const accepted = () => {
+    const log = [held('2022-11-14', 61), decide('2022-11-14', 61, 'accept', 'day', { level: LEVEL }, { reason: 'Planned change' })];
+    return [...log, release(log[1]!.seq)];
+  };
+
+  it('keeps each Accept whose release applied, with its decision, never one amended, refused or under another', () => {
+    const log = accepted();
+    expect(levelsOf(log, 'trips')).toEqual([{ from: '2022-11-14', metrics: LEVEL.metrics, decision: log[1]!.seq }]);
+    expect(levelsOf(log, 'TRIPS')).toHaveLength(1);
+    expect(levelsOf(log, 'weather')).toEqual([]);
+    expect(levelsOf(log.slice(0, 2), 'trips')).toEqual([]);
+    expect(levelsOf([...log.slice(0, 2), release(log[1]!.seq, 'refused')], 'trips')).toEqual([]);
+    // A later day published under it names the same level, and adds none.
+    const under = decide('2022-11-15', 62, 'accept', 'day', { level: LEVEL, under: log[1]!.seq }, { reason: 'Planned change' });
+    expect(levelsOf([...log, held('2022-11-15', 62), under, release(under.seq)], 'trips')).toHaveLength(1);
+    // An Accept names its level: one without isn't a decision the record reads.
+    expect(pausesOf([held('2022-11-14', 63), decide('2022-11-14', 63, 'accept')])[0]!.decision).toBeNull();
+  });
+
+  it('stands for a later day off by nothing but the metrics it names, the way they were, held by the story alone (Q-57b)', () => {
+    const log = accepted();
+    // On the level's own day the vendor's rows and the day's rows were down.
+    const ways = (from: string) => new Map(from === '2022-11-14' ? [['count:VendorID=1', false], ['trips', false], ['value:VendorID=1', false]] : []);
+    const off = (...xs: [string, boolean][]) => new Map(xs);
+    expect(levelFor(log, 'trips', '2022-11-15', off(['count:VendorID=1', false], ['trips', false]), ways)).toMatchObject({ seq: log[1]!.seq, reason: 'Planned change', about: { option: 'accept', level: LEVEL } });
+    // Back the other way (the vendor returns), another metric off, a check holding too, nothing off, the day itself: no.
+    expect(levelFor(log, 'trips', '2022-11-21', off(['trips', true]), ways)).toBeNull();
+    expect(levelFor(log, 'trips', '2022-11-15', off(['trips', false], ['value:extra=3', false]), ways)).toBeNull();
+    expect(levelFor(log, 'trips', '2022-11-15', off(['trips', false]), ways, false)).toBeNull();
+    expect(levelFor(log, 'trips', '2022-11-15', off(), ways)).toBeNull();
+    expect(levelFor(log, 'trips', '2022-11-14', off(['trips', false]), ways)).toBeNull();
+  });
+
+  it('says the day was accepted, publishes it as it came, and learns from it (Q-59)', () => {
+    const log = accepted();
+    const p = pausesOf(log)[0]!;
+    expect(p).toMatchObject({ state: 'decided', released: true });
+    expect(dayState(null, p)).toBe('accepted');
+    expect(dayState({ holds: 1, waiting: 0, released: true }, p)).toBe('accepted');
+    expect(pauseState(null, p)).toBe('asis');
+    expect(skipOf(log)).toEqual([]);
+    expect(skipOf(log.slice(0, 1))).toEqual(['2022-11-14']);
+  });
+
+  it('names the levels in the claim a day after them is told with, and keeps only a level’s own fields', () => {
+    const DAY = '2023-10-11';
+    const doc = { steps: [{ id: 'trips_valid', kind: 'expectations' as const, inputs: ['trips'], rules: [{ name: 'fare', check: 'fare_amount >= 0', onFail: 'drop' as const }] }], ontology: { objectTypes: [], linkTypes: [], actionTypes: [], nouns: { trips: { one: 'trip', many: 'trips' } } } };
+    const file = historyWith({});
+    const h = new HistoryRanges(file, { levels: [{ from: '2023-10-04', metrics: ['trips'], decision: 7 }] });
+    const c = dayClaim(h, doc, HISTORY, DAY, 'trips', 'dev')!;
+    expect(c.levels).toEqual([{ from: '2023-10-04', metrics: ['trips'], decision: 7 }]);
+    expect(dayClaim(new HistoryRanges(file), doc, HISTORY, DAY, 'trips', 'dev')!.levels).toBeUndefined();
+    const facts = { rows: () => c.rows, pinned: () => ({ sha256: HISTORY.sha256, bytes: HISTORY.bytes }) };
+    const at = { node: 0, origin: 'trips', file: HISTORY.path, day: DAY };
+    expect(judgeClaim({ ...c, levels: [{ ...c.levels![0]!, extra: 1 }] }, at, facts)).toEqual(expect.objectContaining({ claim: expect.objectContaining({ levels: [{ from: '2023-10-04', metrics: ['trips'], decision: 7 }] }) }));
+    expect(judgeClaim({ ...c, levels: [{ from: 'Mon', metrics: [], decision: 7 }] }, at, facts)).toEqual({ node: 0, unjudged: "the claim for trips names levels that aren't levels: a day, metrics and a decision" });
   });
 });

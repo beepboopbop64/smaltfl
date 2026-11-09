@@ -55,7 +55,8 @@ export interface ActionRule {
   for: string[];
   /** Optional: the object's row must have, in this column, one of the actor's values for this attribute. */
   scope?: { columns: string[]; attribute: string };
-  /** `smaltfl:decide` only: the options the rule lets its people take; every option when left out (ADR 0009 §8). */
+  /** `smaltfl:decide` only: the options the rule lets its people take; every option but `accept` when left out (ADR
+   * 0009 §8; the owner, Q-57a: Accept the new level only for a role whose rule lists it). */
   may?: DecisionOption[];
 }
 
@@ -63,10 +64,11 @@ export interface ActionRule {
 export const DECIDE = 'smaltfl:decide';
 /**
  * What a decision may do with a held day (C2's order): publish it as is (with a reason), don't publish it (or, for a
- * day readers have a fill of, withdraw the fill, Q-61), fill it from another day, or publish only the part that
- * arrived (ADR 0009 amendment 1 S5).
+ * day readers have a fill of, withdraw the fill, Q-61), fill it from another day, publish only the part that arrived
+ * (ADR 0009 amendment 1 S5), or accept the new level: publish it as is and learn the metrics its cause moved from it
+ * on (S6, ADR 0010 §5).
  */
-export const DECIDE_OPTIONS = ['asis', 'dont', 'fill', 'complete'] as const;
+export const DECIDE_OPTIONS = ['asis', 'dont', 'fill', 'complete', 'accept'] as const;
 export type DecisionOption = (typeof DECIDE_OPTIONS)[number];
 /** The options slice 1's decision sheet draws (decision.ts), publish as is and don't publish, until it draws the
  * remedies too (step A9). */
@@ -76,6 +78,7 @@ const DECIDE_VERB: Record<DecisionOption, string> = {
   dont: 'decide not to publish a held day',
   fill: 'fill a held day from another day',
   complete: 'publish only the part of a held day that arrived',
+  accept: 'accept the new level',
 };
 
 export type Rule = RowRule | ColumnRule | ActionRule;
@@ -185,7 +188,8 @@ const listed = (xs: readonly string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${x
 
 /**
  * Whether `actor` may take `option` for a held day (ADR 0009 §8). The owner always may; a flow without policies lets
- * its one user decide; otherwise a `smaltfl:decide` rule must cover the actor and list the option (or list none). The
+ * its one user decide; otherwise a `smaltfl:decide` rule must cover the actor and list the option (or list none, which
+ * allows every option but `accept`: delegating deciding doesn't include accepting a new level, the owner, Q-57a). The
  * plugin asks this at release, against the policies stored with the run, and the record keeps the rule that allowed it.
  * Until principals are bound to identity cards (ADR 0006 §8), it is a convenience, not a guard.
  */
@@ -196,7 +200,7 @@ export function checkDecision(p: Policies | undefined, actor: string, option: De
   if (!who) return { allowed: false, reason: `${actor} is not one of the flow's people` };
   if (who.owner) return { allowed: true, reason: `${who.name} owns the flow` };
   const rules = p.rules.filter((r): r is ActionRule => r.kind === 'action' && r.action === DECIDE);
-  const lets = (r: ActionRule) => !r.may || r.may.includes(option);
+  const lets = (r: ActionRule) => (r.may ? r.may.includes(option) : option !== 'accept');
   const mine = rules.find((r) => lets(r) && covers(p, r.for, actor));
   if (mine) return { allowed: true, reason: `${mine.name} allows ${who.name}`, rule: mine.id };
   const nameOf = (id: string) => p.groups?.find((g) => g.id === id)?.name ?? p.principals.find((x) => x.id === id)?.name ?? id;

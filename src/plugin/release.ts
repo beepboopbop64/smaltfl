@@ -5,7 +5,8 @@
  * - the run is the one the caller means (its manifest hash), and its stored manifest still has that hash;
  * - its plan holds, and something held it;
  * - the decision's actor may take that option under the policies stored with the run (core/policy.ts checkDecision);
- * - publish as is has a reason, and the decision is a record entry's leaf;
+ * - publish as is (and accept the new level, which publishes as it does, amendment 1 S6) has a reason, and the decision
+ *   is a record entry's leaf;
  * - each output it names is held by the run, with the staged key the decision names, and not yet released; and every
  *   held output it leaves out already shows the run's version, so the outputs never show different days;
  * - no later day, by the plan's period parameter, is current for a name it would point (without a period, no later
@@ -174,6 +175,8 @@ export async function release(db: Database, input: unknown): Promise<ReleaseResu
   if (r.option === 'dont' && r.withdraws === undefined) return refuse("only publish as is is released: don't publish is a decision, and publishes nothing");
   if (typeof r.decision !== 'string' || !HEX64.test(r.decision)) return refuse("the decision isn't a record entry's leaf (64 hex characters)");
   if (r.option === 'asis' && (typeof r.reason !== 'string' || r.reason.trim() === '')) return refuse('publish as is needs a reason');
+  // Accept the new level is released as publish as is is (amendment 1 S6), with its option and a reason.
+  if (r.option === 'accept' && (typeof r.reason !== 'string' || r.reason.trim() === '')) return refuse('accept the new level needs a reason');
 
   // What hashing needs, read before the transaction (WebCrypto is asynchronous); the transaction reads it again and
   // refuses if it changed in between.
@@ -183,7 +186,7 @@ export async function release(db: Database, input: unknown): Promise<ReleaseResu
   const policies = doc ? await policiesHash(doc.policies) : null;
   const derived = derivedOf(db, r.run);
   if (r.withdraws !== undefined) return withdraw(db, r, stored, policies);
-  if (r.option === 'asis' && derived) return refuse(`run ${r.run} is a derived run: it is released as the fill or the part its decision names`);
+  if ((r.option === 'asis' || r.option === 'accept') && derived) return refuse(`run ${r.run} is a derived run: it is released as the fill or the part its decision names`);
   let held: Stored | null = null;
   if (r.option === 'fill' || r.option === 'complete') {
     if (!derived) return refuse(`run ${r.run} isn't a derived run: ${r.option === 'fill' ? 'a fill' : 'the part that arrived'} releases the run its decision derived`);
