@@ -231,7 +231,16 @@ own hours (quarter hours under 3 hours) and judged from its own series, the same
 each hold names its load, a load an earlier run held is carried, citing that run, and a pause is keyed by its load, so
 a daily load held at 08:00 is decided once whatever slots of another source arrive after it. A release cites a decision
 for each load holding what it names, and with `together: false` only the off file's slot pauses (Q-55). A load can be
-filled from the same slot of another day.
+filled from the same slot of another day. A check over several watched loads is held once for each (`shared`), and
+`spare` keeps only the loads new in the run (ADR 0010 §15).
+
+**The last pass** (ADR 0009 S14, ADR 0010 §15). A bad value with no range alerts by its median share; the story leads
+with a bad value only when it surged or vanished; a deliberate change pauses once, on the first day its lasting change
+crosses the relative rule, and Accept covers the days after it at the new level (its column's mix, the notes its news
+showed, a metric gone back less than a quarter still at the level). The plugin never applies a withdrawn decision
+again nor fills a day published as is; a withdrawal once a later day is current is recorded and moves no name. Every
+run's record entry keeps its claims, and `--history` tells every run's claim/2 again, names a run it can't, and checks
+a day published under a standing level against the level. Not built: bursts in the hours finding.
 
 **Releasing** (`src/plugin/release.ts`). A person decides what becomes of a held day: wait (nothing to do), publish
 it as is, accept its new level (released as publishing as is, with a reason), or don't publish it, for that day or
@@ -310,7 +319,9 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
   stored one and the one its claim was told from.
   The audit checks an Accept (a reason, and a level that starts on its day) and each day released under it (an earlier
   Accept released, the same level, starting before the day, the day held by its story alone); `audit.mjs check
-  --history` tells each claim/2 again from the levels the record accepted before it, which the claim must name.
+  --history` tells each claim/2 again from the levels the record accepted before it, which the claim must name, from
+  the claims each run's entry keeps (published or held), names a run that measured a source with no claim/2 to tell,
+  and checks a day published under a standing level: every metric off on it one the level names, off the same way.
   Re-running on an older engine needs that version's worker build; smaltkit's engine loader, which already loads a
   chosen smaltdb version, is the starting point.
 - **Determinism:** results that can differ between runs of the same plan are pinned for verified runs: row order

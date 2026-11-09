@@ -626,6 +626,7 @@ so moves the vector (Q-52):
   - It finds surges as well as shortfalls ("Burst 02:00–05:00: 4.1× usual"). They are drawn as the 24 bars over their
     ghost, with the excess past a notch, the same way trips beyond usual are drawn (ADR 0008 §6).
   - An hours surge is unusual, or wrong when a bad value carries it.
+  - Not built yet (§15): the hours find shortfalls only.
 
 ### 9. The app runs any document (i)
 
@@ -736,8 +737,8 @@ mark (Q-79), is plan/2. It is hashed as `SHA-256(UTF-8("smaltfl/plan/2\n" + JCS(
     each as a list of `[column, …]` sorted by column: `bad` as `[column, code, …]` (codes sorted), `newValues` as
     `[column, "alert"]` for each serious column (§4), `after` as `[column, of, minutes]`;
   - a watch given as a file name, in a plan/2, has the legacy settings filled in: `scale` `"fixed"`, `pattern`
-    `"weekly"`, `donor` `"weekday"`; and a flow whose watches are all given so, with no calendar block, keeps
-    `us-nyc/1` (§0). A flow with a general watch and no calendar block has `none` (Q-58).
+    `"weekly"`, `donor` `"weekday"`. A format-3 document with no calendar block has `none`, whatever form its watches
+    take (Q-58, as built in §15); only a format-2 flow keeps `us-nyc/1` (§0).
 - **What it changes.** The flow hash and the plan hash cover these settings; node keys don't, so nothing is rebuilt.
   verify's *flow* check translates the document again and must get the same plan.
 - **What stays the same.**
@@ -838,6 +839,41 @@ Q-76).
 **The order they are built in.** This ADR's phase 1 merges first; then the fills; then phases 2, 3 (with Accept, built
 once on both) and 4. The fills wait once, before their screens, for phase 1; phase 2 waits once, before its data and
 app work, for the fills.
+
+### 15. As built in the last pass (the review of 2026-11-09)
+
+- **Rare but serious values with no range (§4, the owner: always alert).** A bad value on a day its share has no range
+  (a holiday in the feed's first year, a flow's first weeks) is something wrong at twice its median share over the last
+  seven days before it that aren't special, past its floor: the day is `wrong`, not `unlearned`. A new value the
+  ontology marks bad is flagged bad; no new value in a serious column offers Mark as expected (C9). The sign-in example
+  marks the client (`ua_family`) serious, as Q-56 names it ("country, tool").
+- **The story leads with a bad value only when it surged or vanished.** One that held is no cause; a held part is never
+  said as a shortfall when the rest rose ("Sign-ins 2.5× usual; Locked out held"); and a bad value that alerts with no
+  clean split heads the day itself ("Failed 14× usual", Open an incident).
+- **A deliberate change pauses once (the owner: "pause until accepted"; Q-57b).** In the general form, a value that was a
+  part of the mix (1% or more), on the first day its lasting change crosses three times its usual share or a third of it,
+  within the change's first week, is held instead of lowered to a note, and Accept is offered there: the sign-in
+  migration to passkeys holds on Jun 9, 2024, and once accepted holds nothing after it. A change that crossed already,
+  codes under 1%, smaller changes and the legacy form's are notes as before. On the taxi history this moves no day: the
+  vector stays the 25 days the owner accepted (Q-54). A share after an accepted level's break follows the days since it
+  by the step (`stepped`), so a change that goes on moving is followed.
+- **A format-3 document with no calendar block has none (Q-58),** whatever form its watches take; `us-nyc/1` is a
+  format-2 flow's (§0, §11 as amended).
+- **A check over several watched loads (§7, Q-55)** is held once for each load it reads (`shared`), each reaching only the
+  outputs that read that load's source, so every hold can be decided; `spare` drops the hold of a load an earlier run of
+  the flow read while the same check passed (the runtime, verify and the audit agree).
+- **The guess is worded by the pattern (§3):** "the 14 days before" (none), "the same day of the 6 months before"
+  (monthly); the usual hours follow the pattern too.
+- **--history (§6).** Every run's record entry keeps the claims it was judged by (`claims`), published or held; the
+  audit checks they include the engine's. --history tells every run's claim/2 again, names a run that measured a source
+  and has no claim/2 to tell instead of skipping it, and checks a day published under a standing level: every metric
+  off on it is one the level names, off the way it was on the level's day (`levelStray`). A decision about a load
+  applied under a standing one is checked by `standingForLoad`.
+- **The app** makes the ranges again after a run's measures join the tail, so a day past the base has its story on its
+  first run, keeping each run's claim/2 (told before it from its load's measures).
+- **Not built: the hours finding finds no surges.** A burst ("Burst 02:00–05:00: 4.1× usual", §8) isn't found by the
+  hours; a burst of a bad value is told by its share (and with no range, by the rule above), and a burst of ordinary
+  rows by the day's amount.
 
 ## Encodings
 

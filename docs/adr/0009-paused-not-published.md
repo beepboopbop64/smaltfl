@@ -1040,6 +1040,33 @@ ADR 0008's rules apply: shape first, words budgeted.
   proposed (`data` published only from the default branch, `data-<branch>` otherwise) isn't built (Q-75). If lanes
   ever push, it comes first.
 
+### S14. As built in the last pass (the review of 2026-11-09)
+
+- **A withdrawn decision stays withdrawn (S5, Q-61).** The plugin refuses a release that cites a decision whose applied
+  release a withdrawal took back: only a new decision applies the fill again. The audit fails an engine release that
+  applies a decision again after an engine withdrawal took it back, and any engine release citing a decision more often
+  than the record keeps applied releases citing it.
+- **Publish as is can't be taken back (§12, S5).** The plugin refuses a fill or the part alone of a held run whose day an
+  applied release published as is or at its new level (that run, or a run of the same inputs). The audit fails a remedy
+  decision, and its release, made after the day went out so.
+- **A withdrawal once a later day is current** is recorded with no engine release: no name moves back, and `pausesOf`
+  reads a decision not to publish made after the fill went out as its withdrawal (`withdrawn` is the decision's seq), so
+  the day is ✕ and readers keep the later day. The page finds the day's released fill from its derived runs, not from
+  what the names show.
+- **On a filled day, Change decision** offers the other donors, never the one readers have (S7). A refused release
+  never hides the one that applied before it, and the receipt cites the decision whose release applied.
+- **What readers keep (S12):** a filled day's Keep row gives its rows as filled (what its checks were given past the
+  fill) and draws its donor's hours or part stippled when the causes match; the Keep label, the day line and the pause
+  row mark it ◧ (◐) beside its date (`readersSee`'s mark).
+- **A backfill donor is a day that has arrived here (S3):** run and judged in the visit or the record (`DonorQuery.arrived`);
+  a later day not loaded yet is "not arrived", never offered or drawn.
+- **Accept (S6):** an accepted day is marked by the level's step, never ⚑, in the strip, the receipt, the sheet's header
+  and the day line; the strip's key names every mark it draws (new level, filled, part only). The level names the notes
+  outside their range the accepted day's news shows too; a level naming a value's share applies to its column's whole
+  mix; and a later day's metric gone back less than a quarter of the way to its old level is still at the new level
+  (`levelWays(story, then)`). On the real history, Mon Nov 14, 2022 accepted covers Tue 15 to Sun 20, and Mon 21, the
+  vendor back, pauses (hold-real).
+
 ### Encodings (amendment 1)
 
 **Unchanged:** `key/0`, `flow/1`, `plan/0`, `plan/1` (E10), `dataset/0`, `run/1`, `log/1`, `checkpoint/0`, `edit/0`,
