@@ -645,6 +645,9 @@ export async function auditBag(files: readonly BagFile[], kept?: unknown, trust:
     if (!base) say(false, "the history you gave isn't a smaltfl history");
     const told: Retold[] = [];
     for (const [manifest, run] of runs) {
+      // A derived run's claims are its held run's (C4), told again at the held run's entry; that they are the same is
+      // checked with the derived run itself (its document, snapshot and claims against its held run's).
+      if ((run.entry.about as { outcome?: string }).outcome === 'derived') continue;
       const judged = engineHolds.get(manifest)?.judged ?? [];
       const fromHolds = ((run.entry.about as Partial<HeldAbout>).holds ?? []).flatMap((h) => (h.by === 'story' && h.claim ? [h.claim] : []));
       for (const claim of [...fromHolds, ...judged.flatMap((j) => ('claim' in j ? [j.claim] : []))].filter(isClaim2).filter((c, i, all) => all.findIndex((x) => x.source === c.source) === i)) {
