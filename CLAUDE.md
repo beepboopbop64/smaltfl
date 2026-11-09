@@ -36,7 +36,8 @@ match smaltdb's `CLAUDE.md`.
 - `examples/`: flow documents and their sources; `fixtures/xs/`: real tier XS data for the tests.
 - `scripts/data/build.py` and `.github/workflows/data.yml`: the scenario's data, fetched on a GitHub runner into the
   `data` branch (`git fetch origin data --depth 1`); `scripts/data/history.ts` measures the history's days there, on
-  the runtime (`node scripts/data/history.mjs DAYS_DIR OUT.json`).
+  the runtime (`node scripts/data/history.mjs --flow DOC --watch SOURCE --files LIST.json OUT.json`, or `DAYS_DIR
+  OUT.json` for the taxi example).
 - The day's news (ADR 0008): `src/core/news.ts` finds what is out of the ordinary, `src/core/story.ts` tells it as one
   cause with what follows from it, `src/app/viz.ts` draws it (SVG strings, tested in Node). Words at a glance are
   budgeted (`glanceStrings`, `wordsIn`); a new kind of finding gets its visual there too.
@@ -59,7 +60,11 @@ match smaltdb's `CLAUDE.md`.
   plan/2 say how a watched source is judged (`WatchDef`, `WatchPlan`); `judgeOf` and `flowNames` (news.ts) read the
   watch's settings, the ontology's marks (`bad`, `newValues`, `after`) and its nouns; a day with nothing to compare
   against is `unlearned` (◌, published, marked). `test/fixtures/security.ts` is the sign-in log every phase asserts on
-  (`test/security.test.ts`). No new string on screen writes "trips": counts go through `names.noun`.
+  (`test/security.test.ts`). No new string on screen writes "trips": counts go through `names.noun`. Phase 2: a load's
+  measures (`src/core/measures.ts`, the plugin's `measure`), smaltfl-history/3 with a tail appended from each run, and
+  claim/2 under plan/2 (`loadClaim`); `scripts/data/history.ts` builds any flow's history (`--flow DOC --watch SOURCE
+  --files LIST.json`); sources are bound by id (`examples/<flow>.data.json`, loads.json format 2, `src/app/datalist.ts`);
+  `npm run build:app -- --flow examples/security-signins.smaltfl.json` builds the app on the generated sign-ins.
 
 ## Rules for this repository
 

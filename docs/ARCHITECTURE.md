@@ -190,6 +190,23 @@ of its last seven days' rows is something wrong, judged or not. A bad value abov
 is something wrong, never marked as expected; a serious column's new value too. Every count says the source's noun.
 This build refuses a flow's own calendar days, any pattern but weekly and any `every` but day.
 
+**Measuring a load, and judging it from its own run** (ADR 0010 phase 2). A watched load's numbers are its *measures*
+(measures/0, `src/core/measures.ts`): its rows, what its checks drop, each column's values present, medians and
+quantiles from the profile's sample, its rows by hour (in the watch's zone), the counted columns' values and pairs,
+and the followed columns' values. The plugin measures them in the engine (`measure`, `src/plugin/measure.ts`, the
+statements emit.ts writes); the history builder (`scripts/data/history.ts`) calls the same method, so a period built
+offline and the same load measured by its own run are equal (`test/measures-real.test.ts` checks the data branch's
+loads against history.json). A history is smaltfl-history/3 (/2 still reads): its base, as the data's list gives it,
+plus the source's *tail*, the measures of the loads the base lacks, appended from their own runs in this browser, one
+a slot, the first to arrive, never a derived run's (`appendPeriods`, `HistoryRanges.of`). The record keeps each run's
+measures, and the page rebuilds the tail from it when it opens. Under plan/2 a watched source is judged by claim/2:
+told from the base, the tail before the day (a Merkle tree, E12, named by its size and root) and the load's own
+measures (`loadClaim`), leaving out the days the record held and didn't publish as is (`skipOf`, Q-80); the plugin
+measures the snapshot, checks the claim's flow hash, slot, base, tail (pinned as `tail.<source>.json`, its root
+computed again) and measures, and keeps the measures (`_smaltfl_measures`). A derived run's watched source is judged
+against the held run it repairs (its flow hash and stored measures, the same snapshot), and each donor by its own day's
+measures (C4). The checks' numbers are judged only from the periods counted with the rules in force (`checksStart`).
+
 **Releasing** (`src/plugin/release.ts`). A person decides what becomes of a held day: wait (nothing to do), publish
 it as is, or don't publish it, for that day or until a day publishes (`smaltfl:decide`, a rule in the flow's policies;
 the owner may always decide). The decision is recorded first, by the day's inputs and every held output's staged key.
@@ -234,6 +251,8 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
 | Snapshot | A source's rows, as a dataset version | Its key is its content, so the same rows from another file are the same snapshot |
 | Dataset version | Its schema and the multiset of its rows: each row's canonical binary encoding is hashed, and the sorted row hashes are hashed in 1 MiB chunks | Exact: `REAL` values hash by their IEEE-754 bits; `NULL` and each type are tagged. The same rows in any order give the same hash, with no sort in the engine (`src/plugin/dataset-hash.ts`) |
 | Edit | The edit and the previous edit's hash | A hash chain in the engine; each edit also goes into the record with the policies and ontology hashes in force |
+| Measures (measures/0) | One load's numbers, canonical JSON tagged `measures/0` (ADR 0010 E11) | Kept with the run (`_smaltfl_measures`) and in its record entry; a claim/2 names the hash it was told from |
+| Tail (tail/0) | A source's appended measures as an RFC 9162 tree, each leaf over the same bytes as the measures' hash (E12) | A claim/2 names it by its size and root; the plugin computes the root of the tail pinned with the run again |
 | Run manifest (run/1) | The flow (with its policies and ontology hashes), the plan, parameters, engine and plugin versions and the code's commit, step keys, the source files read, snapshot and dataset hashes, row counts, expectation results, the data commit and list hash, the record's head, the previous run | The flow document is kept with it; run/0 manifests still verify. Signed when shared (section 7) |
 | Record entry (log/1) | The entry's canonical JSON, as an RFC 9162 leaf; the record's root as the Merkle tree hash of its leaves | One append-only record per flow and browser (`src/core/log.ts`, `src/app/record.ts`): runs (`ok`, `failed`, `held` with what held them, what waits and the staged keys, or `derived` with the held run it repairs, the repair and its document), decisions on held days (with a remedy's repair and derived run), releases (with `from`, `repair`, `filled`, or `withdraws`), flow changes, file checks, actions on findings, edits, verifications, signatures, exports |
 | Checkpoint | The record's origin, size and root, signed (ECDSA P-256) by this browser's identity | Downloaded and kept elsewhere, it anchors the record: a later record is checked against it with a consistency proof |
@@ -259,6 +278,9 @@ client's `AbortSignal`; progress is reported per step. Previews run a segment up
   snapshot, donor file, day and claim), its decision's repair and keys, its release (by the derived run's inputs, so a
   decision applied again in a new engine holds), a replacement that moved a name back past a later day, and a
   withdrawal, with what the engine kept (`engine/repairs.json` in the bag).
+  A plan/2 run's *held* check judges its claim/2 again by the measures the run stored, and at the Recomputed level
+  measures each watched snapshot (and each donor's) again with the settings it was measured by: the hash must be the
+  stored one and the one its claim was told from.
   Re-running on an older engine needs that version's worker build; smaltkit's engine loader, which already loads a
   chosen smaltdb version, is the starting point.
 - **Determinism:** results that can differ between runs of the same plan are pinned for verified runs: row order
@@ -370,11 +392,12 @@ src/
   core/       flow model, validation, compiler, hashes, lineage, policies, ontology, packages; data quality (profiles,
               odd rows, drift), the holiday calendar, each day's normal range, the news (a day's, a table's), what
               holds a run and what became of a held day, and filling one (fill.ts: what is missing, the donor, the
-              derived document, a day's versions)
+              derived document, a day's versions), a load's measures and a source's tail (measures.ts)
   plugin/     the runtime plugin (engine worker): running and holding a plan, staging a derived run, releasing a
-              held or derived run and withdrawing a fill, verifying
+              held or derived run and withdrawing a fill, measuring a load, verifying
   worker.ts   the app's worker entry
-  app/        the UI; fills.ts pins a donor and stages, decides and releases a fill
+  app/        the UI; fills.ts pins a donor and stages, decides and releases a fill; datalist.ts reads the data's list
+              (loads.json, format 2: sources bound by id, histories by watch)
 test/         vitest on the in-process engine and through the worker protocol; Playwright end-to-end tests with the app
 bench/        scenario benchmarks (SCENARIO.md §7); results in bench/results/
 fixtures/     tier XS data with its hashes

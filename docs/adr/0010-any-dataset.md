@@ -412,6 +412,44 @@ so moves the vector (Q-52):
     part only. They are left out of learning for later days.
   - A day published as is, or accepted, is learned from (Q-59's last part, the default the build starts on).
 
+**Phase 2 as built** (2026-11-08). Where the build settled what the text above leaves open, or differs from it:
+- **The tail's file in the engine** is pinned as `tail.<source>.json`: pinned names take no slashes. It holds the
+  tail's measures records in slot order, one a slot; the plugin refuses anything else, saying why.
+- **A claim names a prefix of the tail pinned.** A claim/2's `history.tail` is the first `size` leaves of the tail
+  pinned with the run: a donor's claim, told before the held day, names a shorter tail than the held day's. The page
+  pins the tail before the latest day it claims.
+- **A load the base has** is told from the base only when the base's period is the load's (`samePeriod`: every number
+  the base keeps of it, and for a followed column or a pair, the values first seen that day and their rows); a load the
+  base lacks inside the base's span (a gap) can't be added after it. Either way no claim is told, and the run holds the
+  source as not judged.
+- **What /3 keeps of a period.** Each counted column's rows a period, as /2 does; a followed column and a pair keep
+  each value's first and last period, its periods and rows, and the rows of values new each period. A load's measures
+  keep all of them in full, so the tail folds them in exactly; a base period can't be taken back out into a full record
+  (`periodOf` gives the numbers the file keeps).
+- **How a load is measured** (`settingsFor`): the columns its base counts, follows and pairs; with no base, the watch's
+  `count` and `follow`, else its bad columns counted and its serious columns followed, no pairs. The checks are named
+  as the document writes them (a rule with a parameter is the same rule whatever its value) and counted with their
+  parameters bound (`counting`). With no time column a load has no parts. A run of a plan/2 flow is given its document
+  (as `runFlow` gives it), or its measures can't be told apart from the page's.
+- **The builder's columns** come from `--count`, `--follow` and `--pair`, else the watch's, else the ontology's (values
+  or bad codes counted, serious columns followed, counted columns of 20 values or fewer paired). Profiling the first 28
+  periods is not built. The taxi's columns are named by `build.py`.
+- **`_smaltfl_measures`** keeps the settings beside the measures, which verify measures the snapshot again by.
+- **Days the record leaves out** reach claim/1 too (Q-80): a claim/1 names them in an optional `skip`, only when there
+  are some, so every claim made before is unchanged.
+- **loads.json format 2** is `{ format: 2, month, built, data, flow, sources: { <id>: { table, format, file, header?,
+  columns?, context?, entry? | loads, donors } }, histories: { <id>: { path, sha256, bytes, from } }, episodes }`: a
+  source's one file is its `entry`, a loaded source's days are `{ slot, file, sha256, bytes, rows }`, and `flow` names
+  the document when it isn't the built example. Format 1 still reads (`src/app/datalist.ts`).
+- **Not built in phase 2:** the screens of §9 beyond the first watched source (each card's own story, lanes in the strip:
+  phase 4), `?flow=` and `?data=` in the address, the Columns tab's "Values not watched" line and the checks card's
+  "Checks not judged yet · rules changed Tue" words (the core says when the rules changed: `checksFrom`), a fill's donor
+  claim/2 told by the page (the plugin and the tests tell it; the app's flows under plan/2 have no fill step yet).
+- **`audit.mjs check --history <history.json>`** tells each claim/2 in the bag again (`src/core/retell.ts`): the tail
+  rebuilt from the record's run entries before it (one a slot, never a derived run's), the days the record left out
+  before it, the load's measures its entry keeps and the base the auditor brings; the claim must name each, and the
+  story told again must say what it said. Checking that each donor was the first good day by its rule is not built.
+
 ### 7. Several watched sources, each with its own cadence (g)
 
 - **Slot:** what one load covers.
@@ -745,7 +783,7 @@ measured from real files are pinned in `test/measures.test.ts` when they are bui
   - An older plugin refuses `v: 2`, and the state `unlearned`, as not judged. That is safe, since not judged holds.
 - **smaltfl-history/3** is a file format. Its digest is E1, unchanged.
 - **Document format 3** is not a new hash: flow/1 hashes the document as before.
-- **New store table** (not hashed): `_smaltfl_measures(run, node, slot, hash, measures)`.
+- **New store table** (not hashed): `_smaltfl_measures(run, node, slot, hash, measures, settings)`.
 - **New record data** (log/1 doesn't change):
   - a decide entry's `level: { source, from, metrics }` (Accept, ADR 0009 amendment 1 S6);
   - with several watched sources, a decide entry's `load: { source, slot, sha256 }` in place of `outputs`;
