@@ -140,7 +140,7 @@ export interface WatchPlan {
   history: string;
   period: string | null;
   every: 'day';
-  pattern: 'weekly';
+  pattern: 'weekly' | 'none' | 'monthly';
   donor: 'weekday' | 'nearest';
   time: string | null;
   zone: string | null;
@@ -481,7 +481,7 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never): void {
     if (typeof w.history !== 'string' || w.history === '') fail(`${at}.history is a file`);
     if (w.period === null ? period === null : !text(w.period)) fail(`${at}.period ${String(w.period)} is not one of the plan's text parameters`);
     if (w.every !== 'day') fail(`${at}.every ${String(w.every)} is not one this version can judge (day)`);
-    if (w.pattern !== 'weekly') fail(`${at}.pattern ${String(w.pattern)} is not one this version can judge (weekly)`);
+    if (!['weekly', 'none', 'monthly'].includes(w.pattern as string)) fail(`${at}.pattern ${String(w.pattern)} is not one this version can judge (weekly, none, monthly)`);
     if (w.donor !== 'weekday' && w.donor !== 'nearest') fail(`${at}.donor is weekday or nearest`);
     if (w.time !== null && typeof w.time !== 'string') fail(`${at}.time is a column or null`);
     if (w.zone !== null && (typeof w.zone !== 'string' || calendarProblems({ zone: w.zone }).length)) fail(`${at}.zone is a time zone or null`);

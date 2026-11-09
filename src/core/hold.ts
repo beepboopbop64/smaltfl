@@ -17,7 +17,7 @@ import { canonicalJSON } from './canonical.js';
 import type { DayState, PauseState } from './days.js';
 import { isGeneralWatch, sourceOf, type FlowDocument, type HoldKind, type WatchDef } from './document.js';
 import type { Repair } from './fill.js';
-import { HistoryRanges, type HistoryFile } from './history.js';
+import { HistoryRanges, rangeSettings, type HistoryFile, type Level, type RangeOptions } from './history.js';
 import { appendPeriods, emptyHistory, measuresHash, samePeriod, tailBefore, tailRef, type MeasureSettings, type Measures, type TailRef } from './measures.js';
 import { rootOf } from './log.js';
 import type { JSONValue, LogEntry } from './log.js';
@@ -160,13 +160,24 @@ export function flowStory(h: HistoryRanges, day: string, doc: FlowFor, source: s
   if (h.skipped > 0) throw new Error("the flow's verdict learns from every day of the history but those the record leaves out: these ranges leave out days one viewer marked");
   const judge = judgeOf(doc, source);
   if (h.calendar.base !== judge.calendar.base) throw new Error(`the flow judges ${source} by the ${judge.calendar.base} calendar: these ranges were made with ${h.calendar.base}`);
-  if (canonicalJSON(h.calendar) !== canonicalJSON(judge.calendar)) throw new Error(`the flow judges ${source} by its own calendar's days: these ranges were made with other days`);
+  if (canonicalJSON(h.calendar as never) !== canonicalJSON(judge.calendar as never)) throw new Error(`the flow judges ${source} by its own calendar's days: these ranges were made with other days`);
+  if (h.settings !== rangeSettings(rangesFor(doc, source))) throw new Error(`the flow judges ${source} by its watch's pattern and re-learning: these ranges were made with other settings`);
   const names = flowNames(doc, source);
   return storyOf(h, day, newsOf(h, day, names, { checks: countedChecks(doc, h, source), judge }), { names, episode: false, judge });
 }
 
 /** The calendar a flow judges a watched source by (ADR 0010 §2): what its history's ranges must be made with. */
 export const calendarFor = (doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calendar'>, source: string) => judgeOf(doc, source).calendar;
+
+/**
+ * What a flow's ranges for a watched source must be made with (ADR 0010 §2, §3, §5): its calendar and its watch's
+ * pattern; in the general form the echo fix and re-learning on its own, bad values never re-learned. `flowStory`
+ * refuses ranges made otherwise. The levels accepted come from the record (`levelsOf`), the days left out from it too.
+ */
+export function rangesFor(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calendar'>, source: string): Pick<RangeOptions, 'calendar' | 'pattern' | 'echoes' | 'relearn' | 'bad'> {
+  const j = judgeOf(doc, source);
+  return { calendar: j.calendar, pattern: j.pattern, echoes: !j.legacy, relearn: !j.legacy, bad: j.bad };
+}
 
 /**
  * The donor rule a watch fills a paused day by when it names none (ADR 0010 §3, C1): the same weekday for the weekly
@@ -240,7 +251,7 @@ export async function loadClaim(o: LoadClaimInput): Promise<{ claim: StoryClaim2
     }
   }
   const skip = [...new Set(o.skip)].filter((d) => d < slot).sort();
-  const ranges = new HistoryRanges(file, { calendar: calendarFor(o.doc, o.source), recorded: new Set(skip) });
+  const ranges = new HistoryRanges(file, { ...rangesFor(o.doc, o.source), recorded: new Set(skip) });
   const s = flowStory(ranges, slot, o.doc, o.source);
   const claim: StoryClaim2 = {
     by: 'story', v: 2, source: o.source, slot, every: 'day', state: s.state, below: belowOf(s), head: s.head, build: o.build, flow: o.flow,

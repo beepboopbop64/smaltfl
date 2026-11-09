@@ -3,7 +3,7 @@
  * how well each has been guessing, give or take three typical misses. On made-up days whose pattern is known.
  */
 import { describe, expect, it } from 'vitest';
-import { dayLastYear, holidayOf, holidaysOf, isSpecial, plusDays, seasonOf } from '../src/core/calendar.js';
+import { dayLastYear, holidayOf, holidaysOf, isSpecial, NONE, plusDays, seasonOf } from '../src/core/calendar.js';
 import { HistoryRanges, seriesOf, type HistoryFile } from '../src/core/history.js';
 import { NormalRanges, type DailySeries } from '../src/core/normal.js';
 import { random } from '../src/core/quality.js';
@@ -218,5 +218,119 @@ describe('the history', () => {
     expect([h.from, h.to]).toEqual(['2024-01-01', '2024-01-03']);
     expect(h.of({ of: 'trips' })!.scale).toBe('count');
     expect(h.of({ of: 'dropped' })!.scale).toBe('share');
+  });
+});
+
+describe('patterns, breaks and re-learning (ADR 0010 §3, §5, phase 3)', () => {
+  // A flat feed with a little noise: no weekday effect, no year.
+  const flat = (f: (day: string, k: number) => number, noise = 0.02, seed = 11): DailySeries => {
+    const rnd = random(seed);
+    return { from: FROM, values: DAYS.map((d, k) => f(d, k) * Math.exp(noise * normal(rnd))) };
+  };
+  const within = (r: NormalRanges, d: string) => r.place(r.at(d)!, r.value(d)!) === 'within';
+  const outsideFrom = (r: NormalRanges, from: string, n: number) => span(from, plusDays(from, n - 1)).filter((d) => r.at(d) && !within(r, d)).length;
+
+  it('none: the periods before whatever the weekday, catching up with a change in days where weekly takes weeks', () => {
+    // In the history's first year, with no last year to slow either.
+    const STEP = '2022-05-04';
+    const s = flat((d) => (d >= STEP ? 13_000 : 10_000));
+    const none = new NormalRanges(s, 'count', { calendar: NONE, pattern: 'none' });
+    const weekly = new NormalRanges(s, 'count', { calendar: NONE });
+    // A step of +30% (an outlier for a count) is learned once the three periods before it are at the new level.
+    expect(outsideFrom(none, STEP, 30)).toBeLessThanOrEqual(5);
+    expect(outsideFrom(weekly, STEP, 30)).toBeGreaterThanOrEqual(14);
+    const r = none.at('2022-06-15')!;
+    expect(r.guesses[0]!.by).toBe('weeks');
+    expect(r.guesses.find((g) => g.by === 'weeks')!.from.map((f) => f.day).slice(0, 3)).toEqual(['2022-06-14', '2022-06-13', '2022-06-12']);
+    // Six periods at least: none for the history's first days.
+    expect(none.at(plusDays(FROM, 5))).toBeNull();
+    expect(none.at(plusDays(FROM, 20))).not.toBeNull();
+  });
+
+  it('monthly: the same day of the month as well, the month-end counted from its end', () => {
+    // Payroll: the 1st and the 15th at 1.5×, the last day at 1.4×.
+    const pay = (d: string) => (d.endsWith('-01') || d.endsWith('-15') ? 1.5 : plusDays(d, 1).endsWith('-01') ? 1.4 : 1);
+    const s = flat((d) => 10_000 * pay(d), 0.02, 5);
+    const monthly = new NormalRanges(s, 'count', { calendar: NONE, pattern: 'monthly' });
+    const none = new NormalRanges(s, 'count', { calendar: NONE, pattern: 'none' });
+    const paydays = span('2023-03-01', '2023-12-31').filter((d) => pay(d) > 1);
+    expect(paydays.filter((d) => !within(monthly, d)).length).toBeLessThanOrEqual(2);
+    expect(paydays.filter((d) => !within(none, d)).length).toBeGreaterThanOrEqual(paydays.length - 3);
+    const r = monthly.at('2023-10-31')!;
+    expect(r.guesses.map((g) => g.by)).toContain('month');
+    expect(r.guesses.find((g) => g.by === 'month')!.from.map((f) => f.day).slice(0, 3)).toEqual(['2023-09-30', '2023-08-31', '2023-07-31']);
+  });
+
+  it('a level accepted on its first day: the next day is judged against it, not the three weeks before', () => {
+    const STEP = '2023-05-03';
+    const s = trips(0.03, 7);
+    const stepped: DailySeries = { from: s.from, values: s.values.map((v, k) => (DAYS[k]! >= STEP ? Math.round(v! * 1.6) : v)) };
+    const plain = new NormalRanges(stepped, 'count');
+    const accepted = new NormalRanges(stepped, 'count', { breaks: [STEP] });
+    // Unaccepted, +60% is outside its range for about three weeks; accepted, only on its own day.
+    expect(outsideFrom(plain, STEP, 23)).toBeGreaterThanOrEqual(20);
+    expect(outsideFrom(accepted, STEP, 23)).toBe(1);
+    expect(accepted.at(plusDays(STEP, 1))).toMatchObject({ since: STEP });
+    expect(accepted.breakAt(plusDays(STEP, 1))).toBe(STEP);
+    expect(accepted.breakAt(STEP)).toBeNull();
+    // The days before the break keep their ranges: a break never changes a day before it.
+    expect(accepted.at('2023-05-01')).toEqual(plain.at('2023-05-01'));
+    // Each weekday keeps its own level: a Saturday after the step is judged as a Saturday, at the new level.
+    const sat = accepted.at('2023-05-06')!;
+    expect(sat.expected / plain.at('2023-04-29')!.expected).toBeGreaterThan(1.45);
+    // Once three of a weekday are since the break, its own; once a quarter of the window is, its own miss.
+    expect(accepted.at('2023-05-31')!.guesses.find((g) => g.by === 'weeks')!.from.every((f) => f.day >= STEP)).toBe(true);
+    // Weeks on, last year's guess carries the new level too.
+    const late = accepted.at('2023-07-12')!;
+    expect(late.guesses.find((g) => g.by === 'year')?.value ?? late.expected).toBeGreaterThan(1.4 * plain.at('2023-04-12')!.expected);
+  });
+
+  it('the echo fix: a share far from the same weekday’s three weeks before is not learned from', () => {
+    // A share near 40%, one Tuesday at 60%; a year on, last year's guess for that Tuesday's neighbours.
+    const ODD = '2022-11-08';
+    const s = flat((d) => (d === ODD ? 0.6 : 0.4), 0.01, 3);
+    const echo = new NormalRanges(s, 'share');
+    const fixed = new NormalRanges(s, 'share', { echoes: true });
+    const year = (r: NormalRanges, d: string) => r.at(d)!.guesses.find((g) => g.by === 'year')!.from.map((f) => f.day);
+    expect(year(echo, '2023-11-07')).toContain(ODD);
+    expect(year(fixed, '2023-11-07')).not.toContain(ODD);
+    // Off, the legacy form's shares are as they were.
+    expect(new NormalRanges(s, 'share', { echoes: false }).at('2023-11-07')).toEqual(echo.at('2023-11-07'));
+  });
+
+  it('re-learns on its own a change told as a note that has lasted 14 days, and then sees a second change', () => {
+    // A share climbs from 30% to 50% over a month, then stays; three weeks later it falls 10 points.
+    const RAMP = '2023-03-01';
+    const FALL = '2023-04-19';
+    const share = (d: string) => {
+      const t = Math.max(0, Math.min(1, (Date.parse(d) - Date.parse(RAMP)) / (30 * 864e5)));
+      return (0.3 + 0.2 * t) - (d >= FALL ? 0.1 : 0);
+    };
+    const s = flat(share, 0.01, 9);
+    // The climb is ten points off its day's range once it has lasted, when it is told as a note: it holds no day.
+    const held = (r: { expected: number }, v: number, d: number) => Math.abs(d) >= 4 && Math.abs(v - r.expected) >= 0.1;
+    const relearn = new NormalRanges(s, 'share', { echoes: true, relearn: true, held });
+    const blind = new NormalRanges(s, 'share', { echoes: true });
+    const found = relearn.relearned('2023-06-30');
+    expect(found.length).toBeGreaterThanOrEqual(1);
+    expect(found[0]!.from >= RAMP && found[0]!.from < '2023-04-01').toBe(true);
+    expect(found[0]!.found >= plusDays(found[0]!.from, 13)).toBe(true);
+    expect(relearn.at(FALL)!.since).toBe(found[0]!.from);
+    // The second change: told by the ranges that re-learned, missed by those still blind from the climb.
+    expect(within(relearn, FALL)).toBe(false);
+    expect(within(blind, FALL)).toBe(true);
+  });
+
+  it('never re-learns on its own a change that held a day (X7): a +60% step not accepted stays outside', () => {
+    const STEP = '2023-05-03';
+    const s = flat((d) => (d >= STEP ? 16_000 : 10_000), 0.02, 4);
+    const held = (r: { expected: number }, v: number, d: number) => v < 0.1 * r.expected || Math.abs(d) >= 6;
+    const r = new NormalRanges(s, 'count', { calendar: NONE, relearn: true, held });
+    expect(r.relearned('2023-07-01')).toEqual([]);
+    expect(outsideFrom(r, STEP, 23)).toBeGreaterThanOrEqual(20);
+    // Told as a note, never held, the same step is re-learned once it has lasted 14 days.
+    const never = new NormalRanges(s, 'count', { calendar: NONE, relearn: true, held: () => false });
+    expect(never.relearned('2023-07-01').map((x) => x.from)).toEqual([STEP]);
+    expect(outsideFrom(never, STEP, 23)).toBeLessThan(outsideFrom(r, STEP, 23));
   });
 });

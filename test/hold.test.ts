@@ -9,6 +9,7 @@ import { sourceOf, type FlowDocument, type PublishDef, type StepDef } from '../s
 import { HistoryRanges } from '../src/core/history.js';
 import {
   calendarFor,
+  rangesFor,
   claimHolds,
   countedChecks,
   dayClaim,
@@ -298,7 +299,11 @@ describe('the flow’s verdict on a day (ADR 0009 §3)', () => {
     expect(calendarFor(general, 'trips')).toBe(NONE);
     expect(calendarFor(doc, 'trips').base).toBe('us-nyc/1');
     expect(() => flowStory(new HistoryRanges(historyWith({})), DAY, general, 'trips')).toThrow('the flow judges trips by the none calendar: these ranges were made with us-nyc/1');
-    expect(dayClaim(new HistoryRanges(historyWith({}), { calendar: NONE }), general, HISTORY, FIRST_THANKSGIVING, 'trips', 'dev')!.state).not.toBe('unlearned');
+    // And with the general form's pattern and re-learning (ADR 0010 §3, §5), which ranges made otherwise don't have.
+    expect(() => flowStory(new HistoryRanges(historyWith({}), { calendar: NONE }), DAY, general, 'trips')).toThrow("the flow judges trips by its watch's pattern and re-learning: these ranges were made with other settings");
+    expect(rangesFor(general, 'trips')).toMatchObject({ calendar: NONE, pattern: 'weekly', echoes: true, relearn: true });
+    expect(rangesFor(doc, 'trips')).toMatchObject({ pattern: 'weekly', echoes: false, relearn: false });
+    expect(dayClaim(new HistoryRanges(historyWith({}), rangesFor(general, 'trips')), general, HISTORY, FIRST_THANKSGIVING, 'trips', 'dev')!.state).not.toBe('unlearned');
   });
 
   it('fills a paused day from the same weekday for the weekly pattern, and the nearest good day otherwise (ADR 0010 §3)', () => {

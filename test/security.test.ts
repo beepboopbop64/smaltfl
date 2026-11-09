@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { validateDocument } from '../src/core/document.js';
 import { HistoryRanges } from '../src/core/history.js';
-import { calendarFor, claimHolds, dayClaim, type StoryClaim } from '../src/core/hold.js';
+import { claimHolds, dayClaim, rangesFor, type StoryClaim } from '../src/core/hold.js';
 import { judgeOf, newsOf, type Names } from '../src/core/news.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
 import { translate, type PlanPublish2 } from '../src/core/plan.js';
@@ -27,7 +27,7 @@ const names: Names = {
   noun: (n) => (n === 1 ? 'sign-in' : 'sign-ins'),
 };
 const judge = judgeOf(doc, 'auth');
-const ranges = (incidents = true) => new HistoryRanges(securityHistory({ incidents }), { calendar: calendarFor(doc, 'auth') });
+const ranges = (incidents = true) => new HistoryRanges(securityHistory({ incidents }), { ...rangesFor(doc, 'auth') });
 const h = ranges();
 const story = (day: string): Story => storyOf(h, day, newsOf(h, day, names, { judge }), { names, judge, step: 'auth_valid', limit: 0.05 });
 const claimsOf = (r: HistoryRanges): StoryClaim[] => r.file.days.filter((d) => d >= '2023-01-01').map((d) => dayClaim(r, doc, ref, d, 'auth', 'dev')!);
@@ -108,7 +108,7 @@ describe('a flow’s own recurring days (variant M, phase 3, ADR 0010 §2)', () 
   const withDays = { ...doc, calendar: { base: 'us' as const, days: [{ name: 'Month-end', day: -1 }, { name: 'Patch Tuesday', weekday: 'tue' as const, between: [8, 14] as [number, number] }] } };
   // Each day told by the flow's own verdict, under the calendar the document gives.
   const claimsFor = (d: typeof doc) => {
-    const r = new HistoryRanges(file, { calendar: calendarFor(d, 'auth') });
+    const r = new HistoryRanges(file, { ...rangesFor(d, 'auth') });
     return r.file.days.filter((x) => x >= '2023-01-01').map((x) => dayClaim(r, d, ref, x, 'auth', 'dev')!);
   };
 
@@ -116,7 +116,7 @@ describe('a flow’s own recurring days (variant M, phase 3, ADR 0010 §2)', () 
     expect(validateDocument(withDays)).toEqual([]);
     const claims = claimsFor(withDays);
     expect(claims.filter((c) => claimHolds(withDays.publish!.hold, c)).map((c) => c.day)).toEqual([]);
-    const r = new HistoryRanges(file, { calendar: calendarFor(withDays, 'auth') });
+    const r = new HistoryRanges(file, { ...rangesFor(withDays, 'auth') });
     const s = storyOf(r, '2024-05-14', newsOf(r, '2024-05-14', names, { judge: judgeOf(withDays, 'auth') }), { names, judge: judgeOf(withDays, 'auth') });
     expect(s.head).toBe('Normal for Patch Tuesday');
   }, 120_000);
@@ -127,4 +127,23 @@ describe('a flow’s own recurring days (variant M, phase 3, ADR 0010 §2)', () 
     expect(held.filter(isMonthEnd).length).toBeGreaterThanOrEqual(20);
     expect(held.every((d) => isMonthEnd(d) || isPatchTuesday(d))).toBe(true);
   }, 120_000);
+});
+
+describe('a step in rows that stays: a +60% step, accepted and not (phase 3, ADR 0010 §5)', () => {
+  const STEP = '2024-02-06';
+  const file = securityHistory({ incidents: false, step: { from: STEP, by: 1.6 } });
+  const first23 = file.days.filter((d) => d >= STEP && d < '2024-02-29');
+  const heldWith = (levels: { from: string; metrics: string[] }[]) => {
+    const r = new HistoryRanges(file, { ...rangesFor(doc, 'auth'), levels });
+    return first23.filter((d) => claimHolds(doc.publish!.hold, dayClaim(r, doc, ref, d, 'auth', 'dev')!));
+  };
+
+  it('holds its first day only, once the new level is accepted on it', () => {
+    expect(heldWith([{ from: STEP, metrics: ['trips'] }])).toEqual([STEP]);
+  }, 60_000);
+
+  it('holds nearly all of its first 23 days unaccepted, never re-learned on its own: it held a day (X7)', () => {
+    expect(heldWith([]).length).toBeGreaterThanOrEqual(20);
+    expect(new HistoryRanges(file, rangesFor(doc, 'auth')).of({ of: 'trips' })!.relearned('2024-03-31')).toEqual([]);
+  }, 60_000);
 });

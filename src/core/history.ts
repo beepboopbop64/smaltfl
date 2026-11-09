@@ -4,7 +4,8 @@
  * they were published: a range for what the checks drop holds only while the checks are the same. No DOM, no engine.
  */
 import { plusDays, daysBetween, US_NYC_1, type Calendar } from './calendar.js';
-import { NormalRanges, type DailySeries, type Scale } from './normal.js';
+import { canonicalJSON } from './canonical.js';
+import { NormalRanges, type DailySeries, type NormalRange, type Pattern, type Scale } from './normal.js';
 import type { Kind } from './quality.js';
 import { appendPeriods, type Measures } from './measures.js';
 
@@ -191,7 +192,43 @@ export interface RangeOptions {
   recorded?: ReadonlySet<string>;
   /** The flow's calendar (ADR 0010 §2): `US_NYC_1` unless the flow chose one. */
   calendar?: Calendar;
+  /** What a day is compared with (ADR 0010 §3): `weekly` unless the watch says otherwise. */
+  pattern?: Pattern;
+  /** The echo fix and re-learning on its own (ADR 0010 §5): the general form's, never the legacy form's. */
+  echoes?: boolean;
+  relearn?: boolean;
+  /** Each column's bad codes (ADR 0010 §4): a bad value's share is never re-learned on its own. */
+  bad?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** The levels accepted (ADR 0010 §5, C6): from each, the metrics it names are learned only from the days since. */
+  levels?: readonly Level[];
 }
+
+/** An accepted level (ADR 0009 amendment 1 S6, C6): the day it starts, and the metrics it names, as `metricKey` does. */
+export interface Level {
+  from: string;
+  metrics: readonly string[];
+}
+
+/** The settings a flow's ranges are made with, as one text: what `flowStory` checks against the flow's own. */
+export function rangeSettings(o: Pick<RangeOptions, 'calendar' | 'pattern' | 'echoes' | 'relearn' | 'bad'>): string {
+  const bad = [...(o.bad ?? new Map()).entries()].map(([c, v]) => [c, ...[...v].sort()]).sort((a, b) => (a[0]! < b[0]! ? -1 : 1));
+  return canonicalJSON({ calendar: (o.calendar ?? US_NYC_1) as unknown as Record<string, never>, pattern: o.pattern ?? 'weekly', echoes: !!o.echoes, relearn: !!o.relearn, bad: o.relearn ? bad : [] });
+}
+
+/**
+ * Whether a number against its day's range would hold the day by itself (ADR 0010 §5, X7): rows under a tenth of a day
+ * like it, or six typical misses off; a share four typical misses and ten points off, or a share of a fifth or more
+ * gone; what the checks drop doubled to a tenth or more. A change that held a day is never re-learned on its own.
+ */
+const HELD: Partial<Record<Metric['of'], (r: NormalRange, v: number, d: number) => boolean>> = {
+  trips: (r, v, d) => v < 0.1 * r.expected || Math.abs(d) >= 6,
+  value: (r, v, d) => (Math.abs(d) >= 4 && Math.abs(v - r.expected) >= 0.1) || (v === 0 && r.expected >= 0.2),
+  missing: (r, v, d) => Math.abs(d) >= 4 && Math.abs(v - r.expected) >= 0.1,
+  dropped: (r, v) => v >= 2 * r.expected && v >= 0.1,
+};
+
+/** Whether a level applies to a metric: it names it, or it names the rows and the metric counts rows. */
+const levelOn = (l: Level, m: Metric): boolean => l.metrics.includes(metricKey(m)) || (l.metrics.includes('trips') && SCALES[m.of] === 'count');
 
 /** Each metric's normal ranges over a history, made once a metric. */
 export class HistoryRanges {
@@ -202,6 +239,11 @@ export class HistoryRanges {
   private readonly left: ReadonlySet<string>;
   /** The flow's calendar (ADR 0010 §2): `US_NYC_1` unless the flow chose one. */
   readonly calendar: Calendar;
+  private readonly options: RangeOptions;
+  /** The settings these ranges are made with (`rangeSettings`). */
+  readonly settings: string;
+  /** The levels accepted, as these ranges learn them. */
+  readonly levels: readonly Level[];
 
   constructor(file: HistoryFile, options: RangeOptions = {}) {
     this.file = file;
@@ -209,6 +251,9 @@ export class HistoryRanges {
     this.recorded = options.recorded ?? new Set();
     this.left = this.recorded.size ? new Set([...this.skip, ...this.recorded]) : this.skip;
     this.calendar = options.calendar ?? US_NYC_1;
+    this.options = options;
+    this.settings = rangeSettings(options);
+    this.levels = options.levels ?? [];
   }
 
   /**
@@ -219,11 +264,21 @@ export class HistoryRanges {
     return new HistoryRanges(parts.tail?.length ? appendPeriods(parts.base, parts.tail) : parts.base, options);
   }
 
+  /** The same history with some of its options changed: a viewer's incident days, the record's days, its levels. */
+  with(changes: RangeOptions): HistoryRanges {
+    return new HistoryRanges(this.file, { ...this.options, ...changes });
+  }
+
   of(m: Metric): NormalRanges | null {
     const key = metricKey(m);
     if (!this.made.has(key)) {
       const s = seriesOf(this.file, m);
-      this.made.set(key, s ? new NormalRanges(s, SCALES[m.of], { skip: this.left, calendar: this.calendar }) : null);
+      const o = this.options;
+      const breaks = this.levels.filter((l) => levelOn(l, m)).map((l) => l.from);
+      // A bad value's share is never re-learned on its own: it always alerts (ADR 0010 §4).
+      const bad = m.of === 'value' && !!o.bad?.get(m.column.toLowerCase())?.has(String(parseKey(m.value)));
+      const general = { ...(o.pattern && o.pattern !== 'weekly' ? { pattern: o.pattern } : {}), ...(o.echoes ? { echoes: true } : {}), ...(o.relearn && !bad ? { relearn: true, held: HELD[m.of] ?? (() => false) } : {}), ...(breaks.length ? { breaks } : {}) };
+      this.made.set(key, s ? new NormalRanges(s, SCALES[m.of], { skip: this.left, calendar: this.calendar, ...general }) : null);
     }
     return this.made.get(key)!;
   }
@@ -266,6 +321,14 @@ export class HistoryRanges {
     return this.file.days[checksStart(this.file)] ?? null;
   }
 }
+
+const parseKey = (key: string): unknown => {
+  try {
+    return JSON.parse(key) as unknown;
+  } catch {
+    return key;
+  }
+};
 
 /** The days from one to another, both included. */
 export function daysFrom(from: string, to: string): string[] {

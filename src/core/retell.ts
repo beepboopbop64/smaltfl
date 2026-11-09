@@ -8,7 +8,7 @@
  */
 import type { FlowDocument } from './document.js';
 import { HistoryRanges, type HistoryFile } from './history.js';
-import { calendarFor, flowStory, isClaim2, skipOf, type Claim, type StoryClaim2 } from './hold.js';
+import { flowStory, rangesFor, isClaim2, skipOf, type Claim, type StoryClaim2 } from './hold.js';
 import type { LogEntry } from './log.js';
 import { appendPeriods, emptyHistory, measuresHash, samePeriod, settingsFor, tailBefore, tailRef, type Measures } from './measures.js';
 import { translate } from './plan.js';
@@ -68,7 +68,7 @@ export async function retellClaims(entries: readonly EntryLike[], runs: readonly
           if (!s) throw new Error(`the flow doesn't watch ${c.source} by a period`);
           file = appendPeriods(emptyHistory({ flow: r.doc.id, source: c.source, settings: s, columns: own.columns, types: own.types, kinds: own.kinds }), [...tail, own]);
         }
-        const story = flowStory(new HistoryRanges(file, { calendar: calendarFor(r.doc, c.source), recorded: new Set(c.skip) }), c.slot, r.doc, c.source);
+        const story = flowStory(new HistoryRanges(file, { ...rangesFor(r.doc, c.source), recorded: new Set(c.skip) }), c.slot, r.doc, c.source);
         const below = story.amount ? story.amount.value < story.amount.low : story.state === 'wrong' && story.hero === 'amount' && story.cause?.kind === 'volume';
         if (story.state !== c.state || story.head !== c.head || below !== c.below) problems.push(`told again, its story says ${story.state} "${story.head}", and the claim ${c.state} "${c.head}"`);
       } catch (e) {

@@ -44,7 +44,8 @@ export type HoldKind = (typeof HOLD_KINDS)[number];
 
 /**
  * A watch in the general form (ADR 0010 §10): its history, and how its source is judged, every setting but the history
- * optional. This build judges a day a load (`every: day`) and the weekly pattern; any other is refused, never ignored.
+ * optional. This build judges a day a load (`every: day`), with the patterns `weekly`, `none` and `monthly` (ADR 0010 §3);
+ * any other is refused, never ignored.
  */
 export interface WatchDef {
   /** The history's file, a file in the data's list. */
@@ -53,8 +54,9 @@ export interface WatchDef {
   period?: string;
   /** What one load covers (default `day`). */
   every?: 'day';
-  /** What a load is compared with: the same weekday over the weeks before (default `weekly`). */
-  pattern?: 'weekly';
+  /** What a load is compared with: the same weekday over the weeks before (`weekly`, the default), the periods before
+   * whatever the weekday (`none`), or those and the same day of the month (`monthly`). */
+  pattern?: 'weekly' | 'none' | 'monthly';
   /** Which good day fills a paused one: the same weekday, or the nearest (default from the pattern: weekly, `weekday`). */
   donor?: 'weekday' | 'nearest';
   /** The time column the hours are counted from, and the zone they are counted in (default the calendar's). */
@@ -526,7 +528,7 @@ function validateWatch(w: Record<string, unknown>, at: string, add: (path: strin
   if (typeof w.history !== 'string' || w.history === '') add(`${at}.history`, "the history's file, a file in the data's list");
   if (w.period !== undefined) textParam(w.period, `${at}.period`, 'the period is a text parameter, such as a day');
   if (w.every !== undefined && w.every !== 'day') add(`${at}.every`, typeof w.every === 'string' && /^(12|8|6|4|3|2|1)h$/.test(w.every) ? `${w.every}: ${later}` : 'day');
-  if (w.pattern !== undefined && w.pattern !== 'weekly') add(`${at}.pattern`, w.pattern === 'none' || w.pattern === 'monthly' ? `${w.pattern}: ${later}` : 'weekly');
+  if (w.pattern !== undefined && !['weekly', 'none', 'monthly'].includes(w.pattern as string)) add(`${at}.pattern`, 'weekly, none or monthly');
   if (w.donor !== undefined && w.donor !== 'weekday' && w.donor !== 'nearest') add(`${at}.donor`, 'weekday or nearest');
   if (w.time !== undefined && (typeof w.time !== 'string' || w.time === '')) add(`${at}.time`, 'a time column');
   if (w.zone !== undefined && (typeof w.zone !== 'string' || calendarProblems({ zone: w.zone }).length > 0)) add(`${at}.zone`, 'a time zone, such as UTC or America/New_York');

@@ -336,8 +336,10 @@ describe('a document that says how its days are judged (format 3, ADR 0010 §10)
     const later = 'not something this version can judge yet: refused rather than ignored';
     expect(issues({ every: '6h' })).toEqual([{ path: '$.publish.watch.trips.every', message: `6h: ${later}` }]);
     expect(issues({ every: 'week' })).toEqual([{ path: '$.publish.watch.trips.every', message: 'day' }]);
-    expect(issues({ pattern: 'none' })).toEqual([{ path: '$.publish.watch.trips.pattern', message: `none: ${later}` }]);
-    expect(issues({ pattern: 'monthly' })).toEqual([{ path: '$.publish.watch.trips.pattern', message: `monthly: ${later}` }]);
+    // The patterns none and monthly are judged from phase 3 (ADR 0010 §3); any other is refused.
+    expect(issues({ pattern: 'none' })).toEqual([]);
+    expect(issues({ pattern: 'monthly' })).toEqual([]);
+    expect(issues({ pattern: 'daily' })).toEqual([{ path: '$.publish.watch.trips.pattern', message: 'weekly, none or monthly' }]);
     expect(issues({ breaks: [] })).toEqual([{ path: '$.publish.watch.trips.breaks', message: 'not a field this version reads (history, period, every, pattern, donor, time, zone, calendar, scale, holds, count, follow): refused rather than ignored' }]);
     expect(issues({ history: '' })).toEqual([{ path: '$.publish.watch.trips.history', message: "the history's file, a file in the data's list" }]);
     expect(issues({ donor: 'previous', zone: 'Nowhere/Else', calendar: 'yes', scale: 'log', holds: 1, count: ['a', 'a'], follow: 'user' })).toEqual([
@@ -796,7 +798,8 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
     expect(bad({ ...pub, calendar: { ...pub.calendar, days: [{ name: 'Patch Tuesday' }] } })).toThrow('publish.calendar.days[0]: a day of the month (day) or a weekday between two days of it (weekday, between): one of them');
     expect(() => validatePlan({ ...plan, publish: { ...pub, calendar: { ...pub.calendar, days: [{ name: 'Patch Tuesday', weekday: 'tue', between: [8, 14] }] } } } as FlowPlan)).not.toThrow();
     expect(bad({ ...pub, watch: [[0, { ...w, every: '6h' }]] })).toThrow('publish.watch[0].every 6h is not one this version can judge (day)');
-    expect(bad({ ...pub, watch: [[0, { ...w, pattern: 'none' }]] })).toThrow('publish.watch[0].pattern none is not one this version can judge (weekly)');
+    expect(bad({ ...pub, watch: [[0, { ...w, pattern: 'yearly' }]] })).toThrow('publish.watch[0].pattern yearly is not one this version can judge (weekly, none, monthly)');
+    expect(() => validatePlan({ ...plan, publish: { ...pub, watch: [[0, { ...w, pattern: 'none' }]] } } as FlowPlan)).not.toThrow();
     const { zone: _z, ...short } = w;
     expect(bad({ ...pub, watch: [[0, short]] })).toThrow('publish.watch[0] has after, bad, calendar, count, donor, every, follow, history, holds, newValues, pattern, period, scale, time; a watch has exactly');
     expect(bad({ ...pub, watch: [[1, w]] })).toThrow("publish.watch[0] watches node 1, which isn't a source");

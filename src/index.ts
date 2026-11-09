@@ -52,9 +52,9 @@ export type { ColumnFacts, Cut, Drift, Forest, Judge, Kind, Profile, Projection,
 export { calendarProblems, dayLastYear, holidayOf, holidaysOf, isSpecial, NONE, resolveCalendar, seasonOf, shortName, specialOf, US_1, US_NYC_1 } from './core/calendar.js';
 export type { Calendar, CalendarBase, CalendarDate, CalendarDay, CalendarDef, CalendarWindow } from './core/calendar.js';
 export { NormalRanges } from './core/normal.js';
-export type { Backtest, DailySeries, Guess, NoRange, NormalOptions, NormalRange, Place, Scale } from './core/normal.js';
+export type { Backtest, DailySeries, Guess, NoRange, NormalOptions, NormalRange, Pattern, Place, Scale } from './core/normal.js';
 export { checksStart, HISTORY_FORMAT, HISTORY_FORMATS, HistoryRanges, isHistory, metricKey, seriesOf, timeOf } from './core/history.js';
-export type { DayError, HistoryFile, Metric, RangeOptions, ValueHistory } from './core/history.js';
+export type { DayError, HistoryFile, Level, Metric, RangeOptions, ValueHistory } from './core/history.js';
 export { isPlaceholder, MATERIAL, newsOf, PLACEHOLDERS, schemaChanges, tableNewsOf } from './core/news.js';
 export { coverageOf, flowNames, judgeOf, LEGACY_JUDGE, materialFor, notJudgedChip, nounFor } from './core/news.js';
 export type { Act, Coverage, Finding, JudgeSettings, Look, Names, Severity, TableFacts } from './core/news.js';
@@ -68,7 +68,7 @@ export type { ActRequest, ActionType, Edit, LinkType, Noun, ObjectType, Ontology
 export { counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, VERDICT_MARKS } from './core/ontology.js';
 // What holds a run, what waits, and what the record decided (ADR 0009): one group a line, so that changes to one part
 // don't touch the others' lines.
-export { calendarFor, claimHolds, dayClaim, donorDefault, flowStory, loadClaim } from './core/hold.js';
+export { calendarFor, claimHolds, dayClaim, donorDefault, flowStory, loadClaim, rangesFor } from './core/hold.js';
 export { claimBase, claimDay, factsFromClaims, isClaim2, levelsOf, skipOf, tailPath } from './core/hold.js';
 export { countedChecks, donorGood, holdsOf, judgeClaim, judgeClaims, judgeDonors, tripped } from './core/hold.js';
 export { heldOutputs, reachOf, stagedKeys, waitingOf } from './core/hold.js';

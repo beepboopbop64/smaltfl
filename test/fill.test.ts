@@ -9,7 +9,7 @@ import type { FlowDocument } from '../src/core/document.js';
 import { validateDocument } from '../src/core/document.js';
 import { dayVersions, donorChoices, donorFor, donorRuleOf, fillable, fillCounts, missingOf, offersOf, partLabel, partRows, repairDocument, type DonorQuery, type Repair } from '../src/core/fill.js';
 import { HistoryRanges } from '../src/core/history.js';
-import { donorGood, flowStory, type HistoryRef } from '../src/core/hold.js';
+import { donorGood, flowStory, rangesFor, type HistoryRef } from '../src/core/hold.js';
 import type { LogEntry } from '../src/core/log.js';
 import { flowHash, plannedDonor, translate } from '../src/core/plan.js';
 import type { Split, Story } from '../src/core/story.js';
@@ -126,7 +126,8 @@ describe('the donor (S3)', () => {
     // A watch that says the calendar doesn't apply to its source is the same.
     const off: FlowDocument = { ...doc(), smaltfl: 3, publish: { ...doc().publish!, watch: { trips: { history: 'history.json', calendar: false } } } };
     expect(validateDocument(off)).toEqual([]);
-    expect(donorFor({ ...query(hNone, '2023-09-11'), doc: off })).toMatchObject({ day: '2023-09-04' });
+    // Its ranges are the general form's (ADR 0010 §5: the echo fix and re-learning), made as the flow says.
+    expect(donorFor({ ...query(new HistoryRanges(historyWith(held), rangesFor(off, 'trips')), '2023-09-11'), doc: off })).toMatchObject({ day: '2023-09-04' });
     // us/1 marks Labor Day, and not the day after Thanksgiving, which us-nyc/1 adds.
     const us: FlowDocument = { ...doc(), smaltfl: 3, calendar: { base: 'us' } };
     const hUs = new HistoryRanges(historyWith(held), { calendar: US_1 });

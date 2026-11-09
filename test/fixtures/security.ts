@@ -16,7 +16,8 @@
  * - Fri Nov 29, 2024: a smaller burst, 20:00-23:00, with a tool never seen before (hydra).
  *
  * Variant M (phase 3, `monthEnd`, `patchTuesday`): a batch on each month's last day, and Patch Tuesday's rows (the second
- * Tuesday), each as a multiple of the day's rows, with the same mix: what a flow's own recurring days are for.
+ * Tuesday), each as a multiple of the day's rows, with the same mix: what a flow's own recurring days are for. And a
+ * step in rows that stays (`step`): what Accept the new level is for.
  */
 import { plusDays } from '../../src/core/calendar.js';
 import type { FlowDocument } from '../../src/core/document.js';
@@ -65,6 +66,8 @@ export interface SecurityOptions {
   /** Variant M: each month's last day's rows times this (a month-end batch), and Patch Tuesday's (ADR 0010 §2). */
   monthEnd?: number;
   patchTuesday?: number;
+  /** A step in rows that stays (phase 3, ADR 0010 §5): from a day on, every day's rows times `by`, the same mix. */
+  step?: { from: string; by: number };
 }
 
 /** Whether a day is its month's last, and whether it is Patch Tuesday (the Tuesday between the 8th and the 14th). */
@@ -100,7 +103,7 @@ function planDays(o: SecurityOptions, rnd: () => number): SecurityDay[] {
   const days: SecurityDay[] = [];
   for (const [k, day] of SECURITY_DAYS.entries()) {
     const wd = WD[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
-    const batch = (o.monthEnd && isMonthEnd(day) ? o.monthEnd : 1) * (o.patchTuesday && isPatchTuesday(day) ? o.patchTuesday : 1);
+    const batch = (o.monthEnd && isMonthEnd(day) ? o.monthEnd : 1) * (o.patchTuesday && isPatchTuesday(day) ? o.patchTuesday : 1) * (o.step && day >= o.step.from ? o.step.by : 1);
     const n = 200_000 * scale * wd * (1 + 0.1 * (k / 365)) * Math.exp(0.03 * gauss(rnd)) * batch;
     const dist: Record<string, Dist> = {};
     for (const c of CODED) {

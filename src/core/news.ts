@@ -94,10 +94,12 @@ export interface JudgeSettings {
   serious: ReadonlySet<string>;
   /** Time columns that run behind another, by minutes. */
   after: ReadonlyMap<string, { of: string; minutes: number }>;
+  /** What a day is compared with (ADR 0010 §3): the watch's pattern; weekly in the legacy form. */
+  pattern: 'weekly' | 'none' | 'monthly';
 }
 
 /** The legacy form's settings: what every flow was judged by before ADR 0010. */
-export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map() }) as JudgeSettings;
+export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly' }) as JudgeSettings;
 
 /**
  * How a document judges a watched source (ADR 0010 §10, §11): its watch's settings and the marks its ontology puts on the
@@ -116,6 +118,7 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
     bad: new Map(m.bad.map(([column, ...codes]) => [column.toLowerCase(), new Set(codes)])),
     serious: new Set(m.newValues.map(([column]) => column.toLowerCase())),
     after: new Map(m.after.map(([column, of, minutes]) => [column.toLowerCase(), { of, minutes }])),
+    pattern: general?.pattern ?? 'weekly',
   };
 }
 
@@ -319,7 +322,11 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   // day: the range learns it within weeks, or it is marked expected.
   const lasting = (j: { ranges: NormalRanges; range: NormalRange; value: number }): string | null => {
     const way = j.ranges.place(j.range, j.value);
+    // After a break (an accepted level, or a change re-learned, ADR 0010 §5) a day before it is never counted: a number
+    // is never called lasting against its old level.
+    const since = j.ranges.breakAt(day);
     const so = (i: number): boolean | null => {
+      if (since !== null && plusDays(day, -i) < since) return null;
       const v = j.ranges.value(plusDays(day, -i));
       return v === null ? null : j.ranges.place(j.range, v) === way;
     };

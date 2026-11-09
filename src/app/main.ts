@@ -21,7 +21,7 @@ import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.
 import { isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type PauseState, type RemedyMark } from '../core/days.js';
 import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, type AfterPart, type RemedySaid, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
-import { calendarFor, countedChecks, dayClaim, dayState, flowStory, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
+import { countedChecks, rangesFor, dayClaim, dayState, flowStory, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { dayVersions, fillCounts, partLabel as remedyPart, type Repair, type Version } from '../core/fill.js';
 import { derivedAbout, derivedFails, derivedKeys, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
 import { ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type Story, type Told } from '../core/story.js';
@@ -5349,7 +5349,7 @@ function incidentDays(): Set<string> {
 /** The ranges learn again, without the incidents' days. */
 function relearn(): void {
   if (!history) return;
-  history = new HistoryRanges(history.file, { skip: incidentDays(), calendar: history.calendar, recorded: new Set(recordedSkips()) });
+  history = history.with({ skip: incidentDays(), recorded: new Set(recordedSkips()) });
   storyCache.clear();
   alerts = null;
   backtests.clear();
@@ -7297,9 +7297,9 @@ function refreshRanges(): void {
   if (key === rangesKey && flowHistory) return;
   rangesKey = key;
   const file = tail.length ? appendPeriods(baseHistory, tail) : baseHistory;
-  const calendar = calendarFor(state.doc, source);
-  flowHistory = new HistoryRanges(file, { calendar, recorded: new Set(skips) });
-  history = new HistoryRanges(file, { calendar, skip: incidentDays(), recorded: new Set(skips) });
+  const settings = rangesFor(state.doc, source);
+  flowHistory = new HistoryRanges(file, { ...settings, recorded: new Set(skips) });
+  history = new HistoryRanges(file, { ...settings, skip: incidentDays(), recorded: new Set(skips) });
   claims.clear();
   storyCache.clear();
   alerts = null;
