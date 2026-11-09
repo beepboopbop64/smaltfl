@@ -750,8 +750,10 @@ export function usualHours(h: HistoryRanges, k: number, expected: number): numbe
   const n = file.parts ? (file.hours[k]?.length ?? 0) : 24;
   if (n === 0) return null;
   const shares: number[][] = Array.from({ length: n }, () => []);
-  for (let w = 1; w <= 10 && shares[0]!.length < 6; w++) {
-    const d = plusDays(day, -7 * w);
+  // The same weekday's hours lately; under the patterns none and monthly, the days before, whatever the weekday.
+  const step = h.pattern === 'weekly' ? 7 : 1;
+  for (let w = 1; w <= (step === 7 ? 10 : 28) && shares[0]!.length < 6; w++) {
+    const d = plusDays(day, -step * w);
     const j = file.days.indexOf(d);
     if (j < 0 || specialOf(d, h.calendar) || !file.rows[j] || !file.hours?.[j] || file.hours[j]!.length !== n) continue;
     file.hours[j]!.forEach((x, hr) => shares[hr]!.push(x / file.rows[j]!));

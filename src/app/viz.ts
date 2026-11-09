@@ -1262,8 +1262,15 @@ export function dumbbellRows({ rows, w = 334, aria }: { rows: readonly Dumbbell[
   let s = open(w, rows.length * rowH + 14, aria, 'data-y0="0"');
   rows.forEach((r, i) => {
     const y = i * rowH + 12;
-    s += `<text x="0" y="${y}" class="${r.sev ? 'lbl-b' : 'lbl-mid'}">${esc(r.label)}${r.fresh ? '<tspan class="tag" dx="6">new</tspan>' : ''}</text>`;
-    s += `<text x="${w}" y="${y}" text-anchor="end" class="lbl-m"><tspan class="lbl-b">${esc(r.todayLabel)}</tspan>${r.usualLabel ? ` · ${esc(r.usualLabel)}` : ''}</text>`;
+    // The label and the figures share the row: the usual range gives way first, then the label is cut short, so the two
+    // never run into each other at a phone's width (the aria says it all).
+    const figures = (usual: string | null | undefined) => (r.todayLabel.length + (usual ? 3 + usual.length : 0)) * 6.6;
+    const room = (usual: string | null | undefined) => Math.floor((w - figures(usual) - 12 - (r.fresh ? 34 : 0)) / 7);
+    const usual = r.usualLabel && r.label.length > room(r.usualLabel) ? null : r.usualLabel;
+    const fit = room(usual);
+    const label = r.label.length > fit ? `${r.label.slice(0, Math.max(1, fit - 1)).trimEnd()}…` : r.label;
+    s += `<text x="0" y="${y}" class="${r.sev ? 'lbl-b' : 'lbl-mid'}">${esc(label)}${r.fresh ? '<tspan class="tag" dx="6">new</tspan>' : ''}</text>`;
+    s += `<text x="${w}" y="${y}" text-anchor="end" class="lbl-m"><tspan class="lbl-b">${esc(r.todayLabel)}</tspan>${usual ? ` · ${esc(usual)}` : ''}</text>`;
     const by = y + 9;
     s += `<line class="base" x1="6" x2="${w - 6}" y1="${by}" y2="${by}"/>`;
     if (r.low !== null && r.high !== null) {

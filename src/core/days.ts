@@ -239,6 +239,12 @@ export function reachLabel(s: LoadStory, n: number, pause?: DayState, noun = 'ro
 
 const MID = (day: string) => `${MON[at(day).getUTCMonth()]} ${at(day).getUTCDate()}`;
 
+/** What the weeks' guess was made from, in words, by the watch's pattern (ADR 0010 §3): "the 6 Tuesdays before", "the
+ * 14 days before", "the same day of the 6 months before". */
+export function guessWords(n: number, weekday: string, pattern: 'weekly' | 'none' | 'monthly'): string {
+  return pattern === 'none' ? `the ${n} ${n === 1 ? 'day' : 'days'} before` : pattern === 'monthly' ? `the same day of the ${n} ${n === 1 ? 'month' : 'months'} before` : `the ${n} ${weekday}s before`;
+}
+
 /**
  * How a day's range was judged, in two sentences built from what it was learned from (ADR 0008 §11): the same weekday
  * in the weeks before, the day last year (one day, or the days around it), both, or a holiday from itself last year;
@@ -246,9 +252,11 @@ const MID = (day: string) => `${MON[at(day).getUTCMonth()]} ${at(day).getUTCDate
  * gives the band, and says so when it is wide (more than half its middle across), with the reason the inputs show: a
  * holiday among the days it learns from, else guesses that have missed by a lot.
  */
-export function judgedWords(o: { weekday: string; weeks: readonly string[]; year: readonly string[]; holiday: string | null; special: boolean; band: string; low: number; high: number; expected: number; holidayIn: boolean }): [string, string] {
+export function judgedWords(o: { weekday: string; weeks: readonly string[]; year: readonly string[]; holiday: string | null; special: boolean; band: string; low: number; high: number; expected: number; holidayIn: boolean; pattern?: 'weekly' | 'none' | 'monthly' }): [string, string] {
   const year = o.year.length === 1 ? `${MID(o.year[0]!)} last year` : o.year.length ? `the ${o.year.length} days around it last year` : '';
-  const weeks = o.weeks.length ? `the ${o.weeks.length} ${o.weekday}s before` : '';
+  // The weeks' guess as the watch's pattern makes it (ADR 0010 §3): the same weekday, the days before, or the same day
+  // of the months before.
+  const weeks = o.weeks.length ? guessWords(o.weeks.length, o.weekday, o.pattern ?? 'weekly') : '';
   const when = o.year.length ? ` (${MID(o.year[0]!)})` : '';
   const first = o.special
     ? `${o.holiday ? `${o.holiday} is judged against itself` : 'Judged against its day'} last year${when}, moved by how this year has compared lately.`
@@ -256,6 +264,6 @@ export function judgedWords(o: { weekday: string; weeks: readonly string[]; year
       : weeks ? `Judged against ${weeks}; no data a year ago.`
         : year ? `Judged against ${year} alone.` : 'No days before it to judge it by.';
   const wide = o.expected > 0 && (o.high - o.low) / o.expected > 0.5;
-  const second = `The band is that guess give or take its typical misses: ${o.band} for this ${o.special ? 'day' : o.weekday}${wide ? `; wide: ${o.holidayIn ? 'holidays in the days it learns from' : 'its guesses have missed by a lot lately'}` : ''}.`;
+  const second = `The band is that guess give or take its typical misses: ${o.band} for this ${o.special || o.pattern === 'none' ? 'day' : o.pattern === 'monthly' ? 'day of the month' : o.weekday}${wide ? `; wide: ${o.holidayIn ? 'holidays in the days it learns from' : 'its guesses have missed by a lot lately'}` : ''}.`;
   return [first, second];
 }

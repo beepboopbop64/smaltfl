@@ -758,3 +758,16 @@ describe('a filled day, drawn (ADR 0009 amendment 1 S12)', () => {
     for (const block of [light, dark]) expect(contrast(token(block, dot), token(block, 'surface'))).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('a share’s row at a phone’s width (dumbbellRows)', () => {
+  it('gives the usual range way first, then cuts the label short, so the two never meet', () => {
+    const row = (label: string) => dumbbellRows({ rows: [{ label, today: 0.001, low: 0.004, high: 0.007, todayLabel: '0.1%', usualLabel: 'usually 0.4–0.7%', sev: 'warn' }], aria: 'x' });
+    expect(row('Store and forward trip')).toContain('usually 0.4–0.7%');
+    const long = row('Stored and forwarded Store and forward trip records today');
+    expect(long).not.toContain('usually 0.4–0.7%');
+    const label = /<text x="0" y="12" class="lbl-b">([^<]*)</.exec(long)![1]!;
+    expect(label.endsWith('…')).toBe(true);
+    // Label at about 7 units a letter, figures at 6.6: within the 334 wide row.
+    expect(label.length * 7 + '0.1%'.length * 6.6 + 12).toBeLessThanOrEqual(334);
+  });
+});

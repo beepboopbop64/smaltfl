@@ -236,6 +236,9 @@ describe('how a day’s range was judged (ADR 0008 §11)', () => {
     expect(judgedWords({ ...base, weeks: sixWeeks, year: [] })).toEqual(['Judged against the 6 Saturdays before; no data a year ago.', 'The band is that guess give or take its typical misses: 91k–118k for this Saturday.']);
     // Nov 2022: three days around it last year, not "the day".
     expect(judgedWords({ ...base, weeks: sixWeeks, year: ['2021-11-06', '2021-11-13', '2021-11-20'] })[0]).toBe('Judged against the 6 Saturdays before and the 3 days around it last year, weighted by how well each guesses.');
+    // Under the patterns none and monthly the guess is the days before, or the same day of the months before (ADR 0010 §3).
+    expect(judgedWords({ ...base, weeks: sixWeeks, year: [], pattern: 'none' })).toEqual(['Judged against the 6 days before; no data a year ago.', 'The band is that guess give or take its typical misses: 91k–118k for this day.']);
+    expect(judgedWords({ ...base, weeks: sixWeeks, year: [], pattern: 'monthly' })).toEqual(['Judged against the same day of the 6 months before; no data a year ago.', 'The band is that guess give or take its typical misses: 91k–118k for this day of the month.']);
     expect(judgedWords({ ...base, weeks: sixWeeks, year: ['2021-11-13'] })[0]).toBe('Judged against the 6 Saturdays before and Nov 13 last year, weighted by how well each guesses.');
     // A holiday from itself last year, named and dated, so it can be seen the band was made for it.
     expect(judgedWords({ ...base, weekday: 'Monday', weeks: [], year: ['2023-01-16'], holiday: 'Martin Luther King Jr. Day', special: true })[0]).toBe('Martin Luther King Jr. Day is judged against itself last year (Jan 16), moved by how this year has compared lately.');

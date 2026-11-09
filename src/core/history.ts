@@ -253,6 +253,11 @@ export class HistoryRanges {
   readonly settings: string;
   /** The levels accepted, as these ranges learn them. */
   readonly levels: readonly Level[];
+  /** What a day is compared with (ADR 0010 §3): the same weekday (`weekly`, the default), the periods before (`none`),
+   * or the same day of the months before (`monthly`). */
+  get pattern(): Pattern {
+    return this.options.pattern ?? 'weekly';
+  }
 
   constructor(file: HistoryFile, options: RangeOptions = {}) {
     this.file = file;

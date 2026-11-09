@@ -23,7 +23,7 @@ import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, type HistoryF
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { calendarHead, heldLoadLine, dayMid, dayShort, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type PauseState, type RemedyMark } from '../core/days.js';
+import { calendarHead, heldLoadLine, dayMid, dayShort, guessWords, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type PauseState, type RemedyMark } from '../core/days.js';
 import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, type AfterPart, type RemedySaid, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { dayVersions, donorIdOf, fillCounts, levelOf as acceptedLevel, levelWays, partLabel as remedyPart, type Offer, type Repair, type Version } from '../core/fill.js';
@@ -2983,6 +2983,8 @@ const rowNoun = (id: string): Noun => ontologyNoun(state.doc.ontology, id, reade
 const rowsSaid = (n: number) => `${fmtInt(n)} ${NEWS_NAMES.noun(n)}`;
 /** The watched source's noun as a title begins: "Trips". */
 const RowsWord = () => NEWS_NAMES.noun().replace(/^./, (c) => c.toUpperCase());
+/** What a day is compared with, as the watched source's ranges are made (ADR 0010 §3): the words for its guess follow it. */
+const patternNow = (): 'weekly' | 'none' | 'monthly' => (flowHistory ?? history)?.pattern ?? 'weekly';
 
 const storyCache = new Map<string, Story>();
 
@@ -3373,7 +3375,10 @@ function findingVisual(f: Finding): Element | null {
   if ((f.kind === 'share' || f.kind === 'gone' || f.kind === 'missing') && (f.members?.length || f.range)) {
     const rows: Dumbbell[] = (f.members ?? [{ column: f.columns?.[0] ?? '', value: f.values?.[0] ?? 'null', label: '', share: f.value ?? 0, range: f.range!, rows: f.rows ?? 0 }]).map((m) => {
       const w = shareWords(m.share, m.range.low, m.range.high);
-      const label = `${NEWS_NAMES.column(m.column)} ${m.value === 'null' ? 'blank' : m.label || NEWS_NAMES.label(m.column, JSON.parse(m.value))}`;
+      // A code's meaning says what it is on its own ("Store and forward trip"); a bare value is said with its column.
+      const raw = m.value === 'null' ? null : JSON.parse(m.value) as unknown;
+      const said = m.value === 'null' ? 'blank' : m.label || NEWS_NAMES.label(m.column, raw);
+      const label = m.value !== 'null' && said !== String(raw) && !/^\$?-?[\d.,]+$/.test(said) ? said : `${NEWS_NAMES.column(m.column)} ${said}`;
       return { label, today: m.share, low: m.range.low, high: m.range.high, todayLabel: m.share === 0 ? 'none' : w.value, usualLabel: `usually ${w.range}`, sev, gone: m.share === 0 };
     }).slice(0, 6);
     return svgNode(dumbbellRows({ rows, aria: `${f.title}` }));
@@ -3451,7 +3456,7 @@ function causeDetail(story: Story, card: string): void {
         { ...other, kind: kind(other), ...(byHours && !other.usual ? { sev: story.severity === 'alert' || story.severity === 'warn' ? story.severity : undefined } : {}) },
         { ...today, total: true, kind: 'total' },
       ],
-      aria: `From a usual day's ${fmtInt(usual.value)} trips to ${fmtInt(today.value)}: ${moved.name} ${way(moved.value)}${moved.usual ? ' (within its usual range)' : ''}, ${other.name} ${way(other.value)}${other.usual ? ' (within its usual range)' : ''}.`,
+      aria: `From a usual day's ${rowsSaid(usual.value)} to ${fmtInt(today.value)}: ${moved.name} ${way(moved.value)}${moved.usual ? ' (within its usual range)' : ''}, ${other.name} ${way(other.value)}${other.usual ? ' (within its usual range)' : ''}.`,
     }))));
   }
   if (sp && story.amount) {
@@ -3794,11 +3799,11 @@ function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): v
     // Coloured only outside its range; rows dropped only when more than usual (fewer is the kept rows gone missing).
     const sev = of === 'dropped' ? (story?.gate?.held && value !== null && value > r.high ? 'alert' : null) : story?.severity === 'alert' || story?.severity === 'warn' ? story.severity : null;
     body.push(svgNode(learnStrip({
-      weeks: weeks?.from.map((x) => x.value) ?? [], weeksLabel: weeks ? `${weeks.from.length} ${wd}s before` : '',
+      weeks: weeks?.from.map((x) => x.value) ?? [], weeksLabel: weeks ? guessWords(weeks.from.length, wd, patternNow()).replace(/^the /, '') : '',
       year: year?.from.map((x) => x.value) ?? [], yearLabel,
       today: { v: value, low: r.low, high: r.high, sev: outside ? sev : null },
       bandLabel: band,
-      aria: `${of === 'dropped' ? 'Rows dropped' : RowsWord()}: ${weeks ? `the ${weeks.from.length} ${wd}s before (${weeks.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}${weeks && year ? ' and ' : ''}${year ? `the day last year (${year.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}: today's range from them, ${fmtInt(r.low)} to ${fmtInt(r.high)}${value !== null ? `; today ${fmtInt(value)}` : ''}.`,
+      aria: `${of === 'dropped' ? 'Rows dropped' : RowsWord()}: ${weeks ? `${guessWords(weeks.from.length, wd, patternNow())} (${weeks.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}${weeks && year ? ' and ' : ''}${year ? `the day last year (${year.from.map((x) => `${shortDay(x.day)} ${fmtInt(x.value)}`).join(', ')})` : ''}: today's range from them, ${fmtInt(r.low)} to ${fmtInt(r.high)}${value !== null ? `; today ${fmtInt(value)}` : ''}.`,
     })));
   }
   // Two sentences, as the picture has it, from what this day's range was learned from (days.judgedWords); the rules for
@@ -3806,10 +3811,10 @@ function judgedDetail(story: Story | null, of: 'trips' | 'dropped' = 'trips'): v
   const said = r && day ? (() => {
     const weeks = r.guesses.find((g) => g.by === 'weeks')?.from.map((x) => x.day) ?? [];
     const year = r.guesses.find((g) => g.by === 'year')?.from.map((x) => x.day) ?? [];
-    return judgedWords({ weekday: wd, weeks, year, holiday: holidayOf(day, calendarNow()) ?? null, special: !!r.special, band: band.replace(/^usual /, ''), low: r.low, high: r.high, expected: r.expected, holidayIn: weeks.some((d) => !!holidayOf(d, calendarNow()) || !!seasonOf(d, calendarNow())) });
+    return judgedWords({ weekday: wd, weeks, year, holiday: holidayOf(day, calendarNow()) ?? null, special: !!r.special, band: band.replace(/^usual /, ''), low: r.low, high: r.high, expected: r.expected, holidayIn: weeks.some((d) => !!holidayOf(d, calendarNow()) || !!seasonOf(d, calendarNow())), pattern: patternNow() });
   })() : null;
   body.push(
-    oneLine(said?.[0] ?? 'A day is judged against the same weekday in the weeks before and the day last year, weighted by how well each guesses.'),
+    oneLine(said?.[0] ?? `A day is judged against ${patternNow() === 'weekly' ? 'the same weekday in the weeks before' : patternNow() === 'monthly' ? 'the same day of the months before' : 'the days before'} and the day last year, weighted by how well each guesses.`),
     oneLine(said?.[1] ?? 'The band is that guess give or take its typical misses.'),
     h('details', { class: 'fold vf-more-method' }, h('summary', {}, 'More on the method'),
       h('p', { class: 'vf-sub' }, `A share or a level is told only a typical miss past its band’s edge. Shares are over all ${NEWS_NAMES.noun()}, blanks included; quantiles come from a 2,000-row sample; hours count ${NEWS_NAMES.noun()} before the checks.`)));
@@ -4802,7 +4807,7 @@ function findingCard(f: Finding, card: string): HTMLElement {
 /** Where a normal range comes from, in a line: the band under a finding's chart. */
 function rangeFrom(r: NormalRange): string {
   if (r.special) return `The band: ${r.special} last year, moved by how this year has compared with last year lately${r.scale === 'count' ? ' and to this year’s weekday' : ''}, give or take how far that guess has missed on holidays.`;
-  const by = r.guesses.map((g) => `${g.by === 'weeks' ? 'the same weekday over the six weeks before' : 'its day last year'} (${Math.round(g.weight * 100)}%)`);
+  const by = r.guesses.map((g) => `${g.by === 'weeks' ? (patternNow() === 'weekly' ? 'the same weekday over the six weeks before' : patternNow() === 'monthly' ? 'the same day of the months before' : 'the days before') : 'its day last year'} (${Math.round(g.weight * 100)}%)`);
   return `The band: what a day like it has, from ${listed(by)}, weighted by how well each has been guessing; give or take three typical misses.`;
 }
 
@@ -7548,7 +7553,7 @@ function bandChart(ranges: NormalRanges, days: readonly string[], focus: string,
 function rangeWhy(ranges: NormalRanges, days: readonly string[], day: string, m: Metric, fmt: (v: number) => string, pick: (day: string) => void, label?: string): HTMLElement {
   const r = ranges.at(day);
   const v = ranges.value(day);
-  const what = (x: number) => (m.of === 'trips' ? `${fmt(x)} trips` : m.of === 'dropped' ? `${fmt(x)} of its trips dropped by the checks` : `${label?.replace(/^In the news: /, '') ?? 'It'}: ${fmt(x)}`);
+  const what = (x: number) => (m.of === 'trips' ? `${fmt(x)} ${NEWS_NAMES.noun(x)}` : m.of === 'dropped' ? `${fmt(x)} of its ${NEWS_NAMES.noun()} dropped by the checks` : `${label?.replace(/^In the news: /, '') ?? 'It'}: ${fmt(x)}`);
   const note = holidayOf(day, calendarNow()) ?? seasonOf(day, calendarNow());
   const k = days.indexOf(day);
   const nav = h('div', { class: 'why-nav' },
@@ -7567,7 +7572,7 @@ function rangeWhy(ranges: NormalRanges, days: readonly string[], day: string, m:
     `${fmt(r.low)} to ${fmt(r.high)}, around ${fmt(r.expected)}${r.guesses.length > 1 ? ', from two guesses' : r.special ? (holidayOf(day, calendarNow()) ? ', from last year’s holiday alone' : `, from last year’s alone: ${seasonPhrase(r.special)}`) : ''}.`));
   const share = (g: NormalRange['guesses'][number]) => (r.guesses.length > 1 ? ` It counts ${pct0(g.weight)}${g.miss !== null ? `: it missed by ${missText(r.scale, g.miss, fmt)} on a typical day of the six weeks before` : ''}.` : '');
   const items = r.guesses.map((g) => {
-    if (g.by === 'weeks') return h('li', {}, h('b', {}, fmt(g.value)), ` from the same weekday in the weeks before: the weighted median of ${listed(g.from.map((f) => shortDay(f.day)))}, the latest counting ${pct0(g.from[0]!.weight)}.${share(g)}`);
+    if (g.by === 'weeks') return h('li', {}, h('b', {}, fmt(g.value)), ` from ${patternNow() === 'weekly' ? 'the same weekday in the weeks before' : patternNow() === 'monthly' ? 'the same day of the months before' : 'the days before'}: the weighted median of ${listed(g.from.map((f) => shortDay(f.day)))}, the latest counting ${pct0(g.from[0]!.weight)}.${share(g)}`);
     const f = g.from[0]!;
     const fNote = holidayOf(f.day, calendarNow()) ?? seasonOf(f.day, calendarNow());
     // A share moves by points, a count by a ratio, anything else in its own units.
@@ -7599,7 +7604,7 @@ function rangeWhy(ranges: NormalRanges, days: readonly string[], day: string, m:
       const at = rs.place(rr, rv);
       return [h('li', {}, h('code', {}, rule.name), `${rule.onFail === 'warn' ? ' (warns)' : ''}: ${pct(rv)}, `, at === 'within' ? 'within' : h('b', { class: 'off' }, at), ` ${pct(rr.low)} to ${pct(rr.high)}`)];
     });
-    if (rows.length) box.append(h('p', { class: 'foot' }, 'Each rule’s share of the trips it fails, against its own normal range:'), h('ul', { class: 'rule-ranges' }, ...rows));
+    if (rows.length) box.append(h('p', { class: 'foot' }, `Each rule’s share of the ${NEWS_NAMES.noun()} it fails, against its own normal range:`), h('ul', { class: 'rule-ranges' }, ...rows));
   }
   return box;
 }
@@ -7683,7 +7688,7 @@ function decidedCard(day: string): HTMLElement {
     released ? h('p', { class: 'rec-root' }, `Release #${released.seq}: `, hash4(entryLeaf(released), 'release’s record leaf')) : '');
   return h('div', { class: 'rb-card' },
     h('h3', { class: 'rb-head' }, glyphEl(PAUSE_MARK[st], 16), l.head),
-    draw ? svgNode(decisionRow({ mark: null, label: `${fmtInt(rows!)} trips`, number: kept !== undefined && kept !== rows ? `${fmtInt(kept)} after checks` : '', cause: draw.cause, rows: draw.asis, usual: draw.usual, short: draw.short, scale: draw.scale, part: draw.part, ticks: draw.ticks, cut: draw.cut, missing: draw.cause === 'hours' ? (story?.hoursLabels?.missing ?? null) : null, aria: `${dayMid(day)}: ${fmtInt(rows!)} trips${kept !== undefined && kept !== rows ? `, ${fmtInt(kept)} past its checks` : ''}${story ? `, ${story.head}` : ''}` })) : '',
+    draw ? svgNode(decisionRow({ mark: null, label: rowsSaid(rows!), number: kept !== undefined && kept !== rows ? `${fmtInt(kept)} after checks` : '', cause: draw.cause, rows: draw.asis, usual: draw.usual, short: draw.short, scale: draw.scale, part: draw.part, ticks: draw.ticks, cut: draw.cut, missing: draw.cause === 'hours' ? (story?.hoursLabels?.missing ?? null) : null, aria: `${dayMid(day)}: ${rowsSaid(rows!)}${kept !== undefined && kept !== rows ? `, ${fmtInt(kept)} past its checks` : ''}${story ? `, ${story.head}` : ''}` })) : '',
     l.who ? h('p', { class: 'rb-who' }, l.who) : '',
     l.where ? h('button', { type: 'button', class: 'linkish rb-where', 'aria-expanded': 'false', onclick: (e: Event) => { hashes.hidden = !hashes.hidden; (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(!hashes.hidden)); } }, l.where) : '',
     hashes,
