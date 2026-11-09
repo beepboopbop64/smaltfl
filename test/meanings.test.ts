@@ -11,7 +11,8 @@ import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../src/plugin/index.js';
 import { counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, runFlow, translate, validateDocument, type FlowDocument, type FlowPlan, type RunResult } from '../src/index.js';
-import { emitDayHours, emitDistinct, emitRead, emitSample, stampShift, type EmitContext } from '../src/core/emit.js';
+import { emitDayHours, emitDistinct, emitHourValues, emitRead, emitSample, stampShift, type EmitContext } from '../src/core/emit.js';
+import { hourOf, hourValuesOf } from '../src/core/measures.js';
 import { insertAfter } from '../src/core/document.js';
 import { nodeKey } from '../src/core/keys.js';
 import { shapeOf } from '../src/core/optimize.js';
@@ -189,6 +190,22 @@ describe('the example on real data', () => {
     // Hour 7 is the hour stamped 08:00, averaged over the districts.
     const [[want]] = (await db.queryAsync("SELECT avg(precipitation) FROM weather_file WHERE \"time\" = '2024-01-01T08:00'")).rows as [[number]];
     expect(rows[7]![2]).toBeCloseTo(want, 9);
+  });
+
+  it('counts a load by hour and by one column’s value as its measures count its hours (emit.ts emitHourValues)', async () => {
+    const trips = emitRead(plan, at('trips'), ctx);
+    const by = hourValuesOf((await db.queryAsync(emitHourValues(trips, 'tpep_pickup_datetime', 'payment_type'))).rows, 'payment_type', null);
+    // Each hour's rows are the hours its measures count, row by row (measures.ts hourOf).
+    const hours = new Array<number>(24).fill(0);
+    for (const [t] of (await db.queryAsync(emitSample(trips, ['tpep_pickup_datetime'], 1))).rows) {
+      const h = hourOf(t, null);
+      if (h !== null) hours[h]!++;
+    }
+    expect(Array.from({ length: 24 }, (_, h) => Object.values(by.values).reduce((t, xs) => t + xs[h]!, 0))).toEqual(hours);
+    expect(hours.reduce((a, b) => a + b, 0)).toBeGreaterThan(1000);
+    // Each value's rows in all are its rows in the load, keyed as a history writes a value (JSON).
+    const counts = (await db.queryAsync(`SELECT payment_type, count(*) FROM (${trips}) GROUP BY 1`)).rows;
+    for (const [v, n] of counts) expect(by.values[JSON.stringify(v ?? null)]!.reduce((a, b) => a + b, 0)).toBe(Number(n));
   });
 
   it('reads the stamp’s shift from the flow’s own step in the engine’s terms, however it is written (emit.ts stampShift)', async () => {

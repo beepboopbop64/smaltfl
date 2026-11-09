@@ -17,9 +17,9 @@ const calendarNow = (): Calendar => history?.calendar ?? US_NYC_1;
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, periodOf, sourceOf, takeOut, validateDocument, watchHistory, withoutDisplay } from '../core/document.js';
-import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDayHours, emitDistinct, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, stampShift, type EmitContext } from '../core/emit.js';
+import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDayHours, emitDistinct, emitHourValues, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, stampShift, type EmitContext } from '../core/emit.js';
 import { effectOf, type Effect } from '../core/effect.js';
-import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, type HistoryFile, type Metric } from '../core/history.js';
+import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, timeOf, type HistoryFile, type Metric } from '../core/history.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
@@ -28,8 +28,8 @@ import { afterLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, d
 import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { dayVersions, donorIdOf, fillCounts, levelOf as acceptedLevel, levelWays, partLabel as remedyPart, type Offer, type Repair, type Version } from '../core/fill.js';
 import { derivedAbout, derivedFails, derivedKeys, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
-import { ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type Story, type Told } from '../core/story.js';
-import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
+import { ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, axisShare, recentSpan, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type HourValues, type Story, type Told } from '../core/story.js';
+import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeChip, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
 import { DECIDE, DECIDE_OPTIONS, checkDecision, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
@@ -40,7 +40,7 @@ import { checksOver, clockText, columnSql, fillGaps, growForest, isolationPath, 
 import type { ReleaseResult, RunResult, VerifyLevel, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
 import { measureLoad, pinFile, releaseRun, runFlow, verifyRun } from '../index.js';
-import { appendPeriods, settingsFor, tailBefore, type Measures } from '../core/measures.js';
+import { appendPeriods, hourValuesOf, settingsFor, tailBefore, type Measures } from '../core/measures.js';
 import { utf8 } from '../core/hash.js';
 import { describe as describeFile, severityOf as fileSeverity, type FileCheck } from '../core/integrity.js';
 import { fetchChecked, IntegrityError, type Expected } from './fetch-checked.js';
@@ -3032,12 +3032,15 @@ function storyFor(day: string): Story | null {
   const hidden = hiddenTripColumns();
   const gate = gateStep();
   const loaded = loads.list[loads.at]?.day === day;
+  // The load's own rows by hour and the split's values, once counted for this viewer (byHourFor): what tells an hour
+  // fall where one part kept arriving.
+  const byHour = hourValues.known.get(`${day}|${state.previewAs ?? state.viewer}`) ?? undefined;
   // Held at the gate: by the run on screen, its checks holding it (ADR 0009 §3), or, for a flow that doesn't say what
   // holds it, the gate that stopped the run.
   const own = loaded && gate && !state.failed ? onScreen() : undefined;
   const held = loaded && gate && ((state.failed && !state.failed.file && state.failed.origin === gate.step) || own?.result.holds.some((x) => x.by === 'checks' && x.origin === gate.step)) ? true : undefined;
   const refused = loaded && !!state.failed?.file;
-  const key = `${day}|${checksAsCounted()}|${dataLog.version}|${[...hidden].sort().join(',')}|${held ?? ''}|${refused}`;
+  const key = `${day}|${checksAsCounted()}|${dataLog.version}|${[...hidden].sort().join(',')}|${held ?? ''}|${refused}|${byHour ? byHour.column : ''}`;
   let told = storyCache.get(key);
   if (!told) {
     // Judged as the document says (ADR 0010 §10): the watch's settings and the marks on its source; a legacy watch's are
@@ -3045,11 +3048,74 @@ function storyFor(day: string): Story | null {
     const judge = judgeOf(state.doc, loadSource() ?? '');
     const found = newsOf(history, day, NEWS_NAMES, { checks: checksAsCounted(), judge });
     const acknowledged = new Set(found.filter((f) => logOf(day, f.key).some((e) => e.act === 'expected')).map((f) => f.key));
-    told = storyOf(history, day, found, { names: NEWS_NAMES, step: gate?.step, limit: gate?.limit ?? null, held, refused, acknowledged, hidden, judge });
+    told = storyOf(history, day, found, { names: NEWS_NAMES, step: gate?.step, limit: gate?.limit ?? null, held, refused, acknowledged, hidden, judge, ...(byHour ? { byHour } : {}) });
     storyCache.set(key, told);
     for (const old of [...storyCache.keys()].slice(0, Math.max(0, storyCache.size - 60))) storyCache.delete(old);
   }
+  // An hour fall with a split, its load's rows on screen and not yet counted by hour for this viewer: counted now, and the
+  // day told again with them (run() counts them before it first says the day, so this is for a viewer changed since).
+  if (!byHour && wantsByHour(told) && !hourValues.known.has(`${day}|${state.previewAs ?? state.viewer}`)) void byHourFor(day).then((changed) => changed && retellDay());
   return told;
+}
+
+/**
+ * The viewed load's rows by hour and by the split's column (story.ts HourValues), by day and viewer: null once counted
+ * and found not to be had (the column closed to them, no time column, no run of the day on screen).
+ */
+const hourValues = { known: new Map<string, HourValues | null>(), pending: new Map<string, Promise<boolean>>() };
+
+/** Whether a day's story would say more with its load's rows by hour and value: an hour fall to the day's end with a
+ * split to count by. */
+const wantsByHour = (s: Story): boolean => s.hero === 'hours' && !!s.split && !!s.hours && s.hours.to === 23 && s.hours.got.length === 24;
+
+/**
+ * Count the viewed day's own load by hour and by its story's split column, as the viewer reads it (ADR 0008 §6): its
+ * watched source's rows on the run on screen, through the plan and emit.ts (emitHourValues), each stamp's hour read as
+ * its measures read it (measures.ts hourValuesOf). True when the day's story can now be told with them.
+ */
+function byHourFor(day: string): Promise<boolean> {
+  const who = state.previewAs ?? state.viewer;
+  const key = `${day}|${who}`;
+  if (hourValues.known.has(key)) return Promise.resolve(false);
+  let found = hourValues.pending.get(key);
+  if (found) return found;
+  found = (async () => {
+    // Pending before the story is asked for, so asking doesn't count again.
+    await null;
+    const s = storyFor(day);
+    const run = onScreen();
+    const src = loadSource();
+    const time = history ? timeOf(history.file) : null;
+    if (!s || !wantsByHour(s) || !run || dayOfRun(run) !== day || !src || !time || !state.engine) return false;
+    const insp = await inspect(run);
+    const i = insp.index.get(src);
+    const sql = i === undefined ? null : readIn(insp, i, who);
+    const column = s.split!.column;
+    const cols = i === undefined ? [] : viewIn(insp, i, who).columns;
+    if (i === undefined || !sql || !cols.includes(column) || !cols.includes(time)) {
+      hourValues.known.set(key, null);
+      return false;
+    }
+    const r = await state.engine.query(emitHourValues(sql, time, column));
+    hourValues.known.set(key, hourValuesOf(r.rows, column, history!.file.zone ?? null));
+    for (const k of [...storyCache.keys()]) if (k.startsWith(`${day}|`)) storyCache.delete(k);
+    return true;
+  })().catch((e) => {
+    console.warn(`smaltfl: couldn't count ${day} by hour: ${message(e)}`);
+    hourValues.known.set(key, null);
+    return false;
+  }).finally(() => hourValues.pending.delete(key));
+  hourValues.pending.set(key, found);
+  return found;
+}
+
+/** The day on screen told again: once its load's rows by hour came in after it was first drawn. */
+function retellDay(): void {
+  syncTitle();
+  const r = onScreen();
+  if (r && !state.running) sayRun(r);
+  renderCanvas();
+  if (state.selected) void renderSheet();
 }
 
 /** A day's news from the history, as its story tells it: each finding with its severity as told, most important first. */
@@ -3271,7 +3337,7 @@ function splitVisual(story: Story): Element | null {
   const sev = story.severity === 'alert' || story.severity === 'warn' ? story.severity : 'warn';
   const partMoved = sp.kind !== 'held';
   return svgNode(partBar({
-    left: { name: partLabel(sp), today: sp.part.today, usual: sp.part.usual, label: countLabel(sp.part), sev: partMoved ? sev : null, overLabel: overLabel(sp) },
+    left: { name: partLabel(sp), today: sp.part.today, usual: sp.part.usual, label: countLabel(sp.part), sev: partMoved ? sev : null, overLabel: overLabel(sp), kept: !partMoved },
     right: { name: 'Everything else', today: sp.rest.today, usual: sp.rest.usual, label: countLabel(sp.rest), sev: partMoved ? null : sev },
     aria: `${partLabel(sp)} records: ${fmtInt(sp.part.today)}, where about ${fmtInt(sp.part.usual)} is usual. Everything else: ${fmtInt(sp.rest.today)}, where about ${fmtInt(sp.rest.usual)} is usual.`,
   }));
@@ -3291,21 +3357,44 @@ function amountVisual(story: Story): Element | null {
   return svgNode(amountLine({ value: a.value, low: a.low, high: a.high, valueLabel: fmtInt(a.value), unit: NEWS_NAMES.noun(a.value), bandLabel: `usual ${compact(a.low)}–${compact(a.high)}`, changeLabel: change, changeWindow: said?.[1], sev, aria: `${rowsSaid(a.value)} on ${dayLabel(story.day)}${change ? `, ${said?.[1] ? `${said[1]} ` : ''}${change} against a usual ${wd}` : ''}, where a usual ${wd} has ${fmtInt(a.low)} to ${fmtInt(a.high)}.` }));
 }
 
+/** The hour chart's picture of a day told by its hours, the same on the card and in the Hours sheet: the fall, the
+ * trips missing from it, and, where one part kept arriving (story.kept), the two parts stacked and keyed. */
+function hourProps(story: Story): Parameters<typeof hourBars>[0] & { aria?: string } {
+  const hr = story.hours!;
+  const l = story.hoursLabels!;
+  return {
+    got: hr.got, usual: hr.usual, cut: hr.from, to: hr.to, cutLabel: l.cut, floorLabel: l.floor, missingLabel: l.missing, ghostLabel: l.ghost, beforeLabel: l.before,
+    ...(story.kept && l.kept && l.rest ? { kept: { got: story.kept.got, label: l.kept, restLabel: l.rest } } : {}),
+    aria: '',
+  };
+}
+
+/** What the hour chart shows, said: the fall, what still came, and with a part that kept arriving, the two parts. */
+function hourAria(story: Story): string {
+  const hr = story.hours!;
+  const l = story.hoursLabels!;
+  const wd = WEEKDAY_NAMES[dateOf(story.day).getUTCDay()]!;
+  const at = clockText(hr.from * 60);
+  const had = hr.got.slice(hr.from, hr.to + 1).reduce((a, b) => a + b, 0);
+  const want = hr.usual.slice(hr.from, hr.to + 1).reduce((a, b) => a + b, 0);
+  const fall = Math.round((1 - had / Math.max(1, want)) * 100);
+  const k = story.kept;
+  if (k) {
+    const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
+    const restAt = k.rest[hr.from] ?? 0;
+    const restAfter = sum(k.rest.slice(hr.from + 1));
+    return `${RowsWord()} by hour, ${dayLabel(story.day)}, against a usual ${wd}: ${k.name} kept arriving all day, ${fmtInt(sum(k.got.slice(hr.from)))} from ${at}; everything else stopped in the ${at} hour, ${fmtInt(restAt)} then and ${fmtInt(restAfter)} after; ${rowsSaid(had)} from ${at} where about ${fmtInt(want)} is usual (−${fall}%)${l.before ? `; before ${at}, ${l.before}` : ''}.`;
+  }
+  return `${RowsWord()} by hour, ${dayLabel(story.day)}, against a usual ${wd}: from ${at} ${had ? `they fall ${fall}% but don't stop, ${rowsSaid(had)} where about ${fmtInt(want)} is usual, ${l.floor.replace('/h', ' an hour')}` : `no ${NEWS_NAMES.noun()} came, where about ${fmtInt(want)} is usual`}${l.before ? `; before ${at}, ${l.before}` : ''}.`;
+}
+
 /** The hero of a story's cause card: the one visual its cause calls for. */
 function heroOf(story: Story): Element | null {
   const day = story.day;
   const wd = WEEKDAY_NAMES[dateOf(day).getUTCDay()]!;
   if (story.hero === 'split') return splitVisual(story);
   if (story.hero === 'hours' && story.hours && story.hoursLabels) {
-    const hr = story.hours;
-    const l = story.hoursLabels;
-    const had = hr.got.slice(hr.from, hr.to + 1).reduce((a, b) => a + b, 0);
-    const want = hr.usual.slice(hr.from, hr.to + 1).reduce((a, b) => a + b, 0);
-    const fall = Math.round((1 - had / Math.max(1, want)) * 100);
-    return svgNode(hourBars({
-      got: hr.got, usual: hr.usual, cut: hr.from, to: hr.to, cutLabel: l.cut, floorLabel: l.floor, missingLabel: l.missing, ghostLabel: l.ghost, beforeLabel: l.before,
-      aria: `${RowsWord()} by hour, ${dayLabel(day)}, against a usual ${wd}: from ${clockText(hr.from * 60)} ${had ? `they fall ${fall}% but don't stop, ${rowsSaid(had)} where about ${fmtInt(want)} is usual, ${l.floor.replace('/h', ' an hour')}` : `no ${NEWS_NAMES.noun()} came, where about ${fmtInt(want)} is usual`}${l.before ? `; before ${clockText(hr.from * 60)}, ${l.before}` : ''}.`,
-    }));
+    return svgNode(hourBars({ ...hourProps(story), aria: hourAria(story) }));
   }
   if ((story.hero === 'amount' || story.hero === 'finding') && story.cause?.kind === 'volume') {
     const days = stripOf({ of: 'trips' }, day, 28, story.severity);
@@ -3532,8 +3621,15 @@ function shortSaid(est: number, short: number, noun = 'fewer'): string {
  * day not run here dashed), the trips short so far on one bar, a segment a day, as the chip counts them; then the days,
  * each with Decide while it waits.
  */
-function episodeSheet(story: Story): void {
-  if (!history) return;
+type EpisodeRow = { label: string; trips: number; usual: number; low: number; short: number; marks: VizMark[]; notRun: boolean; at: boolean; day: string; fate: DayState | 'published' | 'notrun' | null };
+
+/**
+ * An episode's days so far (or, after it, all of them), each with the trips it was short as the chip and the hours
+ * count them (the day it fell from its hour, the days after whole), what became of it here, and whether this visit ran
+ * it: what the chip draws and the episode's sheet draws and lists. Null with no history or no days.
+ */
+function episodeRows(story: Story): { days: EpisodeRow[]; first: string; last: string; total: { estimate: number; bound: number } } | null {
+  if (!history) return null;
   const file = history.file;
   const rec = story.recovery;
   const first = story.episode?.since ?? rec?.from ?? story.day;
@@ -3552,20 +3648,18 @@ function episodeSheet(story: Story): void {
     ep.push({ day: d, got, low: r.low, expected: r.expected, alert: storyFor(d)?.severity === 'alert' });
     return { day: d, trips: file.rows[k]!, usual: r.expected, low: r.low };
   }).filter((x): x is { day: string; trips: number; usual: number; low: number } => !!x);
-  if (!rows.length) return;
+  if (!rows.length) return null;
   const whole = (to: string) => ep.filter((d) => d.day <= to).reduce((t, d) => {
     const got = d.got.reduce((a, b) => a + b, 0);
     return { estimate: t.estimate + Math.max(0, d.expected - got), bound: t.bound + Math.max(0, d.low - got) };
   }, { estimate: 0, bound: 0 });
   const so = (to: string) => (fall ? shortfall(ep, fall, to) : whole(to));
-  const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
   const fateOf = (d: string): DayState | 'published' | 'notrun' | null => {
     const f = state.doc.publish ? dayFate(d) : null;
     return f ?? (state.doc.publish && inLoads(d) && (!viewed || d < viewed) ? 'notrun' : null);
   };
-  const said: Record<string, string> = { waiting: 'waits for a decision', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only', published: 'published', notrun: 'not run' };
   let before = 0;
-  const days = rows.map((x) => {
+  const days = rows.map((x): EpisodeRow => {
     const est = so(x.day).estimate;
     const short = est - before;
     before = est;
@@ -3575,8 +3669,17 @@ function episodeSheet(story: Story): void {
     const marks: VizMark[] = f === 'notrun' ? [] : f && f !== 'published' ? [...sevMarks, PAUSE_MARK[f]] : sevMarks;
     return { label: dayShort(x.day), trips: x.trips, usual: x.usual, low: x.low, short, marks, notRun: f === 'notrun', at: x.day === viewed, day: x.day, fate: f };
   });
-  const total = so(last);
-  const totalSaid = total.estimate >= 1 ? shortSaid(total.estimate, total.bound, 'short so far') : null;
+  return { days, first, last, total: so(last) };
+}
+
+function episodeSheet(story: Story): void {
+  const ep = episodeRows(story);
+  if (!ep) return;
+  const { days, first, last, total } = ep;
+  const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
+  const said: Record<string, string> = { waiting: 'waits for a decision', asis: 'published as is', dont: 'not published', fill: 'filled', complete: 'part only', published: 'published', notrun: 'not run' };
+  // The estimate and its bound said apart, which is which (round 3, #23): "likely ~187k short so far · at least 130k".
+  const totalSaid = total.estimate >= 1 ? `likely ${shortSaid(total.estimate, total.bound, 'short so far').replace(/ \(at least (.+)\)$/, ' · at least $1')}` : null;
   const svg = svgNode(episodeDays({
     days, total: totalSaid, key: STRIP_KEY,
     aria: `${RowsWord()} each day, ${dayMid(first)} to ${dayMid(last)}, against a usual day: ${days.map((d) => `${d.label} ${d.notRun ? 'not run' : `${fmtInt(d.trips)} (usual ~${compact(d.usual)})`}${d.fate && d.fate !== 'notrun' ? `, ${said[d.fate]}` : ''}`).join('; ')}${totalSaid ? `; about ${rowsSaid(total.estimate)} short so far, at least ${fmtInt(total.bound)}` : ''}.`,
@@ -3789,7 +3892,14 @@ function findingDetail(f: Finding, card: string): void {
   const body: (Node | null)[] = [findingVisual(f), chipsOf(f)];
   if (day && f.metric && f.kind !== 'volume') {
     const days = stripOf(f.metric, day, 28, f.severity);
-    if (days.length) body.push(block('Day by day', svgNode(dayStrip({ days, labels: stripLabels(days), key: STRIP_KEY, more: { same: sameDays(day) }, aria: `${f.title}, day by day for four weeks.` }))));
+    // On a scale from 0 with its top printed (round 3, #23), a share's in percent, a count's as a count; and where today
+    // ran with the days before and its band sits apart from them, where they ran, so the strip and the note agree.
+    // A level (a median, a time) keeps its 0 and no printed top: its unit is the column's own.
+    const scale = rangesOf(f.metric)?.scale;
+    const axis = scale === 'share' ? axisShare : scale === 'count' ? (v: number) => compact(v) : undefined;
+    const recent = axis ? recentSpan(days, axis) : null;
+    const most = Math.max(...days.flatMap((d) => [d.high ?? 0, d.v ?? 0]));
+    if (days.length) body.push(block('Day by day', svgNode(dayStrip({ days, labels: stripLabels(days), key: STRIP_KEY, more: { same: sameDays(day) }, zero: true, ...(axis ? { axis } : {}), aria: `${f.title}, day by day for four weeks${axis ? `, from 0 to ${axis(most)} at most` : ''}${recent ? `; ${recent}` : ''}.` })), recent ? h('p', { class: 'vf-sub' }, recent) : null));
   }
   if (day && f.columns?.[0] && (f.kind === 'share' || f.kind === 'gone' || f.kind === 'new') && history?.file.values?.[f.columns[0]]?.counts) body.push(block(`${NEWS_NAMES.column(f.columns[0])}, usual and today`, compositionOf(f.columns[0], day, f.values?.[0])));
   body.push(oneLine(f.detail));
@@ -3971,7 +4081,7 @@ function causeCard(story: Story, card: string): HTMLElement {
     h('div', { class: 'vf-headrow' }, h('h3', { class: 'vf-head', role: 'status', 'aria-live': 'polite' }, story.state === 'unlearned' ? glyphEl('unlearned', 18) : m && !calm ? glyphEl(m, 18) : '', ...head)),
     gloss,
     story.chip ? h('button', { type: 'button', class: 'vf-chip-btn', 'aria-label': `${story.chip}${ep ? `: ${ep.trend.map((d) => `${WEEKDAY_NAMES[dateOf(d.day).getUTCDay()]!.slice(0, 3)} ${Math.round((d.trips / Math.max(1, d.expected)) * 100)}% of a usual day`).join(', ')}${ep.short ? `; about ${rowsSaid(ep.short.estimate)} short so far` : ''}` : ''}. Open the episode’s days.`, onclick: () => episodeSheet(story) },
-      days ? svgNode(episodeIcon({ n: days, at: ep ? days - 1 : null })) : '', story.chip, glyphEl('chev', 13)) : null,
+      chipIcon(story, days), story.chip, glyphEl('chev', 13)) : null,
     told ? h('p', { class: 'vf-told' }, glyphEl('ack', 14), told) : null,
     after,
     // An unusual day whose trips all came, with nothing to decide: says so, so its amber can't read as a call to act.
@@ -3995,7 +4105,7 @@ function causeCard(story: Story, card: string): HTMLElement {
     g && (held || g.near || (story.severity === 'alert' && !calm)) && story.hero !== 'gate'
       ? checks && !checks.full
         ? h('button', { type: 'button', class: 'vf-checks-ok', id: 'vf-gate', onclick: () => gateSheet(story, card) }, h('span', {}, checks.line), h('span', { class: 'vf-chev' }, glyphEl('chev', 14)))
-        : h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', ...(checks?.full ? { 'aria-label': 'Checks held: open' } : {}), onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held && !checks?.head ? glyphEl('held', 14) : '', checks?.full ? (checks.head ?? '') : held ? 'Checks held' : g.near ? 'Checks near the limit' : 'Checks passed'), gateVisual(g, false, gateScale(story)))
+        : h('button', { type: 'button', class: 'vf-sec', id: 'vf-gate', ...(checks?.full ? { 'aria-label': 'Checks held: open' } : {}), onclick: () => gateSheet(story, card) }, h('p', { class: 'vf-sec-h' }, held ? glyphEl('held', 14) : '', checks?.full ? (checks.head ?? '') : held ? 'Checks held' : g.near ? 'Checks near the limit' : 'Checks passed'), gateVisual(g, false, gateScale(story)))
       : null,
     // What the day's outputs are: never "published" alone, which reads as good news; a tap names them.
     !paused && story.severity === 'alert' && !calm && outs.length ? h('button', { type: 'button', class: 'vf-reach', 'aria-label': `${reachLabel(story, outs.length, undefined, NEWS_NAMES.noun())}: ${outs.join(', ')}. Open the list.`, onclick: () => outputsDetail(story, outs) },
@@ -4006,6 +4116,17 @@ function causeCard(story: Story, card: string): HTMLElement {
     // The weather last, as a tagged note: context, never a cause, and nothing to tap (ADR 0008 §11).
     story.labels.context ? h('p', { class: 'vf-wx', title: 'Snow, for context: not tested as a cause' }, h('span', { class: 'vf-tag' }, CONTEXT_TAG), h('span', {}, story.labels.context)) : null,
     !paused && anchor && primary ? actionsOf(anchor, card, primary, null, false, !!story.labels.settle) : null);
+}
+
+/**
+ * An episode chip's icon (round 3, #23): its days so far as blocks as wide as each was short, the viewed day filled,
+ * a day not run here a grey dashed frame (viz episodeChip), so the row grows a block a day and its length is the total
+ * the chip says; the calendar page where the days' trips aren't known.
+ */
+function chipIcon(story: Story, n: number): Element | string {
+  const rows = story.episode || story.recovery ? episodeRows(story) : null;
+  if (rows?.days.length) return svgNode(episodeChip({ days: rows.days.map((d) => ({ short: d.short, usual: d.usual, notRun: d.notRun, at: d.at })) }));
+  return n ? svgNode(episodeIcon({ n, at: story.episode ? n - 1 : null })) : '';
 }
 
 /**
@@ -4111,7 +4232,7 @@ function pauseRow(r: RunRecord, story: Story | null): { reach: HTMLElement; verb
     h('button', { type: 'button', class: `vf-reach vf-paused ${now.state}`, 'aria-label': `${l.reach}${l.see ? `; ${l.see}` : ''}${names.length ? `; ${names.join(', ')}` : ''}. Open the list.`, onclick: () => waitingDetail(r, l.reach, !may && now.state === 'waiting' ? () => decisionSheet(r, story) : null) },
       h('span', { class: 'vf-mark' }, glyphEl(PAUSE_MARK[now.state], 16)),
       h('span', { class: 'vf-paused-t' },
-        h('b', {}, l.reach),
+        h('b', {}, ...reachMarked(l.reach, now.state === 'waiting' ? story : null)),
         l.see ? h('span', { class: 'vf-see-line' }, l.see) : null,
         names.length ? h('span', { class: 'vf-outs-named', 'aria-hidden': 'true' }, ...names.map((o) => h('span', { class: `o-chip ${box}` }, h('i', {}, box === 'pub' ? glyphEl('ack', 11) : ''), o))) : null),
       h('span', { class: 'vf-chev' }, glyphEl('chev', 14))));
@@ -4125,6 +4246,24 @@ function pauseRow(r: RunRecord, story: Story | null): { reach: HTMLElement; verb
     ? h('button', { type: 'button', class: 'vf-primary vf-decide', 'aria-label': `Decide what readers get${dayOfRun(r) ? ` for ${dayMid(dayOfRun(r)!)}` : ''}`, onclick: () => decisionSheet(r, story) }, l.verb)
     : l.waits ? h('span', { class: 'vf-waits' }, l.waits) : links;
   return { reach, verb };
+}
+
+/**
+ * What paused a day, with the mark each reason carries where the card draws it (round 3, #16): the source by the day's
+ * mark ("! trips"), its checks by ‖ ("‖ checks", headed "Checks held" under the health row), so the two problems read
+ * apart at the top of the card. The words are pauseLines' own; only marks are added.
+ */
+function reachMarked(reach: string, story: Story | null): (Node | string)[] {
+  const m = /^Paused by (.+)$/.exec(reach);
+  if (!m) return [reach];
+  const sev = story ? sevMark(story.severity) : null;
+  const out: (Node | string)[] = ['Paused by '];
+  m[1]!.split(', ').forEach((r, i) => {
+    if (i) out.push(', ');
+    const mark = /(^| )checks$/.test(r) ? glyphEl('held', 13) : sev === 'alert' || sev === 'warn' ? glyphEl(sev, 13) : null;
+    out.push(mark ? h('span', { class: 'vf-why' }, mark, r) : r);
+  });
+  return out;
 }
 
 /**
@@ -4597,7 +4736,9 @@ function healthDetail(story: Story, cell: Cell, card: string): void {
       const sum = raw.reduce((a, b) => a + b, 0) || 1;
       const usual = story.hours?.usual ?? raw.map((x) => (x / sum) * r.expected);
       const wd = WEEKDAY_NAMES[dateOf(day).getUTCDay()]!;
-      body.push(svgNode(hourBars({ got, usual, ...(story.hours ? { cut: story.hours.from, to: story.hours.to, cutLabel: clockText(story.hours.from * 60) } : {}), ghostLabel: `usual ${wd}`, aria: `${RowsWord()} by hour on ${dayLabel(day)}, against a usual ${wd}${story.hours ? `: short from ${clockText(story.hours.from * 60)}` : ''}.` })));
+      // A day told by its hours draws the card's own picture here (one usual, the same parts and labels).
+      body.push(svgNode(story.hero === 'hours' && story.hours && story.hoursLabels ? hourBars({ ...hourProps(story), aria: hourAria(story) })
+        : hourBars({ got, usual, ...(story.hours ? { cut: story.hours.from, to: story.hours.to, cutLabel: clockText(story.hours.from * 60) } : {}), ghostLabel: `usual ${wd}`, aria: `${RowsWord()} by hour on ${dayLabel(day)}, against a usual ${wd}${story.hours ? `: short from ${clockText(story.hours.from * 60)}` : ''}.` })));
     }
   }
   // Numbers that had no usual range that day are said so, never as usual (ADR 0010 §1), beside what was found too: the
@@ -7977,6 +8118,9 @@ async function run(): Promise<void> {
     await learnColumns();
     void computeChanges();
     await refreshEdits();
+    // The day's own rows by hour and value, before anything says the day: an hour fall names the part that kept arriving.
+    const ranDay = dayOfRun(rec);
+    if (ranDay) await byHourFor(ranDay);
     sayRun(rec);
   } catch (e) {
     const msg = message(e);

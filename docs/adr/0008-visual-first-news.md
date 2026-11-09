@@ -5,7 +5,8 @@
 - **Builds on:** the news and normal ranges (src/core/news.ts, src/core/normal.ts; docs/SCENARIO.md §8), ADR 0006 §9
   (the integrity seal kept apart from the health marks)
 - **Amended by:** [ADR 0009](0009-paused-not-published.md) §12: a held day waits for a decision, and a day shows its
-  own run, published or staged
+  own run, published or staged; amendment 1 below (round 4): an hour fall's part that kept arriving, a held part drawn
+  as kept, the episode chip's days, and the day by day's scale
 
 ## Context
 
@@ -308,3 +309,36 @@ where about 35,000 are usual, and everything else held.
   incident as one record entry; the Columns, History, Odd rows and Dropped tabs drawn as fully as the News (§12 made
   them plainer); a weather_effect whose baseline is the history's dry hours (on a one-day load its join
   to dry hours at the same hour of day keeps no wet hour, so it never measures anything: a change to the document).
+
+## Amendment 1: hour-fall days as they were, and pictures that tell days apart (round 4, 2026-11-09)
+
+Counted from the two hour-fall days' own files (pickup hour × payment type): on Thu Sep 21, 2023 every payment but Flex
+Fare stopped by 13:06 (633 trips that hour, 37 in the rest of the day) while Flex Fare kept arriving (4,657 for the day,
+inside its range); on Sat Sep 17, 2022 nothing but Flex Fare came after 15:00. Readers who saw "stopped after 13:00" were
+right about everything but Flex Fare; "trips fall to a trickle" was true of all trips and hid it.
+
+1. **The part that kept arriving** (story.ts `keptOf`). Given the viewed load's own rows by hour and by the split's
+   column (`StoryOptions.byHour`, counted through the plan by emit.ts `emitHourValues`, each stamp's hour read as its
+   measures read it, measures.ts `hourValuesOf`), when they add up to the day's hours in every hour, the fall runs to the
+   day's end, and the rows in the hours after the fall's own hour are 95% one value (`KEPT_SHARE`; a blank never), the
+   head names it, as the day after does: "Only Flex Fare after 13:00". The hour chart stacks the two parts on one scale
+   over the one usual the card counts on: the part as one teal band from 0h to 24h (5 px at least where it had rows),
+   everything else standing on it at its true height (3 px at least) until it stops at the fall, the trips missing the
+   wash with its dashed skyline, the before-bracket as §6 says, and a key ("Flex Fare", "everything else") in place of
+   the trickle's rate. The rest in an hour after the fall under a twentieth of its rows draws nothing (the head says
+   "only"); the aria counts them. The split's sentence says "kept arriving … everything else stopped after 13:00". A day
+   where the rest fell but didn't stop, or a day whose load wasn't run here, keeps §5's head and §6's chart.
+   The history keeps no hour × value counts, so the claim a run is judged by (and `audit --history`'s retelling) keeps
+   the history's head; the hour × value counts belong in the history's measures when its format next changes (a new
+   measures encoding, with its vectors).
+2. **A part that held is drawn as kept**: the split bar draws the named part that held in the same teal, so "one part
+   held, the rest stopped" (Fri Sep 22, 2023) no longer looks like "one part vanished" (Mon Nov 14, 2022). Checks that
+   held the day too are headed "Checks held" with their ‖ every day they hold (ADR 0009 §12's lone ‖ while waiting went
+   unread), and the pause row marks each reason ("Paused by ! trips, ‖ checks").
+3. **The episode's chip** draws its days so far as blocks as wide as each day was short (16 px a whole usual day), the
+   viewed day filled, a day this visit didn't run a grey dashed frame of the history's width, so day 3 reads apart from
+   day 2 and the row's length is the total its words count (§11's calendar page stays where the days' trips aren't
+   known). Its sheet says the estimate and its bound apart: "likely ~187k short so far · at least 130k".
+4. **A finding's day by day** sits on a printed scale from 0 (a share's top in percent, a count's as a count: a labelled
+   zoom, §7), and when today ran with the 14 days before and its band sits apart from them, says where they ran ("14 days
+   before: 0%, as today"), so the strip and the note agree on what was usual lately.

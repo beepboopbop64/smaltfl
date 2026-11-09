@@ -98,8 +98,13 @@ export interface Story {
    * ("~77k fewer"; `missing` names the wash that draws them), the ghost's day; and, when the hours before the fall ran
    * well off a usual day's, by how much ("~8k above usual"), so the trips missing from the fall and the whole day's
    * change can both be read true (Sat Sep 17, 2022: ~52k fewer, the day −42%). */
-  /** The hour chart's words; `floor` the short hours' rate ("still ~330/h"), empty when no trips came in them. */
-  hoursLabels: { cut: string; floor: string; missing: string; ghost: string; before: string | null } | null;
+  /** The hour chart's words; `floor` the short hours' rate ("still ~330/h"), empty when no trips came in them; `kept`
+   * and `rest` name the two parts its bars stack when one part kept arriving after the fall ("Flex Fare", "everything
+   * else"), else null. */
+  hoursLabels: { cut: string; floor: string; missing: string; ghost: string; before: string | null; kept: string | null; rest: string | null } | null;
+  /** The part that kept arriving after an hour fall while everything else stopped (`keptOf`): its rows by hour and the
+   * rest's, from the load's own rows. Null on any other day, and where the load's rows by hour aren't known. */
+  kept: Kept | null;
   gate: Gate | null;
   /** The finding the head is about, when there is one. */
   cause: Told | null;
@@ -154,7 +159,30 @@ export interface StoryOptions {
   episode?: boolean;
   /** How the source is judged (ADR 0010 §4, §8): the legacy form by default. */
   judge?: JudgeSettings;
+  /** The viewed load's own rows by hour and by each value of one column (the split's), counted from its rows through
+   * the plan and emit.ts (`emitHourValues`): what tells an hour fall where one part kept arriving (`keptOf`). The
+   * history keeps no hour × value counts, so a day without its load's rows is told without it. */
+  byHour?: HourValues;
 }
+
+/** A load's rows in each hour of its day, by each value of one column (values as the history writes them, JSON). */
+export interface HourValues {
+  column: string;
+  values: Record<string, readonly number[]>;
+}
+
+/** The part that kept arriving after an hour fall: its column, value and name, and its rows and the rest's by hour. */
+export interface Kept {
+  column: string;
+  value: string;
+  name: string;
+  got: number[];
+  rest: number[];
+}
+
+/** After an hour fall, the rows of the hours after the fall's own that must be one value for it to be told as the part
+ * that kept arriving (Thu Sep 21, 2023: 2,900 of 2,937 Flex Fare from 14:00, 98.7%; Sat Sep 17, 2022: all of them). */
+export const KEPT_SHARE = 0.95;
 
 export const ACT_VERB: Record<Act, string> = {
   // Marking a day as expected publishes nothing and is never required (ADR 0008 §6): said so on it.
@@ -351,6 +379,28 @@ function partName(column: string, value: string, names: Names, judge: JudgeSetti
   const label = (names.label ?? names.value)(column, parsed).replace(/\s+trips?$/i, '');
   const meaning = label !== String(parsed) && !/^\$?-?[\d.,]+$/.test(label);
   return meaning && wordsIn(label) <= 3 ? { name: label, trips: true, sender } : { name: `${names.column(column)} ${label.length <= 8 ? label : String(parsed)}`, trips: false, sender };
+}
+
+/**
+ * The part that kept arriving after an hour fall (ADR 0008 §6): with the load's own rows by hour and value (`byHour`),
+ * when they add up to the day's hours in every hour (the rows the history counted, or nothing is told from them), the
+ * fall runs to the day's end, and the rows in the hours after the fall's own are almost all one value (`KEPT_SHARE`):
+ * Thu Sep 21, 2023's Flex Fare, every other payment having stopped by 13:06; Sat Sep 17, 2022's from 15:00. A day where
+ * the rest fell but didn't stop has none (it keeps its trickle), nor does a blank, nor a column the viewer may not read.
+ */
+export function keptOf(hours: Finding['hours'] | null | undefined, by: HourValues | undefined, names: Names, judge: JudgeSettings = LEGACY_JUDGE, hidden: ReadonlySet<string> = new Set()): Kept | null {
+  if (!hours || !by || hidden.has(by.column.toLowerCase())) return null;
+  const { got, from, to } = hours;
+  if (got.length !== 24 || to !== 23 || from >= 23) return null;
+  const values = Object.entries(by.values);
+  for (let i = 0; i < 24; i++) if (values.reduce((t, [, xs]) => t + (xs[i] ?? 0), 0) !== got[i]) return null;
+  const tail = (xs: readonly number[]) => xs.slice(from + 1, 24).reduce((a, b) => a + (b ?? 0), 0);
+  const after = tail(got);
+  if (after <= 0) return null;
+  const best = values.map(([value, xs]) => ({ value, xs, n: tail(xs) })).sort((a, b) => b.n - a.n)[0];
+  if (!best || best.value === 'null' || best.n < KEPT_SHARE * after) return null;
+  const part = Array.from({ length: 24 }, (_, i) => best.xs[i] ?? 0);
+  return { column: by.column, value: best.value, name: partName(by.column, best.value, names, judge).name, got: part, rest: got.map((n, i) => n - part[i]!) };
 }
 
 /**
@@ -794,8 +844,12 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   // No trips at all in those hours is no trickle and no rate: the fall is headed as it was found ("Trips fall 100% from
   // 13:00"), never as trips still coming at ~0 an hour.
   const none = !!hoursF?.hours && hoursF.hours.got.slice(hoursF.hours.from, hoursF.hours.to + 1).every((n) => n === 0);
+  // One part kept arriving and everything else stopped (keptOf): headed by the part, as the day after says it ("Only
+  // Flex Fare after 13:00", beside Fri's "Only Flex Fare records arrived"), never as a trickle of every kind of trip.
+  const kept = hero === 'hours' ? keptOf(hoursF?.hours, o.byHour, names, judge, hidden) : null;
   let head: string;
   if (o.refused) head = 'File refused: bytes don’t match';
+  else if (hero === 'hours' && hoursF && kept) head = `Only ${kept.name} after ${clock(hoursF.hours!.from)}`;
   else if (hero === 'hours' && hoursF) head = hoursF.hours && hoursF.hours.to === 23 && perHour !== null && !none ? (trickle ? `${Noun()} fall to trickle from ${clock(hoursF.hours.from)}` : `${Noun()} fall to ~${fmtInt(perHour)}/h from ${clock(hoursF.hours.from)}`) : hoursF.title;
   else if (hero === 'split' && split) {
     const restRatio = split.rest.today / Math.max(1, split.rest.usual);
@@ -925,9 +979,11 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     const off = amount ? fallParts(hoursF.hours, amount)?.before ?? 0 : 0;
     const before = amount && Math.abs(off) >= 0.05 * amount.expected ? `~${compact(Math.abs(off))} ${off > 0 ? 'above' : 'below'} usual` : null;
     // No trips in the short hours: no rate to bracket and nothing "still" coming (the chart draws no ribbon there).
-    return { cut: clock(from), floor: had === 0 ? '' : `${to === 23 ? 'still ' : ''}~${fmtInt(perHour ?? 0)}/h`, missing: `~${compact(Math.max(0, want - had))} fewer`, ghost: `usual ${weekdayOf(day)}`, before };
+    return { cut: clock(from), floor: had === 0 ? '' : `${to === 23 ? 'still ' : ''}~${fmtInt(perHour ?? 0)}/h`, missing: `~${compact(Math.max(0, want - had))} fewer`, ghost: `usual ${weekdayOf(day)}`, before, kept: kept?.name ?? null, rest: kept ? 'everything else' : null };
   })() : null;
-  if (shownHero === 'hours' && hoursLabels) heroLabels.push(hoursLabels.cut, hoursLabels.floor, hoursLabels.missing, hoursLabels.ghost, ...(hoursLabels.before ? [hoursLabels.before] : []));
+  // With a part that kept arriving, its bars stack the two parts and their key names them; the rate the trickle's zoom
+  // said is the band's own height now, and isn't said (the head and the key say what kept coming).
+  if (shownHero === 'hours' && hoursLabels) heroLabels.push(hoursLabels.cut, ...(hoursLabels.kept ? [] : [hoursLabels.floor]), hoursLabels.missing, hoursLabels.ghost, ...(hoursLabels.kept && hoursLabels.rest ? [hoursLabels.kept, hoursLabels.rest] : []), ...(hoursLabels.before ? [hoursLabels.before] : []));
   // Beside the hours, the part and the rest only when the part moved too (a part that held is told in the detail).
   if (shownHero === 'hours' && split && split.kind !== 'held') heroLabels.push(partLabel(split), countLabel(split.part), 'Everything else', countLabel(split.rest));
   // The amount line carries the day's count and its usual range on every day; a strip of days adds no words.
@@ -953,7 +1009,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const more = standalone.filter((f) => f !== cause && !stories.includes(f));
 
   return {
-    day, state, severity, head, chip: state === 'unlearned' ? whyChip : chip, hero: shownHero, amount, split: shownHero === 'calm' ? null : basis, hours: hoursF?.hours ?? null, hoursLabels, gate, coverage,
+    day, state, severity, head, chip: state === 'unlearned' ? whyChip : chip, hero: shownHero, amount, split: shownHero === 'calm' ? null : basis, hours: hoursF?.hours ?? null, hoursLabels, kept: shownHero === 'hours' ? kept : null, gate, coverage,
     cause, stories, more, follows, sameDay, absorbed, notes, context: weather,
     episode, recovery, health, primary,
     labels: {
@@ -1088,7 +1144,42 @@ export function splitSentence(s: Story): string | null {
   };
   const said = (c: Count) => `${fmtInt(c.today)}; usual ${c.low !== null && c.high !== null ? `${compact(c.low)}–${compact(c.high)}` : `~${approx(c.usual)}`}`;
   const restMoved = sp.kind === 'held';
+  // The part that kept arriving after the fall, and the rest that stopped (keptOf): said as the head and the bars say it.
+  if (s.kept && s.hours && s.kept.column === sp.column && s.kept.value === sp.value) return `${sp.name} kept arriving (${said(sp.part)}); everything else stopped after ${clock(s.hours.from)} (${said(sp.rest)}).`;
   return `${sp.name} ${how(sp.part, !restMoved)} (${said(sp.part)}); everything else ${how(sp.rest, restMoved)} (${said(sp.rest)}).`;
+}
+
+/**
+ * A share said for a chart's axis or caption, to the decimals that keep it apart from 0 (a strip of 0.07% shares tops
+ * out at "0.08%", never "0.1%" nor "0%"): two significant figures, at most two decimals of a percent.
+ */
+export function axisShare(x: number): string {
+  if (x <= 0) return '0%';
+  const p = x * 100;
+  const d = p >= 10 ? 0 : p >= 1 ? 1 : 2;
+  return `${Number(p.toFixed(d))}%`;
+}
+
+/**
+ * Where the days before ran, when today ran with them and its own band sits apart from them (round 3, #23): a finding's
+ * day by day says so under its strip, so the chart and the note agree on what was usual lately ("14 days before:
+ * 7.4–9.2%, as today"). Asked of the strip's days, the last today's: at least 7 of the 14 before it with a value, today
+ * outside its band and within what they ran, and their middle outside today's band on today's side. Null otherwise.
+ */
+export function recentSpan(days: readonly { v: number | null; low: number | null; high: number | null }[], fmt: (v: number) => string): string | null {
+  const today = days.at(-1);
+  if (!today || today.v === null || today.low === null || today.high === null) return null;
+  const before = days.slice(-15, -1).map((d) => d.v).filter((v): v is number => v !== null).sort((a, b) => a - b);
+  if (before.length < 7) return null;
+  const v = today.v;
+  const lo = before[0]!;
+  const hi = before.at(-1)!;
+  const mid = before[before.length >> 1]!;
+  const below = v < today.low;
+  if (!(below || v > today.high) || v < lo || v > hi) return null;
+  if (below ? mid >= today.low : mid <= today.high) return null;
+  const said = fmt(lo) === fmt(hi) ? fmt(lo) : `${fmt(lo).replace(/%$/, '')}–${fmt(hi)}`;
+  return `${before.length} days before: ${said}, as today`;
 }
 
 /** Every string a story shows at a glance (head, chip, the hero's labels, rows, the verb), for its word budget. */

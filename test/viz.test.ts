@@ -4,13 +4,14 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DEFS, amountLine, bandSpan, notJudgedMark, degrees, weatherHours, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
+import { DEFS, amountLine, bandSpan, notJudgedMark, degrees, weatherHours, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeChip, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
 const charts: [string, string, boolean][] = [
   ['split', splitRows({ rows: [{ name: 'Flex Fare', today: 4613, usual: 4800, todayLabel: '4,613', usualLabel: '~4.8k' }, { name: 'Everything else', today: 20, usual: 110_000, todayLabel: '20', usualLabel: '~110k', sev: 'alert' }], aria: 'Trips by kind: Flex Fare 4,613 of about 4,800; everything else 20 of about 110,000' }), true],
   ['hours', hourBars({ got: hours, usual, cut: 13, cutLabel: '13:00', floorLabel: '~300/h after', ghostLabel: 'usual Thursday', aria: 'Trips by hour: they fall 95% at 13:00' }), true],
+  ['hours parts', hourBars({ got: hours, usual, cut: 13, to: 23, cutLabel: '13:00', missingLabel: '~52k fewer', ghostLabel: 'usual Thursday', kept: { got: hours.map((n, h) => (h < 13 ? 200 : n)), label: 'Flex Fare', restLabel: 'everything else' }, aria: 'Trips by hour: Flex Fare kept arriving, everything else stopped at 13:00' }), true],
   ['hours zoomed', hourBars({ got: hours, usual, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~300/h', missingLabel: '~52k fewer', ghostLabel: 'usual Thursday', aria: 'Trips by hour: they fall 94% from 13:00 but don’t stop' }), true],
   ['gate', gateBars({ rows: 4633, dropped: 2116, limit: 0.1, usual: { low: 4531, high: 7472 }, shareLabel: '46% of arrived rows dropped', limitLabel: 'limit 10%', countLabel: ['2,116 rows dropped', 'usual 4.5k–7.5k'], aria: 'Checks held the run: 46% of arrived rows dropped, limit 10%' }), true],
   ['bullet', bulletTrack({ value: 77033, low: 54642, high: 118922, valueLabel: '77,033', bandLabel: 'usual 55k–119k', aria: 'Trips: 77,033, usual 55k to 119k' }), true],
@@ -140,6 +141,56 @@ describe('the news’s charts', () => {
     expect(svg).toContain('class="ink-strong trickle"');
   });
 
+  it('stacks an hour fall’s two parts when one kept arriving: its band unbroken from 0h to 24h, the rest stopping at the fall (Thu Sep 21, 2023)', () => {
+    const thu = [2577, 1196, 677, 419, 431, 731, 2000, 4290, 5131, 4840, 5020, 5359, 5589, 742, 150, 206, 244, 315, 317, 279, 283, 393, 399, 351];
+    const flex = [96, 36, 25, 16, 44, 72, 155, 333, 351, 203, 121, 81, 115, 109, 150, 206, 242, 313, 313, 272, 275, 390, 392, 347];
+    const usualThu = [2260, 1227, 685, 419, 394, 699, 1917, 3537, 5363, 5628, 5804, 5950, 6666, 6867, 7212, 8150, 8438, 8099, 8750, 7969, 6810, 6863, 6140, 5149];
+    const svg = hourBars({ got: thu, usual: usualThu, cut: 13, to: 23, cutLabel: '13:00', floorLabel: 'still ~330/h', missingLabel: '~77k fewer', ghostLabel: 'usual Thursday', kept: { got: flex, label: 'Flex Fare', restLabel: 'everything else' }, aria: 'Trips by hour' });
+    const base = Number(svg.match(/<line class="base" x1="0" x2="334" y1="([\d.]+)"/)![1]) - 0.5;
+    const top = 16;
+    const plot = base - top;
+    const ymax = Math.max(...usualThu, ...thu) * 1.04;
+    const cw = 334 / 24;
+    // The band: one path along the baseline from 0 to the chart's end, each hour's top its Flex Fare trips, 5 px at least.
+    const band = svg.match(/<path class="kept" d="M0.5 ([\d.]+)((?:V[\d.]+H[\d.]+)+)V[\d.]+Z"\/>/)!;
+    const steps = [...band[2]!.matchAll(/V([\d.]+)H([\d.]+)/g)].map((m) => ({ h: base - Number(m[1]), x: Number(m[2]) }));
+    expect(steps).toHaveLength(24);
+    expect(steps.at(-1)!.x).toBeCloseTo(333.5, 1);
+    steps.forEach((st, i) => expect(st.h).toBeCloseTo(Math.max(5, (flex[i]! / ymax) * plot), 0));
+    // Everything else: its own column on the band each hour before the fall and in the fall's own hour (633 trips, from
+    // 13:00 to 13:06), at its true height and 3 px at least; after it, its stragglers (2 to 8 an hour, under a twentieth
+    // of each hour) draw nothing.
+    const rest = [...svg.matchAll(/<rect class="ink rest" x="[\d.]+" y="[\d.]+" width="[\d.]+" height="([\d.]+)" rx="1.2" data-k="(\d+)"\/>/g)].map((m) => ({ k: Number(m[2]), h: Number(m[1]) }));
+    expect(rest.map((r) => r.k)).toEqual(Array.from({ length: 14 }, (_, i) => i));
+    rest.forEach((r) => expect(r.h).toBeCloseTo(Math.max(3, ((thu[r.k]! - flex[r.k]!) / ymax) * plot), 0));
+    // One usual: the ghost columns before the fall and the wash's skyline after it are the same usual hours.
+    const ghosts = [...svg.matchAll(/<path class="ghost" d="M[\d.]+ ([\d.]+)V([\d.]+)Q/g)].map((m) => Number(m[1]) - Number(m[2]));
+    expect(ghosts).toHaveLength(13);
+    ghosts.forEach((g, i) => expect(g).toBeCloseTo(Math.max(0, (usualThu[i]! / ymax) * plot - 2), 0));
+    const sky = svg.match(/<path class="absent-fill" d="M([\d.]+) ([\d.]+)H/)!;
+    expect(Number(sky[1])).toBeCloseTo(13 * cw + 0.75, 1);
+    expect(base - Number(sky[2])).toBeCloseTo((usualThu[13]! / ymax) * plot, 0);
+    expect(svg).toContain('class="absent-edge"');
+    // The fall's mark is short and above the plot; no zoom, no trickle ribbon, no rate; the key names the two parts.
+    const cut = svg.match(/<line class="cut-bad" x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)" y2="([\d.]+)"\/>/)!.slice(1).map(Number);
+    expect(cut[1]! - cut[0]!).toBeLessThanOrEqual(6);
+    expect(svg).not.toMatch(/zoom|trickle|still ~/);
+    expect(svg).toMatch(/<rect class="kept" [^>]*\/><text [^>]*>Flex Fare<\/text>/);
+    expect(svg).toMatch(/<rect class="ink" [^>]*\/><text [^>]*>everything else<\/text>/);
+    expect(svg).toContain('~77k fewer');
+    // Sat Sep 17, 2022: the hours before the fall bracketed above the plot, clear of the cut.
+    const sat = hourBars({ got: thu, usual: usualThu, cut: 15, to: 23, cutLabel: '15:00', beforeLabel: '~8.3k above usual', kept: { got: flex, label: 'Flex Fare', restLabel: 'everything else' }, aria: 'Trips by hour' });
+    const brace = sat.match(/<path class="brace" d="M1.5 ([\d.]+)V([\d.]+)H([\d.]+)V/)!.slice(1).map(Number);
+    expect(Math.max(brace[0]!, brace[1]!)).toBeLessThanOrEqual(top + 1.5);
+    expect(brace[2]).toBeLessThan(15 * cw);
+    expect(sat).toContain('~8.3k above usual');
+    // An hour with no rows of the part breaks the band there: nothing is drawn for a zero.
+    const gap = hourBars({ got: thu, usual: usualThu, cut: 13, to: 23, kept: { got: flex.map((n, i) => (i === 3 ? 0 : n)), label: 'Flex Fare', restLabel: 'everything else' }, aria: 'Trips by hour' });
+    const gapSteps = [...gap.match(/<path class="kept" d="M0.5 [\d.]+((?:V[\d.]+H[\d.]+)+)/)![1]!.matchAll(/V([\d.]+)H/g)].map((m) => base - Number(m[1]));
+    expect(gapSteps[3]).toBe(0);
+    expect(gapSteps[2]).toBeGreaterThanOrEqual(5);
+  });
+
   it('puts the day’s change on the amount line when it is given', () => {
     const svg = amountLine({ value: 41939, low: 89028, high: 160128, valueLabel: '41,939', unit: 'trips', bandLabel: 'usual 89k–160k', changeLabel: '−65%', sev: 'alert', aria: '41,939 trips, −65%' });
     expect(svg).toContain('class="count-chg chg-alert" dx="8">−65%</tspan>');
@@ -188,6 +239,12 @@ describe('the news’s charts', () => {
     expect(Number(/class="today-ring" x="([\d.]+)"/.exec(svg)![1])).toBeCloseTo(24 * (334 / 48) + 0.5, 0);
     expect(svg).toMatch(/class="tick at"[^>]*>Fri</);
     expect(svg).not.toContain('>Sat<');
+    // The trips missing from the fall to the bracket's end are the card's wash with its dashed skyline, never a grey
+    // usual: the usual's ghost only before the fall (13 hours of Thu).
+    expect(svg.match(/class="ghost flat"/g)).toHaveLength(13);
+    expect(svg).toMatch(/<path class="absent-fill" d="M[\d.]+ /);
+    expect(svg).toMatch(/<path class="absent-edge" d="M[\d.]+ /);
+    expect(episodeBars({ days: [day], aria: 'Trips by hour, Thu' })).not.toMatch(/absent/);
     // A lone day needs no frame; a late fall on it puts its shortfall under the bracket, clear of the hour's label.
     expect(episodeBars({ days: [day], cut: 13, at: 0, aria: 'Trips by hour, Thu' })).not.toContain('today-ring');
     const late = episodeBars({ days: [day], cut: 15, cutLabel: '15:00', at: 0, bracket: { from: 15, to: 24, label: '~52k fewer (≥45k)' }, aria: 'Trips by hour, Sat' });
@@ -388,6 +445,37 @@ describe('the news’s charts', () => {
     expect(left).toContain('<text x="16" y="12" text-anchor="start" class="lbl-b">Vendor 1</text>');
   });
 
+  it('puts a finding’s day by day on a scale from 0 with its top printed in the metric’s own terms (round 3, #23)', () => {
+    const days = Array.from({ length: 14 }, (_, i) => ({ day: `2024-01-${String(i + 1).padStart(2, '0')}`, v: 0.08, low: 0.07, high: 0.11 }));
+    days.push({ day: '2024-01-15', v: 0.087, low: 0.21, high: 0.33 });
+    const svg = dayStrip({ days, zero: true, axis: (v) => `${Math.round(v * 100)}%`, aria: 'Extras $5.00 day by day' });
+    // Its 0 and its top: niceMax of the largest band end or value, 0.33 → 0.4, printed as the metric says it.
+    expect(svg).toContain('<text x="0" y="');
+    expect(svg).toMatch(/class="tick" aria-hidden="true">0<\/text>/);
+    expect(svg).toMatch(/class="tick" aria-hidden="true">40%<\/text>/);
+    const base = Number(svg.match(/<line class="base" x1="12" x2="334" y1="([\d.]+)"/)![1]) - 0.5;
+    const topLine = Number(svg.match(/<line class="hair" x1="12" x2="334" y1="([\d.]+)"/)![1]) - 0.5;
+    // Today's tick at 8.7% sits where its number says, far under its band.
+    const ticks = [...svg.matchAll(/<rect class="(?:ink|sev-[a-z]+-fill)" x="[\d.]+" y="([\d.]+)" width="[\d.]+" height="([\d.]+)"/g)].map((m) => Number(m[1]) + Number(m[2]) / 2);
+    expect((base - ticks.at(-1)!) / (base - topLine)).toBeCloseTo(0.087 / 0.4, 1);
+    // Without an axis, as before: no printed top.
+    expect(dayStrip({ days, aria: 'x' })).not.toMatch(/40%/);
+  });
+
+  it('draws a part that kept arriving in the band’s teal, so a rest that stopped never looks like a part that vanished', () => {
+    // Fri Sep 22, 2023: Flex Fare kept arriving, everything else stopped; Mon Nov 14, 2022: Vendor 1 vanished.
+    const held = partBar({ left: { name: 'Flex Fare', today: 4613, usual: 4800, label: '4,613 · usual ~4.8k', kept: true }, right: { name: 'Everything else', today: 20, usual: 110_000, label: '20 · usual ~110k', sev: 'alert' }, aria: 'Split' });
+    const gone = partBar({ left: { name: 'Vendor 1', today: 2, usual: 33_800, label: '2 · usual ~33.8k', sev: 'alert' }, right: { name: 'Everything else', today: 82_276, usual: 82_500, label: '82,276 · usual ~82.5k' }, aria: 'Split' });
+    expect(held).toMatch(/<rect class="kept" x="0" /);
+    expect(held.match(/class="absent"/g)).toHaveLength(1);
+    expect(gone).not.toContain('class="kept"');
+    expect(gone).toMatch(/<rect class="ink-strong" x="[1-9][\d.]+" /);
+    // Above its usual (Sun Sep 18, 2022's 4,169 Flex Fare against ~2.9k), past the notch in the band's lighter tone.
+    const over = partBar({ left: { name: 'Flex Fare', today: 4169, usual: 2900, label: '4,169 · usual ~2.9k', kept: true }, right: { name: 'Everything else', today: 60, usual: 85_000, label: '60 · usual ~85k', sev: 'alert' }, aria: 'Split' });
+    expect(over).toContain('class="kept-over"');
+    expect(over).not.toContain('class="over"');
+  });
+
   it('draws snow as context in the strip’s own columns, from 0, the days the card names said clear of every bar', () => {
     const days = Array.from({ length: 56 }, (_, i) => ({ day: `2024-01-${String((i % 28) + 1).padStart(2, '0')}`, v: 90_000, low: 80_000, high: 120_000 }));
     const strip = dayStrip({ days, unit: '/day', aria: 'Trips' });
@@ -466,6 +554,28 @@ describe('the news’s charts', () => {
     expect(episodeIcon({ n: 4, at: null })).not.toContain('cal-at');
   });
 
+  it('draws an episode chip’s days as blocks as wide as each was short, so day 3 reads apart from day 2 (round 3, #23)', () => {
+    const thu = { short: 77_459, usual: 119_398 };
+    const fri = { short: 110_280, usual: 114_913 };
+    const sat = { short: 103_000, usual: 113_000 };
+    const blocks = (svg: string) => [...svg.matchAll(/<rect class="([a-z-]+)" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"/g)].map((m) => ({ cls: m[1], x: Number(m[2]), w: Number(m[3]) }));
+    const day2 = blocks(episodeChip({ days: [thu, { ...fri, at: true }] }));
+    const day3 = blocks(episodeChip({ days: [thu, fri, { ...sat, at: true }] }));
+    // A block a day, each as wide as it was short in usual days (16 px a whole day), the viewed day filled.
+    expect(day2.map((b) => b.cls)).toEqual(['absent', 'ep-at']);
+    expect(day3.map((b) => b.cls)).toEqual(['absent', 'absent', 'ep-at']);
+    expect(day2[0]!.w).toBeCloseTo((77_459 / 119_398) * 16, 1);
+    expect(day3[2]!.w).toBeCloseTo((103_000 / 113_000) * 16, 1);
+    // The row grows by the day's block: its running total.
+    const end = (bs: typeof day2) => bs.at(-1)!.x + bs.at(-1)!.w;
+    expect(end(day3) - end(day2)).toBeCloseTo(1.5 + day3[2]!.w, 1);
+    // A day this visit didn't run: the strip's not-run frame, its width the history's; 3 px at least for a small day.
+    const notRun = blocks(episodeChip({ days: [{ ...thu, notRun: true }, { short: 10, usual: 100_000, at: true }] }));
+    expect(notRun.map((b) => b.cls)).toEqual(['notrun', 'ep-at']);
+    expect(notRun[1]!.w).toBe(3);
+    expect(episodeChip({ days: [thu] })).toContain('aria-hidden="true"');
+  });
+
   it('draws an episode’s days so far: one bar a day from 0 over its usual day, each day’s marks, the shortfall a segment a day', () => {
     const days = [
       { label: 'Thu 21', trips: 41_939, usual: 119_398, low: 89_028, short: 77_459, marks: ['alert', 'held'] as const },
@@ -477,13 +587,14 @@ describe('the news’s charts', () => {
     expect(svg).toContain('>42k</text>');
     expect(svg).toContain('>4.6k</text>');
     expect(svg).not.toContain('>5.7k</text>');
-    expect([...svg.matchAll(/class="notrun"/g)].length).toBe(1);
+    // Its frame, and its segment of the shortfall drawn as the strip draws a day not run (its trips the history's).
+    expect([...svg.matchAll(/class="notrun"/g)].length).toBe(2);
     expect([...svg.matchAll(/class="ghost"/g)].length).toBe(3);
     // Below its range, a day's bar takes the severity's fill.
     expect([...svg.matchAll(/class="sev-alert-fill"/g)].length).toBe(2);
     // Its marks: ! ‖ and ! ⚑ under their dates; the shortfall, three segments on one bar, its total said.
     expect([...svg.matchAll(/class="g g-(alert|held|flag)"/g)].map((m) => m[1])).toEqual(['alert', 'held', 'alert', 'flag']);
-    expect([...svg.matchAll(/class="absent"/g)].length).toBe(3);
+    expect([...svg.matchAll(/class="absent"/g)].length).toBe(2);
     expect(svg).toContain('>~291k short so far (≥210k)</text>');
     expect(svg).toContain('class="today-ring"');
     // Each count sits at its own bar's top, inside the ghost, never on the ghost's top: Thu's 42k is well under its

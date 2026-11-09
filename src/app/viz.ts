@@ -164,7 +164,8 @@ export function splitRows({ rows, w = 334, aria }: { rows: SplitRow[]; w?: numbe
  * them says by how much (`beforeLabel`, "~8k above usual"), so the trips missing from the fall and the whole day's
  * change can both be read true.
  */
-export function hourBars(o: { got: readonly number[]; usual: readonly number[]; w?: number; barsH?: number; cut?: number; to?: number; cutLabel?: string; floorLabel?: string; missingLabel?: string; ghostLabel?: string; beforeLabel?: string | null; aria: string; pick?: number }): string {
+export function hourBars(o: { got: readonly number[]; usual: readonly number[]; w?: number; barsH?: number; cut?: number; to?: number; cutLabel?: string; floorLabel?: string; missingLabel?: string; ghostLabel?: string; beforeLabel?: string | null; aria: string; pick?: number; kept?: KeptBars }): string {
+  if (o.kept && o.cut !== undefined && o.to !== undefined) return hourParts({ ...o, cut: o.cut, to: o.to, kept: o.kept });
   const w = o.w ?? 334;
   const barsH = o.barsH ?? 64;
   const top = 16;
@@ -252,6 +253,104 @@ export function hourBars(o: { got: readonly number[]; usual: readonly number[]; 
   }
   for (const t of [0, 6, 12, 18, 24]) s += `<text x="${f1(t * cw)}" y="${tickY}" text-anchor="${t === 0 ? 'start' : t === 24 ? 'end' : 'middle'}" class="tick" aria-hidden="true">${t}</text>`;
   if (zoomed) s += trickleZoom(o.got, o.cut!, o.to!, o.floorLabel!, { cw, ...ZOOM });
+  return `${s}</svg>`;
+}
+
+/** The part that kept arriving after an hour fall, for the hour chart: its rows each hour, and what its key calls it and
+ * everything else ("Flex Fare", "everything else"). */
+export interface KeptBars {
+  got: readonly number[];
+  label: string;
+  restLabel: string;
+}
+
+/** Below this share of an hour's rows, the rest is inside the "almost all" the head says, and draws no bar of its own. */
+const REST_SHOWN = 0.05;
+
+/**
+ * An hour fall where one part kept arriving and everything else stopped (ADR 0008 §6, story.ts keptOf): 24 columns on
+ * one scale from 0 over a usual day's ghost (the one usual the card's figures are counted on), each hour's rows
+ * stacked as the two parts. The part that kept arriving is one unbroken band along the baseline from 0h to 24h, never
+ * under 5 px where it had rows; everything else stands on it, at its true height and never under 3 px, until it stops at
+ * the fall. After the fall the trips missing are one wash under the usual skyline, 3 px clear of what came, its dashed
+ * edge up its sides and along the skyline (dashes mean absent), counted on it ("~77k fewer"); the fall's hour has a
+ * short mark under its label, never a rule through the plot; a bracket over the hours before it says how far they ran
+ * off a usual day's when they did; a key under the hours names the two parts. The rest in an hour after the fall under
+ * a twentieth of its rows draws no bar: the head says "only", and the stragglers are said in the aria.
+ */
+function hourParts(o: { got: readonly number[]; usual: readonly number[]; w?: number; barsH?: number; cut: number; to: number; cutLabel?: string; missingLabel?: string; ghostLabel?: string; beforeLabel?: string | null; aria: string; kept: KeptBars }): string {
+  const w = o.w ?? 334;
+  const barsH = o.barsH ?? 92;
+  const top = 16;
+  const base = top + barsH;
+  const tickY = base + 13;
+  const keyY = tickY + 17;
+  const h = keyY + 4;
+  const cw = w / 24;
+  const bw = cw - 2.5;
+  const ymax = Math.max(1, ...o.usual, ...o.got) * 1.04;
+  const y = (v: number) => (v / ymax) * barsH;
+  const BAND = 5;
+  const GAP = 1;
+  const part = (i: number) => o.kept.got[i] ?? 0;
+  const rest = (i: number) => Math.max(0, (o.got[i] ?? 0) - part(i));
+  const bandH = (i: number) => (part(i) > 0 ? Math.max(BAND, y(part(i))) : 0);
+  const restShown = (i: number) => rest(i) > 0 && (i < o.cut || rest(i) >= REST_SHOWN * (o.got[i] ?? 0));
+  const restH = (i: number) => (restShown(i) ? Math.max(MIN_MARK, y(rest(i))) : 0);
+  const stack = (i: number) => bandH(i) + (restH(i) ? GAP + restH(i) : 0);
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  // The usual hours before the fall: ghost columns behind today's.
+  for (let i = 0; i < o.cut; i++) s += `<path class="ghost" d="${colPath(i * cw + 1.25, base, bw, y(o.usual[i] ?? 0))}"/>`;
+  // The trips missing from the fall: one wash under the usual skyline, 3 px clear of what came; its dashed edge up its
+  // sides and along the skyline only.
+  {
+    const x0 = (i: number) => f1(i * cw + (i === o.cut ? 0.75 : 0));
+    const x1 = (i: number) => f1((i + 1) * cw - (i === o.to ? 0.75 : 0));
+    const hi = (i: number) => f1(base - y(Math.max(o.usual[i] ?? 0, o.got[i] ?? 0)));
+    const lo = (i: number) => f1(base - stack(i) - 3);
+    let up = '';
+    for (let i = o.cut; i <= o.to; i++) up += `${i === o.cut ? 'M' : 'L'}${x0(i)} ${hi(i)}H${x1(i)}`;
+    let down = '';
+    for (let i = o.to; i >= o.cut; i--) down += `L${x1(i)} ${lo(i)}H${x0(i)}`;
+    s += `<path class="absent-fill" d="${up}${down}Z"/>`;
+    s += `<path class="absent-edge" d="M${x0(o.cut)} ${lo(o.cut)}L${up.slice(1)}L${x1(o.to)} ${lo(o.to)}"/>`;
+  }
+  // Everything else, standing on the band (each hour's own column).
+  for (let i = 0; i < 24; i++) {
+    const rh = restH(i);
+    if (rh > 0) s += `<rect class="ink rest" x="${f1(i * cw + 2.75)}" y="${f1(base - bandH(i) - GAP - rh)}" width="${f1(bw - 3)}" height="${f1(rh)}" rx="1.2" data-k="${i}"/>`;
+  }
+  // The part that kept arriving: one band from 0h to 24h, its top each hour's rows (5 px at least where it had any).
+  let band = `M0.5 ${base}`;
+  for (let i = 0; i < 24; i++) band += `V${f1(base - bandH(i))}H${f1(i === 23 ? w - 0.5 : (i + 1) * cw)}`;
+  s += `<path class="kept" d="${band}V${base}Z"/>`;
+  s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;
+  // The fall's hour: a short mark under its label (a rule through the plot read as the file cut there).
+  const cx = o.cut * cw;
+  s += `<line class="cut-bad" x1="${f1(cx)}" x2="${f1(cx)}" y1="${top - 3}" y2="${top + 3}"/>`;
+  if (o.cutLabel) s += `<text x="${f1(cx - 4)}" y="${top - 5}" text-anchor="end" class="lbl-bad">${esc(o.cutLabel)}</text>`;
+  if (o.ghostLabel) s += `<text x="${w}" y="${top - 5}" text-anchor="end" class="lbl-m">${esc(o.ghostLabel)}</text>`;
+  if (o.missingLabel) {
+    const wanted = o.usual.slice(o.cut, o.to + 1);
+    const mid = [...wanted].sort((a, b) => a - b)[wanted.length >> 1] ?? 0;
+    let most = 0;
+    for (let i = o.cut; i <= o.to; i++) most = Math.max(most, stack(i));
+    const my = Math.min(base - most - 14, base - y(mid) / 2);
+    s += `<text x="${f1(((o.cut + o.to + 1) / 2) * cw)}" y="${f1(my)}" text-anchor="middle" class="lbl-bad lbl-halo">${esc(o.missingLabel)}</text>`;
+  }
+  // The hours before the fall, bracketed along the plot's top, and how far they ran off a usual day's.
+  if (o.beforeLabel && o.cut > 2) {
+    const width = o.beforeLabel.length * 6.4;
+    const room = cx - 4 - (o.cutLabel ? o.cutLabel.length * 7 + 8 : 0);
+    s += `<path class="brace" d="M1.5 ${top + 1.5}V${top - 1.5}H${f1(cx - 3)}V${top + 1.5}"/>`;
+    s += `<text x="1.5" y="${width <= room ? top - 5 : top + 12}" class="lbl-m lbl-halo">${esc(o.beforeLabel)}</text>`;
+  }
+  for (const t of [0, 6, 12, 18, 24]) s += `<text x="${f1(t * cw)}" y="${tickY}" text-anchor="${t === 0 ? 'start' : t === 24 ? 'end' : 'middle'}" class="tick" aria-hidden="true">${t}</text>`;
+  // The key: the band's part, then everything else.
+  const kx = 0;
+  const rx = kx + 22 + o.kept.label.length * 6.6 + 14;
+  s += `<rect class="kept" x="${kx}" y="${keyY - 7}" width="16" height="5" rx="1"/><text x="${kx + 21}" y="${keyY}" class="lbl-b key">${esc(o.kept.label)}</text>`;
+  s += `<rect class="ink" x="${f1(rx)}" y="${keyY - 9}" width="9" height="9" rx="1.5"/><text x="${f1(rx + 14)}" y="${keyY}" class="lbl-m key">${esc(o.kept.restLabel)}</text>`;
   return `${s}</svg>`;
 }
 
@@ -414,6 +513,10 @@ export interface Part {
   sev?: 'alert' | 'warn' | null;
   /** The trips beyond its usual count, said under them ("+6k over usual"), for the part whose surge is the news. */
   overLabel?: string | null;
+  /** The part that kept arriving while everything else stopped or moved (a split that held): drawn in the band's teal,
+   * as the hour chart draws the part that kept arriving, so "one part held, the rest stopped" never reads as "one part
+   * vanished, the rest held" (Fri Sep 22, 2023 beside Mon Nov 14, 2022). */
+  kept?: boolean;
 }
 
 /**
@@ -441,15 +544,16 @@ export function partBar({ left, right, w = 334, aria }: { left: Part; right: Par
     const today = p.today > 0 ? Math.max(MIN_MARK, p.today * scale) : 0;
     const usual = p.usual * scale;
     s += `<rect class="slot" x="${f1(x0)}" y="${by}" width="${f1(sw)}" height="${bh}" rx="2"/>`;
+    const ink = p.kept ? 'kept' : 'ink-strong';
     if (p.today < p.usual) {
-      if (today) s += `<rect class="ink-strong" x="${f1(x0)}" y="${by}" width="${f1(today)}" height="${bh}" rx="2"/>`;
+      if (today) s += `<rect class="${ink}" x="${f1(x0)}" y="${by}" width="${f1(today)}" height="${bh}" rx="2"/>`;
       if (usual - today > 3) s += `<rect class="absent" x="${f1(x0 + today + 1)}" y="${by + 1}" width="${f1(usual - today - 2)}" height="${bh - 2}" rx="2"/>`;
     } else {
-      s += `<rect class="ink-strong" x="${f1(x0)}" y="${by}" width="${f1(Math.max(2, usual))}" height="${bh}" rx="2"/>`;
+      s += `<rect class="${ink}" x="${f1(x0)}" y="${by}" width="${f1(Math.max(2, usual))}" height="${bh}" rx="2"/>`;
       const over = Math.min(today - usual, end - (x0 + usual));
       if (over > 0.5) {
         const notch = over >= 6;
-        s += `<rect class="over" x="${f1(x0 + usual + (notch ? 2 : 0))}" y="${by}" width="${f1(Math.max(1, over - (notch ? 2 : 0)))}" height="${bh}" rx="2"/>`;
+        s += `<rect class="${p.kept ? 'kept-over' : 'over'}" x="${f1(x0 + usual + (notch ? 2 : 0))}" y="${by}" width="${f1(Math.max(1, over - (notch ? 2 : 0)))}" height="${bh}" rx="2"/>`;
         if (notch) s += `<line class="usual-end" x1="${f1(x0 + usual + 1)}" x2="${f1(x0 + usual + 1)}" y1="${by - 3}" y2="${by + bh + 3}"/>`;
         if (p.overLabel) {
           const mid = x0 + usual + over / 2;
@@ -510,14 +614,31 @@ export function episodeBars(o: { days: readonly { label: string; got: readonly n
   const ymax = Math.max(1, ...usual, ...got) * 1.05;
   const y = (v: number) => base - (v / ymax) * (base - top);
   let s = open(w, h, o.aria, 'data-y0="0"');
+  // The short span, from the first short hour to the bracket's end: the trips missing there are the card's wash, under
+  // the usual skyline and over what came, its dashed edge along the skyline (dashes mean absent), never a grey usual.
+  const s0 = o.cut ?? hours;
+  const s1 = o.cut !== undefined ? Math.min(hours, o.bracket?.to ?? hours) : hours;
+  const short = (i: number) => i >= s0 && i < s1;
   // The usual hours: a light fill, too thin to outline hour by hour, under one skyline at 3:1.
   let sky = `M0 ${base}`;
   for (let i = 0; i < hours; i++) {
     const x0 = i * xw;
-    s += `<rect class="ghost flat" x="${f1(x0)}" y="${f1(y(usual[i] ?? 0))}" width="${f1(Math.max(0.6, xw - 0.6))}" height="${f1(base - y(usual[i] ?? 0))}"/>`;
+    if (!short(i)) s += `<rect class="ghost flat" x="${f1(x0)}" y="${f1(y(usual[i] ?? 0))}" width="${f1(Math.max(0.6, xw - 0.6))}" height="${f1(base - y(usual[i] ?? 0))}"/>`;
     sky += `V${f1(y(usual[i] ?? 0))}H${f1(x0 + xw)}`;
   }
+  if (s1 > s0) {
+    let up = '';
+    for (let i = s0; i < s1; i++) up += `${i === s0 ? 'M' : 'L'}${f1(i * xw)} ${f1(y(Math.max(usual[i] ?? 0, got[i] ?? 0)))}H${f1((i + 1) * xw)}`;
+    let down = '';
+    for (let i = s1 - 1; i >= s0; i--) down += `L${f1((i + 1) * xw)} ${f1(Math.min(base, y(got[i] ?? 0)))}H${f1(i * xw)}`;
+    s += `<path class="absent-fill" d="${up}${down}Z"/>`;
+  }
   s += `<path class="skyline" d="${sky}V${base}"/>`;
+  if (s1 > s0) {
+    let edge = '';
+    for (let i = s0; i < s1; i++) edge += `${i === s0 ? 'M' : 'L'}${f1(i * xw)} ${f1(y(Math.max(usual[i] ?? 0, got[i] ?? 0)))}H${f1((i + 1) * xw)}`;
+    s += `<path class="absent-edge" d="${edge}"/>`;
+  }
   for (let i = 0; i < hours; i++) {
     const x0 = i * xw;
     const g = got[i] ?? 0;
@@ -668,7 +789,7 @@ function stripKeyRow(days: readonly StripDay[], more: StripKey, w: number): stri
  * a one-line key over it (band, tick, and "not run" when a day wasn't); `unit` prints the axis's top (a round number)
  * with its unit and 0. A day not run keeps its band, with no tick or mark, inside a dashed frame: absent.
  */
-export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number; labels?: [number, string, string?][]; aria: string; bandLabel?: string; zero?: boolean; key?: readonly [string, string]; unit?: string; more?: StripKey }): string {
+export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number; labels?: [number, string, string?][]; aria: string; bandLabel?: string; zero?: boolean; key?: readonly [string, string]; unit?: string; more?: StripKey; axis?: (v: number) => string }): string {
   const w = o.w ?? 334;
   const n = o.days.length;
   const marks = o.days.some((d) => d.mark || d.marks?.length || d.unlearned);
@@ -678,13 +799,18 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
   const keyH = o.key ? (extra ? 32 : 16) : 0;
   const h = (o.h ?? 64) + keyH + (marks ? 4 : 0);
   // With an axis printed, its 0 sits in a gutter of its own, clear of the first day's band.
-  const gx = o.zero || o.unit ? 12 : 0;
+  // A strip given its axis's words (`axis`: a share's "2.5%", a count's "8k") prints its top too, as one with a unit does.
+  const scaled = !!(o.unit || o.axis);
+  const gx = o.zero || scaled ? 12 : 0;
   const cw = (w - gx) / Math.max(1, n);
   const bw = Math.min(14, cw - 2);
   const top = 14 + keyH + (marks ? 4 : 0);
   const base = h - 14;
-  const raw = Math.max(1, ...o.days.flatMap((d) => [d.high ?? 0, d.v ?? 0]));
-  const ymax = o.unit ? niceMax(raw * 1.02) : raw * 1.06;
+  // A share's strip given its axis is a printed zoom, from 0 to just past its largest band end or value (Extras $5.00 at
+  // 0–40%); without one, as it was (a count from 1, a share on 0–100%).
+  const most = Math.max(0, ...o.days.flatMap((d) => [d.high ?? 0, d.v ?? 0]));
+  const raw = o.axis ? (most > 0 ? most : 1) : Math.max(1, most);
+  const ymax = scaled ? niceMax(raw * 1.02) : raw * 1.06;
   const y = (v: number) => base - (v / ymax) * (base - top);
   const last = o.days[n - 1];
   const wd = last ? new Date(`${last.day}T00:00:00Z`).getUTCDay() : -1;
@@ -727,9 +853,9 @@ export function dayStrip(o: { days: readonly StripDay[]; w?: number; h?: number;
     if (o.bandLabel && last.high !== null) s += `<text x="${f1(lx - cw / 2 - 4)}" y="${f1(y(last.high) + 4)}" text-anchor="end" class="lbl-m lbl-halo">${esc(o.bandLabel)}</text>`;
   }
   if (gx) s += `<text x="0" y="${base}" class="tick" aria-hidden="true">0</text>`;
-  if (o.unit) {
+  if (scaled) {
     const k = (v: number) => (v >= 1000 ? `${Number((v / 1000).toPrecision(3))}k` : String(v));
-    s += `<line class="hair" x1="${gx}" x2="${w}" y1="${f1(y(ymax)) + 0.5}" y2="${f1(y(ymax)) + 0.5}"/><text x="0" y="${f1(y(ymax) - 3)}" class="tick" aria-hidden="true">${esc(k(ymax))}${esc(o.unit)}</text>`;
+    s += `<line class="hair" x1="${gx}" x2="${w}" y1="${f1(y(ymax)) + 0.5}" y2="${f1(y(ymax)) + 0.5}"/><text x="0" y="${f1(y(ymax) - 3)}" class="tick" aria-hidden="true">${esc(o.axis ? o.axis(ymax) : `${k(ymax)}${o.unit ?? ''}`)}</text>`;
   }
   for (const [i, t, anchor] of o.labels ?? []) s += `<text x="${f1(gx + i * cw + cw / 2)}" y="${h - 2}" text-anchor="${anchor ?? 'middle'}" class="tick" aria-hidden="true">${esc(t)}</text>`;
   return `${s}</svg>`;
@@ -861,6 +987,32 @@ export function episodeIcon({ n, at }: { n: number; at: number | null }): string
 }
 
 /**
+ * An episode's chip icon (ADR 0008 §11, round 3 #23): its days so far, oldest first, each a block as wide as the trips
+ * it was short, in usual days (16 px a whole usual day short, 3 px at least), side by side, so the row grows a block a
+ * day and its length is the running total the chip's words count ("Day 3 · ~290k short"). Trips missing are drawn as
+ * missing (a wash with a dashed edge); the viewed day's block is filled, so day 3 reads apart from day 2 at a glance; a
+ * day this visit didn't run is a grey dashed frame of the same width, its trips the history's. No day after the viewed
+ * one. aria-hidden: the chip's words and its accessible name say it.
+ */
+export function episodeChip({ days }: { days: readonly { short: number; usual: number; notRun?: boolean; at?: boolean }[] }): string {
+  const unit = 16;
+  const gap = 1.5;
+  const h = 16;
+  const bh = 10;
+  const widths = days.map((d) => Math.max(MIN_MARK, (Math.max(0, d.short) / Math.max(1, d.usual)) * unit));
+  const w = Math.max(1, widths.reduce((a, b) => a + b, 0) + gap * Math.max(0, days.length - 1) + 1.5);
+  let s = `<svg class="viz ep-chip" width="${f1(w)}" height="${h}" viewBox="0 0 ${f1(w)} ${h}" aria-hidden="true" focusable="false">`;
+  let x = 0.75;
+  days.forEach((d, i) => {
+    const bw = widths[i]!;
+    const cls = d.notRun ? 'notrun' : d.at ? 'ep-at' : 'absent';
+    s += `<rect class="${cls}" x="${f1(x)}" y="${(h - bh) / 2}" width="${f1(bw)}" height="${bh}" rx="1.5" data-k="${i}"/>`;
+    x += bw + gap;
+  });
+  return `${s}</svg>`;
+}
+
+/**
  * An episode's days so far (its sheet): one bar a day from 0, the day's trips in ink over its usual day's ghost, its
  * count at the top of its own bar (inside the ghost, so the ghost never reads as that count) and its date under it,
  * each day's marks under its date (what became of it: ! ‖, ! ⚑, ! ✕; a day this visit didn't run dashed, no bar),
@@ -912,7 +1064,8 @@ export function episodeDays(o: { days: readonly { label: string; trips: number; 
     let x = 0;
     o.days.forEach((d) => {
       const dw = (Math.max(0, d.short) / shortSum) * sw;
-      if (dw >= 1) s += `<rect class="absent" x="${f1(x + 0.75)}" y="${sy}" width="${f1(Math.max(1, dw - 1.5))}" height="10" rx="2"/>`;
+      // A day this visit didn't run counts the history's trips, its segment the not-run frame the strip draws.
+      if (dw >= 1) s += `<rect class="${d.notRun ? 'notrun' : 'absent'}" x="${f1(x + 0.75)}" y="${sy}" width="${f1(Math.max(1, dw - 1.5))}" height="10" rx="2"/>`;
       x += dw;
     });
     s += `<text x="0" y="${sy - 5}" class="lbl-m">${esc(o.total)}</text>`;

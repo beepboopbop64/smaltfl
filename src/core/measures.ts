@@ -172,6 +172,22 @@ export function hourOf(t: unknown, zone: string | null): number | null {
 }
 
 /**
+ * A load's rows by hour and by one column's value (story.ts HourValues), from emitHourValues' rows: each stamp's hour
+ * read as a row's time is read for its parts (`hourOf`, in the source's zone), each value as JSON, as a history writes
+ * it. A stamp with no hour is in no hour, as a row with no time is in no part.
+ */
+export function hourValuesOf(rows: readonly (readonly unknown[])[], column: string, zone: string | null): { column: string; values: Record<string, number[]> } {
+  const values: Record<string, number[]> = {};
+  for (const [stamp, value, n] of rows) {
+    const hr = hourOf(stamp, zone);
+    if (hr === null) continue;
+    const key = JSON.stringify(value ?? null);
+    (values[key] ??= new Array<number>(24).fill(0))[hr]! += Number(n);
+  }
+  return { column, values };
+}
+
+/**
  * The minute of the day of a time in a zone, or as the text writes it (characters 12–16) with no zone, with the date
  * it falls on; null when it has none. What a slot's parts are counted by.
  */

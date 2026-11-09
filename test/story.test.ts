@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { LEGACY_JUDGE, newsOf, type JudgeSettings, type Names } from '../src/core/news.js';
-import { ACT_VERB, CELL_KINDS, CONTEXT_TAG, HEALTH_HEAD, SETTLE_LINE, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, rowName, shortWho, splitOf, splitSentence, stepLabels, storyOf, wordsIn, type Gate, type Story, type StoryOptions } from '../src/core/story.js';
+import { ACT_VERB, CELL_KINDS, CONTEXT_TAG, HEALTH_HEAD, KEPT_SHARE, axisShare, recentSpan, SETTLE_LINE, STRIP_KEY, approx, cardWords, compact, countLabel, gateLabels, glanceStrings, keptOf, partLabel, ruleOrder, ruleUsual, rowName, shortWho, splitOf, splitSentence, stepLabels, storyOf, wordsIn, type Gate, type HourValues, type Story, type StoryOptions } from '../src/core/story.js';
 import { historyWith, vendorNames, type Trouble } from './helpers/history.js';
 
 const DAY = '2023-10-11'; // a Wednesday
@@ -140,6 +140,83 @@ describe('the cause, as a time', () => {
     expect(['follows', 'sameDay', 'absorbed']).toContain(mix.tier);
     expect(mix.severity).toBe('note');
     expect(s.stories).toEqual([]);
+  });
+});
+
+describe('an hour fall where one part kept arriving (the load’s own rows by hour and value)', () => {
+  const fall = () => story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } });
+  // The day's hours split into vendor 1 and vendor 2: vendor 1 a third of each hour before 13:00, and from 13:00 every
+  // trip but `stragglers` an hour, which go to vendor 2; with `at13`, the 13:00 hour's vendor 2 trips too.
+  const split = (got: readonly number[], stragglers = 0, at13 = 0): HourValues => {
+    const v1 = got.map((n, h) => (h < 13 ? Math.round(n / 3) : h === 13 ? Math.max(0, n - at13) : Math.max(0, n - stragglers)));
+    return { column: 'VendorID', values: { '1': v1, '2': got.map((n, h) => n - v1[h]!) } };
+  };
+
+  it('heads the day by the part that kept arriving, keys the two parts, and stops saying a trickle of every trip', () => {
+    const plain = fall();
+    const got = plain.hours!.got;
+    const s = story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } }, DAY, { byHour: split(got, 0, Math.round(got[13]! / 2)) });
+    expect(s.head).toBe('Only Vendor 1 after 13:00');
+    expect(wordsIn(s.head)).toBeLessThanOrEqual(6);
+    expect(s.kept).toMatchObject({ column: 'VendorID', value: '1', name: 'Vendor 1' });
+    // Its two parts add up to the day's hours, hour by hour.
+    s.kept!.got.forEach((n, h) => expect(n + s.kept!.rest[h]!).toBe(got[h]));
+    expect(s.hoursLabels).toMatchObject({ cut: '13:00', kept: 'Vendor 1', rest: 'everything else', missing: plain.hoursLabels!.missing, ghost: 'usual Wednesday' });
+    // At a glance: the cut, the trips missing, the ghost and the key; the rate is the band's own height, not said.
+    expect(s.labels.hero.slice(0, 5)).toEqual(['13:00', plain.hoursLabels!.missing, 'usual Wednesday', 'Vendor 1', 'everything else']);
+    expect(s.labels.hero.join(' ')).not.toMatch(/still|trickle/);
+    expect(words(s)).toBeLessThanOrEqual(60);
+  });
+
+  it('allows stragglers up to a twentieth of the rows after the fall’s own hour, and no more', () => {
+    const got = fall().hours!.got;
+    const after = got.slice(14).reduce((a, b) => a + b, 0);
+    const few = Math.floor(((1 - KEPT_SHARE) * after) / 10 / 2);
+    const many = Math.ceil(((1 - KEPT_SHARE) * after) / 10) + 2;
+    expect(story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } }, DAY, { byHour: split(got, few) }).head).toBe('Only Vendor 1 after 13:00');
+    // The rest fell but didn't stop: the trickle it was.
+    const fell = story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } }, DAY, { byHour: split(got, many) });
+    expect(fell.head).toBe('Trips fall to trickle from 13:00');
+    expect(fell.kept).toBeNull();
+    expect(fell.hoursLabels).toMatchObject({ kept: null, rest: null });
+  });
+
+  it('tells nothing from rows that don’t add up to the day’s hours, from a column the viewer may not read, or from a blank', () => {
+    const got = fall().hours!.got;
+    const off = split(got);
+    const shifted: HourValues = { column: off.column, values: { ...off.values, '2': off.values['2']!.map((n, h) => (h === 3 ? n + 1 : n)) } };
+    expect(story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } }, DAY, { byHour: shifted }).head).toBe('Trips fall to trickle from 13:00');
+    expect(story({ [DAY]: { stopAt: 13, vendorShare: 0.5 } }, DAY, { byHour: split(got), hidden: new Set(['vendorid']) }).kept).toBeNull();
+    const blank: HourValues = { column: 'VendorID', values: { null: split(got).values['1']!, '2': split(got).values['2']! } };
+    expect(keptOf(fall().hours, blank, vendorNames)).toBeNull();
+    // Without the load's rows (a day not run here), the history alone: as before.
+    expect(fall().kept).toBeNull();
+    // A cut-off file (nothing after the fall) has no part that kept arriving.
+    const none = story({ [DAY]: { stopAt: 13, keep: 0, vendorShare: 0.5 } });
+    expect(keptOf(none.hours, split(none.hours!.got), vendorNames)).toBeNull();
+  });
+});
+
+describe('a finding’s day by day, as its note says it (round 3, #23)', () => {
+  it('says a share on an axis to the decimals that keep it apart from 0', () => {
+    expect([axisShare(0), axisShare(0.0008), axisShare(0.025), axisShare(0.4), axisShare(0.12345)]).toEqual(['0%', '0.08%', '2.5%', '40%', '12%']);
+  });
+
+  it('says where the days before ran when today ran with them and its band sits apart from them', () => {
+    const day = (v: number | null, low: number | null = 0.07, high: number | null = 0.11) => ({ v, low, high });
+    // Jan 4, 2024's Extras $5.00 as a band learned apart from the weeks before: 8.7% against 21–33%, the 14 days before
+    // at 7.4–9.2% (the weekends lower) where today is too.
+    const recent = [0.08, 0.085, 0.074, 0.092, 0.081, 0.083, 0.088, 0.079, 0.082, 0.086, 0.09, 0.077, 0.084, 0.087];
+    const jan4 = [...recent.map((v) => day(v)), day(0.087, 0.21, 0.33)];
+    expect(recentSpan(jan4, axisShare)).toBe('14 days before: 7.4–9.2%, as today');
+    // Today inside its band, or apart from the days before too, or with its band where they ran: nothing to say.
+    expect(recentSpan([...recent.map((v) => day(v)), day(0.087)], axisShare)).toBeNull();
+    expect(recentSpan([...recent.map((v) => day(v)), day(0.3, 0.21, 0.33)], axisShare)).toBeNull();
+    expect(recentSpan([...recent.map((v) => day(v)), day(0.05, 0.06, 0.12)], axisShare)).toBeNull();
+    // Fewer than 7 days before with a value: too few to say.
+    expect(recentSpan([...recent.slice(0, 6).map((v) => day(v)), ...Array.from({ length: 8 }, () => day(null)), day(0.087, 0.21, 0.33)], axisShare)).toBeNull();
+    // All the days before at none, as today, under a band from last year: said once.
+    expect(recentSpan([...recent.map(() => day(0, 0, 0)), day(0, 0.0006, 0.0007)], axisShare)).toBe('14 days before: 0%, as today');
   });
 });
 

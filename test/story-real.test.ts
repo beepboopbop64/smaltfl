@@ -12,7 +12,7 @@ import { donorChoices, fillCounts, missingOf, offersOf } from '../src/core/fill.
 import { dayClaim, type HistoryRef } from '../src/core/hold.js';
 import { exampleFilled } from './helpers/example.js';
 import { meaningOf, propertyOf } from '../src/core/ontology.js';
-import { CELL_KINDS, countRange, fallParts, fallSteps, gateHead, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, splitSteps, storyOf, wordsIn } from '../src/core/story.js';
+import { CELL_KINDS, countRange, fallParts, fallSteps, gateHead, gateLabels, glanceStrings, partLabel, ruleOrder, ruleUsual, splitSentence, splitSteps, storyOf, wordsIn, type HourValues } from '../src/core/story.js';
 
 const HISTORY = new URL('../dist/app/data/history.json', import.meta.url);
 const has = existsSync(HISTORY) && (JSON.parse(readFileSync(HISTORY, 'utf8')) as HistoryFile).days.length > 400;
@@ -33,7 +33,9 @@ describe.skipIf(!has)('the story on the real history', () => {
   const h = file ? new HistoryRanges(file) : null;
   const story = (day: string) => storyOf(h!, day, newsOf(h!, day, names), { names, step: 'trips_valid', limit: 0.1 });
 
-  it('tells Thu Sep 21, 2023 as the hour the trips fall, to the trickle that still came', () => {
+  it('tells Thu Sep 21, 2023 from the history alone as the hour the trips fall, to the trickle that still came', () => {
+    // Without the load's own rows by hour and value (a day not run here, and the claim its run is judged by): the
+    // history's hours alone, which can't say which trips kept coming. With them, below, the head names Flex Fare.
     const s = story('2023-09-21');
     // The head says the trips fell to a trickle, so the fall can't read as the file cut off: ~330 an hour still came,
     // 3,679 of a usual ~80k, which the chart's zoom says.
@@ -42,9 +44,48 @@ describe.skipIf(!has)('the story on the real history', () => {
     // The trips go on after the fall (~330 an hour), the missing trips are counted, and the day's own change is on
     // the amount line, named as the whole day's so it can't fight the head; the morning ran close to usual (no label).
     // The detail's sentence says the others fell from 13:00, never that they almost stopped.
-    expect(s.hoursLabels).toEqual({ cut: '13:00', floor: 'still ~330/h', missing: '~77k fewer', ghost: 'usual Thursday', before: null });
+    expect(s.hoursLabels).toEqual({ cut: '13:00', floor: 'still ~330/h', missing: '~77k fewer', ghost: 'usual Thursday', before: null, kept: null, rest: null });
     expect(s.labels.amount).toEqual(['41,939 trips', 'whole day −65%', 'usual 89k–160k']);
     expect(splitSentence(s)).toBe('Flex Fare as usual (4,657; usual 2.8k–5.4k); everything else fell from 13:00 (37,282; usual ~115k).');
+  });
+
+  // The two hour-fall days' Flex Fare trips (payment type 0) by pickup hour, counted from their day files (the loads
+  // the app runs; scratch hourfall/truth.md): every other payment stopped by 13:06 on Thu Sep 21, 2023 (633 that hour,
+  // 37 in the rest of the day), and at 15:00 on Sat Sep 17, 2022 (none after), while Flex Fare kept arriving.
+  const FLEX: Record<string, number[]> = {
+    '2023-09-21': [96, 36, 25, 16, 44, 72, 155, 333, 351, 203, 121, 81, 115, 109, 150, 206, 242, 313, 313, 272, 275, 390, 392, 347],
+    '2022-09-17': [321, 311, 256, 183, 83, 42, 54, 55, 90, 119, 140, 189, 235, 218, 189, 180, 196, 261, 286, 335, 315, 228, 250, 342],
+  };
+  // The load's rows by hour and payment type, as the app counts them from the day's own rows (every other payment
+  // together under one value: only the totals and Flex Fare's matter here).
+  const byHour = (day: string): HourValues => {
+    const got = file!.hours![file!.days.indexOf(day)]!;
+    return { column: 'payment_type', values: { '0': FLEX[day]!, '1': got.map((n, i) => n - FLEX[day]![i]!) } };
+  };
+  const told = (day: string) => storyOf(h!, day, newsOf(h!, day, names), { names, step: 'trips_valid', limit: 0.1, byHour: byHour(day) });
+
+  it('heads an hour fall by the part that kept arriving when the load’s rows say everything else stopped (Sep 21, 2023; Sep 17, 2022)', () => {
+    // The day files' hours are the history's, hour by hour: the counts add up.
+    for (const d of Object.keys(FLEX)) expect(byHour(d).values['0']!.map((n, i) => n + byHour(d).values['1']![i]!)).toEqual(file!.hours![file!.days.indexOf(d)]);
+    const thu = told('2023-09-21');
+    expect(thu.head).toBe('Only Flex Fare after 13:00');
+    expect(thu.kept).toMatchObject({ column: 'payment_type', value: '0', name: 'Flex Fare' });
+    expect(thu.kept!.rest.slice(13)).toEqual([633, 0, 0, 2, 2, 4, 7, 8, 3, 7, 4]);
+    expect(thu.hoursLabels).toEqual({ cut: '13:00', floor: 'still ~330/h', missing: '~77k fewer', ghost: 'usual Thursday', before: null, kept: 'Flex Fare', rest: 'everything else' });
+    expect(splitSentence(thu)).toBe('Flex Fare kept arriving (4,657; usual 2.8k–5.4k); everything else stopped after 13:00 (37,282; usual ~115k).');
+    const sat = told('2022-09-17');
+    expect(sat.head).toBe('Only Flex Fare after 15:00');
+    expect(sat.kept!.rest.slice(15).every((n) => n === 0)).toBe(true);
+    expect(sat.hoursLabels).toMatchObject({ cut: '15:00', missing: '~52k fewer', before: '~8.3k above usual', kept: 'Flex Fare', rest: 'everything else' });
+    // Within the budgets, at a glance and paused, and every number the chart prints is its own (story.ts hoursLabels).
+    for (const s of [thu, sat]) {
+      expect([...glanceStrings(s), reachLabel(s, 3)].reduce((t, x) => t + wordsIn(x), 0), s.day).toBeLessThanOrEqual(60);
+      expect([...glanceStrings(s).filter((x) => x !== s.labels.primary), 'Decide', reachLabel(s, 3, 'waiting')].reduce((t, x) => t + wordsIn(x), 0), s.day).toBeLessThanOrEqual(60);
+      expect(s.labels.hero.join(' ')).not.toMatch(/still|trickle/);
+    }
+    // The history alone (a day not run here, the claim a run is judged by) tells it as before.
+    expect(story('2023-09-21').head).toBe('Trips fall to trickle from 13:00');
+    expect(story('2023-09-21').kept).toBeNull();
   });
 
   it('names each figure of an hour-fall day by its window, and the detail’s waterfall says the same (Sat Sep 17, 2022)', () => {

@@ -398,6 +398,15 @@ export function emitDayHours(sql: string, time: string, day: string, columns: re
   return `SELECT CAST(strftime('%H', ${t}) AS INTEGER) AS "hour", ${avg} FROM (\n${sql}\n) WHERE date(${t}) = '${day.replace(/'/g, "''")}' GROUP BY 1 ORDER BY 1`;
 }
 
+/**
+ * A relation's rows counted by the hour its time column says and by one column's value: each hour's stamp ("2023-09-21
+ * 13:00:00"), the value, and its rows. The page reads each stamp's hour as a load's measures read a row's (measures.ts
+ * hourOf, in the source's zone), so the counts add up to the hours its history counts (story.ts HourValues, keptOf).
+ */
+export function emitHourValues(sql: string, time: string, column: string): string {
+  return `SELECT strftime('%Y-%m-%d %H:00:00', ${q(time)}) AS "hour", ${q(column)} AS "value", count(*) AS "rows" FROM (\n${sql}\n) GROUP BY 1, 2`;
+}
+
 /** Up to `limit` distinct values of one column of a relation. */
 export function emitDistinct(sql: string, column: string, limit: number): string {
   return `SELECT DISTINCT ${q(column)} FROM (\n${sql}\n) LIMIT ${Math.max(1, Math.floor(limit))}`;

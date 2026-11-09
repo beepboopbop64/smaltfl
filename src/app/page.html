@@ -864,6 +864,10 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 /* A usual count's end and a range's ends are soft (thin, the band's own edge); only a real limit is a heavy tick. */
 .viz .usual-end { stroke: var(--edge); stroke-width: 1.2; }
 .viz .band-end { stroke: var(--edge); stroke-width: 1; fill: none; }
+/* The part that kept arriving after an hour fall: its band along the baseline, keyed under the hours (ADR 0008 §6). */
+/* An episode chip's viewed day: its trips missing, filled (round 3, #23); earlier days are .absent, days not run .notrun. */
+.viz .ep-at { fill: var(--bad); stroke: var(--bad); stroke-width: 1; }
+.viz .kept { fill: var(--teal-fill); } .viz .kept-over { fill: color-mix(in srgb, var(--teal-fill) 52%, var(--surface)); }
 .viz .wx-bar.snow { fill: var(--teal-fill); } .viz .wx-bar.rain { fill: var(--smalt); opacity: 0.55; }
 .viz .joint { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; }
 .viz .brk { fill: none; stroke: var(--muted); stroke-width: 1.2; }
@@ -1102,6 +1106,9 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .vf-paused .vf-chev { align-self: center; }
 .vf-paused-t { display: grid; gap: 3px; min-width: 0; }
 .vf-paused-t b { font-weight: 600; color: var(--ink); font-size: 14px; }
+/* Each reason that paused the day with its mark: the source by the day's, its checks by ‖ (round 3, #16). */
+.vf-paused-t .vf-why { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.vf-paused-t .vf-why .g { flex: none; }
 .vf-see-line { font-size: 13.5px; color: var(--ink-2); }
 .vf-outs-named { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; }
 .o-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 12px; color: var(--ink); }

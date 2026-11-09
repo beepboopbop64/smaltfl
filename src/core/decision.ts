@@ -635,15 +635,14 @@ export function pauseWords(l: PauseRow): number {
 }
 
 /**
- * The checks on a paused card (ADR 0009 §12). Checks that held the day too are drawn in full, headed by their ‖ alone
- * while the day waits (the pause row has named them among what paused it), and once it is decided by words, "Checks
- * held" (`head`), so no ‖ is left under a day marked ✕ or ⚑. Checks that passed, near their limit or not, are one line
- * a tap from their sheet, "Checks passed: 9.55% dropped": not a second problem under a paused card, nor a contradiction
- * of it.
+ * The checks on a paused card (ADR 0009 §12). Checks that held the day too are drawn in full, headed "Checks held"
+ * (`head`) every day they hold, waiting or decided: a ‖ alone under the health row went unread, and the day's two
+ * problems read as one (round 3, #16). Checks that passed, near their limit or not, are one line a tap from their
+ * sheet, "Checks passed: 9.55% dropped": not a second problem under a paused card, nor a contradiction of it.
  */
-export function pausedChecks(g: Pick<Gate, 'held' | 'near' | 'share' | 'limit' | 'step' | 'dropped' | 'rows' | 'usual'> | null, decided = false): { full: boolean; line: string | null; head: string | null } {
+export function pausedChecks(g: Pick<Gate, 'held' | 'near' | 'share' | 'limit' | 'step' | 'dropped' | 'rows' | 'usual'> | null, _decided = false): { full: boolean; line: string | null; head: string | null } {
   if (!g) return { full: false, line: null, head: null };
-  if (g.held) return { full: true, line: null, head: decided ? 'Checks held' : null };
+  if (g.held) return { full: true, line: null, head: 'Checks held' };
   return { full: false, line: `Checks passed: ${gateLabels(g as Gate).said} dropped`, head: null };
 }
 

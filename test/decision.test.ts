@@ -265,8 +265,9 @@ describe('the cause card’s pause row, the day after an episode, and the record
     // Thu Sep 21, 2023: near its limit and under it, so fine: one line, its share as its bars say it.
     expect(pausedChecks(g)).toEqual({ full: false, line: 'Checks passed: 9.55% dropped', head: null });
     expect(pausedChecks({ ...g, share: 0.06, near: false })).toEqual({ full: false, line: 'Checks passed: 6.0% dropped', head: null });
-    expect(pausedChecks({ ...g, held: true, near: false, share: 0.4567 })).toEqual({ full: true, line: null, head: null });
-    // Once the day is decided (✕ or ⚑ on its header and tab), the held checks are headed in words, never a lone ‖.
+    // Held checks are headed in words every day they hold, waiting or decided: a lone ‖ under the health row went unread,
+    // and the day's two problems read as one (round 3, #16).
+    expect(pausedChecks({ ...g, held: true, near: false, share: 0.4567 })).toEqual({ full: true, line: null, head: 'Checks held' });
     expect(pausedChecks({ ...g, held: true, near: false, share: 0.4567 }, true)).toEqual({ full: true, line: null, head: 'Checks held' });
     expect(pausedChecks(g, true).head).toBeNull();
     expect(pausedChecks(null)).toEqual({ full: false, line: null, head: null });

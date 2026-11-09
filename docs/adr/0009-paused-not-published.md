@@ -263,8 +263,8 @@ published. Cached check counts must still hold. And older builds must refuse wha
       weather_effect"); its one verb is **Decide**, under it, before the health cells and the checks, so they are on the
       first screen; "Tell the source" moves behind ⋯. Someone who may not decide sees who does in the verb's place
       ("Owner decides"). The day's mark sits by its date and on its News tab too. On a paused card the checks are drawn
-      in full only when they held the day too, under their ‖ (the row has named them), headed "Checks held" once the day
-      is decided; checks that passed, near their
+      in full only when they held the day too, under their ‖ (the row has named them), headed "Checks held" every day
+      they hold, waiting too (ADR 0008 amendment 1); checks that passed, near their
       limit or not, are one line, "Checks passed: 9.55% dropped", a tap from their sheet, never a second problem nor a
       contradiction of the pause. For the budget, a paused card leaves out the health cells' head (as does the day after
       an episode while a day of it waits) and the kinds under its rows of changes, and readers' day goes without its age there (the day line, the staged bar and the list carry it).
