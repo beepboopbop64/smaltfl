@@ -35,11 +35,7 @@
     }
   ],
   "notebooks": [
-    "clean.nb.ts",
-    "places.nb.ts",
-    "enrich.nb.ts",
-    "demand.nb.ts",
-    "weather.nb.ts"
+    "taxis.nb.ts"
   ],
   "ontology": {
     "objectTypes": [

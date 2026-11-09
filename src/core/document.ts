@@ -176,6 +176,30 @@ export interface FlowDocument {
    * and a step's sheet can show the cell. Not part of any hash.
    */
   cells?: Record<string, CellRef>;
+  /** Display only, in a format-4 document: each notebook's cells in order, as the notebook view reads them. */
+  outline?: NotebookOutline[];
+}
+
+/** A notebook's cells in order, for the notebook view: what each is, and the step, source or section it makes. */
+export interface NotebookOutline {
+  path: string;
+  cells: OutlineCell[];
+}
+
+export interface OutlineCell {
+  cell: string;
+  /** heading: an md cell that opens a section; md: prose about the step after it; source: a source binding; step: a
+   * step; params: the notebook's parameters; publish: what the notebook publishes; other: a cell the flow leaves out. */
+  kind: 'heading' | 'md' | 'source' | 'step' | 'params' | 'publish' | 'other';
+  lang: 'ts' | 'sql' | 'df' | 'md';
+  line: number;
+  endLine: number;
+  /** The section a heading opens, or the step or source a cell makes, or the steps a publish cell names. */
+  heading?: string;
+  text?: string;
+  step?: string;
+  source?: string;
+  publishes?: string[];
 }
 
 /** Where a step is written: its notebook, its cell, the cell's language and its lines (1-based, inclusive). */
@@ -465,6 +489,7 @@ export function validateDocument(doc: unknown): Issue[] {
     if (!isRecord(doc.cells)) add('$.cells', 'an object: each step\'s notebook cell');
     else for (const [k, v] of Object.entries(doc.cells)) if (!isRecord(v) || typeof v.notebook !== 'string' || typeof v.cell !== 'string' || typeof v.line !== 'number') add(`$.cells.${k}`, '{ notebook, cell, lang, line, endLine }');
   }
+  if (doc.outline !== undefined && !Array.isArray(doc.outline)) add('$.outline', "an array: each notebook's cells in order");
   if (doc.layout !== undefined) {
     if (!isRecord(doc.layout)) add('$.layout', 'an object');
     // Keys are card ids, or `group:<id>` for where an empty section sits; a key nothing uses is ignored.
@@ -970,8 +995,8 @@ export function sourceOf(doc: Pick<FlowDocument, 'steps'>, id: string): string |
   return undefined;
 }
 
-/** The document without display-only fields (its layout, groups, profiles and cells): what the flow hash covers. */
-export function withoutDisplay(doc: FlowDocument): Omit<FlowDocument, 'layout' | 'groups' | 'profiles' | 'cells'> {
-  const { layout: _layout, groups: _groups, profiles: _profiles, cells: _cells, ...rest } = doc;
+/** The document without display-only fields (its layout, groups, profiles, cells and outline): what the flow hash covers. */
+export function withoutDisplay(doc: FlowDocument): Omit<FlowDocument, 'layout' | 'groups' | 'profiles' | 'cells' | 'outline'> {
+  const { layout: _layout, groups: _groups, profiles: _profiles, cells: _cells, outline: _outline, ...rest } = doc;
   return rest;
 }

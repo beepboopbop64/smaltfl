@@ -17,6 +17,7 @@ const calendarNow = (): Calendar => history?.calendar ?? US_NYC_1;
 import { canonicalJSON } from '../core/canonical.js';
 import type { FlowDocument, GroupDef, ProfileDef, StepDef } from '../core/document.js';
 import { GROUP_COLORS, insertAfter, periodOf, sourceOf, takeOut, validateDocument, watchHistory, withoutDisplay, type CellRef } from '../core/document.js';
+import { notebookName } from '../core/notebook.js';
 import { createTable, emitCheckCounts, emitColumnFacts, emitCopy, emitDayHours, emitDistinct, emitHourValues, emitDrop, emitDropped, emitExcept, emitFailures, emitLookup, emitRead, emitRuleFailures, emitSample, emitSqlOver, emitUnionAll, emitUnmatched, sameColumns, stampShift, type EmitContext } from '../core/emit.js';
 import { effectOf, type Effect } from '../core/effect.js';
 import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, timeOf, type HistoryFile, type Metric } from '../core/history.js';
@@ -1550,9 +1551,141 @@ function syncCanvasKey(): void {
   tools.prepend(h('p', { class: 'canvas-key' }, svgNode('<svg class="seal-key" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3"/><path d="M5.2 8l2 2.2 3.6-4"/></svg>'), 'file matches its list'));
 }
 
+// ------------------------------------------------------------------ the notebook view (ADR 0011 §6)
+
+/** Whether the flow is read as its notebooks (the default where it has them) or drawn on the canvas. */
+function notebookView(): boolean {
+  if (!state.doc.outline?.length) return false;
+  try {
+    const saved = localStorage.getItem('smaltfl:flow-view');
+    return saved === null ? true : saved === 'notebook';
+  } catch {
+    return true;
+  }
+}
+
+function setFlowView(view: 'notebook' | 'canvas'): void {
+  try {
+    localStorage.setItem('smaltfl:flow-view', view);
+  } catch {
+    // Storage unavailable: the choice holds for this page.
+  }
+  renderCanvas();
+}
+
+/**
+ * The flow as its notebooks, top to bottom (ADR 0011 §6): each heading a stage, each md cell its words, each source
+ * and step a card that opens its sheet, with the rows that flow out of it once it has run, each step's code a tap
+ * away, and what the notebook publishes. What the canvas shows across, read down the page: on a phone the default.
+ */
+function renderNotebook(): void {
+  const host = $('notebook');
+  const outline = state.doc.outline ?? [];
+  const groups = state.doc.groups ?? [];
+  const run = latest();
+  const rowsOf = (id: string): number | undefined => nodeOf(id)?.rows;
+  const nb = (id: string) => state.doc.notebooks?.find((n) => n.path === id);
+  const code = (path: string, line: number, endLine: number): string => {
+    const lines = (nb(path)?.source ?? '').split('\n').slice(line - 1, endLine);
+    while (lines.length && lines[lines.length - 1]!.trim() === '') lines.pop();
+    const indent = Math.min(...lines.filter((l) => l.trim()).map((l) => /^\s*/.exec(l)![0].length));
+    return lines.map((l) => l.slice(Number.isFinite(indent) ? indent : 0)).join('\n');
+  };
+  const sectionOfStep = (id: string) => groups.find((g) => g.steps.includes(id));
+  const card = (id: string, kind: 'source' | 'step'): HTMLElement => {
+    if (!visible(id)) return h('p', { class: 'nb-md' }, `${id}: closed to ${personName(state.viewer)}.`);
+    const st = steps().get(id);
+    const n = nodeOf(id);
+    const line = cardLine(id);
+    const rows = rowsOf(id);
+    const classes = ['nb-card', kind, st?.dataset ? 'dataset' : '', n?.status === 'built' ? 'built' : '', state.failed?.origin === id ? 'failed' : '', state.selected === id ? 'selected' : ''].filter(Boolean).join(' ');
+    const status = n ? (n.status === 'folded' ? 'folded' : n.status) : run ? 'not run' : '';
+    return h('button', { type: 'button', class: classes, 'data-nb-card': id, onclick: () => select(id), 'aria-label': `${id}: open its sheet` },
+      h('span', { class: 'eyebrow' }, kindLabel(id)),
+      h('span', { class: 'nb-name' }, id),
+      h('span', { class: `nb-line ${line.tone === 'drop' ? 'drop' : ''}` }, line.mark ? glyphEl(PAUSE_MARK[line.mark], 13) : '', line.text),
+      h('span', { class: 'nb-side' }, rows !== undefined ? h('span', { class: 'nb-rows' }, `${fmtInt(rows)} rows`) : '', status ? h('span', { class: 'nb-status' }, status) : ''));
+  };
+  /** The rows that flow from a card to the next: the rows its version holds, or what its checks let through. */
+  const flowOut = (id: string): string | null => {
+    const n = nodeOf(id);
+    if (!n) return null;
+    if (n.expectations) return `${fmtInt(n.expectations.rows - n.expectations.dropped)} rows on`;
+    if (n.rows !== undefined) return `${fmtInt(n.rows)} rows on`;
+    return n.status === 'folded' ? 'folded into the next step' : null;
+  };
+  const checks = (id: string): HTMLElement | null => {
+    const e = nodeOf(id)?.expectations;
+    const st = steps().get(id);
+    if (!e || st?.kind !== 'expectations') return null;
+    return h('div', { class: 'nb-check', role: 'list', 'aria-label': 'The checks and what they caught' },
+      ...e.rules.flatMap((r) => [h('span', { class: 'k' }, r.name), h('span', {}, st.rules.find((x) => x.name === r.name)?.onFail === 'drop' ? 'drops' : 'warns'), h('span', { class: `n ${r.failed && r.onFail === 'drop' ? 'drop' : ''}` }, r.failed ? `${fmtInt(r.failed)} rows` : 'none')]),
+      h('span', { class: 'k' }, 'in'), h('span', {}, ''), h('span', { class: 'n' }, `${fmtInt(e.rows)} rows`),
+      h('span', { class: 'k' }, 'dropped'), h('span', {}, ''), h('span', { class: `n ${e.dropped ? 'drop' : ''}` }, `${fmtInt(e.dropped)} rows`));
+  };
+  const parts: HTMLElement[] = [];
+  for (const o of outline) {
+    if (outline.length > 1) parts.push(h('div', { class: 'nb-file' }, h('span', { class: 'eyebrow' }, 'Notebook'), h('code', {}, o.path)));
+    let stage: HTMLElement | null = null;
+    let lastCard: string | null = null;
+    const open = (name: string, body?: string, color?: string) => {
+      stage = h('div', { class: `nb-stage c-${color ?? 'slate'}` }, h('h3', {}, name), body ? h('p', { class: 'nb-lede' }, body) : '');
+      parts.push(stage);
+      lastCard = null;
+    };
+    const put = (el: HTMLElement) => {
+      if (!stage) open(notebookName(o.path), undefined, groups[0]?.color);
+      stage!.append(el);
+    };
+    const between = (id: string) => {
+      if (lastCard && stage) {
+        const said = flowOut(lastCard);
+        if (said) stage.append(h('div', { class: 'nb-flow', 'aria-hidden': 'true' }, h('span', { class: 'arrow' }, '↓'), said));
+      }
+      lastCard = id;
+    };
+    for (const c of o.cells) {
+      if (c.kind === 'heading') {
+        const g = groups.find((x) => x.name === c.heading);
+        open(c.heading ?? '', c.text, g?.color);
+      } else if (c.kind === 'md') put(h('p', { class: 'nb-md' }, c.text ?? ''));
+      else if (c.kind === 'params') {
+        const values = run?.result.manifest.parameters ?? Object.fromEntries((state.doc.parameters ?? []).map((p) => [p.name, p.default ?? null]));
+        put(h('p', { class: 'nb-params' }, `Parameters · ${Object.entries(values).map(([k, v]) => `${k} = ${v === null || v === undefined ? '—' : String(v)}`).join(' · ')}`));
+      } else if (c.kind === 'source' && c.source) {
+        between(c.source);
+        put(card(c.source, 'source'));
+      } else if (c.kind === 'step' && c.step) {
+        between(c.step);
+        const st = steps().get(c.step);
+        const text = code(o.path, c.line, c.endLine);
+        const lines = text.split('\n').length;
+        put(h('div', { class: 'nb-step' }, card(c.step, 'step'), checks(c.step) ?? '',
+          h('details', { ...(st?.kind === 'sql' ? { open: 'open' } : {}) }, h('summary', {}, `${c.lang === 'sql' ? 'SQL' : st?.kind === 'expectations' ? 'The rules' : 'The cell'} · ${plural(lines, 'line')}`), h('pre', { class: 'cell-code' }, h('code', {}, text)))));
+      } else if (c.kind === 'publish' && c.publishes) {
+        put(h('p', { class: 'nb-pub' }, 'Publishes ', ...c.publishes.flatMap((n, i) => [i ? ', ' : '', h('b', {}, n)])));
+      }
+    }
+    void sectionOfStep;
+  }
+  host.replaceChildren(...parts);
+}
+
 function renderCanvas(): void {
   // Mid-drag, wait: the drop draws everything once it lands.
   if (moving) return;
+  // The notebook view, where the flow has notebooks: the canvas waits behind the switch (ADR 0011 §6).
+  const hasNotebooks = !!state.doc.outline?.length;
+  const asNotebook = notebookView();
+  $('view-switch').hidden = !hasNotebooks;
+  $('notebook').hidden = !asNotebook;
+  $('canvas').hidden = asNotebook;
+  $('switch-notebook').setAttribute('aria-pressed', String(asNotebook));
+  $('switch-canvas').setAttribute('aria-pressed', String(!asNotebook));
+  if (asNotebook) {
+    renderNotebook();
+    return;
+  }
   let sealed = false;
   const host = $('canvas');
   const svg = host.querySelector('svg') ?? setUpCanvas(host);
@@ -9566,6 +9699,8 @@ async function start(): Promise<void> {
   picker.value = state.viewer;
   picker.addEventListener('change', () => setViewer(picker.value));
   window.addEventListener('hashchange', showView);
+  $('switch-notebook').addEventListener('click', () => setFlowView('notebook'));
+  $('switch-canvas').addEventListener('click', () => setFlowView('canvas'));
   let resize = 0;
   window.addEventListener('resize', () => {
     cancelAnimationFrame(resize);

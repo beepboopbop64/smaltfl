@@ -64,9 +64,9 @@ describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
       { id: 'nb-checks', name: 'Checks', steps: ['auth', 'auth_valid'], color: 'smalt' },
       { id: 'nb-counts', name: 'Counts', steps: ['signins_by_hour', 'failures_by_country'], color: 'teal' },
     ]);
-    expect(await flowHash(doc)).toBe(await flowHash({ ...doc, cells: undefined, groups: undefined }));
+    expect(await flowHash(doc)).toBe(await flowHash({ ...doc, cells: undefined, groups: undefined, outline: undefined }));
     // Everything but the format is the JSON example's: the steps too, where the JSON's visual steps are SQL here.
-    const { notebooks: _n, smaltfl: _f, cells: _c, groups: _g, ...rest } = doc;
+    const { notebooks: _n, smaltfl: _f, cells: _c, groups: _g, outline: _o, ...rest } = doc;
     const { smaltfl: _jf, ...jrest } = json;
     expect({ ...rest, steps: rest.steps.map((s) => (s.kind === 'sql' ? { ...s, sql: '' } : s)) }).toEqual({ ...jrest, steps: jrest.steps.map((s) => (s.kind === 'aggregate' ? { kind: 'sql', id: s.id, inputs: s.inputs, sql: '', description: s.description, dataset: s.dataset } : s)) });
   });

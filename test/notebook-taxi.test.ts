@@ -1,5 +1,6 @@
 /**
- * The taxi example as notebooks (ADR 0011 slice 3, examples/nyc-taxis-weather/): five notebooks, one a stage, giving
+ * The taxi example as a notebook (ADR 0011 slice 3, examples/nyc-taxis-weather/): one notebook whose headings open the
+ * stages, giving
  * the JSON example's fill and expect nodes, its outputs and its publish block, and the same rows on the XS fixtures.
  * The hold and donor vectors (test/hold-real.test.ts, test/fill-real.test.ts) read the history, not the steps, and
  * run on the JSON example: this file shows the two forms compute the same thing.
@@ -49,13 +50,19 @@ describe('the taxi example as notebooks (ADR 0011 §1, §5)', () => {
     expect(plan.publish).toEqual(other.publish);
     // Everything but the steps and the format is the JSON example's; the steps share their ids, descriptions and
     // datasets, in the JSON's order.
-    const { steps, notebooks: _n, smaltfl: _f, cells: _c, groups, ...rest } = doc;
+    const { steps, notebooks: _n, smaltfl: _f, cells: _c, outline: _o, groups, ...rest } = doc;
     const { steps: jsteps, smaltfl: _jf, groups: jgroups, ...jrest } = json;
     expect(rest).toEqual(jrest);
-    // The sections the JSON drew by hand are the notebooks here, one each, with the same members.
+    // The sections the JSON drew by hand are the notebook's headings here, with the same members.
     const sections = (gs: NonNullable<FlowDocument['groups']>) => gs.map((g) => [...g.steps].sort());
     expect(groups!.map((g) => g.name)).toEqual(['Clean', 'Places', 'Enrich', 'Demand', 'Weather']);
     expect(sections(groups!)).toEqual(sections(jgroups!));
+    // The outline reads the notebook top to bottom: headings, prose, sources, steps and what is published.
+    expect(doc.outline!.map((o) => o.path)).toEqual(['taxis.nb.ts']);
+    const kinds = doc.outline![0]!.cells.map((c) => c.kind);
+    expect(kinds.slice(0, 6)).toEqual(['params', 'heading', 'source', 'md', 'step', 'md']);
+    expect(doc.outline![0]!.cells.filter((c) => c.kind === 'heading').map((c) => c.heading)).toEqual(['Clean', 'Places', 'Enrich', 'Demand', 'Weather']);
+    expect(doc.outline![0]!.cells.at(-1)).toMatchObject({ kind: 'publish', publishes: ['zone_hour', 'borough_hour', 'zone_list', 'districts', 'weather_hourly', 'weather_effect'] });
     const facts = (xs: FlowDocument['steps']) => [...xs].sort((a, b) => a.id.localeCompare(b.id)).map((s) => [s.id, s.description, s.dataset]);
     expect(facts(steps)).toEqual(facts(jsteps));
   });

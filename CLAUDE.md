@@ -82,8 +82,9 @@ match smaltdb's `CLAUDE.md`.
   imports (`source`, `check`, `fill`); its plan is plan/3 (E14, `test/notebook.test.ts`). A flow is a folder:
   `examples/security-signins/` and `examples/nyc-taxis-weather/` (`flow.json` and `*.nb.ts`, typechecked with the
   repository; `test/notebook-taxi.test.ts` holds them to the JSON forms, which the real-history tests still read).
-  `scripts/flow.ts` reads either form from disk for the app build and the history builder. The app shows a step's
-  cell (`cells`, `groups`, display fields `expandNotebooks` fills). `packed.json` pins smaltnb and smaltkit beside
+  `scripts/flow.ts` reads either form from disk for the app build and the history builder. The app's Flow view opens
+  on the notebook view, the flow read top to bottom (`renderNotebook`; a `# heading` md cell opens a stage), the
+  canvas a switch away; `cells`, `groups` and `outline` are the display fields `expandNotebooks` fills for it. `packed.json` pins smaltnb and smaltkit beside
   smaltdb.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
