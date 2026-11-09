@@ -11,7 +11,7 @@ answers and what is still open).
 | The code | `beepboopbop64/smaltfl`, branch `claude/elegant-knuth-r8364a` (the repository's default branch), all pushed. No PR is open. |
 | stenhoor's initial commit | merged in (remote `stenhoor/main`); the move to `stenhoor/smaltfl` (ADR 0007) was blocked by GitHub access, see "Moving the repository" |
 | The data | the `data` branch: tip `0ca4dd1` (history format `smaltfl-history/3`, 31 days of January 2024, three incident episodes, 11 donor days), on top of `6e387dd`; built by `.github/workflows/data.yml` |
-| The app, published | a private claude.ai artifact (version 22, built from `6be5755`): it doesn't have the last three commits (round 3 below). The notebook form (ADR 0011, slice 4) is published separately: https://claude.ai/artifact/3xkiHJnRGK4viZkT4y5k6u, built from the fork's `claude/gallant-mendel-uckiwr` on the data branch's loads; the sign-ins with the demo's three days (ADR 0012) as a second artifact, built with `--flow examples/security-signins/flow.json --out dist/app-signins` |
+| The app, published | a private claude.ai artifact (version 22, built from `6be5755`): it doesn't have the last three commits (round 3 below). The notebook form (ADR 0011, slice 4) is published separately: https://claude.ai/artifact/3xkiHJnRGK4viZkT4y5k6u, built from the fork's `claude/gallant-mendel-uckiwr` on the data branch's loads; the sign-ins with the demo's three days (ADR 0012) as a second artifact (https://claude.ai/artifact/YNfh3yNapW9pv4HCtoWdCu), built with `--flow examples/security-signins/flow.json --out dist/app-signins`; the controls posture (ADR 0013) as a third, https://claude.ai/artifact/EaLvZcxsnu5ZNP5kNNCahH, built with `--flow examples/controls/flow.json --out dist/app-controls` |
 | Browser checks and judging tools | [tools/](../tools/README.md) (added for this handoff; they lived in a session scratch folder before) |
 
 ## What is built
@@ -41,6 +41,12 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   - Accept the new level.
 
   The taxi example is format 3 with 25 held days (Q-54).
+- **Checks nobody wrote** (ADR 0013, 2026-11-09): a history keeps each pair's cells day by day; the combination
+  judge (a pair's log odds ratio against its own history, one finding a pair) and the forest judge (the day against
+  the days before, by the isolation forest); a watch on a published step, its claim told in the engine; the history
+  builder's step mode; the app on several daily sources, following the dataset the list names; the controls example
+  (six controls over 400 applications, five planted days) through the engine (`test/controls.test.ts`) and in the
+  app. What the planted days read as is ADR 0013 §6's table. Open: Q-104 to Q-109.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.
@@ -51,7 +57,7 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
 ```sh
 npm ci && npm run deps                      # then the smaltdb build pinned in packed.json
 git fetch origin data --depth 1             # the real data; without it the app builds on the XS fixtures
-npm run check                               # typecheck + 773 tests (1 skipped)
+npm run check                               # typecheck + 813 tests (1 skipped)
 npm run build                               # declarations; NOTE: wipes dist/, so build the app again after it
 npm run build:app                           # dist/app from the data branch; the bundles are named by content (app.<hash>.js), so a
                                             # browser never serves a stale build under the old name (bundles.json says which)
@@ -104,6 +110,13 @@ Parked behind the notebook surface by the maintainer's decision of 2026-11-09 (Q
 3. **Re-test.**
    - **What:** after the fixes, run a judge round (round 4) with the corrected answer key (see "How the views were
      tested"). It never ran on the last three commits.
+   - **The controls example** (ADR 0013) hasn't had a two-minute round: its five planted days
+     (`tools/judges/two-minute.md`, with the controls app) are the next answer key. Known rough edges to judge: the
+     posture cell's amount line (400 apps against 400–400, a 10k scale) says nothing and should give way; the canvas
+     places the inventory above the controls and the notebook boxes off screen on a phone (Fit brings them in); a
+     control's News on a held day shows the engine's verdict over "Nothing out of the ordinary" from its own rows.
+   - **The sign-ins' pair.** Its shipped history predates the pair counts: rebuild the sign-ins app and check that
+     Wed Mar 20, 2024 now names "result locked with method api_key" (ADR 0012's open point).
    - **Hour-fall days:** check them with fresh five-second readers. The new head ("Only Flex Fare after 13:00") and the
      parts chart replaced the trickle chart, and haven't been judged yet.
 4. **Not built, by decision or left for later** (each recorded in its ADR):

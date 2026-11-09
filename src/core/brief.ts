@@ -38,9 +38,10 @@ export interface BriefIn {
   /** The source's noun: `noun(1)` "trip", `noun(2)` "trips". */
   noun: (n: number) => string;
   story: Pick<Story, 'state' | 'severity' | 'head' | 'amount' | 'split' | 'hours' | 'hoursLabels' | 'gate' | 'episode' | 'cause' | 'context'> | null;
-  /** The day under the flow that holds: its state, the day readers see meanwhile, who decides. Null for a flow that
-   * doesn't hold, or a day that wasn't held. */
-  pause: { state: DayState; readers: string | null; deciders: string; may: boolean; who?: string | null; remedy?: string | null; level?: string | null } | null;
+  /** The day under the flow that holds: its state, the day readers see meanwhile, who decides; and `by`, what held it
+   * when that isn't this story (ADR 0013 §5: another watched load's verdict, "backup: status fail with restore_tested
+   * yes: 55"). Null for a flow that doesn't hold, or a day that wasn't held. */
+  pause: { state: DayState; readers: string | null; deciders: string; may: boolean; who?: string | null; remedy?: string | null; level?: string | null; by?: string | null } | null;
   outputs: BriefOutput[];
   /** The ontology's object types built on the outputs that wait or changed. */
   objects: string[];
@@ -81,7 +82,7 @@ const BANNED = /\b(because|caused by|disappeared|feed stopped|null|unknown)\b/i;
 export function briefOf(o: BriefIn): Brief {
   const s = o.story;
   const status = statusOf(o);
-  const title = s?.head ?? (o.pause ? 'Paused' : 'Published');
+  const title = (s?.severity === 'alert' ? s.head : null) ?? o.pause?.by ?? s?.head ?? (o.pause ? 'Paused' : 'Published');
   const generated = situationOf(o);
   const situation = o.edited?.trim() ? o.edited.trim() : generated;
   const impact = impactOf(o);
@@ -113,7 +114,9 @@ export function statusOf(o: Pick<BriefIn, 'pause' | 'story'>): BriefStatus {
 export function situationOf(o: Pick<BriefIn, 'day' | 'story' | 'pause' | 'outputs' | 'noun'>): string {
   const s = o.story;
   const parts: string[] = [];
-  if (s?.head) parts.push(s.head.replace(/^./, (c) => c.toLowerCase()));
+  // Another watched load held the day (ADR 0013 §5): what it said leads, this dataset's own head after it when loud.
+  if (o.pause?.by && s?.severity !== 'alert') parts.push(lowerFirst(o.pause.by));
+  if (s?.head && (s.severity === 'alert' || s.severity === 'warn' || !o.pause?.by)) parts.push(lowerFirst(s.head));
   if (s?.amount && s.amount.change !== null) parts.push(`${compact(s.amount.value)} ${o.noun(s.amount.value)} against a usual ${compact(s.amount.low)}–${compact(s.amount.high)}`);
   const stake = stakeOf(o);
   if (stake) parts.push(stake);
@@ -123,6 +126,9 @@ export function situationOf(o: Pick<BriefIn, 'day' | 'story' | 'pause' | 'output
   if (wordsIn(text) > 25 && parts.length > 2) text = `${dayMid(o.day)}: ${[parts[0], parts[2]].join('; ')}.`;
   return text;
 }
+
+/** A head mid-sentence: its first letter lowered, unless the word is an initialism ("TLS Passing" stays). */
+const lowerFirst = (text: string) => (/^[A-Z][A-Z0-9]/.test(text) ? text : text.replace(/^./, (c) => c.toLowerCase()));
 
 /** What is at stake, for the sentence's end. */
 function stakeOf(o: Pick<BriefIn, 'pause' | 'outputs'>): string | null {

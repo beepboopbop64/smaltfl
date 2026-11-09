@@ -94,7 +94,8 @@ export interface HistoryFile {
   parts?: { start: number; width: number };
   /** Days at the start before a value counts as never seen. */
   warmup: number;
-  /** The coded and zone columns' values, and the coded columns' pairs (`a|b`). */
+  /** The coded and zone columns' values, and the coded columns' pairs (`a|b`); a pair's cells kept day by day
+   * (`counts`) while they number PAIR_CELLS or fewer (ADR 0013), else followed for new combinations only. */
   values: Record<string, ValueHistory>;
   pairs: Record<string, ValueHistory>;
   /** The trips file's own columns, month by month, before they were cast to the month's (scripts/data/build.py). */
@@ -119,7 +120,13 @@ export type Metric =
    * checks drop, and the rows a rule fails. */
   | { of: 'count'; column: string; value: string }
   | { of: 'droppedRows' }
-  | { of: 'ruleRows'; name: string };
+  | { of: 'ruleRows'; name: string }
+  /** How two values go together, beyond what their own shares explain (ADR 0013): the log odds ratio of the cell's
+   * two-by-two table (the cell's rows times the rows with neither value, over the rows with one value alone times the
+   * rows with the other alone, half a row added to each so none is empty). Zero when the two are independent,
+   * positive when they go together, and unmoved when a column's share changes while the association doesn't. The
+   * pair as the history names it (`a|b`), the cell as its JSON key. */
+  | { of: 'combo'; pair: string; value: string };
 
 /** The quantiles the history keeps of a measure or a time, in order. */
 export const QUANTILES = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
@@ -131,9 +138,10 @@ export const metricKey = (m: Metric) =>
   : m.of === 'value' ? `value:${m.column}=${m.value}`
   : m.of === 'count' ? `count:${m.column}=${m.value}`
   : m.of === 'quantile' ? `quantile:${m.column}@${m.q}`
+  : m.of === 'combo' ? `combo:${m.pair}=${m.value}`
   : `${m.of}:${m.column}`;
 
-const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level', value: 'share', quantile: 'level', count: 'count', droppedRows: 'count', ruleRows: 'count' };
+const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level', value: 'share', quantile: 'level', count: 'count', droppedRows: 'count', ruleRows: 'count', combo: 'level' };
 
 /** Whether a metric counts the checks: its periods are comparable only while they were counted with the same rules. */
 const ofChecks = (m: Metric) => m.of === 'dropped' || m.of === 'rule' || m.of === 'droppedRows' || m.of === 'ruleRows';
@@ -165,6 +173,8 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
   const counted = m.of === 'value' || m.of === 'count' ? h.values?.[m.column] : undefined;
   const place = counted && (m.of === 'value' || m.of === 'count') ? counted.values.indexOf(m.value) : -1;
   if ((m.of === 'value' || m.of === 'count') && (!counted?.counts || place < 0)) return null;
+  const combo = m.of === 'combo' ? comboPlaces(h, m.pair, m.value) : null;
+  if (m.of === 'combo' && !combo) return null;
   const start = ofChecks(m) ? checksStart(h) : 0;
   const values = new Array<number | null>(daysBetween(from, h.days.at(-1)!) + 1).fill(null);
   h.days.forEach((day, k) => {
@@ -180,10 +190,83 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
       : m.of === 'droppedRows' ? h.dropped[k]!
       : m.of === 'ruleRows' ? h.failed[k]![rule]!
       : m.of === 'quantile' ? (h.quantiles?.[k]?.[column]?.[m.q] ?? null)
+      : m.of === 'combo' ? (rows ? comboLogOdds(comboTable(combo!, k, rows)) : null)
       : h.p50[k]![column]!;
     values[daysBetween(from, day)] = v;
   });
   return { from, values };
+}
+
+/** Where a pair's cell and its two values are counted in a history: the pair's history and the cell's place in it, and
+ * each column's history with the value's place. Null unless all three are counted day by day. */
+interface ComboPlaces {
+  pair: ValueHistory;
+  cell: number;
+  a: ValueHistory;
+  x: number;
+  b: ValueHistory;
+  y: number;
+}
+
+export function comboPlaces(h: Pick<HistoryFile, 'values' | 'pairs'>, pair: string, key: string): ComboPlaces | null {
+  const p = h.pairs?.[pair];
+  const cell = p?.values.indexOf(key) ?? -1;
+  if (!p?.counts || cell < 0) return null;
+  const [ca, cb] = pair.split('|');
+  const a = ca === undefined ? undefined : h.values?.[ca];
+  const b = cb === undefined ? undefined : h.values?.[cb];
+  if (!a?.counts || !b?.counts) return null;
+  let xy: unknown;
+  try {
+    xy = JSON.parse(key);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(xy) || xy.length !== 2) return null;
+  const x = a.values.indexOf(JSON.stringify(xy[0]));
+  const y = b.values.indexOf(JSON.stringify(xy[1]));
+  return x < 0 || y < 0 ? null : { pair: p, cell, a, x, b, y };
+}
+
+/** A cell's two-by-two table on a period: the rows with both values, with each alone, and with neither. */
+export interface ComboTable {
+  both: number;
+  xOnly: number;
+  yOnly: number;
+  neither: number;
+  rows: number;
+  /** The rows with each value, as its own column counts them. */
+  x: number;
+  y: number;
+}
+
+export function comboTable(c: ComboPlaces, k: number, rows: number): ComboTable {
+  const both = c.pair.counts![k]?.[c.cell] ?? 0;
+  const nx = c.a.counts![k]?.[c.x] ?? 0;
+  const ny = c.b.counts![k]?.[c.y] ?? 0;
+  return { both, xOnly: Math.max(0, nx - both), yOnly: Math.max(0, ny - both), neither: Math.max(0, rows - nx - ny + both), rows, x: nx, y: ny };
+}
+
+/** The table's log odds ratio, half a row added to each cell (the `combo` metric). */
+export const comboLogOdds = (t: ComboTable): number => Math.log(((t.both + 0.5) * (t.neither + 0.5)) / ((t.xOnly + 0.5) * (t.yOnly + 0.5)));
+
+/**
+ * How many rows a cell would hold were its two values to go together as a log odds ratio says, given the period's
+ * rows with each value: the table with those margins and that odds ratio (the quadratic's root inside the margins).
+ */
+export function comboPredicted(t: ComboTable, logOdds: number): number {
+  const r = t.both + t.xOnly;
+  const c = t.both + t.yOnly;
+  const n = t.rows;
+  if (!n || !r || !c) return 0;
+  const theta = Math.exp(logOdds);
+  const lo = Math.max(0, r + c - n);
+  const hi = Math.min(r, c);
+  if (Math.abs(theta - 1) < 1e-9) return Math.min(hi, Math.max(lo, (r * c) / n));
+  const B = (theta - 1) * (r + c) + n;
+  const disc = Math.max(0, B * B - 4 * (theta - 1) * theta * r * c);
+  const a = (B - Math.sqrt(disc)) / (2 * (theta - 1));
+  return Math.min(hi, Math.max(lo, a));
 }
 
 /** What ranges are learned from, besides the history: days left out, and the flow's calendar. */
@@ -295,6 +378,11 @@ export class HistoryRanges {
       this.made.set(key, s ? new NormalRanges(s, SCALES[m.of], { skip: this.left, calendar: this.calendar, ...general }) : null);
     }
     return this.made.get(key)!;
+  }
+
+  /** Whether a day is learned from: not one a viewer marked or the record left out. */
+  learnsFrom(day: string): boolean {
+    return !this.left.has(day);
   }
 
   /** How many days one viewer left out: none for the flow's own verdict (ADR 0009 §3, ADR 0010 §5). */

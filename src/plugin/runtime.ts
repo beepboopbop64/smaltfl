@@ -27,8 +27,9 @@ import { flowHash, translate } from '../core/plan.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, ColumnType, ExpectNode, FillNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
 import { isPublish2, validatePlan, watchesOf } from '../core/plan.js';
-import { carry, heldOutputs, spare, holdsOf, judgeClaims, judgeDonors, tailPath, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef } from '../core/hold.js';
+import { carry, heldOutputs, spare, holdsOf, judgeClaims, judgeDonors, tailPath, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef, type StoryClaim2 } from '../core/hold.js';
 import { measuresHash, settingsFor, type MeasureSettings, type Measures } from '../core/measures.js';
+import { tellClaim } from './tell.js';
 import { measureSnapshot, pinnedHeader, pinnedTail } from './measure.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q, type ParamValue } from '../core/sqltext.js';
@@ -206,6 +207,9 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   // held run it repairs (C4): its flow hash, and its stored measures when the snapshot is the same.
   const measured = new Map<number, { hash: string; measures: Measures; settings: MeasureSettings }>();
   let told: { flow: string; measured: (node: number) => string | undefined; unmeasured: (node: number) => string } | null = null;
+  // Watched steps' claims, told here (ADR 0013 §4), and why one couldn't be.
+  const engineClaims: StoryClaim2[] = [];
+  const untold = new Map<number, string>();
   if (plan.publish && isPublish2(plan.publish)) {
     if (stage) {
       told = heldMeasures(db, stage, plan, records);
@@ -234,6 +238,19 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
         aborted(signal);
         const m = await measureSnapshot(db, table, settings, rec.file?.sha256 ?? null, rec.content);
         measured.set(w.node, { hash: await measuresHash(m), measures: m, settings });
+        // A watched step (ADR 0013 §4): its load is the dataset just built, so the engine tells its claim, from the
+        // pinned history and tail and what the page said of the record (context.tell). Without that, it isn't judged.
+        const n = plan.nodes[w.node]!;
+        if (n.op !== 'table' && context.doc !== undefined) {
+          const tell = context.tell?.[n.origin] ?? Object.entries(context.tell ?? {}).find(([id]) => id.toLowerCase() === n.origin.toLowerCase())?.[1];
+          if (!tell) {
+            untold.set(w.node, `${n.origin} is a watched step: its claim is told in the engine from what the page says of the record (tell), and the run was given none`);
+            continue;
+          }
+          const told = await tellClaim({ doc: context.doc as FlowDocument, source: n.origin, history: w.history, flow: plan.flow.hash, measures: m, settings, tell, build: commit });
+          if ('problem' in told) untold.set(w.node, told.problem);
+          else engineClaims.push(told.claim);
+        }
       }
     }
   }
@@ -249,7 +266,7 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
       tail: (source) => pinnedTail(tailPath(source), source),
       flow: told ? told.flow : plan.flow.hash,
     };
-    judged = judgeClaims(plan, context.claims, facts);
+    judged = judgeClaims(plan, [...(context.claims ?? []), ...engineClaims], facts).map((j) => (untold.has(j.node) && 'unjudged' in j ? { node: j.node, unjudged: untold.get(j.node)! } : j));
     // With several watched sources, a load an earlier run held is carried, citing that run (ADR 0010 §7).
     holds = carry(spare(holdsOf(plan, manifest, judged), (l, node) => readBefore(db, plan.flow.id, l, node)), (l) => carriedFrom(db, plan.flow.id, l));
     if (stage) {

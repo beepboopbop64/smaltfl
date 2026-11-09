@@ -45,6 +45,27 @@ describe('readDataList', () => {
     expect(list.files).toEqual({ history, 'history:auth': history, flow });
     // The flow document is the build's own, checked by its entry when read, not one of the data's files (ADR 0011).
     expect(namedFiles(list).map((f) => f.path)).toEqual(['history.json', 'history.json', 'loads/auth_2024-03-12.csv']);
+    expect(list).toMatchObject({ daily: ['auth'], judged: 'auth' });
+  });
+
+  it('reads several daily sources as days, each with every source\'s file, and the dataset the views follow (ADR 0013 §5)', () => {
+    const l = (id: string, slot: string, c: string) => ({ slot, file: `loads/${id}_${slot}.csv`, sha256: SHA(c), bytes: 1, rows: 400 });
+    const hist = (id: string) => ({ path: `history.${id}.json`, from: `history.${id}.json`, sha256: SHA(id[0]!), bytes: 5 });
+    const list = readDataList({
+      format: 2, data: null, flow: null, judged: 'posture',
+      sources: {
+        apps: { table: 'apps_file', format: 'csv', file: 'apps.csv', header: true, entry: { path: 'apps.csv', from: 'apps.csv', sha256: SHA('p'), bytes: 2 } },
+        tls: { table: 'tls_file', format: 'csv', file: 'tls.csv', header: true, loads: [l('tls', '2024-03-04', 'a'), l('tls', '2024-03-05', 'b')], donors: [] },
+        mfa: { table: 'mfa_file', format: 'csv', file: 'mfa.csv', header: true, loads: [l('mfa', '2024-03-05', 'c')], donors: [] },
+      },
+      histories: { tls: hist('tls'), mfa: hist('mfa'), posture: hist('posture') }, episodes: [],
+    }, EXAMPLE_DATA);
+    expect(list).toMatchObject({ format: 2, loadSource: 'tls', daily: ['tls', 'mfa'], judged: 'posture' });
+    expect(list.loads.map((x) => [x.day, x.file, Object.keys(x.files!)])).toEqual([['2024-03-04', 'loads/tls_2024-03-04.csv', ['tls']], ['2024-03-05', 'loads/tls_2024-03-05.csv', ['tls', 'mfa']]]);
+    expect(list.files['history:posture']).toEqual(hist('posture'));
+    expect(list.files.apps).toBeDefined();
+    // Every file of every day is in the list to check: each source's.
+    expect(namedFiles(list).map((f) => f.path)).toEqual(['apps.csv', 'history.tls.json', 'history.tls.json', 'history.mfa.json', 'history.posture.json', 'loads/tls_2024-03-04.csv', 'loads/tls_2024-03-05.csv', 'loads/mfa_2024-03-05.csv']);
   });
 });
 

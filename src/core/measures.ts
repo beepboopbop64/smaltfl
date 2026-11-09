@@ -17,6 +17,8 @@ import { hashOf, utf8 } from './hash.js';
 import { timeOf, type HistoryFile, type ValueHistory } from './history.js';
 import { leafHash, rootOf } from './log.js';
 import type { StepDef } from './document.js';
+import type { FlowDocument } from './document.js';
+import { propertyOf } from './ontology.js';
 import { watchesOf, type FlowPlan } from './plan.js';
 import { minuteOfDay, numbersOf, profileColumn, quantile, type Kind } from './quality.js';
 
@@ -84,6 +86,8 @@ export interface MeasureSettings {
 
 /** The profile box's sample, as the app and the history take it (src/app/main.ts SAMPLE). */
 export const SAMPLE = 2000;
+/** A pair's cells are kept day by day while its combinations number this many or fewer (ADR 0013): 8 values by 8. */
+export const PAIR_CELLS = 64;
 /** Quantiles kept of a measure or a time (a time's in minutes of the day): history.ts QUANTILES. */
 const PS = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
 const NUMERIC = new Set(['int', 'real', 'num']);
@@ -140,6 +144,25 @@ export function settingsFor(plan: Pick<FlowPlan, 'nodes' | 'parameters' | 'publi
   }
   const c = checksOf(plan, node, steps);
   return { source: plan.nodes[node]!.origin, slot, every: st?.every ?? 'day', checks: c?.checks ?? null, counting: c?.counting ?? null, counted, followed, paired, time: st?.time ?? (base ? timeOf(base) : null), zone: st?.zone ?? base?.zone ?? null, sample: base?.sample ?? SAMPLE };
+}
+
+/**
+ * The columns a watched node's history counts, follows and pairs when its watch doesn't say (ADR 0010 §6; the general
+ * builder's rule, scripts/data/history.ts): counted, every column the ontology lists values or bad codes for; followed,
+ * the columns a new value in is something wrong (`newValues: "alert"`) and not counted; paired, the counted columns of
+ * twenty values or fewer, so any two multiply to four hundred or fewer. A watch's own `count` and `follow` win.
+ */
+export function watchColumns(doc: Pick<FlowDocument, 'ontology' | 'publish'>, source: string): { count: string[]; follow: string[]; pair: string[] } {
+  const watch = Object.entries(doc.publish?.watch ?? {}).find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1];
+  const w = typeof watch === 'object' && watch !== null ? watch : null;
+  const props = (doc.ontology?.properties ?? []).filter((p) => propertyOf(doc.ontology, source, p.column) === p);
+  const count = [...new Set(w?.count ?? props.filter((p) => (p.values !== undefined && Object.keys(p.values).length > 0) || (p.bad?.length ?? 0) > 0).map((p) => p.column))];
+  const follow = [...new Set((w?.follow ?? props.filter((p) => p.newValues === 'alert').map((p) => p.column)).filter((c) => !count.includes(c)))];
+  const pair = count.filter((c) => {
+    const p = props.find((x) => x.column === c);
+    return p?.values !== undefined && Object.keys(p.values).length <= 20;
+  });
+  return { count, follow, pair };
 }
 
 /** What the engine counted of a load, for `measuresOf`. */
@@ -376,14 +399,15 @@ export interface Period {
   p50: (number | null)[];
   quantiles: (number[] | null)[];
   parts: number[];
-  /** Each counted column's values with rows that period, sorted by the value's text. */
+  /** Each counted column's values with rows that period, and each pair's cells kept day by day (`a|b`), sorted by
+   * the value's text. */
   counts: Record<string, [string, number][]>;
 }
 
 /** A history file's period `k`: the numbers it keeps of it. */
 export function periodOf(file: HistoryFile, k: number): Period {
   const counts: Record<string, [string, number][]> = {};
-  for (const [column, vh] of Object.entries(file.values ?? {})) {
+  for (const [column, vh] of [...Object.entries(file.values ?? {}), ...Object.entries(file.pairs ?? {})]) {
     if (!vh.counts) continue;
     counts[column] = vh.values.flatMap((v, i): [string, number][] => ((vh.counts![k]?.[i] ?? 0) > 0 ? [[v, vh.counts![k]![i]!]] : [])).sort(byText);
   }
@@ -391,9 +415,10 @@ export function periodOf(file: HistoryFile, k: number): Period {
 }
 
 /** The same numbers of a load's measures, as `file` keeps them: its counted columns are those it counts each period. */
-export function periodOfMeasures(m: Measures, file: Pick<HistoryFile, 'values'>): Period {
+export function periodOfMeasures(m: Measures, file: Pick<HistoryFile, 'values' | 'pairs'>): Period {
   const counts: Record<string, [string, number][]> = {};
   for (const [column, vh] of Object.entries(file.values ?? {})) if (vh.counts) counts[column] = (m.values[column] ?? []).filter(([, n]) => n > 0).map(([v, n]): [string, number] => [v, n]).sort(byText);
+  for (const [pair, vh] of Object.entries(file.pairs ?? {})) if (vh.counts) counts[pair] = (m.pairs[pair] ?? []).filter(([, n]) => n > 0).map(([v, n]): [string, number] => [v, n]).sort(byText);
   return { slot: m.slot, rows: m.rows, dropped: m.dropped, failed: [...m.failed], present: [...m.present], p50: [...m.p50], quantiles: m.quantiles.map((q) => (q ? [...q] : null)), parts: [...m.parts], counts };
 }
 
@@ -442,9 +467,11 @@ export function emptyHistory(o: { flow: string; source: string; settings: Pick<M
   const values: Record<string, ValueHistory> = {};
   for (const c of s.counted) if (have.has(c)) values[c] = vh(true);
   for (const c of s.followed) if (have.has(c) && !values[c]) values[c] = vh(false);
+  // A pair's cells are counted day by day too, while they are few (PAIR_CELLS; ADR 0013): what the combination judge
+  // reads. A pair that grows past that is followed for new combinations only, as every pair was before.
   const paired = s.paired.filter((c) => have.has(c));
   const pairs: Record<string, ValueHistory> = {};
-  for (let a = 0; a < paired.length; a++) for (let b = a + 1; b < paired.length; b++) pairs[`${paired[a]}|${paired[b]}`] = vh(false);
+  for (let a = 0; a < paired.length; a++) for (let b = a + 1; b < paired.length; b++) pairs[`${paired[a]}|${paired[b]}`] = vh(true);
   return {
     format: 'smaltfl-history/3', built: o.built ?? '', flow: o.flow, source: o.source, every: s.every ?? 'day', time: s.time, zone: s.zone, skipped: [],
     step: s.checks?.step ?? '', rules: s.checks?.rules.map((r) => ({ ...r })) ?? [],
@@ -518,7 +545,11 @@ export function appendPeriods(file: HistoryFile, ms: readonly Measures[]): Histo
       if (vh.counts && row) vh.counts.push(row);
     };
     for (const [column, vh] of Object.entries(out.values ?? {})) fold(vh, m.values[column] ?? []);
-    for (const [pair, vh] of Object.entries(out.pairs ?? {})) fold(vh, m.pairs[pair] ?? []);
+    for (const [pair, vh] of Object.entries(out.pairs ?? {})) {
+      fold(vh, m.pairs[pair] ?? []);
+      // Past PAIR_CELLS combinations the pair's cells are no longer kept day by day (ADR 0013): its counts go, for good.
+      if (vh.counts && vh.values.length > PAIR_CELLS) delete vh.counts;
+    }
   }
   // In order of rows over the history, as the builder writes them.
   for (const vh of touched) {

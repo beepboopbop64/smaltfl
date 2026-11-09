@@ -26,15 +26,18 @@ import io from '@smaltdb/io';
 import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../../src/plugin/index.js';
-import { measureLoad, pinFile, translate, type FlowDocument, type WatchDef } from '../../src/index.js';
+import { measureLoad, pinFile, runFlow, translate, type FlowDocument, type WatchDef } from '../../src/index.js';
 import { bindingsPath, readFlow } from '../flow.js';
 import { type DayError, type HistoryFile } from '../../src/core/history.js';
-import { appendPeriods, checksOf, emptyHistory, SAMPLE, type MeasureSettings, type Measures } from '../../src/core/measures.js';
+import { appendPeriods, checksOf, emptyHistory, SAMPLE, watchColumns, type MeasureSettings, type Measures } from '../../src/core/measures.js';
 import { pinnedDdl, type Binding, type DataBindings } from '../../examples/sources.js';
 import type { Kind } from '../../src/core/quality.js';
 
 /** Days at the start of the history before anything counts as never seen: at first, everything is. */
 const WARMUP = 28;
+/** The pinned smaltdb's version, which run keys depend on (history.mjs defines it from its package). */
+declare const __SMALTDB_VERSION__: string | undefined;
+const SMALTDB = typeof __SMALTDB_VERSION__ === 'string' ? __SMALTDB_VERSION__ : (JSON.parse(readFileSync('node_modules/smaltdb/package.json', 'utf8')) as { version: string }).version;
 /** A history past this size is too big for a page to fetch and fold (ADR 0010, risks). */
 const LIMIT = 8 * 1024 * 1024;
 /** The taxi example's legacy columns (scripts/data/build.py): the coded columns counted, value by value and in pairs
@@ -46,33 +49,63 @@ const TAXI = {
   time: 'tpep_pickup_datetime',
 };
 
+/** A load: a source's file for a slot; for a watched step, each source's file for the slot (ADR 0013 §4). */
+interface LoadFiles {
+  slot: string;
+  file?: string;
+  files?: Record<string, string>;
+}
+
 interface Job {
   doc: FlowDocument;
   source: string;
-  binding: Binding;
+  /** The watched source's binding; null for a watched step, whose loads name every source's file. */
+  binding: Binding | null;
+  bindings: Record<string, Binding>;
   /** Each load's settings but its slot, and the parameters' templates. */
   settings: Omit<MeasureSettings, 'slot' | 'checks' | 'counting'>;
   params: Record<string, string>;
-  files: { file: string; slot: string }[];
+  files: LoadFiles[];
 }
 
 /** A parameter's value for a load: `{slot}`, `{slot:N}` (its first N characters), or as written. */
 const valueFor = (template: string, slot: string) => template.replace(/\{slot(?::(\d+))?\}/g, (_, n?: string) => (n ? slot.slice(0, Number(n)) : slot));
 
-/** One load measured: pinned under its binding's name, read through the binding's table, measured by the plugin. */
-async function measure(job: Job, load: { file: string; slot: string }): Promise<Measures> {
+/**
+ * One load measured: a source's file pinned under its binding's name, read through the binding's table, measured by
+ * the plugin; a watched step's load (ADR 0013 §4) has every source's file pinned, the flow run on them without its
+ * publish block (nothing to hold while its history is being built), and the dataset it built measured as a run
+ * measures it: the same numbers, so the history's period and the run's own measures agree.
+ */
+async function measure(job: Job, load: LoadFiles): Promise<Measures> {
   const db = Database.openMemory({ plugins: [io, external, parquet, smaltfl] });
   try {
-    await pinFile(db, job.binding.file, new Uint8Array(readFileSync(load.file)));
-    await db.execAsync(pinnedDdl(job.binding));
     const watch = job.doc.publish?.watch?.[job.source];
     const period = (typeof watch === 'object' ? (watch as WatchDef).period : undefined) ?? job.doc.publish?.period;
     const values: Record<string, string> = Object.fromEntries(Object.entries(job.params).map(([k, t]) => [k, valueFor(t, load.slot)]));
     if (period) values[period] = load.slot;
     const plan = await translate(job.doc, values);
-    const node = plan.nodes.findIndex((n) => n.op === 'table' && n.origin === job.source);
+    if (job.binding) {
+      if (!load.file) throw new Error(`${load.slot}: a load of ${job.source} names its file`);
+      await pinFile(db, job.binding.file, new Uint8Array(readFileSync(load.file)));
+      await db.execAsync(pinnedDdl(job.binding));
+      const node = plan.nodes.findIndex((n) => n.op === 'table' && n.origin === job.source);
+      const c = checksOf(plan, node, job.doc.steps);
+      return await measureLoad(db, job.binding.table, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null });
+    }
+    for (const [source, b] of Object.entries(job.bindings)) {
+      const path = load.files?.[source];
+      if (!path) throw new Error(`${load.slot}: no file for ${source}`);
+      await pinFile(db, b.file, new Uint8Array(readFileSync(path)));
+      await db.execAsync(pinnedDdl(b));
+    }
+    const bare: FlowDocument = { ...job.doc };
+    delete bare.publish;
+    const r = await runFlow(db, bare, { smaltdb: SMALTDB, parameters: values });
+    if (!r.published.includes(job.source)) throw new Error(`${load.slot}: the run didn't publish ${job.source}`);
+    const node = plan.nodes.findIndex((n) => n.origin === job.source);
     const c = checksOf(plan, node, job.doc.steps);
-    return await measureLoad(db, job.binding.table, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null });
+    return await measureLoad(db, job.source, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null });
   } finally {
     db.close();
   }
@@ -113,31 +146,32 @@ async function jobOf(args: string[]): Promise<{ job: Job; out: string }> {
   const flowPath = one('flow')!;
   const doc = await readFlow(flowPath);
   const source = one('watch') ?? Object.keys(doc.publish?.watch ?? {})[0];
-  if (!source || !doc.sources.some((s) => s.id === source)) throw new Error(`${flowPath} has no source ${source ?? '(none named)'} to watch`);
+  // A watched step (ADR 0013 §4): its history is built by running the flow on each day's files and measuring the
+  // dataset it builds, as a run does.
+  const step = !!source && doc.steps.some((s) => s.id === source && s.dataset !== undefined);
+  if (!source || (!step && !doc.sources.some((s) => s.id === source))) throw new Error(`${flowPath} has no source or published step ${source ?? '(none named)'} to watch`);
   const bindPath = one('bind') ?? bindingsPath(flowPath);
   if (!existsSync(bindPath)) throw new Error(`no data list ${bindPath} for ${basename(flowPath)}: pass --bind`);
   const data = JSON.parse(readFileSync(bindPath, 'utf8')) as DataBindings;
-  const binding = data.sources[source];
-  if (!binding) throw new Error(`${bindPath} binds no ${source}`);
+  const binding = step ? null : data.sources[source];
+  if (!step && !binding) throw new Error(`${bindPath} binds no ${source}`);
   const filesArg = one('files');
-  if (!filesArg) throw new Error('--files LIST.json: the loads, each { file, slot }');
-  const files = (filesArg.trim().startsWith('[') ? JSON.parse(filesArg) : JSON.parse(readFileSync(filesArg, 'utf8'))) as { file: string; slot: string }[];
+  if (!filesArg) throw new Error(step ? '--files LIST.json: the loads, each { slot, files: { source: path, … } }' : '--files LIST.json: the loads, each { file, slot }');
+  const files = (filesArg.trim().startsWith('[') ? JSON.parse(filesArg) : JSON.parse(readFileSync(filesArg, 'utf8'))) as LoadFiles[];
+  if (step) for (const f of files) if (!f.files || typeof f.files !== 'object') throw new Error(`${f.slot}: a watched step's load names each source's file: { slot, files: { source: path, … } }`);
   const watch = doc.publish?.watch?.[source];
   const w = typeof watch === 'object' ? watch : null;
-  const props = doc.ontology?.properties ?? [];
-  const count = list(one('count')) ?? w?.count ?? props.filter((p) => (p.values !== undefined && Object.keys(p.values).length > 0) || (p.bad?.length ?? 0) > 0).map((p) => p.column);
-  const follow = (list(one('follow')) ?? w?.follow ?? props.filter((p) => p.newValues === 'alert').map((p) => p.column)).filter((c) => !count.includes(c));
-  const pair = list(one('pair')) ?? count.filter((c) => {
-    const p = props.find((x) => x.column === c);
-    return p?.values !== undefined && Object.keys(p.values).length <= 20;
-  });
+  const defaults = watchColumns(doc, source);
+  const count = list(one('count')) ?? defaults.count;
+  const follow = (list(one('follow')) ?? defaults.follow).filter((c) => !count.includes(c));
+  const pair = list(one('pair')) ?? defaults.pair;
   const params = Object.fromEntries((flags.get('param') ?? []).map((p) => {
     const at = p.indexOf('=');
     return [p.slice(0, at), p.slice(at + 1)];
   }));
   const out = rest[0];
   if (!out) throw new Error('name the history file to write');
-  return { job: { doc, source, binding, settings: { source, every: 'day', counted: [...new Set(count)], followed: [...new Set(follow)], paired: [...new Set(pair)], time: one('time') ?? w?.time ?? null, zone: one('zone') ?? w?.zone ?? null, sample: SAMPLE }, params, files }, out };
+  return { job: { doc, source, binding, bindings: data.sources, settings: { source, every: 'day', counted: [...new Set(count)], followed: [...new Set(follow)], paired: [...new Set(pair)], time: one('time') ?? w?.time ?? null, zone: one('zone') ?? w?.zone ?? null, sample: SAMPLE }, params, files }, out };
 }
 
 async function main(): Promise<void> {

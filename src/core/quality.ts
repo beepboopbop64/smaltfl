@@ -150,7 +150,7 @@ export function random(seed: number): () => number {
 }
 
 /** The average path length of an unsuccessful search in a binary search tree of n points: the forest's yardstick. */
-const avgPath = (n: number) => (n > 2 ? 2 * (Math.log(n - 1) + 0.5772156649) - (2 * (n - 1)) / n : n === 2 ? 1 : 0);
+export const avgPath = (n: number) => (n > 2 ? 2 * (Math.log(n - 1) + 0.5772156649) - (2 * (n - 1)) / n : n === 2 ? 1 : 0);
 
 /** An isolation tree: a split on feature `f` at `split` (lower values go left), or a leaf of the points left. */
 export type Tree = { f: number; split: number; left: Tree; right: Tree } | { size: number };

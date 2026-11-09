@@ -563,6 +563,10 @@ function validatePublish(doc: Record<string, unknown>, params: Map<string, Param
   const judged = hold.has('short') || hold.has('wrong');
   if (hold.has('unlearned') && !judged) add('$.publish.hold', 'unlearned holds beside short or wrong: a day not judged is only a reason to hold for a flow that holds on its story');
   const sources = new Map((Array.isArray(doc.sources) ? doc.sources : []).filter((s: unknown) => isRecord(s) && typeof s.id === 'string').map((s: Record<string, unknown>) => [String(s.id).toLowerCase(), String(s.id)]));
+  // A watch may name a step the flow publishes (ADR 0013 §4): its load is the dataset the run builds, judged once built.
+  const steps = (Array.isArray(doc.steps) ? doc.steps : []).filter((s: unknown): s is Record<string, unknown> => isRecord(s) && typeof s.id === 'string');
+  const published = new Map(steps.filter((s) => s.dataset !== undefined).map((s) => [String(s.id).toLowerCase(), String(s.id)]));
+  const stepIds = new Set(steps.map((s) => String(s.id).toLowerCase()));
   const textParam = (name: unknown, path: string, what: string) => {
     const d = typeof name === 'string' ? params.get(name) : undefined;
     if (!d) add(path, `no parameter ${String(name)}`);
@@ -577,8 +581,8 @@ function validatePublish(doc: Record<string, unknown>, params: Map<string, Param
       for (const [id, w] of Object.entries(p.watch)) {
         watched++;
         const at = `$.publish.watch.${id}`;
-        if (!sources.has(id.toLowerCase())) add(at, `no source ${id}: a watch judges a source`);
-        else if (Object.keys(p.watch).findIndex((k) => k.toLowerCase() === id.toLowerCase()) < watched - 1) add(at, `${sources.get(id.toLowerCase())} is watched twice (ids are compared without case)`);
+        if (!sources.has(id.toLowerCase()) && !published.has(id.toLowerCase())) add(at, stepIds.has(id.toLowerCase()) ? `${id} isn't published: a watched step is one the flow publishes (a step with a dataset block), judged once the run has built it` : `no source or published step ${id}: a watch judges a source, or a step the flow publishes`);
+        else if (Object.keys(p.watch).findIndex((k) => k.toLowerCase() === id.toLowerCase()) < watched - 1) add(at, `${sources.get(id.toLowerCase()) ?? published.get(id.toLowerCase())} is watched twice (ids are compared without case)`);
         if (!isGeneralWatch(w)) {
           if (typeof w !== 'string' || w === '') add(at, "the history's file, a file in the data's list");
           holding++;

@@ -51,6 +51,23 @@ behind the proposals is in [research/ecosystem-survey.md](research/ecosystem-sur
 | Q-15 | Lineage granularity in v1? | Dataset-level and run-level from the start; column-level when the plan API lands | open |
 | Q-18 | Data quality in v1? | Row expectations (warn, drop, fail) and dataset checks (freshness, row count, uniqueness, schema) | open |
 
+## Checks nobody wrote: the maintainer's request, and what is open (ADR 0013)
+
+The maintainer, 2026-11-09: a dataset like the one they work with, a list of applications passing or failing
+controls, every control its own starting dataset; checks at the control level (data missing, columns missing, odd
+columns, combinations of columns) and across the datasets ("suddenly everyone failing TLS is now passing
+encryption"), not hard-coded: "an isolation forest or some data-driven check to discover it". Built as ADR 0013 says;
+these are the choices made on the way that the maintainers should confirm or change.
+
+| ID | Question | Default built | Status |
+| --- | --- | --- | --- |
+| Q-104 | How is a combination judged: by the cell's share of rows, or by how the two values go together beyond their own shares? | The log odds ratio of the cell's two-by-two table, with its own normal range; the rows it moved said against what the day's own counts and the usual odds predict (ADR 0013 §2). A column moving on its own is never told twice | default |
+| Q-105 | What holds a day for a combination? | Four typical misses out and either five points of the day's rows, or twice (or half) what the columns predict by two points or more (ADR 0013 §2). Two points: unusual | default |
+| Q-106 | How many cells may a pair have before its day-by-day counts stop? | 64 (eight values by eight); past it, new combinations only (ADR 0013 §1) | default |
+| Q-107 | Should the isolation forest's "unlike any day before" pause a day on its own? | No: it is told as unusual, and only when nothing plainer names its columns (ADR 0013 §3). The maintainer may want it to hold | default |
+| Q-108 | Who tells a watched step's claim, and should the engine tell every claim the same way? | The engine tells a watched step's, from what the page pins and says of the record (`tell`); the page still tells a source's (ADR 0013 §4). Telling every claim in the engine would retire the page's judge (ADR 0009's "left for later") | default |
+| Q-109 | A daily file whose columns don't match its declared ones: refused as now, or paused with a decision? | Refused: the run fails and the status line says which file and why; nothing publishes (ADR 0013 §6, Mon Mar 11). A pause with a decision is ADR 0009's slice 3 | default |
+
 ## Visual first, in two minutes: the maintainer's answers (ADR 0012)
 
 Asked through the question prompt on 2026-11-09, after the survey ADR 0012 cites. The ADR that records them is

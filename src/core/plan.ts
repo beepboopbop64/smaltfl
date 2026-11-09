@@ -490,7 +490,8 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never): void {
   pairs.forEach((x, i) => {
     if (!Array.isArray(x) || x.length !== 2 || !Number.isInteger(x[0]) || typeof x[1] !== 'object' || x[1] === null) fail(`publish.watch[${i}] is [node, watch]`);
     const [node, w] = x as [number, Record<string, unknown>];
-    if (p.nodes[node]?.op !== 'table') fail(`publish.watch[${i}] watches node ${node}, which isn't a source`);
+    // plan/2 and plan/3 may watch a step the plan publishes (ADR 0013 §4): its dataset is judged once the run has built it.
+    if (p.nodes[node]?.op !== 'table' && !(p.nodes[node] && p.outputs.some((o) => o.node === node))) fail(`publish.watch[${i}] watches node ${node}, which isn't a source or a published step`);
     if (i > 0 && !((pairs[i - 1] as [number, unknown])[0] < node)) fail('publish.watch is sorted by node, each node once');
     const at = `publish.watch[${i}]`;
     if (Object.keys(w).sort().join() !== WATCH_PLAN_FIELDS.join()) fail(`${at} has ${Object.keys(w).sort().join(', ')}; a watch has exactly ${WATCH_PLAN_FIELDS.join(', ')}`);

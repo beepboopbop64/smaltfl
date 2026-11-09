@@ -1,0 +1,456 @@
+{
+  "smaltfl": 4,
+  "id": "controls",
+  "name": "Controls posture",
+  "description": "Every application's standing on six security controls, a day at a time (ADR 0013): each control arrives as its own file, is checked on its own, and the posture across them is judged as a dataset of its own, so what two controls do together is found without a rule naming them. A synthetic feed, generated from a fixed seed (scripts/data/controls.ts), with one trouble a day planted in March 2024: data missing (Wed 6), a column missing (Mon 11), a value never seen (Thu 14), two columns of one control off together (Tue 19), and two controls off together (Fri 22).",
+  "parameters": [
+    {
+      "name": "day",
+      "type": "text",
+      "default": null
+    }
+  ],
+  "sources": [
+    {
+      "id": "apps",
+      "table": "apps_file",
+      "description": "The application inventory: unit, environment and tier"
+    },
+    {
+      "id": "tls",
+      "table": "tls_file",
+      "description": "Transport encryption: the protocol its hosts offer and the certificate's days left"
+    },
+    {
+      "id": "encryption",
+      "table": "encryption_file",
+      "description": "Encryption of data at rest, and whether its keys are managed"
+    },
+    {
+      "id": "mfa",
+      "table": "mfa_file",
+      "description": "Multi-factor authentication enforced for the application's users"
+    },
+    {
+      "id": "patching",
+      "table": "patching_file",
+      "description": "Open critical and high vulnerabilities against the patching SLA"
+    },
+    {
+      "id": "logging",
+      "table": "logging_file",
+      "description": "Logs shipped to the central sink, and how much of the application they cover"
+    },
+    {
+      "id": "backup",
+      "table": "backup_file",
+      "description": "Backups taken on time, and restores tested"
+    }
+  ],
+  "notebooks": [
+    "controls.nb.ts",
+    "posture.nb.ts",
+    "summary.nb.ts"
+  ],
+  "ontology": {
+    "objectTypes": [],
+    "linkTypes": [],
+    "actionTypes": [],
+    "nouns": {
+      "posture": {
+        "one": "app",
+        "many": "apps"
+      },
+      "by_unit": {
+        "one": "unit",
+        "many": "units"
+      },
+      "by_control": {
+        "one": "control",
+        "many": "controls"
+      },
+      "tls": {
+        "one": "app",
+        "many": "apps"
+      },
+      "encryption": {
+        "one": "app",
+        "many": "apps"
+      },
+      "mfa": {
+        "one": "app",
+        "many": "apps"
+      },
+      "patching": {
+        "one": "app",
+        "many": "apps"
+      },
+      "logging": {
+        "one": "app",
+        "many": "apps"
+      },
+      "backup": {
+        "one": "app",
+        "many": "apps"
+      }
+    },
+    "properties": [
+      {
+        "column": "app_id",
+        "title": "Application",
+        "description": "The application's id in the inventory"
+      },
+      {
+        "column": "name",
+        "title": "Name",
+        "description": "The application's name"
+      },
+      {
+        "column": "business_unit",
+        "title": "Business unit",
+        "values": {
+          "Retail": "Retail",
+          "Payments": "Payments",
+          "Corporate": "Corporate",
+          "Platform": "Platform",
+          "Data": "Data"
+        },
+        "description": "The business unit that owns the application"
+      },
+      {
+        "column": "environment",
+        "title": "Environment",
+        "values": {
+          "prod": "Production",
+          "nonprod": "Non-production"
+        },
+        "description": "Production or not"
+      },
+      {
+        "column": "tier",
+        "title": "Tier",
+        "values": {
+          "1": "Tier 1",
+          "2": "Tier 2",
+          "3": "Tier 3"
+        },
+        "description": "1 is the most critical"
+      },
+      {
+        "column": "status",
+        "title": "Status",
+        "description": "Whether the application passes the control",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert"
+      },
+      {
+        "column": "tls",
+        "title": "TLS",
+        "description": "The application's standing on TLS",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control"
+        ]
+      },
+      {
+        "column": "encryption",
+        "title": "Encryption at rest",
+        "description": "The application's standing on encryption at rest",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control"
+        ]
+      },
+      {
+        "column": "mfa",
+        "title": "MFA",
+        "description": "The application's standing on MFA",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control"
+        ]
+      },
+      {
+        "column": "patching",
+        "title": "Patching",
+        "description": "The application's standing on patching",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control"
+        ]
+      },
+      {
+        "column": "logging",
+        "title": "Central logging",
+        "description": "The application's standing on central logging",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control"
+        ]
+      },
+      {
+        "column": "backup",
+        "title": "Backup",
+        "description": "The application's standing on backup",
+        "values": {
+          "pass": "Passing",
+          "fail": "Failing"
+        },
+        "bad": [
+          "fail"
+        ],
+        "newValues": "alert",
+        "datasets": [
+          "posture",
+          "by_unit",
+          "by_control"
+        ]
+      },
+      {
+        "column": "hostname",
+        "title": "Host",
+        "description": "The host the control was checked on"
+      },
+      {
+        "column": "protocol",
+        "title": "Protocol",
+        "values": {
+          "TLS1.0": "TLS 1.0",
+          "TLS1.2": "TLS 1.2",
+          "TLS1.3": "TLS 1.3"
+        },
+        "newValues": "alert",
+        "description": "The TLS protocol the host offers"
+      },
+      {
+        "column": "cert_days_left",
+        "title": "Certificate days left",
+        "unit": "days",
+        "description": "Days until the certificate expires (negative: expired)"
+      },
+      {
+        "column": "datastore",
+        "title": "Datastore",
+        "values": {
+          "postgres": "PostgreSQL",
+          "s3": "S3",
+          "mysql": "MySQL",
+          "mongo": "MongoDB",
+          "files": "Files"
+        },
+        "description": "Where the application keeps its data"
+      },
+      {
+        "column": "kms_managed",
+        "title": "Keys managed",
+        "values": {
+          "yes": "Yes",
+          "no": "No"
+        },
+        "description": "Whether the keys are managed by the key service"
+      },
+      {
+        "column": "idp",
+        "title": "Identity provider",
+        "values": {
+          "okta": "Okta",
+          "azuread": "Entra ID",
+          "local": "Local accounts"
+        },
+        "description": "The identity provider the application signs in through"
+      },
+      {
+        "column": "enforced",
+        "title": "MFA enforced",
+        "values": {
+          "yes": "Yes",
+          "no": "No"
+        },
+        "description": "Whether every sign-in needs a second factor"
+      },
+      {
+        "column": "exceptions",
+        "title": "Exceptions",
+        "description": "Users excused from MFA"
+      },
+      {
+        "column": "critical_open",
+        "title": "Critical open",
+        "description": "Critical vulnerabilities open"
+      },
+      {
+        "column": "high_open",
+        "title": "High open",
+        "description": "High vulnerabilities open"
+      },
+      {
+        "column": "oldest_days",
+        "title": "Oldest finding",
+        "unit": "days",
+        "description": "The age of the oldest open finding"
+      },
+      {
+        "column": "sink",
+        "title": "Log sink",
+        "values": {
+          "splunk": "Splunk",
+          "cloudwatch": "CloudWatch",
+          "none": "None"
+        },
+        "description": "Where the application's logs go"
+      },
+      {
+        "column": "coverage_pct",
+        "title": "Log coverage",
+        "unit": "%",
+        "description": "How much of the application the logs cover"
+      },
+      {
+        "column": "last_success_hours",
+        "title": "Last backup",
+        "unit": "hours ago",
+        "description": "How long since the last good backup"
+      },
+      {
+        "column": "restore_tested",
+        "title": "Restore tested",
+        "values": {
+          "yes": "Yes",
+          "no": "No"
+        },
+        "description": "Whether a restore from backup has been tested"
+      },
+      {
+        "column": "apps",
+        "title": "Applications",
+        "description": "Applications counted"
+      },
+      {
+        "column": "failing",
+        "title": "Failing",
+        "description": "Applications failing the control"
+      },
+      {
+        "column": "control",
+        "title": "Control",
+        "description": "The control"
+      }
+    ]
+  },
+  "policies": {
+    "principals": [
+      {
+        "id": "owner",
+        "name": "Owner",
+        "role": "Owns the flow",
+        "owner": true
+      },
+      {
+        "id": "ciso",
+        "name": "Dana",
+        "role": "Security lead"
+      }
+    ],
+    "groups": [],
+    "rules": [
+      {
+        "id": "leads",
+        "kind": "action",
+        "name": "Dana may decide",
+        "action": "smaltfl:decide",
+        "for": [
+          "ciso"
+        ]
+      }
+    ]
+  },
+  "publish": {
+    "hold": [
+      "checks",
+      "wrong"
+    ],
+    "period": "day",
+    "together": false,
+    "watch": {
+      "tls": {
+        "history": "history.tls.json",
+        "pattern": "none"
+      },
+      "encryption": {
+        "history": "history.encryption.json",
+        "pattern": "none"
+      },
+      "mfa": {
+        "history": "history.mfa.json",
+        "pattern": "none"
+      },
+      "patching": {
+        "history": "history.patching.json",
+        "pattern": "none"
+      },
+      "logging": {
+        "history": "history.logging.json",
+        "pattern": "none"
+      },
+      "backup": {
+        "history": "history.backup.json",
+        "pattern": "none"
+      },
+      "posture": {
+        "history": "history.posture.json",
+        "pattern": "none"
+      }
+    }
+  }
+}

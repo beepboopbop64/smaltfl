@@ -15,6 +15,8 @@ export interface Listed {
   sha256: string;
   bytes?: number;
   rows: number;
+  /** With several daily sources (ADR 0013 §5): the day's file of each, by source id, this one's among them. */
+  files?: Record<string, Listed>;
 }
 
 /** A fixed file's entry: where the page fetches it, the sha256 and size the list gives, and where it came from. */
@@ -39,8 +41,15 @@ export interface DataList {
   sources: Record<string, ListedSource>;
   /** Each watched source's history, by source id. */
   histories: Record<string, FileEntry>;
-  /** The source the loads feed (the one with loads), its month's loads, its incidents' and its donor days. */
+  /** The source the loads feed (the first with loads), its month's loads, its incidents' and its donor days. With
+   * several daily sources (ADR 0013 §5), a load is a day: the first daily source's file, with every source's file
+   * for the day in `files`. */
   loadSource: string | null;
+  /** Every source with loads, in the list's order. */
+  daily: string[];
+  /** The watched source or step the page's views follow (the list's `judged`; else the loads' source): whose
+   * history the strip and the news read, whose card carries the day's story. */
+  judged: string | null;
   loads: Listed[];
   episodes: { name: string; about?: string; loads: Listed[] }[];
   donors: Listed[];
@@ -66,7 +75,19 @@ export function readDataList(raw: unknown, fallback: DataBindings): DataList {
       sources[id] = { ...(s as unknown as Binding), ...(s.entry ? { entry: s.entry as FileEntry } : {}), ...(Array.isArray(s.loads) ? { loads: (s.loads as RawLoad[]).map(listedOf) } : {}), ...(Array.isArray(s.donors) ? { donors: (s.donors as RawLoad[]).map(listedOf) } : {}) };
     }
     const histories = (index.histories ?? {}) as Record<string, FileEntry>;
-    const loadSource = Object.entries(sources).find(([, s]) => s.loads !== undefined)?.[0] ?? null;
+    const daily = Object.entries(sources).filter(([, s]) => s.loads !== undefined).map(([id]) => id);
+    const loadSource = daily[0] ?? null;
+    // Several daily sources: a load is a day, listed once, with each source's file for it (the first source's at top).
+    const loads: Listed[] = daily.length <= 1 ? (loadSource ? sources[loadSource]!.loads! : []) : [...new Set(daily.flatMap((id) => sources[id]!.loads!.map((l) => l.day)))].sort().map((day) => {
+      const files: Record<string, Listed> = {};
+      for (const id of daily) {
+        const l = sources[id]!.loads!.find((x) => x.day === day);
+        if (l) files[id] = l;
+      }
+      const top = files[loadSource!] ?? Object.values(files)[0]!;
+      return { ...top, files };
+    });
+    const judged = typeof index.judged === 'string' ? index.judged : loadSource;
     const files: Record<string, FileEntry> = {};
     for (const [id, s] of Object.entries(sources)) if (s.entry) files[id] = s.entry;
     Object.entries(histories).forEach(([id, h], k) => {
@@ -76,8 +97,8 @@ export function readDataList(raw: unknown, fallback: DataBindings): DataList {
     const flow = isRecord(index.flow) ? (index.flow as unknown as FileEntry) : null;
     if (flow) files.flow = flow;
     return {
-      format: 2, ...(typeof index.month === 'string' ? { month: index.month } : {}), ...(typeof index.built === 'string' ? { built: index.built } : {}), data, flow, sources, histories, loadSource,
-      loads: loadSource ? sources[loadSource]!.loads! : [], episodes: episodesOf(index.episodes), donors: loadSource ? sources[loadSource]!.donors ?? [] : [], files,
+      format: 2, ...(typeof index.month === 'string' ? { month: index.month } : {}), ...(typeof index.built === 'string' ? { built: index.built } : {}), data, flow, sources, histories, loadSource, daily, judged,
+      loads, episodes: episodesOf(index.episodes), donors: loadSource ? sources[loadSource]!.donors ?? [] : [], files,
     };
   }
   // Format 1: the example's files by name.
@@ -102,7 +123,7 @@ export function readDataList(raw: unknown, fallback: DataBindings): DataList {
   }
   return {
     format: 1, ...(typeof index.month === 'string' ? { month: index.month } : {}), ...(typeof index.built === 'string' ? { built: index.built } : {}), data, flow: null, sources, histories,
-    loadSource: loads.length ? loadSource : null, loads, episodes: episodesOf(index.episodes), donors, files: out,
+    loadSource: loads.length ? loadSource : null, daily: loads.length && loadSource ? [loadSource] : [], judged: loads.length ? loadSource : null, loads, episodes: episodesOf(index.episodes), donors, files: out,
   };
 }
 
@@ -111,6 +132,6 @@ export function namedFiles(list: DataList): { path: string; sha256: string; byte
   // The flow document is the build's own file (ADR 0011: a folder's flow.json, its notebooks expanded), never the data
   // branch's: it is checked against loads.json's entry when it is read, not against MANIFEST.json.
   const fixed = Object.entries(list.files).filter(([k]) => k !== 'flow').map(([, f]) => ({ path: f.from ?? f.path, sha256: f.sha256, bytes: f.bytes }));
-  const days = [...list.loads, ...list.episodes.flatMap((e) => e.loads), ...list.donors].map((l) => ({ path: l.file, sha256: l.sha256, bytes: l.bytes ?? -1 }));
+  const days = [...list.loads, ...list.episodes.flatMap((e) => e.loads), ...list.donors].flatMap((l) => (l.files ? Object.values(l.files) : [l])).map((l) => ({ path: l.file, sha256: l.sha256, bytes: l.bytes ?? -1 }));
   return [...fixed, ...days];
 }

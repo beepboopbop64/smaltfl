@@ -90,6 +90,16 @@ match smaltdb's `CLAUDE.md`.
   glance budget `briefWords`, `briefBanned`); `briefSections` in `src/app/main.ts` puts it in the input card's News on
   a day with something to say (status, the sentence, impact, cause, the fix with a tap to propose another, copy as
   text, image or link; `#brief-YYYY-MM-DD` opens a day's). `tools/judges/two-minute.md` is the test it is judged by.
+- Checks nobody wrote (ADR 0013): a history keeps each pair's cells day by day while they are few (`PAIR_CELLS`,
+  `measures.ts`); `src/core/combos.ts` judges every pair's association against its own history (`comboNews`, the
+  `combo` metric: a cell's log odds ratio, `history.ts`) and the day as a whole against the days before by the
+  isolation forest (`unlikeNews`); kinds `combo` and `unlike` are findings of the values cell. A `publish.watch` may name
+  a published step (its claim told in the engine from `RunContext.tell`, `src/plugin/tell.ts`; its history built by
+  `scripts/data/history.ts --watch <step>` running the flow on each day's files). `examples/controls/` is the controls
+  posture (six daily control sources, the posture joined and watched, five planted days; `test/fixtures/controls.ts`,
+  `scripts/data/controls.ts`, `test/controls.test.ts`); `npm run build:app -- --flow examples/controls/flow.json --out
+  dist/app-controls` builds it; loads.json may list several daily sources (read as days) and name the dataset the
+  views follow (`judged`).
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
@@ -98,6 +108,8 @@ match smaltdb's `CLAUDE.md`.
   notebooks (smaltnb's `.nb.ts`) as the only step surface, in slices; its §"The slices" is the order of work. Then
   [ADR 0012](docs/adr/0012-visual-first-in-two-minutes.md): the brief and the incident page first, then the drill by
   the biggest driver, then the phone canvas read sideways, then the notebook as a page behind the visuals.
+  [ADR 0013](docs/adr/0013-discovered-checks.md) adds the combination and forest judges and the watched step, built on
+  the controls example; its Q-104 to Q-109 are the maintainers' to confirm.
 
 ## Rules for this repository
 

@@ -18,6 +18,7 @@ import { HistoryRanges, QUANTILES, type Metric, type ValueHistory } from './hist
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
 import { marksOn, nounOf, partNamed, propertyOf } from './ontology.js';
 import { clockText } from './quality.js';
+import { comboNews, unlikeNews } from './combos.js';
 
 export type Severity = 'alert' | 'warn' | 'note' | 'ok';
 /** Where a finding's details are: the tabs of a drill-down. */
@@ -27,7 +28,7 @@ export type Act = 'expected' | 'incident' | 'notify' | 'rule' | 'quarantine' | '
 
 export interface Finding {
   key: string;
-  kind: 'volume' | 'hours' | 'gone' | 'share' | 'new' | 'pair' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
+  kind: 'volume' | 'hours' | 'gone' | 'share' | 'new' | 'pair' | 'combo' | 'unlike' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
   severity: Severity;
   /** How far out, in typical misses (capped): what ranks findings of a severity. */
   score: number;
@@ -59,6 +60,9 @@ export interface Finding {
   bad?: boolean;
   /** A day not judged (`unlearned`): why its rows have no range. */
   why?: NoRange;
+  /** A day unlike the days before (`unlike`, ADR 0013 §3): the forest's score for it, the highest a day before reached,
+   * the days learned from, and the numbers that set it apart, each with today's value and the usual. */
+  unlike?: { score: number; highest: number; days: number; numbers: string[] };
 }
 
 /** How a column and a value are said: a column's title, and a code with what it stands for. */
@@ -175,6 +179,10 @@ export const MATERIAL = {
   newUnusual: 100,
   /** A part that held or moved is a split's cause from this many rows (story.ts). */
   split: 200,
+  /** A combination's excess over what its columns predict (ADR 0013, combos.ts) must move at least `share` of the day's
+   * rows; two points is unusual, five something wrong. */
+  comboUnusual: 0.02,
+  comboWrong: 0.05,
 };
 
 /** The floors that count rows, which scale with a day's expected rows in the general form (ADR 0010 §4). */
@@ -451,7 +459,8 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     if (!vh.counts) continue;
     const badCodes = judge.bad.get(column.toLowerCase());
     vh.values.forEach((key, i) => {
-      if (vh.first[i]! > k) return;
+      // A value first seen today is told as new (below), not as a share against a history of none.
+      if (vh.first[i]! >= k) return;
       const bad = key !== 'null' && !!badCodes?.has(String(parse(key)));
       const j = judged({ of: 'value', column, value: key });
       if (!j) {
@@ -530,6 +539,14 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     const badCodes = judge.bad.get(column.toLowerCase());
     const bad = fresh.keys.some((key) => key !== 'null' && !!badCodes?.has(String(parse(key))));
     const alert = serious || bad;
+    // A column whose one new value is null went blank (ADR 0013: a control's file with no rows leaves its column of the
+    // posture blank): told as blanks, so the day reads as the data missing, not as a value.
+    if (fresh.keys.length === 1 && fresh.keys[0] === 'null' && rows > 0) {
+      const share = n / rows;
+      // Ten points of the day blank where none ever was: something wrong; two: unusual.
+      out.push({ key: `missing:${column}`, kind: 'missing', severity: share >= 0.1 && n >= M.rows ? 'alert' : share >= MATERIAL.shareUnusual ? 'warn' : 'note', score: Math.min(99, share * 100), title: `${sentence(names.column(column))} blank: ${share >= 0.995 ? 'all' : `${Math.round(share * 100)}%`} (never before)`, detail: `${fmtInt(n)} ${noun(n)} without it today; never a blank in ${daysSeen(file, k)} days.`, look: 'columns', columns: [column], values: ['null'], value: share, rows: n, acts: ['incident', 'expected', 'rule', 'notify'] });
+      continue;
+    }
     out.push({ key: `new:${column}`, kind: 'new', severity: alert ? 'alert' : n >= M.newUnusual || n >= 0.001 * rows ? 'warn' : 'note', score: alert ? 60 : Math.min(99, n / Math.max(1, rows) * 1000), title: fresh.keys.length === 1 ? `New ${names.column(column)}: ${label(column, fresh.keys[0]!)} · ${fmtInt(n)} ${noun(n)}` : `New ${names.column(column)} values: ${fresh.keys.length} · ${fmtInt(n)} ${noun(n)}`, detail: `${listed(said)}${fresh.keys.length > 5 ? ` and ${fresh.keys.length - 5} more` : ''}: never in ${daysSeen(file, k)} days of history.`, look: 'columns', columns: [column], values: fresh.keys, rows: n, acts: alert ? ['incident', 'quarantine', 'notify'] : ['expected', 'quarantine', 'rule', 'notify'], ...(bad ? { bad: true } : {}) });
   }
   for (const [pair, vh] of Object.entries(file.pairs ?? {})) {
@@ -550,6 +567,16 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       return `${names.column(a)} ${names.value(a, x)} with ${names.column(b)} ${names.value(b, y)}`;
     });
     out.push({ key: `pair:${pair}`, kind: 'pair', severity: n >= M.newUnusual || n >= 0.001 * rows ? 'warn' : 'note', score: Math.min(99, n / Math.max(1, rows) * 1000), title: `New pair: ${names.column(a)} with ${names.column(b)} · ${fmtInt(n)} ${noun(n)}`, detail: `${sentence(listed(said))}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}: never together in ${daysSeen(file, k)} days.`, look: 'columns', columns: [a, b], values: keys, rows: n, acts: ['expected', 'quarantine', 'rule', 'notify'] });
+  }
+
+  // Combinations (ADR 0013): a pair's cell against what its two columns alone predict, and the day as a whole against
+  // the days before, by an isolation forest: checks discovered from the history, not written as rules.
+  out.push(...comboNews(h, day, { names, M, label, noun }));
+  // The forest speaks when nothing loud is said of the columns it would name: what it adds is the day no single
+  // number flags.
+  for (const f of unlikeNews(h, day, { names, label, noun })) {
+    const loud = out.filter((x) => x.severity === 'alert' || x.severity === 'warn');
+    if (!loud.some((x) => (x.columns ?? []).some((c) => f.columns?.includes(c)) || x.kind === 'volume' || x.kind === 'hours')) out.push(f);
   }
 
   // Shape: a measure's or a time's bottom tenth, median or top tenth moved.

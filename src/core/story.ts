@@ -196,7 +196,7 @@ export const ACT_VERB: Record<Act, string> = {
 };
 
 /** The health row's cells (ADR 0008 §6), in order, each with the kinds of finding it holds and its name on screen. */
-export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'new', 'pair', 'missing'], shape: ['shape'] };
+export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'new', 'pair', 'combo', 'unlike', 'missing'], shape: ['shape'] };
 export const CELL_NAMES: Record<Cell, string> = { file: 'File', amount: 'Amount', hours: 'Hours', values: 'Values', shape: 'Shape' };
 /** The health row's heading: what the five cells are, said once and counted at a glance. */
 export const HEALTH_HEAD = 'Health';
@@ -207,7 +207,7 @@ export const SETTLE_LINE = 'Total in range · nothing to do';
 
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const VALUE_KINDS = new Set<Finding['kind']>(['gone', 'share', 'missing']);
-const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
+const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'combo', 'unlike', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const worst = (xs: readonly Severity[]): Severity => xs.reduce<Severity>((a, b) => (RANK[b] < RANK[a] ? b : a), 'ok');
 const weekdayOf = (day: string) => WEEKDAYS[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
@@ -641,14 +641,22 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   // A value marked bad that is something wrong leads the day (ADR 0010 §4, the owner: always alert, an incident): told
   // by its own finding unless a split leads with that value surging or vanishing.
   const badLead = live.filter((f) => f.bad && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  // A column gone blank beyond what a day like it has leads too (ADR 0013: a control's file with no rows, or rows its
+  // checks dropped, leaves blanks in its column of the posture): its values' shares falling away are what the blanks
+  // are, not a part that vanished.
+  const blankLead = live.filter((f) => f.kind === 'missing' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  // A value never seen in a column where that is something wrong (ADR 0010 §4) leads the day too: what the checks drop
+  // and the shares that fell follow from it.
+  const newLead = live.filter((f) => f.kind === 'new' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  const lead = badLead ?? newLead ?? blankLead;
   const splitFound = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden, judge) : null;
-  const split = splitFound && (!badLead || (splitFound.bad && splitFound.kind !== 'held')) ? splitFound : null;
+  const split = splitFound && (!lead || (splitFound.bad && splitFound.kind !== 'held' && !blankLead)) ? splitFound : null;
   const gate = k >= 0 && o.step ? gateOf(h, day, o.step, o.limit ?? null) : null;
   if (gate && o.held !== undefined) (gate.held = o.held), gate.held && (gate.near = false);
   const blankDay = !!volume && volume.value !== undefined && !!volume.range && volume.value < MATERIAL.blank * volume.range.expected;
   // A population seen through its blanks (a value and the fields blank on its rows, told together): the day's cause
   // when nothing else is, named by the value and not by a blank or a symptom (Mon Sep 18, 2023's Flex Fare trips).
-  const popFinding = k >= 0 && !o.refused && !split && !badLead && !hoursF && !(volume && loud(volume)) && !gate?.held
+  const popFinding = k >= 0 && !o.refused && !split && !lead && !hoursF && !(volume && loud(volume)) && !gate?.held
     ? (live.filter((f) => f.members && loud(f)).sort((a, b) => b.score - a.score).find((f) => populationOf(h, day, names, f, hidden, judge)) ?? null)
     : null;
   const population = popFinding ? populationOf(h, day, names, popFinding, hidden, judge) : null;
@@ -660,7 +668,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     : hoursF ? (hoursF.rows ?? 0)
     : volume && volume.range && volume.value !== undefined ? Math.abs(volume.value - volume.range.expected) : 0;
   const caused = !!(basis || hoursF || (volume && loud(volume)));
-  const hero: Hero = o.refused ? 'refused' : hoursF ? 'hours' : split ? 'split' : badLead ? 'finding' : volume && loud(volume) ? 'amount' : gate?.held ? 'gate' : 'finding';
+  const hero: Hero = o.refused ? 'refused' : hoursF ? 'hours' : split ? 'split' : lead ? 'finding' : volume && loud(volume) ? 'amount' : gate?.held ? 'gate' : 'finding';
 
   // Tier each finding.
   const n = k >= 0 ? file.rows[k]! : 0;
@@ -695,6 +703,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const blankCols = new Set(basis?.blank ?? []);
   const tierOf = (f: Finding): { tier: Tier; predicted?: number } => {
     if (ack.has(f.key)) return { tier: 'note' };
+    // A column gone blank: its values' shares falling away, and anything about its values, are the blanks (ADR 0013).
+    if (blankLead && f !== blankLead && (f.columns ?? []).some((c) => blankLead.columns?.includes(c)) && f.kind !== 'new') return { tier: 'absorbed' };
     if (f === popFinding && population) return { tier: 'cause' };
     if (f === hoursF && hero === 'hours') return { tier: 'cause' };
     if (f === volume) return hero === 'amount' ? { tier: 'cause' } : caused ? { tier: 'absorbed' } : { tier: loud(f) ? 'standalone' : 'note' };
@@ -739,7 +749,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const byRank = (a: Told, b: Told) => RANK[a.severity] - RANK[b.severity] || b.score - a.score;
   const standalone = told.filter((f) => f.tier === 'standalone').sort(byRank);
   // The finding the head is about: the cause, or with none, the first standalone one.
-  const cause = told.find((f) => f.tier === 'cause') ?? (hero === 'finding' ? (standalone.find((f) => f.key === badLead?.key) ?? standalone[0] ?? null) : null);
+  const cause = told.find((f) => f.tier === 'cause') ?? (hero === 'finding' ? (standalone.find((f) => f.key === lead?.key) ?? standalone[0] ?? null) : null);
   const absorbed = told.filter((f) => f.tier === 'absorbed');
   const follows = told.filter((f) => f.tier === 'follows').sort((a, b) => RANK[a.was] - RANK[b.was] || b.score - a.score);
   const sameDay = told.filter((f) => f.tier === 'sameDay').sort((a, b) => RANK[a.was] - RANK[b.was] || b.score - a.score);
@@ -877,9 +887,9 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     const way = population.kind === 'surged' ? 'More' : 'Fewer';
     const full = `${way} ${population.name}${population.trips ? ` ${noun()}` : ''}: ${popShare.value}`;
     head = wordsIn(full) <= 6 ? full : `${way} ${population.name}: ${popShare.value}`;
-  } else if (standalone[0]) {
+  } else if ((hero === 'finding' && cause) || standalone[0]) {
     // A finding's title as a head, in six words: its usual range left to the visual under it when it doesn't fit.
-    const t = standalone[0].title;
+    const t = ((hero === 'finding' && cause) || standalone[0])!.title;
     head = wordsIn(t) > 6 ? t.replace(/\s*\(usually [^)]*\)$/, '') : t;
   }
   else if (recovery) head = 'Back to normal';

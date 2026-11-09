@@ -3,7 +3,7 @@
  * only, so it crosses the worker protocol by structured clone.
  */
 import type { Repair } from './fill.js';
-import type { Claim, FillHold, Hold, Load, RunRef } from './hold.js';
+import type { Claim, ClaimLevel, FillHold, Hold, Load, RunRef } from './hold.js';
 import type { RunManifest } from './manifest.js';
 import type { Measures } from './measures.js';
 import type { DecisionOption } from './policy.js';
@@ -40,6 +40,19 @@ export interface RunContext {
    * claims add each donor's (amendment 1 S3): the donor source's id, its day, the same pinned history.
    */
   claims?: Claim[];
+  /**
+   * For each watched step (ADR 0013 §4), whose load exists only once the run has built it, so the page cannot tell its
+   * claim: what the page knows of the record, the days it leaves out of learning and the levels it accepted for the
+   * step. The engine tells the step's claim itself, from the base history and tail pinned under the watch's names,
+   * the measures it takes of the built dataset, and this. A watched step with no entry is not judged, which holds.
+   */
+  tell?: Record<string, TellFor>;
+}
+
+/** What the page says of the record for a watched step the engine tells the claim of. */
+export interface TellFor {
+  skip: string[];
+  levels: ClaimLevel[];
 }
 
 /** How far verify goes (ADR 0006 §1): the stored hashes; then a recomputation; then decoding the source files again. */

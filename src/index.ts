@@ -99,9 +99,9 @@ export type { ParamType, ParamValue } from './core/sqltext.js';
  * with `stage` and `from`, the held run it repairs, its claims the day's and each donor's (ADR 0009 amendment 1 S4):
  * held whatever else holds, until a release of its decision.
  */
-export async function runFlow(db: PluginCaller, doc: FlowDocument, options: { smaltdb: string; parameters?: Readonly<Record<string, ParamValue>>; data?: RunContext['data']; log?: RunContext['log']; claims?: RunContext['claims']; stage?: boolean; from?: RunOptions['from'] }): Promise<RunResult> {
+export async function runFlow(db: PluginCaller, doc: FlowDocument, options: { smaltdb: string; parameters?: Readonly<Record<string, ParamValue>>; data?: RunContext['data']; log?: RunContext['log']; claims?: RunContext['claims']; tell?: RunContext['tell']; stage?: boolean; from?: RunOptions['from'] }): Promise<RunResult> {
   const plan = await translate(doc, options.parameters ?? {});
-  const context: RunContext = { doc, data: options.data ?? null, log: options.log ?? null, ...(options.claims !== undefined ? { claims: options.claims } : {}) };
+  const context: RunContext = { doc, data: options.data ?? null, log: options.log ?? null, ...(options.claims !== undefined ? { claims: options.claims } : {}), ...(options.tell !== undefined ? { tell: options.tell } : {}) };
   const stage = options.stage ? { stage: true, ...(options.from ? { from: options.from } : {}) } : options.from ? { from: options.from } : {};
   return (await db.callPlugin(PLUGIN_NAME, 'run', [plan, { smaltdb: options.smaltdb, context, ...stage }], { lock: true })) as RunResult;
 }

@@ -1,0 +1,192 @@
+{
+  "smaltflData": 1,
+  "flow": "controls",
+  "generate": "scripts/data/controls.mjs",
+  "sources": {
+    "apps": {
+      "table": "apps_file",
+      "format": "csv",
+      "file": "apps.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "name",
+          "TEXT"
+        ],
+        [
+          "business_unit",
+          "TEXT"
+        ],
+        [
+          "environment",
+          "TEXT"
+        ],
+        [
+          "tier",
+          "INTEGER"
+        ]
+      ]
+    },
+    "tls": {
+      "table": "tls_file",
+      "format": "csv",
+      "file": "tls.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "hostname",
+          "TEXT"
+        ],
+        [
+          "protocol",
+          "TEXT"
+        ],
+        [
+          "cert_days_left",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "encryption": {
+      "table": "encryption_file",
+      "format": "csv",
+      "file": "encryption.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "datastore",
+          "TEXT"
+        ],
+        [
+          "kms_managed",
+          "TEXT"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "mfa": {
+      "table": "mfa_file",
+      "format": "csv",
+      "file": "mfa.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "idp",
+          "TEXT"
+        ],
+        [
+          "enforced",
+          "TEXT"
+        ],
+        [
+          "exceptions",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "patching": {
+      "table": "patching_file",
+      "format": "csv",
+      "file": "patching.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "critical_open",
+          "INTEGER"
+        ],
+        [
+          "high_open",
+          "INTEGER"
+        ],
+        [
+          "oldest_days",
+          "INTEGER"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "logging": {
+      "table": "logging_file",
+      "format": "csv",
+      "file": "logging.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "sink",
+          "TEXT"
+        ],
+        [
+          "coverage_pct",
+          "REAL"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    },
+    "backup": {
+      "table": "backup_file",
+      "format": "csv",
+      "file": "backup.csv",
+      "header": true,
+      "columns": [
+        [
+          "app_id",
+          "TEXT"
+        ],
+        [
+          "last_success_hours",
+          "INTEGER"
+        ],
+        [
+          "restore_tested",
+          "TEXT"
+        ],
+        [
+          "status",
+          "TEXT"
+        ]
+      ]
+    }
+  },
+  "judged": "posture"
+}

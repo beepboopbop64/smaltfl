@@ -22,6 +22,11 @@ export interface DataBindings {
   smaltflData: 1;
   flow: string;
   sources: Record<string, Binding>;
+  /** A generated example's generator (scripts/data/*.mjs) and its arguments: what writes its daily files. */
+  generate?: string;
+  generateArgs?: string[];
+  /** The watched source or step the app's views follow (ADR 0013 §5), when it isn't the first daily source. */
+  judged?: string;
 }
 
 /** A source as the engine reads it: its file, its table, and the table's DDL. */

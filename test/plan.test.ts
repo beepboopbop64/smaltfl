@@ -279,7 +279,8 @@ describe('a document that says what holds its publication (ADR 0009 §2)', () =>
     expect(issues({ hold: ['wrong'], watch: {} })).toEqual([{ path: '$.publish.watch', message: 'wrong judges a source against its history: watch names it' }]);
     expect(issues({ hold: ['checks'], watch: { trips: 'history.json' }, period: 'day' })).toEqual([{ path: '$.publish.watch', message: 'a watch is judged only for short or wrong, and hold has neither' }]);
     expect(issues({ ...PUBLISH, watch: { trips_valid: 'history.json', trips: '' } })).toEqual([
-      { path: '$.publish.watch.trips_valid', message: 'no source trips_valid: a watch judges a source' },
+      // A watch may name a published step (ADR 0013 §4); trips_valid is a step the flow doesn't publish.
+      { path: '$.publish.watch.trips_valid', message: "trips_valid isn't published: a watched step is one the flow publishes (a step with a dataset block), judged once the run has built it" },
       { path: '$.publish.watch.trips', message: "the history's file, a file in the data's list" },
     ]);
     expect(issues({ ...PUBLISH, period: undefined })).toEqual([{ path: '$.publish.period', message: 'a watch needs a period: the parameter whose value is the day a claim names' }]);
@@ -822,7 +823,11 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
     expect(() => validatePlan({ ...plan, publish: { ...pub, watch: [[0, { ...w, pattern: 'none' }]] } } as FlowPlan)).not.toThrow();
     const { zone: _z, ...short } = w;
     expect(bad({ ...pub, watch: [[0, short]] })).toThrow('publish.watch[0] has after, bad, calendar, count, donor, every, follow, history, holds, newValues, pattern, period, relearn, scale, time; a watch has exactly');
-    expect(bad({ ...pub, watch: [[1, w]] })).toThrow("publish.watch[0] watches node 1, which isn't a source");
+    // A watched node is a source or a step the plan publishes (ADR 0013 §4): node 1 is a step, and not an output here.
+    const unpublished = plan.nodes.findIndex((n, i) => n.op !== 'table' && !plan.outputs.some((o) => o.node === i));
+    expect(bad({ ...pub, watch: [[unpublished, w]] })).toThrow(`publish.watch[0] watches node ${unpublished}, which isn't a source or a published step`);
+    const published = plan.outputs[0]!.node;
+    expect(() => validatePlan({ ...plan, publish: { ...pub, watch: [[published, w]] } } as FlowPlan)).not.toThrow();
     expect(bad({ ...pub, watch: [[0, { ...w, bad: [['result']] }]] })).toThrow('publish.watch[0].bad is a list of [column, …]');
     expect(bad({ ...pub, watch: [[0, { ...w, holds: false }]] })).toThrow('publish.hold judges a source (short or wrong), and no watch holds');
     expect(bad({ ...pub, hold: ['checks', 'unlearned'] })).toThrow('publish.hold has unlearned without short or wrong');

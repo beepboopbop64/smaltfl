@@ -39,7 +39,7 @@ import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifes
 import { shapeOf } from '../core/optimize.js';
 import { flowHash, isPublish2, planPeriod, translate, type Column, type FlowPlan, type PlanNode } from '../core/plan.js';
 import { checksOver, clockText, columnSql, fillGaps, growForest, isolationPath, madsOf, minuteOfDay, needOf, needWords, pathLength, principalComponents, profileColumn, quantile, renamesOf, scoreOf, secondsText, suggestChecks, unusual, type Cut, type Drift, type Forest, type Judge, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
-import type { ReleaseResult, RunResult, VerifyLevel, VerifyResult } from '../core/protocol.js';
+import type { ReleaseResult, RunResult, TellFor, VerifyLevel, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
 import { measureLoad, pinFile, releaseRun, runFlow, verifyRun } from '../index.js';
 import { appendPeriods, hourValuesOf, settingsFor, tailBefore, type Measures } from '../core/measures.js';
@@ -323,8 +323,9 @@ function sayRun(r: RunRecord): void {
   const figures = runFigures({ day: day ?? null, run: runName(r), ms: fmtMs(r.ms), nodes: result.manifest.nodes, holds: pause ? result.holds : [], sight: sightOf, page: state.engine?.mode === 'page' });
   const top = day ? verdictOf(day) : undefined;
   const may = (['asis', 'dont'] as const).some((o) => checkDecision(policies(), state.viewer, o).allowed);
+  const other = pause ? heldElsewhere(r) : null;
   const said = day
-    ? daySentence({ day, head: top?.title ?? null, wrong: top?.severity === 'alert', pause: pause ? { state: pause.state, readers: readersAsOf(r).day, past: readersAsOf(r).past, standing: standsOn(pause.pause?.decision), may, deciders: deciders(), remedy: pause.remedy, withdrawn: pause.withdrawn, level: pause.pause?.decision?.about.level?.from ?? null, under: levelUnder(pause.pause?.decision) } : null })
+    ? daySentence({ day, head: other ? `${other.origin}: ${other.said}` : top?.title ?? null, wrong: top?.severity === 'alert' || !!other, pause: pause ? { state: pause.state, readers: readersAsOf(r).day, past: readersAsOf(r).past, standing: standsOn(pause.pause?.decision), may, deciders: deciders(), remedy: pause.remedy, withdrawn: pause.withdrawn, level: pause.pause?.decision?.about.level?.from ?? null, under: levelUnder(pause.pause?.decision) } : null })
     : pause ? `Held${result.holds.every((x) => sightOf(x.origin) === 'all') ? `: ${result.holds[0]!.said}` : ''}` : figures;
   setStatus(said, false, { n: attempts, state: pause && !isOut(pause.state) ? 'held' : 'done', mark: pause?.state ?? null });
   $('status').title = figures;
@@ -410,6 +411,20 @@ const onScreen = (): RunRecord | undefined => {
   const r = latest();
   return r && dayOfRun(r) === viewedDay() ? r : undefined;
 };
+/**
+ * What held a run besides the judged dataset's own story (ADR 0013 §5): with several watched loads, the first other
+ * load's verdict ("backup: status fail with restore_tested yes: 55"), or why it wasn't judged, when the viewer may read
+ * that node. Null when the judged dataset's own day is what's wrong, or nothing else held.
+ */
+function heldElsewhere(r: RunRecord | undefined): { origin: string; said: string } | null {
+  if (!r) return null;
+  const day = dayOfRun(r);
+  const own = day ? verdictOf(day) : undefined;
+  if (own?.severity === 'alert') return null;
+  const judged = loadSource();
+  const h = r.result.holds.find((x) => (x.by === 'story' || x.by === 'unjudged') && x.origin !== judged && (isOwner() || visible(x.origin)));
+  return h ? { origin: h.origin, said: h.said } : null;
+}
 /**
  * The bar over rows on screen that aren't what readers get: another day's, after a refused file ("Rows from Thu Sep 21
  * · the last day published"); or the viewed day's own, staged while it waits or after it was not published ("Thu 21
@@ -934,6 +949,9 @@ function cardLine(id: string): CardLine {
   const story = sday && (id === loadSource() || id === history?.file.step) ? storyFor(sday) : null;
   if (story && id === loadSource() && (story.severity === 'alert' || story.severity === 'warn')) return { text: shortHead(story), tone: 'drop' };
   if (story?.gate?.held && id === history?.file.step) return heldCardLine(story.gate);
+  // Another watched load's own verdict, on its card (ADR 0013 §5): what the engine judged it by, in a few words.
+  const ownHold = id !== loadSource() ? onScreen()?.result.holds.find((x) => x.origin === id && (x.by === 'story' || x.by === 'unjudged')) : undefined;
+  if (ownHold) return { text: ownHold.said.replace(/\s*\((usually|never)[^)]*\)$/, ''), tone: 'drop' };
   // An output the held run didn't build, or one built from a day with something wrong upstream (ADR 0008); on a day
   // paused, an output that waits says what readers see meanwhile, and after a decision what became of it (ADR 0009).
   const out = outputState(id);
@@ -4471,7 +4489,7 @@ function briefInputs(day: string): BriefIn {
   }
   return {
     day, flow: state.doc.name, noun: (n) => (n === 1 ? rowNoun(loadSource() ?? '').one : rowNoun(loadSource() ?? '').many), story,
-    pause: p ? { state: p.state, readers, deciders: deciders(), may: mayDecide(state.viewer), remedy: p.remedy ? (p.remedy.donor ? `Filled from ${dayShort(p.remedy.donor)}` : p.remedy.part ? `${p.remedy.part} only` : null) : null } : null,
+    pause: p ? { state: p.state, readers, deciders: deciders(), may: mayDecide(state.viewer), remedy: p.remedy ? (p.remedy.donor ? `Filled from ${dayShort(p.remedy.donor)}` : p.remedy.part ? `${p.remedy.part} only` : null) : null, by: (() => { const e = heldElsewhere(r); return e ? `${e.origin}: ${e.said}` : null; })() } : null,
     outputs, objects, readers: who, file: load ? { name: load.file.replace(/^loads\//, ''), rows: load.rows, check } : null, options, picked, edited, prefer,
   };
 }
@@ -5344,6 +5362,16 @@ async function newsTab(card: string, id: string, who: string): Promise<HTMLEleme
     box.append(...(kind === 'checks' ? checksNews(card, story) : storyNews(card, story)));
     return box;
   }
+  // Another watched load's own verdict (ADR 0013 §5): what the engine judged this load by, against its own history,
+  // when it held the day; the judged dataset's view of the day is the status line's and its card's.
+  const mine = !state.failed && dataOf(card) !== loadSource() ? onScreen()?.result.holds.find((x) => x.origin === dataOf(card) && (x.by === 'story' || x.by === 'unjudged')) : undefined;
+  if (mine) {
+    const now = viewedDay();
+    box.append(h('div', { class: 'verdict alert stopped' },
+      h('p', { class: 'v-day' }, now ? dayLabel(now) : ''),
+      h('h3', { class: 'v-head' }, glyphEl(mine.by === 'unjudged' ? 'held' : 'alert', 16), mine.by === 'unjudged' ? 'Held: not judged' : mine.said.replace(/\s*\((usually|never)[^)]*\)$/, '')),
+      h('p', { class: 'v-line' }, mine.by === 'unjudged' ? mine.said : `${mine.said}: this load against its own history. The day is paused by it.`)));
+  }
   // A day paused with no story to tell it (the history doesn't have the day, or there is none): what held it, what
   // waits, and Decide (ADR 0009 §3: a source not judged is held, and a person decides).
   const own = !state.failed && dataOf(card) === loadSource() ? onScreen() : undefined;
@@ -5479,7 +5507,7 @@ function healthStrip(card: string, day: string, findings: Finding[]): HTMLElemen
     ['Arrived', findings.find((f) => f.kind === 'integrity'), k >= 0 ? `${rowsSaid(history!.file.rows[k]!)} in the day’s file${integrity.checks.get(loads.list[loads.at]?.file ?? '') ? ', which matches the source’s list' : ''}` : 'no file'],
     ['Amount', worst(['volume']), 'a normal amount for the day'],
     ['Complete', worst(['hours']), `${NEWS_NAMES.noun()} every hour`],
-    ['Values', worst(['gone', 'share', 'new', 'pair', 'missing']), 'values as usual'],
+    ['Values', worst(['gone', 'share', 'new', 'pair', 'combo', 'unlike', 'missing']), 'values as usual'],
     ['Shape', worst(['shape', 'schema']), 'as usual'],
   ];
   return h('div', { class: 'health', role: 'list' }, ...rows.map(([name, f, calm]) =>
@@ -5767,6 +5795,11 @@ function metricName(m: Metric): string {
     case 'quantile': return `${col(m.column)} p${Math.round((QUANTILES[m.q] ?? 0) * 100)}`;
     case 'value': return `${col(m.column)} ${NEWS_NAMES.label(m.column, JSON.parse(m.value) as unknown)} share`;
     case 'count': return `${col(m.column)} ${NEWS_NAMES.label(m.column, JSON.parse(m.value) as unknown)} ${NEWS_NAMES.noun()}`;
+    case 'combo': {
+      const [a, b] = m.pair.split('|') as [string, string];
+      const [x, y] = JSON.parse(m.value) as [unknown, unknown];
+      return `${col(a)} ${NEWS_NAMES.label(a, x)} with ${col(b)} ${NEWS_NAMES.label(b, y)}, beyond the columns`;
+    }
   }
 }
 
@@ -7584,6 +7617,8 @@ interface Load {
   rows: number;
   sha256: string;
   bytes?: number;
+  /** With several daily sources (ADR 0013 §5): each source's file for the day, by id. */
+  files?: Record<string, Listed>;
   note?: string;
   /** The episode it belongs to: the month, or an incident. */
   episode: string;
@@ -7602,6 +7637,8 @@ const loads = {
   /** The load whose file is pinned in the engine as the trips source: what a run reads, whatever is shown. */
   pinned: -1,
   bytes: new Map<number, Uint8Array>(),
+  /** The other daily sources' bytes for the same loads (ADR 0013 §5), by source id. */
+  others: new Map<number, Record<string, Uint8Array>>(),
   /** The days a paused day may be filled from that aren't loads (loads.json `donors`, ADR 0009 amendment 1 S13): never
    * stepped through, checked against the data's list, and pinned only when a fill needs one. */
   donors: [] as Listed[],
@@ -7642,6 +7679,10 @@ const spanOf = (id: string): string => {
  * else the example's trips.
  */
 const loadSource = (): string | undefined => {
+  // The data's list may name the watched source or step the views follow (ADR 0013 §5): the posture across several
+  // daily sources, whose card carries the day's story.
+  const judged = dataList?.judged;
+  if (judged && Object.keys(state.doc.publish?.watch ?? {}).some((id) => id.toLowerCase() === judged.toLowerCase()) && (state.doc.sources.some((x) => x.id === judged) || state.doc.steps.some((x) => x.id === judged))) return judged;
   const listed = dataList?.loadSource;
   if (listed && state.doc.sources.some((x) => x.id === listed)) return listed;
   const watched = Object.keys(state.doc.publish?.watch ?? {}).find((id) => state.doc.sources.some((x) => x.id === id));
@@ -7650,7 +7691,12 @@ const loadSource = (): string | undefined => {
   return state.doc.sources.find((x) => x.table === table)?.id;
 };
 /** The name the loads' files are pinned under: their source's binding's file. */
-const loadFile = (): string => bindingOf(loadSource() ?? '')?.file ?? 'trips.parquet';
+/** The source the daily loads feed first (the list's `loadSource`): the file a load's bytes are pinned as. */
+const primarySource = (): string | undefined => {
+  const listed = dataList?.loadSource;
+  return listed && state.doc.sources.some((x) => x.id === listed) ? listed : loadSource();
+};
+const loadFile = (): string => bindingOf(primarySource() ?? '')?.file ?? 'trips.parquet';
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dateOf = (day: string) => new Date(`${day}T12:00:00Z`);
 const weekday = (day: string) => WEEKDAYS[dateOf(day).getUTCDay()]!;
@@ -7950,8 +7996,19 @@ async function runLoad(k: number): Promise<void> {
     }
     // The engine hashes the bytes again as it pins them, kept ones included, and refuses them if they don't match.
     await pinFile(engine, loadFile(), bytes, l.sha256);
+    // The other daily sources' files for the day (ADR 0013 §5), each checked and pinned under its binding's name.
+    const others = loads.others.get(k) ?? {};
+    for (const [id, f] of Object.entries(l.files ?? {})) {
+      const b = bindingOf(id);
+      if (!b || id === primarySource()) continue;
+      others[id] ??= await checked(f.file, { sha256: f.sha256, bytes: f.bytes ?? -1, from: f.file });
+      await pinFile(engine, b.file, others[id], f.sha256);
+    }
+    loads.others.set(k, others);
+    for (const old of [...loads.others.keys()].slice(0, Math.max(0, loads.others.size - 3))) loads.others.delete(old);
   } catch (e) {
     loads.bytes.delete(k);
+    loads.others.delete(k);
     refuse(k, e);
     return;
   }
@@ -8065,6 +8122,8 @@ let flowHistory: HistoryRanges | null = null;
 let historyPin: HistoryRef | null = null;
 /** The watched source's base history, as the data's list gave it (ADR 0010 §6). */
 let baseHistory: HistoryFile | null = null;
+/** Every watch's base history and its pin (ADR 0013 §5), by watched id: the judged one's is `baseHistory`. */
+const bases = new Map<string, { file: HistoryFile; ref: HistoryRef }>();
 /**
  * Each watched source's tail (ADR 0010 §6, C5): the measures of its loads the base lacks, from their own runs in this
  * browser, one a slot (the first to arrive), rebuilt from the record when the page opens. A derived run adds none.
@@ -8147,19 +8206,34 @@ let measuring: Measures[] = [];
  * claim/2 for each watched source, told from its base, its tail before the day and the load's own measures, which the
  * plugin measures in the engine first; its tail pinned beside its base, as the claim names it.
  */
-async function claimsForRun(engine: Engine, day: string | undefined, parameters: Record<string, string>): Promise<Claim[] | undefined> {
+async function claimsForRun(engine: Engine, day: string | undefined, parameters: Record<string, string>): Promise<{ claims: Claim[]; tell: Record<string, TellFor> } | undefined> {
   measuring = [];
   const plan = await translate(state.doc, parameters);
   planKindCache.doc = state.doc;
   planKindCache.v2 = !!plan.publish && isPublish2(plan.publish);
-  if (!planKindCache.v2) return claimsFor(day);
+  if (!planKindCache.v2) {
+    const c = claimsFor(day);
+    return c ? { claims: c, tell: {} } : undefined;
+  }
   const out: Claim[] = [];
+  const tell: Record<string, TellFor> = {};
   for (const [source, w] of Object.entries(state.doc.publish?.watch ?? {})) {
-    const node = plan.nodes.findIndex((n) => n.op === 'table' && n.origin === source);
+    const node = plan.nodes.findIndex((n) => n.origin === source);
+    if (!day || node < 0) continue;
+    const known = bases.get(source);
+    const base = known?.file ?? (source === loadSource() ? baseHistory : null);
+    const pin = known?.ref ?? (source === loadSource() ? historyPin : null);
+    const ref = base && pin && pin.path === watchHistory(w) ? pin : null;
+    if (plan.nodes[node]!.op !== 'table') {
+      // A watched step (ADR 0013 §4): its load is the dataset the run builds, so the engine tells its claim, from the
+      // history and tail pinned under the watch's names and what the record says; its tail is pinned here.
+      const tail = tailBefore(tails.get(source) ?? [], day);
+      await pinFile(engine, tailPath(source), tail.length ? utf8(canonicalJSON(tail as unknown as Parameters<typeof canonicalJSON>[0])) : null);
+      tell[source] = { skip: recordedSkips(), levels: levelsOf(ledger?.entries ?? [], source) };
+      continue;
+    }
     const b = bindingOf(source);
-    if (!day || node < 0 || !b) continue;
-    const base = source === loadSource() ? baseHistory : null;
-    const ref = base && historyPin && historyPin.path === watchHistory(w) ? historyPin : null;
+    if (!b) continue;
     const settings = settingsFor(plan, node, ref ? base : null, state.doc.steps);
     if (!settings) continue;
     const m = await measureLoad(engine, b.table, settings);
@@ -8170,7 +8244,7 @@ async function claimsForRun(engine: Engine, day: string | undefined, parameters:
     claims.set(key, told?.claim ?? null);
     if (told) out.push(told.claim);
   }
-  return out;
+  return { claims: out, tell };
 }
 
 /** Whether the person may read the history: the trips source is open to them. */
@@ -8732,12 +8806,16 @@ async function run(): Promise<void> {
     const period = periodOfFlow();
     if (period && has(period) && loadDay) parameters[period] = loadDay;
     refreshRanges();
-    const told = await claimsForRun(engine, loadDay, parameters);
+    const asked = await claimsForRun(engine, loadDay, parameters);
+    const told = asked?.claims;
     const data = integrity.data ? { commit: integrity.data.commit, manifest: integrity.data.manifest } : null;
-    const result = await runFlow(engine, state.doc, { smaltdb: SMALTDB, parameters, data, log: recordHead(), ...(told ? { claims: told } : {}) });
+    const result = await runFlow(engine, state.doc, { smaltdb: SMALTDB, parameters, data, log: recordHead(), ...(told ? { claims: told } : {}), ...(asked && Object.keys(asked.tell).length ? { tell: asked.tell } : {}) });
     const ms = performance.now() - t;
-    // A held run returns, built, checked and recorded, its versions staged: only `published` names show it.
-    const rec: RunRecord = { result, ms, at: new Date(), inputs: inputsKey(inputsOf(result.manifest)), ...(loads.pinned >= 0 && loads.list.length > 1 ? { load: loads.pinned } : {}), ...(told?.length ? { claims: told } : {}) };
+    // A held run returns, built, checked and recorded, its versions staged: only `published` names show it. A watched
+    // step's claim, told in the engine, is kept from the hold it made (ADR 0013 §4).
+    const engineTold = result.holds.flatMap((h) => (h.by === 'story' && h.claim && asked?.tell[h.origin] ? [h.claim] : []));
+    const kept = [...(told ?? []), ...engineTold];
+    const rec: RunRecord = { result, ms, at: new Date(), inputs: inputsKey(inputsOf(result.manifest)), ...(loads.pinned >= 0 && loads.list.length > 1 ? { load: loads.pinned } : {}), ...(kept.length ? { claims: kept } : {}) };
     state.runs.unshift(rec);
     // Each watched load's measures to its source's tail, the first time its slot runs (C5).
     for (const m of result.measures ?? []) addToTail(m);
@@ -9994,18 +10072,29 @@ async function start(): Promise<void> {
     // smaltfl:<file>: the loads' source its first load.
     for (const [id, b] of Object.entries(list.sources)) {
       if (!state.doc.sources.some((x) => x.id === id)) continue;
-      const want: (Expected & { path: string }) | undefined = id === list.loadSource && first ? { path: first.file, sha256: first.sha256, bytes: first.bytes ?? -1, from: first.file } : b.entry;
+      // A daily source's first load (with several daily sources, the first day's file of each, ADR 0013 §5).
+      const day = first && (id === list.loadSource ? first : first.files?.[id]);
+      const want: (Expected & { path: string }) | undefined = day ? { path: day.file, sha256: day.sha256, bytes: day.bytes ?? -1, from: day.file } : b.entry;
       if (!want) throw new Error(`no hash for ${b.file} in the data's list: it can't be checked, so it isn't used`);
       const bytes = await checked(want.path, want);
       await pinFile(engine, b.file, bytes, want.sha256);
       await engine.exec(pinnedDdl(b));
       if (id === list.loadSource && first) loads.bytes.set(0, bytes);
+      else if (day) loads.others.set(0, { ...(loads.others.get(0) ?? {}), [id]: bytes });
     }
-    // The history pinned in the engine as the flow's watch names it (ADR 0009 §3): a claim told from it is checked against
-    // the bytes the engine hashed, and a run whose claim was told from other bytes holds its day as not judged.
-    if (pastBytes && flowHistory && hf && Object.values(state.doc.publish?.watch ?? {}).map(watchHistory).includes(hf.path)) {
-      const pin = await pinFile(engine, hf.path, pastBytes, hf.sha256);
-      historyPin = { path: pin.name, sha256: pin.sha256, bytes: pin.bytes };
+    // Each history pinned in the engine as the flow's watch names it (ADR 0009 §3): a claim told from it is checked
+    // against the bytes the engine hashed, and a run whose claim was told from other bytes holds its day as not judged.
+    // Every watch's (ADR 0013 §5): the judged one's is the page's base; a watched step's is read by the engine itself.
+    const named = Object.values(state.doc.publish?.watch ?? {}).map(watchHistory);
+    for (const [id, entry] of Object.entries(list.histories)) {
+      const bytes = id === watched ? pastBytes : await checked(entry.path, entry);
+      if (!bytes || !named.includes(entry.path)) continue;
+      const file = id === watched ? past : (JSON.parse(new TextDecoder().decode(bytes)) as HistoryFile);
+      if (!isHistory(file) || !file.days.length) continue;
+      const pin = await pinFile(engine, entry.path, bytes, entry.sha256);
+      const ref = { path: pin.name, sha256: pin.sha256, bytes: pin.bytes };
+      bases.set(id, { file, ref });
+      if (id === watched && flowHistory) historyPin = ref;
     }
     if (first) loads.pinned = 0;
     if (first) loads.at = 0;
