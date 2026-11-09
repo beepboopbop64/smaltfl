@@ -6,7 +6,7 @@
  * Nobody needs to read it. It is canonical JSON with positional references, built for hashing, optimizing and
  * replaying, and its format is versioned (`smaltflPlan`).
  */
-import { calendarProblems, resolveCalendar, type Calendar } from './calendar.js';
+import { calendarListProblems, calendarProblems, resolveCalendar, type Calendar } from './calendar.js';
 import type { DonorRule, FlowDocument, HoldKind, Meanwhile, Missing, ParameterDef, StepDef, Until, WatchDef } from './document.js';
 import { DONOR_RULES, HOLD_KINDS, isGeneralWatch, MEANWHILES, missingProblem, periodOf, UNTILS, validateDocument, withoutDisplay } from './document.js';
 import { hashOf } from './hash.js';
@@ -466,7 +466,8 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never): void {
   const c = calendar as Record<string, unknown> | null;
   if (typeof c !== 'object' || c === null || !['none', 'us/1', 'us-nyc/1'].includes(c.base as string) || typeof c.zone !== 'string' || calendarProblems({ zone: c.zone }).length || Object.keys(c).sort().join() !== 'base,dates,days,windows,zone')
     fail('publish.calendar is { base: none, us/1 or us-nyc/1, zone, days, windows, dates }');
-  if ([c!.days, c!.windows, c!.dates].some((x) => !Array.isArray(x) || x.length > 0)) fail("publish.calendar has a flow's own days, which this version can't judge yet");
+  const listed = calendarListProblems(c!);
+  if ([c!.days, c!.windows, c!.dates].some((x) => !Array.isArray(x)) || listed.length) fail(`publish.calendar${listed[0]?.[0] ?? ''}: ${listed[0]?.[1] ?? 'days, windows and dates are lists'}`);
   if (!Array.isArray(watch)) fail('publish.watch is a list of [node, watch]');
   const pairs = watch as unknown[];
   let holding = 0;

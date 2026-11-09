@@ -15,7 +15,7 @@
  *
  * Severity is carried through: a folded finding is told as a note, with what it was kept. No DOM, no engine.
  */
-import { holidayOf, plusDays, seasonOf, shortName } from './calendar.js';
+import { holidayOf, plusDays, recurringOf, seasonOf, shortName } from './calendar.js';
 import { QUANTILES, type HistoryRanges } from './history.js';
 import { shortfall, type EpisodeDay } from './days.js';
 import { coverageOf, LEGACY_JUDGE, MATERIAL, hoursShort, materialFor, notJudgedChip, nounFor, partTemplate, shareWords, type Act, type Coverage, type Finding, type JudgeSettings, type Names, type Severity } from './news.js';
@@ -767,7 +767,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   // The head: the cause as a population or a time, in at most six words.
   const holiday = holidayOf(day, h.calendar);
   const season = seasonOf(day, h.calendar);
-  const calmHead = holiday ? `Normal for ${shortName(holiday)}` : season ? `Normal for ${shortName(season).replace(/^Holiday season$/, 'the holidays')}` : `A normal ${weekdayOf(day)}`;
+  const recurring = holiday || season ? undefined : recurringOf(day, h.calendar)?.name;
+  const calmHead = holiday ? `Normal for ${shortName(holiday, h.calendar)}` : season ? `Normal for ${shortName(season, h.calendar).replace(/^Holiday season$/, 'the holidays')}` : recurring ? `Normal for ${shortName(recurring, h.calendar)}` : `A normal ${weekdayOf(day)}`;
   const pctShort = (x: number) => `${Math.round(x * 100)}%`;
   // The trips an hour after a fall that runs to the day's end: they fall to a trickle and don't stop (Thu Sep 21, 2023
   // kept ~330 an hour), which the chart's zoom says ("still ~330/h").
@@ -857,7 +858,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       ? `Day ${episode.days} · ~${compact(episode.short.estimate)} short`
       : `Day ${episode.days} · since ${ddd(episode.since)}${episode.hour !== null ? ` ${clock(episode.hour)}` : ''}`
     : afterChip;
-  const whyChip = coverage.why ? notJudgedChip(coverage.why, shortName, h.to) : null;
+  const whyChip = coverage.why ? notJudgedChip(coverage.why, (n) => shortName(n, h.calendar), h.to) : null;
   // And whether anything is left to do: a held load is never published, and nothing waits on a person to release it.
   const after = recovery && o.step ? `Nothing to do · ${[recovery.published.length ? `${spans(recovery.published)} published short` : '', recovery.held.length ? `${spans(recovery.held)} held` : ''].filter(Boolean).join(', ')}` : null;
 

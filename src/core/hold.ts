@@ -160,6 +160,7 @@ export function flowStory(h: HistoryRanges, day: string, doc: FlowFor, source: s
   if (h.skipped > 0) throw new Error("the flow's verdict learns from every day of the history but those the record leaves out: these ranges leave out days one viewer marked");
   const judge = judgeOf(doc, source);
   if (h.calendar.base !== judge.calendar.base) throw new Error(`the flow judges ${source} by the ${judge.calendar.base} calendar: these ranges were made with ${h.calendar.base}`);
+  if (canonicalJSON(h.calendar) !== canonicalJSON(judge.calendar)) throw new Error(`the flow judges ${source} by its own calendar's days: these ranges were made with other days`);
   const names = flowNames(doc, source);
   return storyOf(h, day, newsOf(h, day, names, { checks: countedChecks(doc, h, source), judge }), { names, episode: false, judge });
 }

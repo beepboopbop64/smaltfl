@@ -372,11 +372,12 @@ describe('a document that says how its days are judged (format 3, ADR 0010 §10)
     ]);
   });
 
-  it('checks its calendar, refusing the days this build can’t judge yet', () => {
+  it('checks its calendar: its base, and its own days written as ADR 0010 §2 has them', () => {
     expect(validateDocument(general({}, { calendar: { base: 'us', zone: 'Europe/London' } }))).toEqual([]);
-    expect(validateDocument(general({}, { calendar: { base: 'uk' as never, days: [{ name: 'Patch Tuesday', weekday: 'tue', between: [8, 14] }] } }))).toEqual([
+    expect(validateDocument(general({}, { calendar: { base: 'us', days: [{ name: 'Patch Tuesday', weekday: 'tue', between: [8, 14] }] } }))).toEqual([]);
+    expect(validateDocument(general({}, { calendar: { base: 'uk' as never, days: [{ name: 'Patch Tuesday', weekday: 'tue', between: [8, 16] }] } }))).toEqual([
       { path: '$.calendar.base', message: 'one of none, us, us-nyc' },
-      { path: '$.calendar.days', message: "a flow's own recurring days are not something this version can judge yet: refused rather than ignored" },
+      { path: '$.calendar.days[0].between', message: 'two days of the month, at most six apart, so one weekday falls between them: [8, 14]' },
     ]);
   });
 
@@ -792,7 +793,8 @@ describe('the plan of a flow that says how its days are judged (plan/2, ADR 0010
     expect(bad({ ...pub, until: 'later' })).toThrow('publish.until later is not one this version reads (decision, normal)');
     expect(() => validatePlan({ ...plan, publish: { ...pub, meanwhile: 'fill', until: 'normal' } } as FlowPlan)).not.toThrow();
     expect(bad({ ...pub, calendar: { ...pub.calendar, base: 'uk/1' } })).toThrow('publish.calendar is { base: none, us/1 or us-nyc/1, zone, days, windows, dates }');
-    expect(bad({ ...pub, calendar: { ...pub.calendar, days: [{ name: 'Patch Tuesday' }] } })).toThrow("publish.calendar has a flow's own days");
+    expect(bad({ ...pub, calendar: { ...pub.calendar, days: [{ name: 'Patch Tuesday' }] } })).toThrow('publish.calendar.days[0]: a day of the month (day) or a weekday between two days of it (weekday, between): one of them');
+    expect(() => validatePlan({ ...plan, publish: { ...pub, calendar: { ...pub.calendar, days: [{ name: 'Patch Tuesday', weekday: 'tue', between: [8, 14] }] } } } as FlowPlan)).not.toThrow();
     expect(bad({ ...pub, watch: [[0, { ...w, every: '6h' }]] })).toThrow('publish.watch[0].every 6h is not one this version can judge (day)');
     expect(bad({ ...pub, watch: [[0, { ...w, pattern: 'none' }]] })).toThrow('publish.watch[0].pattern none is not one this version can judge (weekly)');
     const { zone: _z, ...short } = w;

@@ -27,7 +27,7 @@
  * Counts are guessed on a log scale (a miss is a ratio), shares on a logit scale, anything else as it is. No DOM, no
  * engine: the numbers come from runs, or from the scenario's history (scripts/data/history.ts).
  */
-import { dayLastYear, daysBetween, isSpecial, plusDays, specialOf, US_NYC_1, type Calendar } from './calendar.js';
+import { dayLastYear, daysBetween, isSpecial, occurrencesBefore, plusDays, recurringOf, specialOf, US_NYC_1, type Calendar } from './calendar.js';
 
 /** How a number varies: a count (by ratios), a share of rows (0 to 1), or a level, such as a median. */
 export type Scale = 'count' | 'share' | 'level';
@@ -46,15 +46,20 @@ export interface Reference {
 }
 
 export interface Guess {
-  by: 'weeks' | 'year';
+  /** The weeks before; last year; or, for a flow's recurring day, its occurrences before (ADR 0010 §2). */
+  by: 'weeks' | 'year' | 'occurrences';
   /** The guess, as the number is. */
   value: number;
   /** Its share of the range's centre. */
   weight: number;
   /** Its typical miss over the days it was measured on, on its scale: a count's is a ratio's logarithm. */
   miss: number | null;
-  /** The weeks before: the same weekdays, each with its weight; last year: the days last year, a median of up to three. */
+  /** The weeks before: the same weekdays, each with its weight; last year: the days last year, a median of up to three;
+   * the occurrences: the recurring day's days before, each with its weight. */
   from: Reference[];
+  /** The occurrences': how far above a day like it each occurrence was, their weighted median, as a ratio for a count and
+   * a difference otherwise. */
+  lift?: number;
   /** Last year's, for a count: how this year's days compared with last year's lately, as a ratio. */
   ratio?: number;
   /** Last year's, for a share or a level: how much this year's days were above last year's lately. */
@@ -82,7 +87,7 @@ export interface NormalRange {
   z: number;
   /** The days the typical miss was measured on, and what they were. */
   over: number;
-  spreadFrom: 'weeks' | 'holidays' | 'ordinary days';
+  spreadFrom: 'weeks' | 'holidays' | 'ordinary days' | 'occurrences';
   /** A holiday's name, or the window around one it is in: a day judged by last year's alone. */
   special?: string;
   /** Its typical miss came from ordinary days, for want of holidays with a guess: a rough range. */
@@ -110,13 +115,16 @@ export interface NormalOptions {
 /**
  * Why a day has no range, for the words that say it isn't judged (ADR 0010 §1): a special day last year's history
  * doesn't have (`no last year`), one whose last year has moved too far to judge it by (`last year moved`), too few days
- * before it to learn from (`too few days`), or a day past the history's end (`history ends`). `days` counts the days
- * before it that have a number; `special` names a special day.
+ * before it to learn from (`too few days`), a flow's recurring day with fewer than three of its days before it
+ * (`too few times`), or a day past the history's end (`history ends`). `days` counts the days before it that have a
+ * number; `special` names a special day or a recurring one.
  */
 export interface NoRange {
-  why: 'no last year' | 'last year moved' | 'too few days' | 'history ends';
+  why: 'no last year' | 'last year moved' | 'too few days' | 'history ends' | 'too few times';
   days: number;
   special?: string;
+  /** A flow's recurring day: how many of its days before the history has a number for (`too few times`). */
+  times?: number;
 }
 
 const EPS = 1e-4;
@@ -164,6 +172,9 @@ export class NormalRanges {
   // By day, counted from the series' first: its date, whether it is special, its day last year, and what was guessed.
   private readonly dates = new Map<number, string>();
   private readonly specials = new Map<number, boolean>();
+  private readonly nameds = new Map<number, boolean>();
+  private readonly occurringAt = new Map<number, boolean>();
+  private readonly occurrencesAt = new Map<number, (Inner & { lift: number }) | null>();
   private readonly lastYears = new Map<number, number | null>();
   private readonly weeksAt = new Map<number, Inner | null>();
   private readonly yearAt = new Map<number, Inner | null>();
@@ -177,9 +188,9 @@ export class NormalRanges {
     this.o = { weeks: 6, back: 10, half: 2, window: 42, z: 3, skip: new Set(), calendar: US_NYC_1, ...options };
   }
 
-  /** A day not learned from: a holiday or one around it, or one left out. */
+  /** A day not learned from: a holiday or one around it, a day the flow's calendar names, or one left out. */
   private excluded(k: number): boolean {
-    return this.special(k) || (this.o.skip.size > 0 && this.o.skip.has(this.date(k))) || this.outlier(k);
+    return this.named(k) || (this.o.skip.size > 0 && this.o.skip.has(this.date(k))) || this.outlier(k);
   }
 
   /**
@@ -192,7 +203,7 @@ export class NormalRanges {
     let out = this.outliers.get(k);
     if (out === undefined) {
       const v = this.val(k);
-      const before = [k - 7, k - 14, k - 21].filter((j) => !this.special(j)).flatMap((j) => (this.val(j) === null ? [] : [this.fwd(this.val(j)!)]));
+      const before = [k - 7, k - 14, k - 21].filter((j) => !this.named(j)).flatMap((j) => (this.val(j) === null ? [] : [this.fwd(this.val(j)!)]));
       out = v !== null && before.length >= 2 && Math.abs(this.fwd(v) - median(before)) > Math.log(1.5);
       this.outliers.set(k, out);
     }
@@ -205,9 +216,24 @@ export class NormalRanges {
     return d;
   }
 
+  /** A day judged by last year's alone: a holiday, a flow's yearly day, or a day in a window. */
   private special(k: number): boolean {
     let s = this.specials.get(k);
-    if (s === undefined) this.specials.set(k, (s = isSpecial(this.date(k), this.o.calendar)));
+    if (s === undefined) this.specials.set(k, (s = specialOf(this.date(k), this.o.calendar) !== undefined));
+    return s;
+  }
+
+  /** A day the calendar names, never learned from as an ordinary day: a special day, a recurring day, or a date. */
+  private named(k: number): boolean {
+    let s = this.nameds.get(k);
+    if (s === undefined) this.nameds.set(k, (s = isSpecial(this.date(k), this.o.calendar)));
+    return s;
+  }
+
+  /** A flow's recurring day (or a day in its window) that recurs more often than yearly: judged against its occurrences. */
+  private occurring(k: number): boolean {
+    let s = this.occurringAt.get(k);
+    if (s === undefined) this.occurringAt.set(k, (s = recurringOf(this.date(k), this.o.calendar) !== undefined));
     return s;
   }
 
@@ -317,6 +343,36 @@ export class NormalRanges {
     return out;
   }
 
+  /**
+   * The occurrences' guess, for a flow's recurring day (ADR 0010 §2): how far above (or below) a day like it each of its
+   * last six days was, on the guessing scale (its number against the weeks' guess for its own weekday), weighted as the
+   * weeks are, the latest counting most; their weighted median, added to the weeks' guess for this day. So a month-end
+   * batch or a Patch Tuesday is judged against its own kind, moved by how the weeks before them compare. Three
+   * occurrences at least.
+   */
+  private occurrences(k: number): (Inner & { lift: number }) | null {
+    if (this.occurrencesAt.has(k)) return this.occurrencesAt.get(k)!;
+    let out: (Inner & { lift: number }) | null = null;
+    const here = this.weeks(k);
+    if (here) {
+      const from: (Reference & { lift: number })[] = [];
+      for (const day of occurrencesBefore(this.date(k), this.o.calendar, 6)) {
+        if (this.o.skip.size > 0 && this.o.skip.has(day)) continue;
+        const j = daysBetween(this.series.from, day);
+        const v = this.val(j);
+        const w = v === null ? null : this.weeks(j);
+        if (v !== null && w) from.push({ day, value: v, weight: 0.5 ** (from.length / this.o.half), lift: this.fwd(v) - w.g });
+      }
+      if (from.length >= 3) {
+        const total = from.reduce((t, r) => t + r.weight, 0);
+        const lift = weightedMedian(from.map((r) => ({ v: r.lift, w: r.weight })));
+        out = { g: here.g + lift, lift, from: from.map((r) => ({ day: r.day, value: r.value, weight: r.weight / total })) };
+      }
+    }
+    this.occurrencesAt.set(k, out);
+    return out;
+  }
+
   /** Each ordinary day of the window before a day: its number, and what each guess said of it. */
   private misses(k: number): { i: number; x: number; w: number | null; y: number | null }[] {
     const out: { i: number; x: number; w: number | null; y: number | null }[] = [];
@@ -376,6 +432,12 @@ export class NormalRanges {
     let days = 0;
     for (let j = 0; j < Math.min(k, this.series.values.length); j++) if (this.val(j) !== null) days++;
     if (k >= this.series.values.length) return { why: 'history ends', days };
+    const recurring = k < 0 ? undefined : recurringOf(day, this.o.calendar);
+    if (recurring && !this.weeks(k)) return { why: 'too few days', days, special: recurring.name };
+    if (recurring) {
+      const times = occurrencesBefore(day, this.o.calendar, 6).filter((d) => !this.o.skip.has(d) && this.value(d) !== null).length;
+      return times < 3 ? { why: 'too few times', days, special: recurring.name, times } : { why: 'too few days', days, special: recurring.name };
+    }
     const special = k < 0 ? undefined : specialOf(day, this.o.calendar);
     if (!special) return { why: 'too few days', days };
     const c = this.lastYear(k);
@@ -422,6 +484,7 @@ export class NormalRanges {
       const s = typical(ordinary);
       return this.range(k, Y.g, s, [this.guess('year', Y, 1, s)], ordinary.length, 'ordinary days', { special, rough: true });
     }
+    if (this.occurring(k)) return this.occurrenceRange(k);
     const W = this.weeks(k);
     if (!W && !Y) return null;
     const ms = this.misses(k);
@@ -443,6 +506,31 @@ export class NormalRanges {
     if (eC.length < least) return null;
     const guesses = [...(W && wW > 0 ? [this.guess('weeks', W, wW, sW)] : []), ...(Y && wY > 0 ? [this.guess('year', Y, wY, sY)] : [])];
     return this.range(k, centre, typical(eC), guesses, eC.length, 'weeks');
+  }
+
+  /**
+   * A recurring day's range: the occurrences' guess, give or take three typical misses: that guess's own on the
+   * occurrences before (each guessed from its own, three of them at least), and never less than the weeks' guess
+   * misses ordinary days by, since a few occurrences can agree by chance. Without three misses to measure, the ordinary
+   * days' alone, and the range is rough.
+   */
+  private occurrenceRange(k: number): NormalRange | null {
+    const O = this.occurrences(k);
+    if (!O) return null;
+    const misses: number[] = [];
+    for (const r of O.from) {
+      const j = daysBetween(this.series.from, r.day);
+      const g = this.occurrences(j);
+      if (g) misses.push(this.fwd(r.value) - g.g);
+    }
+    const ms = this.misses(k);
+    const sW = this.missOf(ms, (m) => m.w);
+    const sO = misses.length >= 3 ? typical(misses) : null;
+    if (sW === null && sO === null) return null;
+    const s = Math.max(sW ?? 0, sO ?? 0);
+    const guess: Guess = { by: 'occurrences', value: this.back(O.g), weight: 1, miss: s, from: O.from, lift: this.scale === 'count' ? Math.exp(O.lift) : this.back(O.g) - this.back(O.g - O.lift) };
+    const special = recurringOf(this.date(k), this.o.calendar)!.name;
+    return this.range(k, O.g, s, [guess], sO !== null ? misses.length : ms.length, sO !== null ? 'occurrences' : 'ordinary days', { special, ...(sO === null ? { rough: true } : {}) });
   }
 
   /** How far a number is from the day's guess, in typical misses on the guessing scale: what ranks a finding. */

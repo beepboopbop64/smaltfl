@@ -12,7 +12,7 @@
  * enough change: MATERIAL), and findings that are one thing seen through several columns (the same rows missing a
  * passenger count, a rate code and a surcharge) are told once. A day with nothing to tell says so. No DOM, no engine.
  */
-import { NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
+import { namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
 import { HistoryRanges, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
@@ -194,6 +194,13 @@ export function notJudgedChip(why: NoRange, calendarShort = (name: string) => sh
     const name = calendarShort(why.special.replace(/ \(observed\)$/, '')).replace(/^Holiday season$/, 'holiday season');
     const words = (t: string) => t.split(/\s+/).length;
     return words(`First ${name} here`) <= 4 ? `First ${name} here` : words(`First ${name}`) <= 4 ? `First ${name}` : 'None last year';
+  }
+  // A flow's recurring day with fewer than three of its days before: the first, or "2nd Patch Tuesday here".
+  if (why.why === 'too few times' && why.special) {
+    const name = calendarShort(why.special);
+    const n = (why.times ?? 0) + 1;
+    const nth = n === 1 ? 'First' : n === 2 ? '2nd' : '3rd';
+    return `${nth} ${name} here`.split(/\s+/).length <= 4 ? `${nth} ${name} here` : `${nth} ${name}`.split(/\s+/).length <= 4 ? `${nth} ${name}` : 'Few before it';
   }
   if (why.why === 'last year moved') return 'Changed since last year';
   if (why.why === 'history ends' && end) return `History ends ${MON[Number(end.slice(5, 7)) - 1]} ${Number(end.slice(8, 10))}`;
@@ -561,12 +568,13 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   const told = together(out, rows, names);
   told.sort((a, b) => RANK[a.severity] - RANK[b.severity] || b.score - a.score);
   if (!told.some((f) => f.severity === 'alert' || f.severity === 'warn')) {
-    const note = specialOf(day, cal);
+    const note = namedOf(day, cal);
     const why = trips ? null : h.of({ of: 'trips' })?.explain(day) ?? null;
     if (why) {
       // Nothing to compare the day's rows with: not judged, never "normal" (ADR 0010 §1). Published, marked (Q-53).
       const name = why.special ? shortName(why.special).replace(/^Holiday season$/, 'holiday season') : '';
       const because = why.why === 'no last year' ? `the history has no ${name || 'day like it'} before this one to judge it by`
+        : why.why === 'too few times' ? `the history has ${fmtInt(why.times ?? 0)} ${name} before this one, too few to judge it by`
         : why.why === 'last year moved' ? `last year’s ${name || 'day'} is too far from this year’s days to judge it by`
         : why.why === 'history ends' ? 'the history ends before it'
         : `${fmtInt(why.days)} ${why.days === 1 ? 'day' : 'days'} of history before it, too few to judge it by`;
