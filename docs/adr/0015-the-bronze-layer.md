@@ -321,3 +321,89 @@ notebook; then §5 and §6 as written. Slice 1 stands: its scope and key become 
   and the judge, three runs of one through the engine (`runFlow`, its claim told by `src/plugin/tell.ts`: published
   with one row an object, held on "5 rows out of scope", held on "1 row repeats a key" with its key turned on), and
   the story's cases above. The estate app was built into a scratch folder and `estate.json` run on it: no problems.
+
+### Amendment 1, piece (a) (2026-11-10): the Ontology page by file, showing the rules the ontology has today
+
+Nothing is edited and nothing is judged differently: no document, plan, hash, verdict or test vector moved.
+
+- **The page as data** (`src/core/ontologypage.ts`, pure; `ontologyPage(doc, columns)`): one `FileSection` a source,
+  in the flow's order: its id, its description and the description's opening for the list (up to its first colon or
+  full stop), the noun for its rows (`nounOf`), whether a watch judges it, its own rules, a card a column, and
+  `discovered`, an empty list with a place of its own. `columns(file)` gives the columns a load has (the app gives
+  the ones the viewer may read); a file it gives nothing for has no cards yet. A card has the column's name as the
+  file writes it, its title, its description, the words for its coded values, the ontology's entry (`propertyOf`,
+  for its unit, note, lookup and references) and its rules.
+- **Where the rules come from.** A file's own from `writtenRules` (slice 1), so the page lists what the plan counts:
+  `rows` ("One row an application"), `covers` (the scope: "Covers the applications where Internet-facing is Yes, and
+  no others"; no condition is "Covers every application, and no others"), `key` ("No Application blank or
+  repeated"), and from a gate cell's own rules `same` ("The same Application values as apps: none missing, none
+  extra") and `needs` ("Where Status is Passing, Code must be A or B"). A column's from `marksOn` for that file, so a
+  band is the one the plan carries there: `values` ("Holds Passing, Failing, Exception or Not assessed: a value
+  never seen before is flagged as wrong"), `bad` ("Failing is a bad value: a jump above its usual share is flagged
+  as wrong"), `band` ("Failing between 0% and 15% of apps"), `due` ("A due date: late when Status is still Failing
+  the day after, checked against the usual late share"), `after` ("About 30 minutes after Opened"). A sentence uses
+  the ontology's titles and the words for its values; only a condition its author wrote for the engine in a gate
+  cell is quoted as written. Nothing is shared in what is shown: the band on `not_assessed` that the ontology gives
+  wherever `status` appears is listed in each of the twelve control files as that file's rule, and the WAF's band on
+  `fail` in the WAF's alone.
+- **A rule's shape** (`Rule`): an id that stands while the rule does (`tls/covers`, `waf/status/band=fail`,
+  `pentest/next_due/due`: the column in lower case, so a load's case doesn't move it), its kind, its sentence, the
+  numbers behind it (a band's ends, a window in days, a lag in minutes), the values it is about, the dataset it is
+  checked against, and how it came to be (`RuleOrigin`): `set` by hand in the ontology or the notebook, which is
+  every rule today; `derived` from the last N days, fixed or rolling (Q-142); `discovered`. The last two are in the
+  type and in `originSaid` ("From the last 90 days, rolling") for pieces (b) and after; nothing produces them yet.
+- **What isn't a rule.** A column's listed values with no mark are its meaning (the dictionary, amendment 1 point 2),
+  not a rule. The inventory has none: its section says it is the list the other files are checked against
+  (`FileSection.inventory`, from every file whose scope reads it).
+- **A rule nothing judges says so** (`Rule.unchecked`): "nothing watches this file" (the line slice 1's review owed,
+  said here for a file), "switched off in the notebook" (its check is `off` in the gate), "a key of several columns
+  isn't checked yet", and for a bad value with a band in the same file "this file's band on Failing is checked
+  instead" (ADR 0014 §3: a value with a band is judged by it alone, as the WAF's `fail` is). It is read from the
+  document, not from a run.
+- **The page** (`renderOntology`, `renderFiles`, `fileSection`, `src/app/main.ts`; CSS `.of-*`, `page.html`). It
+  leads with **Files**: a row a file (its name, the description's opening, the rows of the load on screen through the
+  viewer's policies, how many rules), none open on arrival so the first screen is the list; a tap opens a file's
+  section in place and closes the one that was open, the tapped row brought under the header. A section, in order:
+  what the file is; **This file's rules**; a card a column (its title and name, its values in the load on screen
+  drawn, its meaning, its codes behind a tap, **Rules**); **Discovered**, which says nothing has been discovered yet
+  and that rules the app finds will be listed there to accept. Each rule line says how it came to be ("Set by hand")
+  and what it is checked against. A file closed to the viewer isn't listed, and a column closed to them has no card.
+  A file the engine refused that day says so on its row and in place of its columns. The panel is drawn again only
+  when the document, the run, the viewer or a file's columns changed: an object picked further down the page leaves
+  an open section as it is.
+- **The drawings are the import card's.** `columnShape` is taken out of the Columns tab's `columnCard` and both call
+  it: a measure's or a time's histogram with its numbers, else its most common values as bars. It is computed when a
+  section opens (`nodeView`, `qualityOf`, as the viewer), not for every file at once. A key (every value different)
+  and free text draw nothing and say how many values they hold. Three small things changed in the shared drawing,
+  so in the Columns tab too: a column of dates reads as days (it read "2024-03-14 00:00"), one more value is "1
+  more value", and a meaning that is its code isn't printed under it ("Retail" over "Retail").
+- **What left the page.** The box for an object type that only says what files' rows are (`typesShown`: a type
+  stays with a link or an action, or when no `rows` entry names it): the estate's `application` is gone, and its
+  count is the inventory's row ("600 applications"). The flat list "What the columns mean": a file's columns are in
+  its section, with the references a meaning comes from on the column's card. Kept, after the files: the columns
+  the flow's steps make, in one fold ("Columns the flow makes"), then the object types under **Objects**, their
+  objects, action forms and the edits, as before. The objects and edits panels are hidden in a flow with no type
+  to show and no action.
+- **Tests:** `test/ontologypage.test.ts` (the estate's sections as the page shows them, the taxi example and the
+  sign-in log, and small documents for a gate cell's own rules, a check switched off, a file nothing watches, a
+  key of several columns, a hidden column, a time that runs behind another, the types still drawn, `originSaid`).
+  `tools/browser/stops/estate.json`: the two object-type stops are replaced by six (`mar06-ontology`,
+  `mar06-ontology-control`, `mar06-ontology-inventory`, `mar12-ontology-control`, `mar12-ontology-dark`,
+  `mar12-ontology-control-dark`), each with expectations; `tour.cjs` gains `waitFor`, for what a tap draws once the
+  engine answers. The taxi example and the sign-in log were built and driven with scratch stops: their files'
+  sections, no page error, and on the taxi example the four object types, their objects, and an action typed,
+  applied and recorded in the chain.
+- **Choices made here, for the maintainers to confirm or change:**
+  - No file is open on arrival (amendment 1 allowed the first open): with thirteen files, an open first section
+    pushes the list off the first screen. One section is open at a time.
+  - Each rule carries "Set by hand" under it, so the place where "From the last 90 days" will stand is on screen.
+  - A column's codes are behind a tap ("What its 4 values stand for"): the drawing above already names the values
+    the load has.
+  - The columns the steps make stay on the page, folded, though the amendment speaks only of files: they were in
+    the list this replaces, and are in no file's section.
+  - The words: "flagged as wrong" for what a rule does when it is broken (whether that holds the day is the gate's
+    mode, which the page doesn't say yet), "a bad value", "between 0% and 15% of apps" with the file's noun.
+  - A file tied to an object type with no noun of its own is counted in "rows" (`nounOf` doesn't read `rows`).
+- **Left for pieces (b) and (c):** nothing is edited here; the rules are still the ontology's marks, which a
+  column's files share in the document, though the page lists them file by file; `discovered` is empty; a rule
+  doesn't say whether it holds or warns, has no switch, and isn't drawn against today's number (§5).

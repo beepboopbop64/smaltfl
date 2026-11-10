@@ -671,8 +671,9 @@ Builder and drawn in the family's look. The first concepts are on the design can
   in dollars or its unit, a code with what it stands for, a zone number with the zone's name (read through the
   viewer's policy, so none from a lookup closed to them); a table's header gives the title and unit, with the
   description on hover. A column card says what the column is, decodes its common values, and adds the note. The
-  Ontology view lists every column the viewer can read somewhere, grouped by the source it comes from or the steps
-  that make it, with its codes, where it is, how a step makes it, and links to its sources.
+  Ontology view lists every column the viewer can read somewhere: a file's in that file's section, with its values
+  drawn, its codes, its rules and links to its sources (ADR 0015 amendment 1); the ones the steps make in one fold
+  after the files, each with where it is and how a step makes it.
 - **Suggested checks, added as a filter box.** For the columns a step makes itself (an input's, an aggregate's or a SQL
   step's, the ones a formula, join or select adds), and that no check before or after it already judges: an upper
   bound for a far tail, `>= 0` for stray negatives or as a guard, `IS NOT NULL` for a few missing values (columns

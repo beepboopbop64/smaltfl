@@ -35,7 +35,8 @@ import { derivedAbout, derivedFails, derivedKeys, derivedWhy, donorsOf, filledRo
 import { followsCause as followsFrom, ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, axisShare, recentSpan, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type HourValues, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeChip, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
-import { glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
+import { counted, glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
+import { ontologyPage, originSaid, typesShown, type FileSection, type Rule } from '../core/ontologypage.js';
 import { DECIDE, DECIDE_OPTIONS, checkDecision, checkRun, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
@@ -2158,7 +2159,9 @@ async function lookInto(insp: Inspection, i: number, read: string, columns: stri
 /** A measure's value for people: about three significant digits. */
 const fmtNum = (v: number) => (Math.abs(v) >= 1000 ? fmtInt(v) : Math.abs(v) >= 100 ? String(Math.round(v)) : Math.abs(v) >= 10 ? String(Math.round(v * 10) / 10) : String(Math.round(v * 100) / 100));
 const fmtTime = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
-const fmtOf = (p: Profile) => (p.kind === 'time' ? fmtTime : fmtNum);
+/** A column of dates, none with a time of day: its first and last values are written as days. */
+const datesOnly = (p: Profile) => p.kind === 'time' && [p.facts.min, p.facts.max].every((v) => typeof v === 'string' && v.length <= 10);
+const fmtOf = (p: Profile) => (p.kind !== 'time' ? fmtNum : datesOnly(p) ? (ms: number) => fmtTime(ms).slice(0, 10) : fmtTime);
 
 /** A histogram of the sample from its 1st to its 99th percentile, with the median marked. */
 function histogram(p: Profile): HTMLElement | null {
@@ -2178,6 +2181,38 @@ function histogram(p: Profile): HTMLElement | null {
   return h('div', { class: 'histwrap' }, svg);
 }
 
+/**
+ * A column's values drawn, as its card in the Columns tab and its card on the Ontology page show them: a measure's or
+ * a time's histogram with its numbers under it, else its most common values as bars, each with what its code stands
+ * for. Nothing for a column with neither.
+ */
+function columnShape(p: Profile, meaning?: PropertyType): HTMLElement[] {
+  const f = p.facts;
+  const plain = fmtOf(p);
+  // A measure in its unit; a time as it is.
+  const fmt = (v: number) => (p.kind === 'time' ? plain(v) : inUnit(plain(v), v, meaning));
+  const shape = histogram(p);
+  if (shape && p.quantiles) {
+    const q = p.quantiles;
+    const edge = (v: unknown) => (typeof v === 'number' ? fmt(v) : String(v ?? '—').slice(0, 16));
+    const stat = (k: string, v: string) => [h('dt', {}, k), h('dd', {}, v)];
+    return [shape, h('dl', { class: 'stats' },
+      ...stat('smallest', edge(f.min)),
+      ...stat('median', fmt(q.p50)),
+      ...stat('largest', edge(f.max)),
+      ...(p.kind === 'measure' && f.mean !== null ? stat('mean', fmt(f.mean)) : []),
+      ...stat('middle half', `${fmt(q.p25)} – ${fmt(q.p75)}`))];
+  }
+  if (!p.top?.length) return [];
+  const tops = h('div', { class: 'tops' },
+    ...p.top.map((t) => {
+      // What the code stands for, where that says more than the code does ("Retail" is Retail).
+      const means = meaningFor(meaning, t.value);
+      return h('div', { class: 'top' }, h('span', { class: 'v' }, t.value, means && means !== t.value ? h('span', { class: 'means' }, means) : null), h('span', { class: 'bar' }, h('span', { style: `width:${Math.max(1, t.share * 100).toFixed(1)}%` })), h('span', { class: 'n' }, pct(t.share)));
+    }));
+  return f.distinct > p.top.length ? [tops, h('p', { class: 'foot', style: 'margin:0' }, `and ${plural(f.distinct - p.top.length, 'more value', 'more values')}`)] : [tops];
+}
+
 /** A column as a card: how full it is, its shape or its common values, how it moved, and what a check would flag. */
 function columnCard(p: Profile, type: string, moved: Drift | undefined, since: string | undefined, flags: string[], meaning?: PropertyType, normal?: ColumnNormal): HTMLElement {
   const f = p.facts;
@@ -2190,25 +2225,7 @@ function columnCard(p: Profile, type: string, moved: Drift | undefined, since: s
     meaning ? h('p', { class: 'colname' }, h('code', {}, ...breakable(p.name)), meaning.unit ? ` · in ${meaning.unit}` : '') : null,
     meaning ? h('p', { class: 'means-text' }, meaning.description) : null,
     h('p', { class: 'colline' }, `${pct(f.present / Math.max(1, f.rows))} filled · ${fmtInt(f.distinct)} distinct${gaps ? ` · ${fmtInt(gaps)} empty` : ''}`));
-  const shape = histogram(p);
-  if (shape && p.quantiles) {
-    const q = p.quantiles;
-    const edge = (v: unknown) => (typeof v === 'number' ? fmt(v) : String(v ?? '—').slice(0, 16));
-    const stat = (k: string, v: string) => [h('dt', {}, k), h('dd', {}, v)];
-    card.append(shape, h('dl', { class: 'stats' },
-      ...stat('smallest', edge(f.min)),
-      ...stat('median', fmt(q.p50)),
-      ...stat('largest', edge(f.max)),
-      ...(p.kind === 'measure' && f.mean !== null ? stat('mean', fmt(f.mean)) : []),
-      ...stat('middle half', `${fmt(q.p25)} – ${fmt(q.p75)}`)));
-  } else if (p.top?.length) {
-    card.append(h('div', { class: 'tops' },
-      ...p.top.map((t) => {
-        const means = meaningFor(meaning, t.value);
-        return h('div', { class: 'top' }, h('span', { class: 'v' }, t.value, means ? h('span', { class: 'means' }, means) : null), h('span', { class: 'bar' }, h('span', { style: `width:${Math.max(1, t.share * 100).toFixed(1)}%` })), h('span', { class: 'n' }, pct(t.share)));
-      })));
-    if (f.distinct > p.top.length) card.append(h('p', { class: 'foot', style: 'margin:0' }, `and ${fmtInt(f.distinct - p.top.length)} more values`));
-  }
+  card.append(...columnShape(p, meaning));
   if (moved && since !== undefined) card.append(h('p', { class: 'drift' }, h('span', { class: `level-chip ${moved.level}` }, moved.level), ` since ${since}${moved.note ? `: ${moved.note}` : ''} · PSI ${moved.psi.toFixed(2)}`));
   if (normal) {
     const chip = (place: Place, words: Record<'above' | 'below', string>) => (place === 'within' ? null : h('span', { class: 'range-chip' }, words[place]));
@@ -7695,14 +7712,15 @@ function makes(st: StepDef, column: string): Child[] | null {
 }
 
 /**
- * What the columns mean, from the ontology: grouped by the source a column comes from, or the steps that make it,
- * each with its codes, what the data shows, where it is and where its meaning comes from. Only columns the viewer can
- * read somewhere are listed.
+ * The columns the flow's steps make, with what each means: the ontology's dictionary for what no file holds, in one
+ * fold after the files (a file's own columns are in its section, `fileSection`). Each says where it is made and
+ * where it is. Only columns the viewer can read somewhere are listed.
  */
-function propertiesPanel(): HTMLElement | null {
+function madePanel(): HTMLElement | null {
   const o = state.doc.ontology;
   const props = o?.properties ?? [];
   if (!o || !props.length) return null;
+  const files = new Set(state.doc.sources.map((x) => x.id));
   const ids = [...state.doc.sources.map((x) => x.id), ...state.doc.steps.map((x) => x.id)];
   const where = new Map<PropertyType, string[]>();
   const order = new Map<PropertyType, number>();
@@ -7716,19 +7734,14 @@ function propertiesPanel(): HTMLElement | null {
       if (!order.has(p)) order.set(p, n * 1000 + k);
     });
   });
-  const head = h('h2', {}, 'What the columns mean');
-  if (!where.size) return h('div', {}, head, h('p', { class: 'foot' }, latest() ? `None of the columns described is open to ${personName(state.viewer)}.` : 'Run the flow to see what its columns mean.'));
-  const sources = state.doc.sources.filter((x) => where.size && visible(x.id));
-  const groupOf = (p: PropertyType) => sources.find((x) => where.get(p)!.includes(x.id))?.id ?? '';
-  const refs = new Map((o.references ?? []).map((r) => [r.id, r]));
-  const used = new Set<string>();
+  // A column a file holds is described in that file's section: here, only what the steps add.
+  const made = props.filter((p) => where.has(p) && !where.get(p)!.some((d) => files.has(d))).sort((a, b) => order.get(a)! - order.get(b)!);
+  if (!made.length) return null;
   const few = (list: readonly string[]) => (list.length <= 4 ? list.join(', ') : `${list.slice(0, 3).join(', ')} and ${list.length - 3} more`);
   const card = (p: PropertyType) => {
-    const cited = (p.sources ?? []).map((r) => refs.get(r)).filter((r) => r !== undefined);
-    for (const r of cited) used.add(r.id);
     const codes = Object.entries(p.values ?? {});
     const list = codes.length ? h('dl', { class: 'codes' }, ...codes.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])) : null;
-    const maker = cited.length ? null : where.get(p)!.map((d) => steps().get(d)).find((st) => st && makes(st, p.column));
+    const maker = where.get(p)!.map((d) => steps().get(d)).find((st) => st && makes(st, p.column));
     return h('article', { class: 'prop' },
       h('div', { class: 'prop-head' }, h('h3', {}, p.title), h('code', {}, p.column), p.unit ? h('span', { class: 'unit' }, p.unit) : null),
       h('p', {}, p.description),
@@ -7736,33 +7749,180 @@ function propertiesPanel(): HTMLElement | null {
       p.note ? h('p', { class: 'note' }, p.note) : null,
       maker ? h('p', { class: 'made' }, 'Made in ', h('b', {}, maker.id), ': ', ...makes(maker, p.column)!) : null,
       p.lookup && visible(p.lookup.dataset) ? h('p', { class: 'made' }, 'Reads as its ', h('b', {}, p.lookup.label), ' in ', h('b', {}, p.lookup.dataset)) : null,
-      h('p', { class: 'where' }, `In ${few(where.get(p)!)}`, ...(cited.length ? [' · from ', ...cited.flatMap((r, k) => [k ? ', ' : '', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, r.title)])] : [])));
+      h('p', { class: 'where' }, `In ${few(where.get(p)!)}`));
   };
-  const groups = [...sources.map((x) => ({ id: x.id, title: x.description ?? x.id })), { id: '', title: 'Made by the flow’s steps' }]
-    .map((g) => ({ ...g, props: props.filter((p) => where.has(p) && groupOf(p) === g.id).sort((a, b) => order.get(a)! - order.get(b)!) }))
-    .filter((g) => g.props.length);
-  if (!foldsOpen.has(`props:${groups[0]!.id}`)) foldsOpen.set(`props:${groups[0]!.id}`, true);
-  const body = groups.map((g) => fold(`props:${g.id}`, [h('span', { class: 'eyebrow' }, g.title), h('span', { class: 'fold-sum' }, plural(g.props.length, 'column'))], h('div', { class: 'props' }, ...g.props.map(card))));
-  const cited = [...used].map((r) => refs.get(r)!);
-  return h('div', {}, head,
-    h('p', { class: 'sub' }, 'Each column once, by what people call it, with what it holds in its source’s own words, what the data itself shows, and where it is. A step’s sheet shows the same on each column, and a code’s meaning wherever its rows are shown.'),
-    ...body,
-    cited.length ? h('div', { class: 'refs' }, h('p', { class: 'eyebrow' }, 'Where the meanings come from'),
-      h('ul', {}, ...cited.map((r) => h('li', {}, h('a', { href: r.url, target: '_blank', rel: 'noopener' }, r.title), [r.publisher, r.version].filter(Boolean).length ? ` · ${[r.publisher, r.version].filter(Boolean).join(', ')}` : '')))) : null);
+  return fold('props:made', [h('span', { class: 'made-h' }, 'Columns the flow makes'), h('span', { class: 'fold-sum' }, `${plural(made.length, 'column')} its steps add, and what each means`)], h('div', { class: 'props' }, ...made.map(card)));
+}
+
+// The Ontology page's files (ADR 0015 amendment 1, piece a): a row a file the flow reads, its section opened in place.
+// What a section says is `src/core/ontologypage.ts`'s (the rules in words, a card a column); the page adds the load
+// on screen: how many rows it has, and each column's values drawn as the file's own card draws them.
+
+/** The file whose section is open, kept while the page is drawn again (a run, another viewer), and what the panel on
+ * screen was drawn from: it is left as it is while that hasn't changed (an object picked or an action taken further
+ * down the page draws the page again, and a section rebuilt under the reader would move what they are looking at). */
+const ontologyFiles = { open: null as string | null, doc: null as FlowDocument | null, from: '' };
+
+/** A rule as a line: its sentence, how it came to be and what it is checked against, and why nothing judges it. */
+function ruleLine(r: Rule): HTMLElement {
+  return h('li', { class: `of-rule${r.unchecked ? ' unchecked' : ''}`, 'data-rule': r.id },
+    h('span', { class: 'of-said' }, r.said),
+    h('span', { class: 'of-how' }, `${originSaid(r.origin)}${r.against ? ` · checked against ${r.against}` : ''}`),
+    r.unchecked ? h('span', { class: 'of-off' }, `Not checked: ${r.unchecked}`) : null);
+}
+const ruleList = (rules: readonly Rule[], none: string): HTMLElement => (rules.length ? h('ul', { class: 'of-rules' }, ...rules.map(ruleLine)) : h('p', { class: 'of-none' }, none));
+
+/** A column's values in the load on screen, at the top of its card: the drawing its file's Columns tab has for it
+ * (`columnShape`), and how full it is. A key (every value different) and free text (names, hosts: no value on more
+ * than a few rows) have nothing worth drawing, and say how many values they hold. */
+function drawColumn(slot: HTMLElement, p: Profile, meaning: PropertyType | undefined): void {
+  const f = p.facts;
+  const gaps = f.rows - f.present;
+  const different = f.distinct >= f.present && f.present > 20;
+  const filled = f.present === 0 ? 'Empty in this load' : `${gaps ? `${pct(f.present / Math.max(1, f.rows))} filled · ${fmtInt(gaps)} empty` : 'All filled'} · ${different ? 'every value different' : plural(f.distinct, p.kind === 'text' ? 'different value' : 'value')}`;
+  slot.replaceChildren(...(different || p.kind === 'text' ? [] : columnShape(p, meaning)), h('p', { class: 'colline' }, filled));
+}
+
+/** A file's section: what it is, its own rules, a card a column (drawn once the load has been looked into), and what
+ * was discovered. `refused` says the load's file wasn't read (ADR 0014 §2), so it has no columns to show. */
+function fileSection(f: FileSection, refused: boolean): HTMLElement {
+  const refs = new Map((state.doc.ontology?.references ?? []).map((r) => [r.id, r]));
+  const slots = new Map<string, { slot: HTMLElement; meaning: PropertyType | undefined }>();
+  const cards = (f.columns ?? []).map((c) => {
+    const p = c.property;
+    const slot = h('div', { class: 'of-draw' }, h('span', { class: 'mini-wait' }));
+    slots.set(c.name, { slot, meaning: p });
+    const cited = (p?.sources ?? []).map((r) => refs.get(r)).filter((r) => r !== undefined);
+    return h('article', { class: 'of-col', 'data-column': c.name },
+      h('div', { class: 'of-col-head' }, h('h4', {}, c.title), c.title !== c.name ? h('code', {}, ...breakable(c.name)) : null, p?.unit ? h('span', { class: 'unit' }, p.unit) : null),
+      slot,
+      c.description ? h('p', { class: 'of-mean' }, c.description) : h('p', { class: 'of-none' }, 'Not described yet.'),
+      c.values.length ? h('details', { class: 'whole' }, h('summary', {}, c.values.length === 1 ? 'What its value stands for' : `What its ${c.values.length} values stand for`), h('dl', { class: 'codes' }, ...c.values.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))) : null,
+      p?.note ? h('p', { class: 'note' }, p.note) : null,
+      p?.lookup && visible(p.lookup.dataset) ? h('p', { class: 'of-from' }, 'Reads as its ', h('b', {}, p.lookup.label), ' in ', h('b', {}, p.lookup.dataset)) : null,
+      cited.length ? h('p', { class: 'of-from' }, 'From ', ...cited.flatMap((r, k) => [k ? ', ' : '', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, r.title)])) : null,
+      h('div', { class: 'of-col-rules' }, h('p', { class: 'of-h2' }, 'Rules'), ruleList(c.rules, 'No rules yet.')));
+  });
+  const wait = h('p', { class: 'of-none' }, cards.length ? '' : refused ? 'This load’s file was refused: its columns weren’t read.' : f.columns ? 'No columns in this load.' : 'Run the flow to see this file’s columns.');
+  wait.hidden = cards.length > 0;
+  // The row above says the description's opening: the whole of it here, where it says more.
+  const about = [
+    !f.description ? h('p', { class: 'of-none' }, 'Not described yet.') : f.description.replace(/\.$/, '') === f.summary ? null : h('p', { class: 'of-desc' }, f.description),
+    f.inventory ? h('p', { class: 'of-inv' }, `${f.inventory.said}.`) : null,
+  ].filter((x) => x !== null);
+  const sec = h('div', { class: 'of-sec', id: `of-sec-${f.id}`, role: 'region', 'aria-label': `${f.id}: what it is, its rules and its columns` },
+    about.length ? h('div', { class: 'of-about' }, ...about) : null,
+    h('section', { class: 'of-part of-own' }, h('h3', { class: 'of-h' }, 'This file’s rules'), ruleList(f.rules, 'No rules of its own yet.')),
+    h('section', { class: 'of-part' }, h('h3', { class: 'of-h' }, cards.length ? `Columns · ${cards.length}` : 'Columns'), wait, cards.length ? h('div', { class: 'of-cols' }, ...cards) : null),
+    h('section', { class: 'of-part of-disc' }, h('h3', { class: 'of-h' }, 'Discovered'),
+      f.discovered.length ? ruleList(f.discovered, '') : h('p', { class: 'of-none' }, 'Nothing has been discovered yet. Rules the app finds in the data will be listed here to accept.')));
+  // The drawings arrive once the load has been looked into, as the Data tab's do: the words show straight away. Read
+  // as the viewer reads the file's own card, so a column closed to them is not drawn (it has no card here either).
+  if (slots.size)
+    void (async () => {
+      const nv = await nodeView(f.id, state.viewer);
+      const q = typeof nv === 'string' ? null : await qualityOf(nv.insp, nv.i, state.viewer);
+      // Closed, or the panel drawn again, meanwhile: nothing to fill.
+      if (!sec.isConnected) return;
+      if (!q) {
+        for (const x of slots.values()) x.slot.remove();
+        wait.textContent = typeof nv === 'string' ? nv.replace('its rows', 'its values') : 'Closed.';
+        wait.hidden = false;
+        return;
+      }
+      for (const [name, x] of slots) {
+        const p = q.profiles.find((y) => y.name.toLowerCase() === name.toLowerCase());
+        if (p) drawColumn(x.slot, p, x.meaning);
+        else x.slot.remove();
+      }
+    })().catch(() => { for (const x of slots.values()) x.slot.remove(); });
+  return sec;
+}
+
+/**
+ * The Files panel: a short row a file (its name, what it is, the rows the load on screen has, its rules), each
+ * opening its section in place; one is open at a time. A file closed to the viewer isn't listed, and a column closed
+ * to them has no card.
+ */
+async function renderFiles(stale: () => boolean): Promise<void> {
+  const page = ontologyPage({ ...state.doc, sources: state.doc.sources.filter((x) => visible(x.id)) }, (id) => access(id)?.columns);
+  const run = latest();
+  const day = shownDay();
+  const from = JSON.stringify([run?.result.run ?? null, run?.result.hash ?? null, day ?? null, state.viewer, page.files.map((f) => [f.id, f.columns?.map((c) => c.name) ?? null])]);
+  if (ontologyFiles.doc === state.doc && ontologyFiles.from === from && $('ontology-files').querySelector('.of-list')) return;
+  const rows = new Map<string, number>();
+  // A file the engine couldn't read as declared (ADR 0014 §2): the run built nothing from it, and the row says so.
+  const refused = new Set((run?.result.manifest.nodes ?? []).filter((n) => n.status === 'refused').map((n) => n.origin));
+  if (run && state.engine) {
+    const insp = await inspect(run);
+    for (const f of page.files) {
+      const i = insp.index.get(f.id);
+      const n = i === undefined || !insp.manifest.has(i) ? null : await rowsAs(insp, i).catch(() => null);
+      if (n !== null) rows.set(f.id, n);
+    }
+  }
+  if (stale()) return;
+  [ontologyFiles.doc, ontologyFiles.from] = [state.doc, from];
+  const items = new Map<string, { el: HTMLElement; row: HTMLElement; f: FileSection }>();
+  const show = (id: string | null, jump: boolean) => {
+    ontologyFiles.open = id;
+    for (const [k, x] of items) {
+      const on = k === id;
+      x.row.setAttribute('aria-expanded', String(on));
+      x.el.classList.toggle('open', on);
+      const sec = x.el.querySelector('.of-sec');
+      if (on && !sec) x.el.append(fileSection(x.f, refused.has(k)));
+      else if (!on && sec) sec.remove();
+    }
+    // The file tapped stays under the finger's eye: the section above it may just have closed.
+    if (id && jump) requestAnimationFrame(() => items.get(id)?.el.scrollIntoView({ block: 'start' }));
+  };
+  const list = h('div', { class: 'of-list' },
+    ...page.files.map((f) => {
+      const n = rows.get(f.id);
+      const row = h('button', { type: 'button', class: 'of-row', 'aria-expanded': 'false', 'aria-controls': `of-sec-${f.id}`, onclick: () => show(ontologyFiles.open === f.id ? null : f.id, true) },
+        h('span', { class: 'of-chev', 'aria-hidden': 'true' }),
+        h('span', { class: 'of-main' },
+          h('span', { class: 'of-name' }, ...breakable(f.id)),
+          f.summary ? h('span', { class: 'of-what' }, f.summary) : null,
+          h('span', { class: 'of-nums' }, `${n !== undefined ? `${counted(n, f.noun)} · ` : refused.has(f.id) ? 'file refused · ' : ''}${f.count ? plural(f.count, 'rule') : 'no rules yet'}`)));
+      const el = h('div', { class: 'of-item', 'data-file': f.id }, row);
+      items.set(f.id, { el, row, f });
+      return el;
+    }));
+  $('ontology-files').replaceChildren(
+    h('h2', {}, 'Files'),
+    h('p', { class: 'sub' }, !page.files.length ? `No file of this flow is open to ${personName(state.viewer)}.` : run ? `${day ? `${dayLabel(day)}’s load` : 'This run’s rows'}, read as ${personName(state.viewer)}. Tap a file for its columns and rules.` : 'Run the flow to see each file’s rows and columns.'),
+    list);
+  if (ontologyFiles.open && items.has(ontologyFiles.open)) show(ontologyFiles.open, false);
 }
 
 let ontologyRender = 0;
 async function renderOntology(): Promise<void> {
-  const o = state.doc.ontology;
   const engine = state.engine;
-  if (!o) return;
   // A newer render (the viewer changed, an object was chosen) wins over one still waiting on the engine.
   const token = ++ontologyRender;
   const stale = () => token !== ontologyRender;
   await useLookups(state.viewer);
+  if (stale()) return;
+  // The files first (ADR 0015 amendment 1): what the flow reads, each with its columns and its rules. A flow with no
+  // ontology still has its files, with nothing said of them yet.
+  await renderFiles(stale);
+  if (stale()) return;
+  const made = madePanel();
+  $('properties').replaceChildren(made ?? '');
+  $('properties').hidden = !made;
+  const o = state.doc.ontology;
+  // The object types, after the files: those with a link or an action, or that no file's rows are tied to. A type
+  // that only says what files' rows are is those files' own rule now, and no box. One on a dataset closed to the
+  // viewer isn't shown, nor are its links and actions.
+  const types = typesShown(o).filter((t) => visible(t.dataset));
+  $('ontology-map').hidden = !types.length;
+  $('objects').hidden = !types.length;
+  // Edits are actions' records: nothing to list in a flow that has no action and no record.
+  $('edits').hidden = !o?.actionTypes.length && !state.edits.length;
+  if (!o) return;
   const typeName = (id: string) => o.objectTypes.find((t) => t.id === id)?.name ?? id;
-  // An object type on a dataset closed to the viewer isn't shown, nor are its links and actions.
-  const types = o.objectTypes.filter((t) => visible(t.dataset));
   const shownType = new Set(types.map((t) => t.id));
   if (state.ontologyType && !shownType.has(state.ontologyType)) state.ontologyType = null;
   // A type's objects as the viewer may read them. A dataset the flow publishes is read as readers have it (ADR 0009).
@@ -7786,9 +7946,9 @@ async function renderOntology(): Promise<void> {
     }
   }
   if (stale()) return;
-  $('properties').replaceChildren(propertiesPanel() ?? '');
-  $('properties').hidden = !o.properties?.length;
   $('ontology-map').replaceChildren(
+    h('h2', { class: 'ont-h' }, 'Objects'),
+    h('p', { class: 'sub' }, 'The things the data describes, each backed by one of the flow’s datasets and read through the policies. An action checks its rule before it writes, and every edit or refusal joins a hash chain.'),
     h('div', { class: 'types' },
       ...types.map((t) => {
         const c = counts.get(t.id);

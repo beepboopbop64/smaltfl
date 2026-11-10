@@ -871,8 +871,60 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .sg-col { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .sg-col code { font-family: var(--mono); font-weight: 400; font-size: 11.5px; color: var(--muted); }
 /* The Ontology tab's columns. */
-#properties { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
-#properties h2 { margin: 0 0 2px; }
+#properties { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding-block: 4px; }
+#properties .fold > summary { min-height: 44px; }
+.made-h { font-weight: 650; font-size: 15px; }
+/* The Ontology page's files (ADR 0015 amendment 1): a row a file, its section opened in place under it. Open is said
+   by the chevron's turn, the row's weight and the section itself, not by colour. A section's parts: what the file
+   is (plain), its own rules (a sunk box), a card a column (boxed), what was discovered (a dashed box: nothing yet). */
+#ontology-files { display: grid; grid-template-columns: minmax(0, 1fr); }
+#ontology-files .sub { margin-bottom: 6px; }
+.of-list { display: grid; grid-template-columns: minmax(0, 1fr); }
+.of-item { border-top: 1px solid var(--line); scroll-margin-top: calc(var(--head, 170px) + 4px); min-width: 0; }
+.of-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 0 8px; width: 100%; min-height: 56px; padding: 10px 0; border: 0; background: none; text-align: left; color: var(--ink); }
+.of-chev { width: 7px; height: 7px; margin: 6px 0 0 2px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; }
+.of-item.open > .of-row .of-chev { transform: rotate(45deg); border-color: var(--ink); }
+.of-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; }
+.of-name { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+.of-item.open > .of-row .of-name { font-weight: 750; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.of-what { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.of-nums { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.of-sec { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 2px 0 20px; min-width: 0; }
+.of-about { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.of-desc { margin: 0; font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
+.of-inv { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.of-part { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.of-h { margin: 0; font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-2); }
+.of-h2 { margin: 0; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.of-own { background: var(--sunk); border-radius: var(--radius); padding: 12px; }
+.of-disc { border: 1.5px dashed var(--edge); border-radius: var(--radius); padding: 12px; }
+.of-none { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.of-rules { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.of-rule { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-left: 10px; border-left: 3px solid var(--ink-2); }
+.of-said { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.of-how { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.of-rule.unchecked { border-left-style: dashed; border-left-color: var(--edge); }
+.of-rule.unchecked .of-said { color: var(--ink-2); font-weight: 400; }
+.of-off { font-size: 12px; font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
+.of-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; }
+.of-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.of-col-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.of-col-head h4 { margin: 0; font-size: 15px; overflow-wrap: anywhere; min-width: 0; }
+.of-col-head code { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
+.of-draw { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--sunk); min-width: 0; }
+.of-draw .top .bar { background: var(--surface); }
+.of-draw .top .v { white-space: normal; overflow-wrap: anywhere; }
+.of-draw .colline { font-size: 12px; }
+.of-draw dl.stats { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 14px; margin: 0; font-size: 13px; }
+.of-draw dl.stats dt { color: var(--muted); font-size: 12px; }
+.of-draw dl.stats dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.of-mean { margin: 0; font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.of-from { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.of-col .whole > summary { min-height: 44px; }
+.of-col-rules { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.ont-h { margin: 6px 0 4px; font-size: 16px; }
+#ontology-map .sub { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .of-chev { transition: none; } }
 .props { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; }
 .prop { display: grid; gap: 6px; align-content: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
 .prop-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
@@ -884,8 +936,6 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .codes dd { margin: 0; overflow-wrap: anywhere; }
 .prop .made code { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
 .prop .where { font-size: 12px; color: var(--muted); }
-.refs { margin-top: 10px; display: grid; gap: 4px; }
-.refs ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
 th.hit { color: var(--warn); }
 th.new, td.new { background: var(--teal-wash); }
 .field-label { font-size: 12px; color: var(--muted); font-family: var(--mono); }
@@ -1371,11 +1421,12 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
   </section>
 
   <section class="view" id="view-ontology" aria-label="Ontology" hidden>
-    <p class="lede">The things the data describes, each backed by one of the flow's datasets and read through the policies, so you see the objects the person you're viewing as may see, and what each column means, in its source's own words. An action checks its rule before it writes, and every edit or refusal joins a hash chain.</p>
-    <div id="ontology-map"></div>
+    <p class="lede">Each file the flow reads: what its columns hold, and the rules its data is held to.</p>
+    <div class="panel" id="ontology-files"><h2>Files</h2><p class="foot">Run the flow to see its files.</p></div>
     <div class="panel" id="properties" hidden></div>
-    <div class="panel" id="objects"><p class="foot">Choose an object type to see its objects.</p></div>
-    <div class="panel" id="edits"></div>
+    <div id="ontology-map" hidden></div>
+    <div class="panel" id="objects" hidden><p class="foot">Choose an object type to see its objects.</p></div>
+    <div class="panel" id="edits" hidden></div>
   </section>
 
   <section class="view" id="view-policies" aria-label="Policies" hidden>

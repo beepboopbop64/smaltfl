@@ -89,23 +89,93 @@
   "full": true
  },
  {
-  "name": "mar06-ontology-type",
-  "what": "Control estate, calm Wed Mar 6: the Ontology view with the object type on the inventory tapped: its objects are the inventory file's rows, counted and listed",
+  "name": "mar06-ontology",
+  "what": "Control estate, calm Wed Mar 6: the Ontology view as a phone opens it: the files the flow reads, a row each (its name, what it is, the rows of the day's load, how many rules it has), none open yet; no object-type box and no flat list of columns",
   "day": "Wed 6",
   "view": "ontology",
   "viewFirst": true,
-  "click": "#ontology-map .type",
   "expect": {
    "text": [
-    "600 objects",
-    "Read as Owner"
+    "Files",
+    "Wed Mar 6’s load, read as Owner",
+    "600 applications · no rules yet",
+    "203 apps · 9 rules"
    ],
    "noText": [
-    "Nothing is published from",
-    "a day waits for a decision"
+    "What the columns mean",
+    "OBJECT TYPE",
+    "Choose an object type"
    ],
    "count": {
-    "#objects .object": 30
+    "#ontology-files .of-row": 13,
+    "#ontology-files .of-sec": 0,
+    "#ontology-map .type": 0
+   }
+  }
+ },
+ {
+  "name": "mar06-ontology-control",
+  "what": "Control estate, calm Wed Mar 6: the Ontology view with a control's file (the WAF's) opened in place: what the file is, this file's rules (one row an application, the applications it covers, its key), a card a column with its values in the day's load drawn at the top, its meaning and its rules (the known values, the bad value, the bands), then Discovered, empty",
+  "day": "Wed 6",
+  "view": "ontology",
+  "viewFirst": true,
+  "click": ".of-item[data-file=\"waf\"] .of-row",
+  "waitFor": ".of-item.open .of-draw .colline",
+  "full": true,
+  "expect": {
+   "text": [
+    "One row an application",
+    "Covers the applications where Internet-facing is Yes, and no others",
+    "No Application blank or repeated",
+    "Set by hand · checked against apps",
+    "Holds Blocking, Monitor only or Off: a value never seen before is flagged as wrong",
+    "Off is a bad value: a jump above its usual share is flagged as wrong",
+    "Not checked: this file’s band on Failing is checked instead",
+    "Failing between 0% and 15% of apps",
+    "Not assessed between 0% and 5% of apps",
+    "DISCOVERED",
+    "Nothing has been discovered yet. Rules the app finds in the data will be listed here to accept."
+   ],
+   "noText": [
+    "What the columns mean",
+    "OBJECT TYPE"
+   ],
+   "minCharts": 1,
+   "count": {
+    "#ontology-files .of-row": 13,
+    "#ontology-files .of-sec": 1,
+    "#ontology-files .of-col": 5,
+    "#ontology-files .of-own .of-rule": 3,
+    "#ontology-files .of-col .of-rule": 6,
+    "#ontology-files .of-draw .tops": 3,
+    "#ontology-map .type": 0
+   }
+  }
+ },
+ {
+  "name": "mar06-ontology-inventory",
+  "what": "Control estate, calm Wed Mar 6: the Ontology view with the inventory opened (one tap, and the control's section closes): it says it is the list the other files are checked against, has no rule of its own, and its nine columns are drawn from the day's file",
+  "day": "Wed 6",
+  "view": "ontology",
+  "viewFirst": true,
+  "click": ".of-item[data-file=\"apps\"] .of-row",
+  "waitFor": ".of-item.open .of-draw .colline",
+  "full": true,
+  "expect": {
+   "text": [
+    "The list of applications: 12 other files are checked against it.",
+    "No rules of its own yet.",
+    "All filled · every value different",
+    "DISCOVERED"
+   ],
+   "noText": [
+    "What the columns mean",
+    "One row an application"
+   ],
+   "count": {
+    "#ontology-files .of-sec": 1,
+    "#ontology-files .of-col": 9,
+    "#ontology-files .of-rule": 0
    }
   }
  },
@@ -188,24 +258,30 @@
   "full": true
  },
  {
-  "name": "mar12-ontology-type",
-  "what": "Control estate, Tue Mar 12 (held): the same object type on a day that waits: the inventory is a file, so its objects are still counted and listed, and nothing says they wait",
+  "name": "mar12-ontology-control",
+  "what": "Control estate, Tue Mar 12 (held: the WAF pass rate collapses): the Ontology view with the WAF's file opened: the same rules, and the held day's own rows drawn beside them (Failing at six in ten, under the rule that says at most 15%)",
   "day": "Tue 12",
   "view": "ontology",
   "viewFirst": true,
-  "click": "#ontology-map .type",
+  "click": ".of-item[data-file=\"waf\"] .of-row",
+  "waitFor": ".of-item.open .of-draw .colline",
+  "full": true,
   "expect": {
    "state": "held",
    "text": [
-    "600 objects",
-    "Read as Owner."
+    "Tue Mar 12’s load, read as Owner",
+    "203 apps · 9 rules",
+    "Failing between 0% and 15% of apps",
+    "59.6%",
+    "DISCOVERED"
    ],
    "noText": [
-    "Nothing is published from",
-    "a day waits for a decision"
+    "What the columns mean"
    ],
    "count": {
-    "#objects .object": 30
+    "#ontology-files .of-row": 13,
+    "#ontology-files .of-sec": 1,
+    "#ontology-files .of-col": 5
    }
   }
  },
@@ -282,5 +358,42 @@
   "what": "Control estate, Tue Mar 12: the Flow view, dark",
   "day": "Tue 12",
   "scheme": "dark"
+ },
+ {
+  "name": "mar12-ontology-dark",
+  "what": "Control estate, Tue Mar 12: the Ontology view's first screen, dark",
+  "day": "Tue 12",
+  "scheme": "dark",
+  "view": "ontology",
+  "viewFirst": true,
+  "expect": {
+   "text": [
+    "Files"
+   ],
+   "count": {
+    "#ontology-files .of-row": 13
+   }
+  }
+ },
+ {
+  "name": "mar12-ontology-control-dark",
+  "what": "Control estate, Tue Mar 12: the Ontology view with the WAF's file opened, dark: the section's parts, the drawings and the rules",
+  "day": "Tue 12",
+  "scheme": "dark",
+  "view": "ontology",
+  "viewFirst": true,
+  "click": ".of-item[data-file=\"waf\"] .of-row",
+  "waitFor": ".of-item.open .of-draw .colline",
+  "full": true,
+  "expect": {
+   "text": [
+    "Failing between 0% and 15% of apps",
+    "DISCOVERED"
+   ],
+   "count": {
+    "#ontology-files .of-sec": 1,
+    "#ontology-files .of-col": 5
+   }
+  }
  }
 ]

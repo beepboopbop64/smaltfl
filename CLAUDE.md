@@ -140,7 +140,12 @@ match smaltdb's `CLAUDE.md`.
   watches is taken and gives no rule. The estate declares `application` and one `rows` entry a control
   (`test/rows.test.ts`, with a tied watched step run through the engine; `test/estate.test.ts` holds the entries to
   the generator; `test/estate-flow.test.ts`, whose world keeps each day's `measures` and `ranges`); the Ontology page
-  reads a type whose objects are a source from the run's file (`renderOntology`; `estate.json`'s ontology stops).
+  reads a type whose objects are a source from the run's file (`renderOntology`). Amendment 1, piece (a): the
+  Ontology page is laid out by file, showing today's rules with nothing edited and no hash moved
+  (`src/core/ontologypage.ts` `ontologyPage`: a section a source with its own rules, a card a column with its rules
+  in words, each rule with an id, a kind and how it came to be, `discovered` empty; the app's `renderFiles` and
+  `fileSection` draw a column with the Columns tab's `columnShape`; `test/ontologypage.test.ts`; `estate.json`'s
+  ontology stops).
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).

@@ -14,6 +14,7 @@
 //     "mask": "letters",                  optional: mask the text ("letters": keep digits; "all"); reloads after
 //     "click": "#sheet .vf-hero",         optional: tap this first (a detail sheet opens), then capture
 //     "clicks": ["sel", ...],             optional: tap each in order, settling ~900 ms (or a run) after each
+//     "waitFor": "sel",                   optional: after the taps, wait until this shows (what a tap draws once the engine answers)
 //     "reload": true,                     optional: reload the page first, keeping IndexedDB, and settle
 //     "view": "runs",                     optional: show a view (#runs, #policies, ...) before capturing
 //     "viewFirst": true,                  optional: show the view before the clicks, not after
@@ -211,6 +212,7 @@ const WEEKDAY = { Mon: 'Mon', Tue: 'Tue', Wed: 'Wed', Thu: 'Thu', Fri: 'Fri', Sa
         await p.evaluate((v) => { location.hash = v === 'flow' ? '' : `#${v}`; }, stop.view);
         await p.waitForTimeout(1500);
       }
+      if (stop.waitFor) await p.waitForSelector(stop.waitFor, { state: 'visible', timeout: 30000 }).catch(() => problems.push(`${stop.name}: ${stop.waitFor} never showed`));
       if (stop.download) {
         const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.locator(stop.download).first().click()]);
         const to = path.join(out, dl.suggestedFilename());
