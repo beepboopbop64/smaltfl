@@ -261,7 +261,9 @@ describe('what the examples don’t write', () => {
     expect(column(tls, 'code').rules).toEqual([{ id: 'tls/code/values', kind: 'values', said: 'A value never seen in this file before is flagged as wrong', values: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], origin: { how: 'set', in: 'ontology' } }]);
     expect(column(file(page.files, 'tickets'), 'closed_at').rules).toEqual([{ id: 'tickets/closed_at/after', kind: 'after', said: 'About 30 minutes after Opened', numbers: { minutes: 30 }, origin: { how: 'set', in: 'ontology' } }]);
     // A column the ontology doesn't describe keeps its own name, and has no rule.
-    expect(column(file(page.files, 'tickets'), 'ref')).toEqual({ name: 'ref', title: 'ref', values: [], rules: [], fileRules: [] });
+    // Moved on purpose (ADR 0015 amendment 1, names and labels): a card gained `standFor`, the values whose meaning
+    // says more than the value; it had `{ name, title, values, rules, fileRules }`.
+    expect(column(file(page.files, 'tickets'), 'ref')).toEqual({ name: 'ref', title: 'ref', values: [], standFor: [], rules: [], fileRules: [] });
     // One file checked against the inventory; a file with no load read has no cards.
     expect(file(page.files, 'apps').inventory?.said).toBe('The list of applications: 1 other file is checked against it');
     expect(file(page.files, 'desks').columns).toBeNull();

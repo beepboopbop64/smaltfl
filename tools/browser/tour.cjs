@@ -13,7 +13,8 @@
 //     "scheme": "dark",                   optional: "light" (default) or "dark"
 //     "mask": "letters",                  optional: mask the text ("letters": keep digits; "all"); reloads after
 //     "click": "#sheet .vf-hero",         optional: tap this first (a detail sheet opens), then capture
-//     "clicks": ["sel", ...],             optional: tap each in order, settling ~900 ms (or a run) after each
+//     "clicks": ["sel", ...],             optional: tap each in order, settling ~900 ms (or a run) after each; an entry
+//                                         ["sel", "text"] types the text into that field instead (a form's input)
 //     "waitFor": "sel",                   optional: after the taps, wait until this shows (what a tap draws once the engine answers)
 //     "reload": true,                     optional: reload the page first, keeping IndexedDB, and settle
 //     "view": "runs",                     optional: show a view (#runs, #policies, ...) before capturing
@@ -199,14 +200,19 @@ const WEEKDAY = { Mon: 'Mon', Tue: 'Tue', Wed: 'Wed', Thu: 'Thu', Fri: 'Fri', Sa
           await p.waitForTimeout(900);
         } else problems.push(`${stop.name}: nothing to click at ${stop.click}`);
       }
-      for (const sel of stop.clicks ?? []) {
+      for (const step of stop.clicks ?? []) {
+        const [sel, typed] = Array.isArray(step) ? step : [step];
         const target = p.locator(sel).first();
-        if (await target.count()) {
+        if (!(await target.count())) problems.push(`${stop.name}: nothing to ${typed === undefined ? 'click' : 'type into'} at ${sel}`);
+        else if (typed !== undefined) {
+          await target.fill(typed);
+          await p.waitForTimeout(150);
+        } else {
           const before = await status();
           await target.click();
           await p.waitForTimeout(900);
           if ((await status()).split('|')[0] !== before.split('|')[0] || /Running|Fetching/.test(await status())) await settled(before);
-        } else problems.push(`${stop.name}: nothing to click at ${sel}`);
+        }
       }
       if (stop.view && !stop.viewFirst) {
         await p.evaluate((v) => { location.hash = v === 'flow' ? '' : `#${v}`; }, stop.view);

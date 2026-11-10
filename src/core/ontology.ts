@@ -274,6 +274,28 @@ export function meaningOf(property: PropertyType | undefined, value: unknown): s
   return Object.prototype.hasOwnProperty.call(property.values, String(value)) ? property.values[String(value)] : undefined;
 }
 
+/** A text with everything set aside that doesn't change what it says: its case, its spaces, underscores, hyphens and
+ * other punctuation, and its accents. "Not assessed" and "not_assessed" are both `notassessed`. */
+export const plainOf = (text: string): string => text.normalize('NFKD').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * Whether a label says more than the thing it labels (ADR 0015 amendment 1): "Card data" does for pci, "Application"
+ * for app_id; "Yes" doesn't for yes, nor "AWS" for aws, "Not assessed" for not_assessed or "Name" for name, which are
+ * the thing written again (`plainOf`). A label that only repeats the thing isn't shown beside it, anywhere. No label,
+ * or one with no letter or digit in it, says nothing.
+ */
+export function saysMore(label: string | null | undefined, thing: unknown): boolean {
+  if (label === null || label === undefined) return false;
+  const said = plainOf(label);
+  return said !== '' && said !== plainOf(String(thing ?? ''));
+}
+
+/** A coded value's meaning where it says more than the value does (`saysMore`): what is shown as its label. */
+export function meaningBeyond(property: PropertyType | undefined, value: unknown): string | undefined {
+  const meaning = meaningOf(property, value);
+  return saysMore(meaning, value) ? meaning : undefined;
+}
+
 /**
  * A coded value glossed once where a head first names it (ADR 0008 §5), from what its property type says, in twenty
  * words at most: its code and what it is, the clause its note gives it ("Flex Fare: payment type 0, booked in an app at

@@ -147,7 +147,14 @@ match smaltdb's `CLAUDE.md`.
   `fileSection` draw a column with the Columns tab's `columnShape`; `test/ontologypage.test.ts`; `estate.json`'s
   ontology stops). A file's rule about a column is listed on that column's card too (`Rule.columns`,
   `ColumnCard.fileRules`), a rule nothing judges says why (`Rule.unchecked`: its check off, a band or a due date
-  checked in its place), and a file the run read nothing of has the columns its data list declares (`fileView`).
+  checked in its place), and a file the run read nothing of has the columns its data list declares (`fileView`). Names
+  and labels (piece b, first stage): a label is shown only where it says more than the thing (`saysMore`,
+  `meaningBeyond`; `ColumnCard.standFor`, `asWritten`; the app's `labelFor`, one label a bar); the owner renames a
+  column, rewords its meaning and labels its values on its card (`columnForm`), written as the file's own property
+  (`nameColumn`, `src/core/flowedit.ts`); the edited document is kept across a reload by the shipped flow's hash
+  (`keptOf`, `restoreKept`; `saveFlow`, `loadFlow`), every edit recorded at once with its reason (`flowEdited`: a
+  rename, a toggle, an accepted band via `applyBand`), listed above the files with **Back to the flow as shipped**
+  (`asShipped`, `backToShipped`); `test/flowedit.test.ts`, `estate.json`'s `names-` stops.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).

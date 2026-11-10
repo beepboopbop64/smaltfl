@@ -478,3 +478,101 @@ Still nothing edited: no document, plan, hash, verdict or test vector moved. Wha
   made columns gives meanings only. The maintainer named "this combination has to mean something else" as a rule
   they expect to see. Where they go (a section of its own after the files for a dataset with rules, or a line
   under each file it reads) is theirs to say.
+
+### Amendment 1, piece (b), first stage (2026-11-10): names and labels, and edits that stay
+
+The maintainer, after looking at piece (a): *"you have weird stuff in there, like the name of the thing is the name of
+the thing, so like yes means yes, no means no. The user should be able to update column names that aren't necessarily
+always clear, but labeling everything as what it is is not very helpful."* (Their second point, rules called out
+with no way to add one, is the next stage's.) No shipped document, plan, hash, verdict or test vector moved: what
+the page says changed, and a document changes only when its owner edits it.
+
+- **No label that only repeats the thing** (`plainOf`, `saysMore`, `meaningBeyond`, `ontology.ts`). Two texts are
+  the same thing when they agree with case, spaces, underscores, hyphens, other punctuation and accents set aside:
+  "yes" and "Yes", "aws" and "AWS", "not_assessed" and "Not assessed", "TLS1.2" and "TLS 1.2", "name" and "Name";
+  "pci" and "Card data" are not, nor "app_id" and "Application". A label is shown beside or in place of a thing only
+  when it says more.
+  - A column's card (`ColumnCard`, `ontologypage.ts`): `standFor`, the values whose meaning says more, is what
+    "What its N values stand for" lists and counts, and the list isn't offered when it is empty (the inventory's
+    business units, yes and no; two of its four data classes are listed). `asWritten`, the column as the file
+    writes it, is set only beside a title that is another word ("Application app_id"; "Name" alone). `values`
+    stays every value the ontology lists: the edit form reads it.
+  - The drawing (`columnShape`, `labelFor`, `src/app/main.ts`), shared by the Ontology page and the import card's
+    Columns tab: a bar carries one label, the meaning where it says more, else the value as the file writes it.
+    The `lead` choice of piece (a) (a meaning with its code small beside it, or the code with its meaning under
+    it) is gone, with the code beside the label.
+  - Everywhere else a value or a column is shown with its meaning: the Data tab's cells and heads, the Columns
+    tab's rows and cards, a row read as a record or in a table, the "Columns the flow makes" cards, and the two
+    places the viewer's news names a value in brackets (`NEWS_NAMES.value`, `namesFor`).
+  - Not changed: a rule's sentence and a finding's title name a value by the ontology's word alone ("Not assessed
+    between 0% and 5%"), which is one label and no repeat; and the flow's own verdict words (`flowNames`,
+    `news.ts`) are recorded strings.
+- **A file's description is said once.** The open row's opening line is taken out of the row (`hidden`), not only
+  hidden by a style, so nothing reads it twice.
+- **Names can be changed** (`nameColumn`, `src/core/flowedit.ts`; `columnForm`, `main.ts`). On a column's card the
+  owner has a quiet **Edit**: a form in place of the card's body with the name, what it means, and a label for
+  each value (the ones the ontology lists, then the ones the load on screen has; a field is empty where the value
+  has no label that says more than itself), Save and Cancel. A reader sees no Edit, and a save waits for a run
+  under way to end. By Q-140 the change is the file's own: the property that names only this file is edited in
+  place; else a new one for this file alone is written after the one it stood under (the flow's dictionary, or one
+  several files share, which then stops naming this file), with its unit, note, lookup and marks, and of its bands
+  only those that apply to the file. What the plan carries for the file (`marksOn`) and for every other file is
+  what it was: a rename moves the flow hash and no key, and builds nothing again. The file's own column name never
+  changes, is said under the name field ("The file writes it as status. That stays."), and stays beside the new
+  title. A name left empty is the name as written; a label taken off a listed value leaves the value itself for a
+  label, which is shown nowhere, so the list of values (and a bad value's place in it) stays.
+- **Edits stay** (`keptOf`, `restoreKept`, `asShipped`, `flowedit.ts`; `saveFlow`, `loadFlow`, `main.ts`). The page
+  keeps the edited document in this browser (`localStorage`, `smaltfl:flow:<id>`): `{ v: 2, base, doc, edits }`,
+  the whole document less its arrangement (kept apart, as before), so the notebooks, gates and ontology come back
+  with the cell refs and outline a toggle needs. `base` is the flow hash of the document the page was shipped
+  with; what was kept against another is dropped, and the page says how many changes went and why. The first form
+  (`{ v: 1, base, steps }`) is still read. Where the browser has no storage for it the page says the changes last
+  for the visit.
+- **Every edit is recorded at once, with its reason in words** (`flowEdited`, `recordFlowChange`): a rename
+  ("Renamed status to Result in tls"), a gate toggle ("Set the classifier check on tls to warn (it was off), from
+  the Checks tab"), an accepted band ("Accepted a new band in waf: Status Failing between 0% and 62.5%, by
+  decision #9"; `applyBand` moved to `flowedit.ts`, and no longer waits for the next run to be recorded with no
+  reason), and the canvas's step edits, which had none. Flow entries are appended one at a time, each for the
+  document as it was when asked, so an edit and the run that follows it never both record the change. The entry's
+  shape is what it was (`{ before, after, doc }`, the document kept by hash without its display fields): the audit
+  finds it by its flow hash and verify reads each run's own document, before and after an edit. After a reload
+  the restored document hashes to the record's last flow entry, so the next run records no change back.
+- **The changes are listed, and can be taken away** (`renderFlowEdits`, `backToShipped`). Above the files: how many
+  changes, the last one, all of them behind a tap, that each takes effect from the next run, and for the owner
+  **Back to the flow as shipped**, asked twice, recorded as one flow change. The arrangement and profile boxes
+  stay: they are the browser's own. The canvas's Reset still puts the steps and sections back, and no longer
+  forgets what else was kept.
+- **A waiting day is judged again.** An edit moves the flow hash, by which a day waiting for a decision is found
+  (§4's risk; ADR 0009's matching is not changed). Where a day waits, the form and the list of changes say "A day
+  waiting for a decision is judged again when it next runs."
+- **What moved, on purpose:**
+  - `test/ontologypage.test.ts`: a card's exact shape gained `standFor` (`{ name, title, values, standFor, rules,
+    fileRules }`), said there.
+  - On screen, and in `tools/browser/stops/estate.json`: a bar's single label; the stand-for lists and their
+    counts; names beside titles; the record's flow line, which leads with the reason ("The flow changed: Renamed
+    status to Result in tls · 07df… to 9d2e…"; one with no reason reads "The flow changed · …"); a toggle's
+    default reason (it read "tls: classifier off → warn, from the Checks tab"); the line after a band is accepted
+    ("Recorded; the next run judges by it"; it read "The next run records the change").
+- **Tests:** `test/flowedit.test.ts` (the comparison on the maintainer's cases; the estate's cards; a rename as
+  the file's own with every file's marks and the whole plan but its flow hash unchanged; in place the second
+  time; labels given and taken; a shared entry split; a flow with no ontology; the band; what is kept restored
+  after a toggle, a rename and a band to the same flow hash, toggled again and held to smaltnb's parser; dropped
+  when the shipped document changed; the first form; back to the flow as shipped; a run before and after a rename
+  through the engine, nothing built again and both verified). `tools/browser/tour.cjs`: an entry of `clicks` may
+  be `[selector, text]`, typed into a field. `estate.json` gains eleven stops (`names-form`, `names-rename`,
+  `names-other-file`, `names-import-card`, `names-reload`, `names-reload-record`, `names-reader`, `names-back`,
+  `names-back-record`, and two in dark) and expectations on the inventory's and the WAF's stops. The sign-in log
+  and the taxi example were built and driven through a rename, a reload, a reader and the way back with scratch
+  stops: no page error.
+- **Choices made here, for the maintainers to confirm or change (Q-145 to Q-147):**
+  - A bar whose meaning only repeats its value shows the value as the file writes it, so one drawing can read
+    "Passing, Failing, exception". The other reading (the ontology's spelling as the one label) is a line in
+    `labelFor`.
+  - A file's own name stays in that file: a step that reads the file keeps the flow's dictionary name for the
+    column. Following a column through the steps that only pass it on is not built.
+  - A name is in the flow hash, as the whole ontology is, so a rename is a flow change that a waiting day is
+    judged again under. Keeping names out of the hash would be an encoding change, with its own ADR.
+- **Left for the next stages:** rules are still the ontology's marks, read-only on the page; a column's unit,
+  note and references aren't in the form; a file's own description isn't edited (the estate's still end "One row
+  an application it applies to…", which the rules under them say again); the edited notebook or document isn't
+  offered as a file (§4).

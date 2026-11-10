@@ -13,7 +13,7 @@
  */
 import { sourceOf, type FlowDocument } from './document.js';
 import { gateChecksOf, writtenRules, type CheckName } from './gates.js';
-import { marksOn, meaningOf, nounOf, propertyOf, rowsOf, type Noun, type ObjectType, type Ontology, type PropertyType } from './ontology.js';
+import { marksOn, meaningOf, nounOf, propertyOf, rowsOf, saysMore, type Noun, type ObjectType, type Ontology, type PropertyType } from './ontology.js';
 
 /**
  * How a rule came to be. Today every rule is set by hand, in the ontology or in the notebook's gate cell. The two
@@ -65,10 +65,16 @@ export interface ColumnCard {
   name: string;
   /** What people call it: the ontology's title, or the name where the ontology doesn't describe it. */
   title: string;
+  /** The name as the file writes it, where it says something the title doesn't (`saysMore`: "app_id" beside
+   * "Application"; "name" under "Name" is one word, and absent). The card shows it beside the title only then. */
+  asWritten?: string;
   /** What it holds, in the ontology's words. */
   description?: string;
-  /** The words for its coded values, in the ontology's order. */
+  /** The words for its coded values, in the ontology's order: every value the ontology lists. */
   values: [code: string, meaning: string][];
+  /** Of those, the values whose meaning says more than the value does (`saysMore`: "Card data" for pci, never "Yes"
+   * for yes): what the card's "What its values stand for" lists and counts. Empty, the list isn't offered. */
+  standFor: [code: string, meaning: string][];
   /** The ontology's entry for it in this file (`propertyOf`): its unit, its note, where its meaning comes from. */
   property?: PropertyType;
   /** The column's own rules, from its marks in this file. */
@@ -230,7 +236,9 @@ export function ontologyPage(doc: PageDoc, columns: (file: string) => readonly s
           for (const [, status, miss, within] of mine(marks.due)) own.push({ id: `${at}/due`, kind: 'due', said: `A due date: a row is late if its ${title(id, status)} is still ${word(id, status, miss)} the day after; flagged as wrong when more are late than usual`, numbers: { days: within }, values: [miss], origin, ...quiet('due') });
           for (const [, of, minutes] of mine(marks.after)) own.push({ id: `${at}/after`, kind: 'after', said: `About ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} after ${title(id, of)}`, numbers: { minutes }, origin, ...quiet('shape') });
           const fileRules = rules.filter((r) => r.columns?.some((c) => lower(c) === lower(name))).map((rule) => ({ rule, said: onCard.get(rule) ?? rule.said }));
-          return { name, title: p?.title ?? name, ...(p?.description ? { description: p.description } : {}), values: Object.entries(p?.values ?? {}), ...(p ? { property: p } : {}), rules: own, fileRules };
+          const called = p?.title ?? name;
+          const values = Object.entries(p?.values ?? {});
+          return { name, title: called, ...(saysMore(name, called) ? { asWritten: name } : {}), ...(p?.description ? { description: p.description } : {}), values, standFor: values.filter(([code, meaning]) => saysMore(meaning, code)), ...(p ? { property: p } : {}), rules: own, fileRules };
         })
       : null;
 

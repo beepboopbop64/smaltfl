@@ -825,7 +825,6 @@ select.ch-mode.hold { color: var(--bad); } select.ch-mode.warn { color: var(--wa
 .record dt.hit .col-title { color: var(--warn); }
 .means { display: block; font-family: var(--font); font-size: 11.5px; font-style: normal; color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
 td .means { font-size: 11px; }
-.top .v .means { white-space: normal; }
 th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); }
 .colname { margin: 0; font-size: 12px; color: var(--muted); }
 .colname code { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
@@ -912,17 +911,19 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .of-off { font-size: 12px; font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
 .of-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; }
 .of-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
-.of-col-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.of-col-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0 8px; min-width: 0; }
+.of-col-names { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
 .of-col-head h4 { margin: 0; font-size: 15px; overflow-wrap: anywhere; min-width: 0; }
 .of-col-head code { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
 .of-draw { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--sunk); min-width: 0; }
 .of-draw .top .bar { background: var(--surface); }
 .of-draw .top .v { white-space: normal; overflow-wrap: anywhere; }
-/* A bar is named by what its value means, as the rules below speak; the value as the file writes it, small beside it. */
-.of-draw .tops.over { gap: 10px; }
-.of-draw .tops.over .top { grid-template-columns: minmax(0, 1fr) auto; row-gap: 3px; }
-.of-draw .tops.over .top .v { grid-column: 1 / -1; }
-.of-draw .top .v .as-written { display: inline-block; margin-left: 6px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+/* A bar has one label: what its value stands for where that says more than the value, else the value as the file
+   writes it. A label too long to sit beside its bar (a sentence) sits over it, on the Ontology page and in the
+   Columns tab alike. */
+.tops.over { gap: 10px; }
+.tops.over .top { grid-template-columns: minmax(0, 1fr) auto; row-gap: 3px; }
+.tops.over .top .v { grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere; }
 .of-draw .colline { font-size: 12px; }
 .of-draw dl.stats { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 14px; margin: 0; font-size: 13px; }
 .of-draw dl.stats dt { color: var(--muted); font-size: 12px; }
@@ -937,6 +938,37 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .ont-h { margin: 6px 0 4px; font-size: 16px; }
 #ontology-map .sub { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { .of-chev { transition: none; } }
+/* The edits made to the flow here (ADR 0015 §4): a strip above the files, with the way back to the flow as shipped. */
+#flow-edits { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 0 0 12px; padding: 12px; border: 1.5px solid var(--ink-2); border-radius: var(--radius); background: var(--surface); }
+#flow-edits[hidden], .of-edit[hidden], .of-err[hidden] { display: none; }
+.fe-head { margin: 0; font-size: 14.5px; font-weight: 650; overflow-wrap: anywhere; }
+.fe-last { margin: 0; font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.fe-k { margin-right: 4px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.fe-note { margin: 0; font-size: 12.5px; color: var(--muted); }
+.fe-all > summary { min-height: 44px; }
+.fe-list { display: grid; gap: 6px; margin: 0; padding-left: 22px; font-size: 13px; overflow-wrap: anywhere; }
+.fe-when { color: var(--muted); font-size: 12px; }
+.fe-back { justify-self: start; min-height: 44px; margin-top: 2px; }
+/* A column's names edited in place on its card (amendment 1): a quiet Edit in the card's head, 44 px to the touch
+   without making the head taller; the form takes the card's place while it is open. Fields are 16 px, so a phone
+   doesn't zoom into them. */
+.of-edit { margin: -12px -8px -10px 0; min-width: 44px; min-height: 44px; padding: 0 8px; border: 0; background: none; color: var(--smalt); font-size: 13.5px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.of-col.editing > :not(.of-col-head):not(.of-form) { display: none; }
+.of-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 0; min-width: 0; }
+.of-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
+.of-form label, .of-form legend { padding: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.of-form input, .of-form textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--muted); border-radius: 8px; padding: 9px 10px; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 16px; line-height: 1.35; }
+.of-form textarea { min-height: 88px; }
+.of-vals { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.of-val { display: grid; grid-template-columns: minmax(0, 36%) minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.of-val label code { font-family: var(--mono); font-size: 12.5px; font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
+.of-hint { margin: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.of-hint code { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.of-err { margin: 0; font-size: 13px; font-weight: 600; color: var(--bad); overflow-wrap: anywhere; }
+.of-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.of-acts .btn { min-width: 88px; min-height: 44px; }
+.of-save { background: var(--smalt); border-color: var(--smalt); color: var(--surface); font-weight: 600; }
+.of-col { scroll-margin-top: calc(var(--head, 170px) + 8px); }
 .props { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; }
 .prop { display: grid; gap: 6px; align-content: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
 .prop-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
@@ -1434,6 +1466,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 
   <section class="view" id="view-ontology" aria-label="Ontology" hidden>
     <p class="lede">Each file the flow reads: what its columns hold, and the rules its data is held to.</p>
+    <div id="flow-edits" role="region" aria-label="Changes made to this flow here" hidden></div>
     <div class="panel" id="ontology-files"><h2>Files</h2><p class="foot">Run the flow to see its files.</p></div>
     <div class="panel" id="properties" hidden></div>
     <div id="ontology-map" hidden></div>

@@ -35,8 +35,9 @@ import { derivedAbout, derivedFails, derivedKeys, derivedWhy, donorsOf, filledRo
 import { followsCause as followsFrom, ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, axisShare, recentSpan, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type HourValues, type Story, type Told } from '../core/story.js';
 import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeChip, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
-import { counted, glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
-import { ontologyPage, originSaid, typesShown, type FileSection, type Rule } from '../core/ontologypage.js';
+import { counted, glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, saysMore, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
+import { ontologyPage, originSaid, typesShown, type ColumnCard, type FileSection, type Rule } from '../core/ontologypage.js';
+import { applyBand, asShipped, keptOf as keptFlow, nameColumn, restoreKept, type FlowEdit } from '../core/flowedit.js';
 import { DECIDE, DECIDE_OPTIONS, checkDecision, checkRun, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
@@ -1598,10 +1599,12 @@ function resetArrangement(): void {
   state.collapsed = new Set();
   try {
     localStorage.removeItem(arrangementKey());
-    localStorage.removeItem(flowKey());
   } catch {
     // Nothing kept to forget.
   }
+  // The steps as shipped again are an edit of the flow like any other, kept and recorded; the names, labels, bands
+  // and gate toggles made here are not the canvas's to forget: "Back to the flow as shipped" takes those away.
+  if (edited) void flowEdited('Put the flow’s steps back as shipped, from the canvas');
   select(null);
   startView(gridLayout(canvasDoc(viewDoc()), state.collapsed, wrapWidth()));
   if (edited) void run();
@@ -2183,12 +2186,11 @@ function histogram(p: Profile): HTMLElement | null {
 
 /**
  * A column's values drawn, as its card in the Columns tab and its card on the Ontology page show them: a measure's or
- * a time's histogram with its numbers under it, else its most common values as bars, each with what its code stands
- * for. Nothing for a column with neither. `lead` says which names a bar: the code as the file writes it, with its
- * meaning small under it (the Columns tab, read beside the rows), or the meaning, with the code small beside it (the
- * Ontology page, whose rules below speak in meanings).
+ * a time's histogram with its numbers under it, else its most common values as bars. Nothing for a column with
+ * neither. A bar carries one label: what its value stands for where that says more than the value does ("Card data"
+ * for pci), else the value as the file writes it ("yes", never "Yes" beside it: `labelFor`).
  */
-function columnShape(p: Profile, meaning?: PropertyType, lead: 'code' | 'meaning' = 'code'): HTMLElement[] {
+function columnShape(p: Profile, meaning?: PropertyType): HTMLElement[] {
   const f = p.facts;
   const plain = fmtOf(p);
   // A measure in its unit; a time as it is.
@@ -2206,17 +2208,12 @@ function columnShape(p: Profile, meaning?: PropertyType, lead: 'code' | 'meaning
       ...stat('middle half', `${fmt(q.p25)} – ${fmt(q.p75)}`))];
   }
   if (!p.top?.length) return [];
+  const names = p.top.map((t) => labelFor(meaning, t.value) ?? t.value);
   // A meaning that is a sentence ("Manhattan south of E 96th St…: only yellow cabs take street hails") has no room
-  // beside a bar: where one leads, each name sits over its bar.
-  const over = lead === 'meaning' && p.top.some((t) => (meaningFor(meaning, t.value) ?? '').length > 28);
+  // beside a bar: with one, each name sits over its bar.
+  const over = names.some((n) => n.length > 28);
   const tops = h('div', { class: `tops${over ? ' over' : ''}` },
-    ...p.top.map((t) => {
-      // What the code stands for, where that says more than the code does ("Retail" is Retail, and "yes" is Yes).
-      const means = meaningFor(meaning, t.value);
-      const both = !!means && means.toLowerCase() !== t.value.toLowerCase();
-      const name = lead === 'meaning' && means ? [means, both ? h('code', { class: 'as-written' }, t.value) : null] : [t.value, both ? h('span', { class: 'means' }, means) : null];
-      return h('div', { class: 'top' }, h('span', { class: 'v' }, ...name), h('span', { class: 'bar' }, h('span', { style: `width:${Math.max(1, t.share * 100).toFixed(1)}%` })), h('span', { class: 'n' }, pct(t.share)));
-    }));
+    ...p.top.map((t, k) => h('div', { class: 'top' }, h('span', { class: 'v' }, names[k]!), h('span', { class: 'bar' }, h('span', { style: `width:${Math.max(1, t.share * 100).toFixed(1)}%` })), h('span', { class: 'n' }, pct(t.share)))));
   return f.distinct > p.top.length ? [tops, h('p', { class: 'foot', style: 'margin:0' }, `and ${plural(f.distinct - p.top.length, 'more value', 'more values')}`)] : [tops];
 }
 
@@ -2229,7 +2226,8 @@ function columnCard(p: Profile, type: string, moved: Drift | undefined, since: s
   const fmt = (v: number) => (p.kind === 'time' ? plain(v) : inUnit(plain(v), v, meaning));
   const card = h('article', { class: 'record colcard' },
     h('div', { class: 'colhead' }, h('h3', {}, ...(meaning ? [meaning.title] : breakable(p.name))), h('span', { class: 'tag' }, `${p.kind} · ${type}`)),
-    meaning ? h('p', { class: 'colname' }, h('code', {}, ...breakable(p.name)), meaning.unit ? ` · in ${meaning.unit}` : '') : null,
+    // Its name as the file writes it, where that isn't its title again ("Name", name), and its unit.
+    meaning && (saysMore(p.name, meaning.title) || meaning.unit) ? h('p', { class: 'colname' }, saysMore(p.name, meaning.title) ? h('code', {}, ...breakable(p.name)) : null, meaning.unit ? `${saysMore(p.name, meaning.title) ? ' · ' : ''}in ${meaning.unit}` : '') : null,
     meaning ? h('p', { class: 'means-text' }, meaning.description) : null,
     h('p', { class: 'colline' }, `${pct(f.present / Math.max(1, f.rows))} filled · ${fmtInt(f.distinct)} distinct${gaps ? ` · ${fmtInt(gaps)} empty` : ''}`));
   card.append(...columnShape(p, meaning));
@@ -2595,7 +2593,7 @@ function addFilterBox(stepId: string, picked: readonly Suggestion[]): void {
     return;
   }
   state.doc = next;
-  saveFlow();
+  void flowEdited(`Added the filter ${id} on ${stepId}`);
   saveArrangement();
   select(null);
   void run().then(() => select(id));
@@ -2612,7 +2610,7 @@ function removeStep(id: string): void {
     return;
   }
   state.doc = next;
-  saveFlow();
+  void flowEdited(`Took the step ${id} out`);
   saveArrangement();
   select(null);
   void run();
@@ -2620,32 +2618,159 @@ function removeStep(id: string): void {
 
 // ------------------------------------------------------------------ the flow's edits, kept in this browser
 
-const flowKey = () => `smaltfl:flow:${state.doc.id}`;
-/** A fingerprint of the shipped flow's own steps: edits kept against another version of them aren't used. */
-const flowBase = (): string => {
-  let hash = 0x811c9dc5;
-  for (const ch of canonicalJSON(shippedDoc.steps as unknown as Parameters<typeof canonicalJSON>[0])) hash = Math.imul(hash ^ ch.charCodeAt(0), 0x01000193) >>> 0;
-  return hash.toString(16);
-};
+// The document as edited here is kept across a reload (ADR 0015 §4; src/core/flowedit.ts): its steps, notebooks, gates
+// and ontology, with the cell refs a toggle needs, by the flow hash of the document the page was shipped with. What
+// was kept against another shipped document is dropped. Each edit is listed in the words it was recorded with, and
+// "Back to the flow as shipped" takes them all away.
 
-/** The flow's steps as edited here (settings applied, check boxes added or taken out), kept in this browser. */
+const flowKey = () => `smaltfl:flow:${state.doc.id}`;
+/** The shipped document's flow hash, hashed once when the page opens: what the kept edits go by. */
+let shippedHash = '';
+/** The edits made to the flow here, oldest first, each in the words it was recorded with. */
+let flowEdits: FlowEdit[] = [];
+/** Whether this browser keeps the edited document, or it lasts as long as the page (storage off, or full). */
+let flowKept = true;
+/** What the page dropped of what it kept when it opened, to say once: how many edits, and why. */
+let flowDropped: { edits: number; why: string } | null = null;
+/** Why the flow changed, for the record's next flow entry, when the page changed it itself (what it kept was dropped). */
+let flowReason: string | null = null;
+
+/** The document as edited here, with the edits made, kept in this browser. */
 function saveFlow(): void {
   try {
-    localStorage.setItem(flowKey(), JSON.stringify({ v: 1, base: flowBase(), steps: state.doc.steps }));
+    localStorage.setItem(flowKey(), JSON.stringify(keptFlow(state.doc, shippedHash, flowEdits)));
+    flowKept = true;
   } catch {
-    // Storage can be off: the edits then last as long as the page.
+    // Storage can be off, or full: the edits then last as long as the page, and the page says so.
+    flowKept = false;
+  }
+}
+
+/** What this browser kept of the flow, forgotten: the next visit opens the flow as shipped. */
+function forgetFlow(): void {
+  try {
+    localStorage.removeItem(flowKey());
+  } catch {
+    // Nothing kept to forget.
   }
 }
 
 function loadFlow(): void {
+  let saved: unknown = null;
   try {
-    const saved = JSON.parse(localStorage.getItem(flowKey()) ?? 'null') as { v?: number; base?: string; steps?: unknown } | null;
-    if (!saved || saved.v !== 1 || saved.base !== flowBase() || !Array.isArray(saved.steps)) return;
-    const next = { ...state.doc, steps: saved.steps } as FlowDocument;
-    if (validateDocument(next).length === 0) state.doc = next;
+    saved = JSON.parse(localStorage.getItem(flowKey()) ?? 'null');
   } catch {
-    // Unreadable storage: the example's own steps.
+    // Unreadable storage: the flow as shipped.
+    return;
   }
+  const kept = restoreKept(state.doc, shippedHash, saved);
+  if (kept.state === 'kept') [state.doc, flowEdits] = [kept.doc, kept.edits];
+  else if (kept.state === 'dropped') {
+    forgetFlow();
+    flowDropped = { edits: kept.edits.length, why: kept.why };
+    // The record last saw the edited flow: the next run's flow entry says why it is the shipped one again.
+    const n = kept.edits.length;
+    flowReason = `${n ? `${plural(n, 'change')} kept in this browser ${n === 1 ? 'was' : 'were'}` : 'What this browser kept of the flow was'} dropped: ${kept.why}`;
+  }
+}
+
+/**
+ * The flow was edited here: everything told from the document is told again, the edit is listed and kept in this
+ * browser, and the record gets a flow entry at once with the reason in words. A document that is the shipped one
+ * again (an edit undone by hand) has no edits left to list.
+ */
+async function flowEdited(said: string): Promise<void> {
+  const doc = state.doc;
+  storyCache.clear();
+  planKindCache.doc = null;
+  flowEdits = [...flowEdits, { at: new Date().toISOString(), said }];
+  flowDropped = null;
+  saveFlow();
+  renderFlowEdits();
+  await recordFlowChange(said, doc);
+  if (state.doc === doc && shippedHash && (await flowHash(doc)) === shippedHash) {
+    flowEdits = [];
+    if (doc.profiles?.length) saveFlow();
+    else forgetFlow();
+  }
+  renderFlowEdits();
+}
+
+/**
+ * Back to the flow as shipped: every edit made here taken away (names, labels, bands, gate toggles, steps), recorded
+ * as one flow change. The arrangement stays: it is the browser's own, and no edit of the flow.
+ */
+async function backToShipped(): Promise<void> {
+  if (!isOwner()) return;
+  const n = flowEdits.length;
+  const steps = canonicalJSON(state.doc.steps as unknown as Parameters<typeof canonicalJSON>[0]) !== canonicalJSON(shippedDoc.steps as unknown as Parameters<typeof canonicalJSON>[0]);
+  const doc = (state.doc = asShipped(state.doc, shippedDoc));
+  flowEdits = [];
+  flowDropped = null;
+  if (doc.profiles?.length) saveFlow();
+  else forgetFlow();
+  saveArrangement();
+  storyCache.clear();
+  planKindCache.doc = null;
+  state.issues = [];
+  await recordFlowChange(`Back to the flow as shipped: ${n ? `${plural(n, 'change')} taken away` : 'every change taken away'}`, doc);
+  setStatus(`The flow is as it was shipped again${n ? `: ${plural(n, 'change')} taken away` : ''}. Recorded; the next run uses it.`, false);
+  requestCanvas();
+  syncTitle();
+  if (state.selected) void renderSheet();
+  if (location.hash === '#ontology') void renderOntology();
+  // Steps changed back are data changed back: the flow runs again, as it does when a step is edited.
+  if (steps) void run();
+}
+
+/**
+ * Whether a day of the flow on screen waits for a decision. An edit moves the flow's hash, by which a waiting day is
+ * found again, so the day is judged again when it next runs (ADR 0015 §4): where one waits, the page says so beside
+ * the edit.
+ */
+const anyDayWaits = (): boolean => pauseOf(latest())?.state === 'waiting' || pausedDays().some((d) => d.state === 'waiting');
+const WAITS_AGAIN = 'A day waiting for a decision is judged again when it next runs.';
+
+/**
+ * The edits made to the flow here, on the Ontology page above its files: how many and the last one, that the next
+ * run uses them, and for the owner the way back to the flow as shipped (asked twice: it takes them all away).
+ * Nothing while the flow is as shipped, unless the page just dropped what it kept.
+ */
+function renderFlowEdits(): void {
+  const box = document.getElementById('flow-edits');
+  if (!box) return;
+  const n = flowEdits.length;
+  if (!n && !flowDropped?.edits) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  box.hidden = false;
+  if (!n) {
+    const lost = flowDropped!.edits;
+    box.replaceChildren(h('p', { class: 'fe-head' }, `${plural(lost, 'change')} made here ${lost === 1 ? 'was' : 'were'} dropped: ${flowDropped!.why}.`), h('p', { class: 'fe-note' }, 'This is the flow as shipped.'));
+    return;
+  }
+  const last = flowEdits[n - 1]!;
+  const when = (at: string) => new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const back = h('button', { type: 'button', class: 'btn fe-back' }, 'Back to the flow as shipped');
+  let armed = 0;
+  back.addEventListener('click', () => {
+    if (!armed) {
+      back.textContent = n === 1 ? 'Take the change away?' : `Take all ${n} away?`;
+      armed = window.setTimeout(() => ((armed = 0), (back.textContent = 'Back to the flow as shipped')), 4000);
+      return;
+    }
+    clearTimeout(armed);
+    back.disabled = true;
+    void backToShipped();
+  });
+  box.replaceChildren(
+    h('p', { class: 'fe-head' }, `${plural(n, 'change')} to this flow, ${flowKept ? 'kept in this browser' : 'kept for this visit only: this browser has no storage for them'}`),
+    h('p', { class: 'fe-last' }, h('span', { class: 'fe-k' }, n === 1 ? 'The change' : 'Last'), ` ${last.said} · ${when(last.at)}`),
+    n > 1 ? h('details', { class: 'whole fe-all' }, h('summary', {}, `All ${n} changes`), h('ol', { class: 'fe-list' }, ...flowEdits.map((e) => h('li', {}, e.said, h('span', { class: 'fe-when' }, ` · ${when(e.at)}`))))) : '',
+    h('p', { class: 'fe-note' }, `Each is recorded, and takes effect from the next run.${anyDayWaits() ? ` ${WAITS_AGAIN}` : ''}`),
+    isOwner() ? back : '');
 }
 
 // ------------------------------------------------------------------ the drill-down
@@ -3085,7 +3210,7 @@ async function checksTab(card: string, id: string): Promise<HTMLElement> {
       h('span', { class: 'ch-cell', role: 'cell' }, today)));
   }
   box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, `${layer} gate · ${CHECK_NAMES.filter((c) => checks[c] !== 'off').length} of ${CHECK_NAMES.length} checks on`), grid,
-    owner ? h('p', { class: 'foot' }, 'Hold, warn or off: a change writes the gate cell in the notebook and is recorded as a flow change.') : null));
+    owner ? h('p', { class: 'foot' }, 'Hold, warn or off: a change writes the gate cell in the notebook, is recorded as a flow change and is kept in this browser. Ontology lists the changes made here, with the way back to the flow as shipped.') : null));
   const feedback = feedbackPart(card, id, findings.filter((f) => f.severity === 'alert' || f.severity === 'warn'));
   if (feedback) box.append(feedback);
   // Where it is written: the gate cell, or the layer's defaults.
@@ -3119,9 +3244,8 @@ async function setCheck(card: string, id: string, name: CheckName, mode: CheckMo
     setStatus(`The gate cell couldn't be written: ${message(e)}`, true);
     return false;
   }
-  storyCache.clear();
-  planKindCache.doc = null;
-  await recordFlowChange(reason ?? `${id}: ${name} ${was ?? 'default'} → ${mode}, from the Checks tab`);
+  // Kept across a reload and recorded at once, as every edit of the flow is (`flowEdited`).
+  await flowEdited(reason ?? `Set the ${name} check on ${id} to ${mode}${was ? ` (it was ${was})` : ''}, from the Checks tab`);
   setStatus(`${id}: ${name} is ${mode}. The gate cell in ${state.doc.cells?.[`gate:${id}`]?.notebook ?? 'the notebook'} says so now; the next run judges by it.`, false);
   requestCanvas();
   syncTitle();
@@ -3250,7 +3374,7 @@ function miniDist(p: Profile, meaning?: PropertyType): SVGSVGElement | HTMLEleme
     // "Curb Mobility"), a money value in dollars, else its code (the rest is a tap away); its share after a "·".
     const name = (t: { value: unknown }) => {
       // As the news names it ("Flex Fare", never "Flex Fare trip" or its code 0), a zone by its name where it fits.
-      const m = meaningFor(meaning, t.value)?.replace(/\s+trips?$/i, '');
+      const m = labelFor(meaning, t.value)?.replace(/\s+trips?$/i, '');
       const who = m && /,?\s+(LLC|L\.L\.C\.|Inc\.?|Ltd\.?|Corp\.?)$/i.test(m) ? shortWho(m) : m;
       if (who && (who.split(/\s+/).length <= 3 || who.length <= 22)) return who;
       const n = Number(t.value);
@@ -3307,7 +3431,7 @@ async function dataTab(card: string, id: string, who: string): Promise<HTMLEleme
     const p = meanings(c);
     const th = h('th', { class: fresh.has(c.toLowerCase()) ? 'new' : '', scope: 'col' },
       h('button', { type: 'button', class: 'th-open', 'aria-label': `${p?.title ?? c}: its distribution and values`, onclick: () => openTab(card, 'columns', c) },
-        h('span', { class: 'th-name' }, p?.title ?? c), p ? h('span', { class: 'th-code' }, c) : null,
+        h('span', { class: 'th-name' }, p?.title ?? c), p && saysMore(c, p.title) ? h('span', { class: 'th-code' }, c) : null,
         h('span', { class: 'th-dist' }, h('span', { class: 'mini-wait' }))));
     heads.set(c, th);
     return th;
@@ -3315,7 +3439,7 @@ async function dataTab(card: string, id: string, who: string): Promise<HTMLEleme
   const cell = (v: unknown, c: string) => {
     const { text, cls } = cellOf(v);
     const p = meanings(c);
-    const means = meaningFor(p, v);
+    const means = labelFor(p, v);
     return h('td', { class: cls }, typeof v === 'number' && p?.unit === 'USD' ? inUnit(text, v, p) : text, means ? h('span', { class: 'means' }, means) : null);
   };
   const grid = fadeEdges(h('div', { class: 'grid-wrap' }, h('table', { class: 'data grid' },
@@ -3439,7 +3563,7 @@ async function columnsTab(card: string, id: string, who: string): Promise<HTMLEl
     const out = [normal?.missing, normal?.median].filter((j): j is Judged => !!j && j.place !== 'within');
     const detail = h('div', { class: 'col-detail', hidden: true });
     const row = h('button', { type: 'button', class: `col-row${flag ? ` ${flag.severity}` : ''}`, 'aria-expanded': 'false' },
-      h('span', { class: 'cr-name' }, h('b', {}, m?.title ?? p.name), m ? h('span', { class: 'cr-code' }, p.name) : null),
+      h('span', { class: 'cr-name' }, h('b', {}, m?.title ?? p.name), m && saysMore(p.name, m.title) ? h('span', { class: 'cr-code' }, p.name) : null),
       h('span', { class: 'cr-dist' }, miniDist(p, m) ?? h('span', { class: 'mini-none' }, p.kind)),
       h('span', { class: 'cr-stat' }, filled < 1 ? `${pct(filled)} filled` : 'all filled'),
       colMark(id, p, out),
@@ -3507,7 +3631,7 @@ const NEWS_NAMES = {
   value: (c: string, v: unknown) => {
     if (v === null || v === undefined) return 'none';
     const p = loadSource() ? meaningsOf(loadSource()!)(c) : undefined;
-    const means = meaningFor(p, v);
+    const means = labelFor(p, v);
     const text = typeof v === 'number' && p?.unit === 'USD' ? inUnit(String(v), v, p) : String(v);
     return means ? `${text} (${means})` : text;
   },
@@ -3716,7 +3840,7 @@ const namesFor = (id: string): Names => ({
   column: (c) => meaningsOf(id)(c)?.title ?? c,
   value: (c, v) => {
     if (v === null || v === undefined) return 'none';
-    const means = meaningFor(meaningsOf(id)(c), v);
+    const means = labelFor(meaningsOf(id)(c), v);
     return means ? `${String(v)} (${means})` : String(v);
   },
 });
@@ -6647,7 +6771,7 @@ function addWatch(f: Finding, day: string): void {
     return;
   }
   state.doc = next;
-  saveFlow();
+  void flowEdited(`Added the check ${rule.name} to ${id}`);
   void logRecord(day, f, 'rule', `${rule.name}: ${rule.check}`).then(() => run()).then(() => setStatus(`Added to ${id}: ${rule.name}, which flags rows like these on every load.`));
 }
 
@@ -6668,7 +6792,7 @@ function setAside(f: Finding, day: string): void {
     return;
   }
   state.doc = next;
-  saveFlow();
+  void flowEdited(`Set rows of ${src} aside in the new step ${id}`);
   void logRecord(day, f, 'quarantine', id).then(() => run()).then(() => {
     setStatus(`Set aside in ${id}: open it to review them.`);
     select(id);
@@ -7208,7 +7332,7 @@ function editor(st: StepDef): HTMLElement {
     }
     state.doc = next;
     state.issues = [];
-    saveFlow();
+    void flowEdited(`Changed the settings of the step ${st.id}`);
     void run();
   });
   wrap.append(h('div', { class: 'row', style: 'margin-top:10px' }, apply, h('span', { class: 'foot' }, 'Only this step and what reads it run again.')));
@@ -7289,16 +7413,27 @@ async function loadLookups(run: RunRecord, who: string): Promise<Map<string, Map
 /** What a value stands for: its code's meaning, or the name its key has in the lookup. */
 const meaningFor = (p: PropertyType | undefined, v: unknown): string | undefined => meaningOf(p, v) ?? (p?.lookup && v !== null && v !== undefined ? lookups.get(lookupKey(p))?.get(String(v)) : undefined);
 
+/**
+ * What a value stands for where that says more than the value itself does (`saysMore`, ADR 0015 amendment 1): "Card
+ * data" for pci, a zone's name for its id; nothing for "Yes" beside yes or "Retail" beside Retail. Every place that
+ * shows a value's meaning beside or instead of the value reads this, so no label only repeats the thing.
+ */
+const labelFor = (p: PropertyType | undefined, v: unknown): string | undefined => {
+  const means = meaningFor(p, v);
+  return saysMore(means, v) ? means : undefined;
+};
+
 /** A value as people read it: in its unit, and for a code, with what it stands for (`means`). */
 function readValue(v: unknown, p: PropertyType | undefined): { text: string; cls: string; means?: string } {
   const c = cellOf(v);
-  const means = meaningFor(p, v);
+  const means = labelFor(p, v);
   if (means !== undefined) return { ...c, means };
   return typeof v === 'number' ? { ...c, text: inUnit(c.text, v, p) } : c;
 }
 
-/** A column's label: what people call it, over its name in the data; just the name where the ontology says nothing. */
-const columnLabel = (column: string, p: PropertyType | undefined): Child[] => (p ? [h('span', { class: 'col-title' }, p.title), h('span', { class: 'col-name' }, ...breakable(column))] : breakable(column));
+/** A column's label: what people call it, over its name in the data where that isn't the same word again; just the
+ * name where the ontology says nothing. */
+const columnLabel = (column: string, p: PropertyType | undefined): Child[] => (p ? [h('span', { class: 'col-title' }, p.title), saysMore(column, p.title) ? h('span', { class: 'col-name' }, ...breakable(column)) : null] : breakable(column));
 
 /** How a value reads: numbers rounded and right-aligned, a missing value as a muted null. */
 function cellOf(v: unknown): { text: string; cls: string } {
@@ -7321,14 +7456,16 @@ function table(columns: string[], rows: unknown[][], mark?: Mark, tall = false, 
   // A code shows what it stands for under it; the header, what the column is called and its unit.
   const cell = (v: unknown, k: number, r: number) => {
     const { text, cls } = cellOf(v);
-    const means = meaningFor(props[k], v);
+    const means = labelFor(props[k], v);
     return h('td', { class: [cls, mark?.(columns[k]!, r) ?? ''].filter(Boolean).join(' ') }, text, means ? h('span', { class: 'means' }, means) : null);
   };
   const head = (c: string, k: number) => {
     const p = props[k];
     const attrs: Record<string, string> = marks[k] ? { class: marks[k]! } : {};
     if (p) attrs.title = `${p.title}: ${p.description}`;
-    return h('th', attrs, c, p ? h('span', { class: 'th-title' }, p.unit ? `${p.title} · ${p.unit}` : p.title) : null);
+    // Its title under its name where the title isn't the name again, and its unit.
+    const under = p ? [saysMore(p.title, c) ? p.title : '', p.unit ?? ''].filter(Boolean).join(' · ') : '';
+    return h('th', attrs, c, under ? h('span', { class: 'th-title' }, under) : null);
   };
   return edgeFade(h('div', { class: `scroll${tall ? ' tall' : ''}` }, h('table', { class: 'data' }, h('thead', {}, h('tr', {}, ...columns.map(head))), h('tbody', {}, ...rows.map((row, r) => h('tr', {}, ...row.map((v, k) => cell(v, k, r))))))));
 }
@@ -7785,11 +7922,12 @@ function madePanel(): HTMLElement | null {
   if (!rest.length) return null;
   const few = (list: readonly string[]) => (list.length <= 4 ? list.join(', ') : `${list.slice(0, 3).join(', ')} and ${list.length - 3} more`);
   const card = (p: PropertyType) => {
-    const codes = Object.entries(p.values ?? {});
+    // Only the values whose meaning says more than the value does (`saysMore`): "pass: Passing", never "yes: Yes".
+    const codes = Object.entries(p.values ?? {}).filter(([k, v]) => saysMore(v, k));
     const list = codes.length ? h('dl', { class: 'codes' }, ...codes.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])) : null;
     const maker = fileOf.has(p) ? undefined : where.get(p)!.map((d) => steps().get(d)).find((st) => st && makes(st, p.column));
     return h('article', { class: 'prop' },
-      h('div', { class: 'prop-head' }, h('h3', {}, p.title), h('code', {}, p.column), p.unit ? h('span', { class: 'unit' }, p.unit) : null),
+      h('div', { class: 'prop-head' }, h('h3', {}, p.title), saysMore(p.column, p.title) ? h('code', {}, p.column) : null, p.unit ? h('span', { class: 'unit' }, p.unit) : null),
       h('p', {}, p.description),
       list && codes.length > 8 ? h('details', { class: 'whole' }, h('summary', {}, `What its ${codes.length} codes stand for`), list) : list,
       p.note ? h('p', { class: 'note' }, p.note) : null,
@@ -7812,7 +7950,7 @@ function madePanel(): HTMLElement | null {
 /** The file whose section is open, kept while the page is drawn again (a run, another viewer), and what the panel on
  * screen was drawn from: it is left as it is while that hasn't changed (an object picked or an action taken further
  * down the page draws the page again, and a section rebuilt under the reader would move what they are looking at). */
-const ontologyFiles = { open: null as string | null, doc: null as FlowDocument | null, from: '' };
+const ontologyFiles = { open: null as string | null, doc: null as FlowDocument | null, from: '', who: '' };
 
 /** A rule as a line: its sentence, how it came to be and what it is checked against, and why nothing judges it. On a
  * column's card a file's own rule is said for the column (`here`) and says whose it is: one rule, listed twice. */
@@ -7833,30 +7971,119 @@ function drawColumn(slot: HTMLElement, p: Profile, meaning: PropertyType | undef
   const gaps = f.rows - f.present;
   const different = f.distinct >= f.present && f.present > 20;
   const filled = f.present === 0 ? 'Empty in this load' : `${gaps ? `${pct(f.present / Math.max(1, f.rows))} filled · ${fmtInt(gaps)} empty` : 'All filled'} · ${different ? 'every value different' : plural(f.distinct, p.kind === 'text' ? 'different value' : 'value')}`;
-  slot.replaceChildren(...(different || p.kind === 'text' ? [] : columnShape(p, meaning, 'meaning')), h('p', { class: 'colline' }, filled));
+  slot.replaceChildren(...(different || p.kind === 'text' ? [] : columnShape(p, meaning)), h('p', { class: 'colline' }, filled));
+}
+
+/** The values a column's drawing names in the load on screen: those a label can be given to. None for a key, free
+ * text, a measure or a time, which are drawn as a whole. */
+const namedValues = (p: Profile): string[] => (p.kind === 'text' || (p.facts.distinct >= p.facts.present && p.facts.present > 20) || (p.hist && p.quantiles) ? [] : (p.top ?? []).map((t) => t.value));
+
+let columnForms = 0;
+/**
+ * A column's names, edited in place on its card (ADR 0015 amendment 1, Q-140, Q-143): what people call it in this
+ * file, what it means, and a label for each of its values (the ones the ontology lists, then the ones the load on
+ * screen has). Save writes the file's own entry (`nameColumn`): no other file's name moves, and the name the file
+ * itself writes stays as it is, said under the field. The change is kept, recorded with its reason, and the page drawn
+ * again; Cancel closes the form. Only someone who may change the flow is offered it.
+ */
+function columnForm(f: FileSection, c: ColumnCard, seen: readonly string[], close: () => void): HTMLElement {
+  const uid = `of-edit-${++columnForms}`;
+  const name = h('input', { type: 'text', id: `${uid}-name`, value: c.title, maxlength: '60', autocomplete: 'off', autocapitalize: 'sentences' });
+  const mean = h('textarea', { id: `${uid}-mean`, rows: '3', maxlength: '400' }, c.description ?? '');
+  const had = new Map(c.values);
+  const all = [...c.values.map(([code]) => code), ...seen.filter((v) => !had.has(v))];
+  const shown = all.slice(0, 40);
+  // A field holds the value's label where it says more than the value; "Yes" for yes is no label, and the field is empty.
+  const labels = shown.map((value, k) => ({ value, input: h('input', { type: 'text', id: `${uid}-v${k}`, value: saysMore(had.get(value), value) ? had.get(value)! : '', maxlength: '60', placeholder: 'No label', autocomplete: 'off', autocapitalize: 'sentences' }) }));
+  const err = h('p', { class: 'of-err', role: 'alert', hidden: true });
+  const save = h('button', { type: 'submit', class: 'btn of-save' }, 'Save');
+  const form = h('form', { class: 'of-form', 'aria-label': `Edit ${c.title} in ${f.id}`, novalidate: true },
+    h('div', { class: 'of-field' }, h('label', { for: name.id }, 'Name'), name,
+      h('p', { class: 'of-hint' }, 'The file writes it as ', h('code', {}, ...breakable(c.name)), '. That stays.')),
+    h('div', { class: 'of-field' }, h('label', { for: mean.id }, 'What it means'), mean),
+    labels.length ? h('fieldset', { class: 'of-vals' }, h('legend', {}, labels.length === 1 ? 'A label for its value' : 'A label for each value'),
+      ...labels.map((x) => h('div', { class: 'of-val' }, h('label', { for: x.input.id }, h('code', {}, ...breakable(x.value))), x.input)),
+      all.length > shown.length ? h('p', { class: 'of-hint' }, `The first ${shown.length} of ${fmtInt(all.length)} values.`) : null,
+      h('p', { class: 'of-hint' }, 'A label is shown where it says more than the value itself.')) : null,
+    h('p', { class: 'of-hint' }, `For ${f.id} only. A change is recorded, and takes effect from the next run.${anyDayWaits() ? ` ${WAITS_AGAIN}` : ''}`),
+    err,
+    h('div', { class: 'of-acts' }, save, h('button', { type: 'button', class: 'btn quiet', onclick: close }, 'Cancel')));
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!isOwner()) return;
+    // A run under way was started on the flow as it was: the change waits for it, so run and record agree.
+    if (state.running) {
+      err.textContent = 'The flow is running. Save again when the run has ended.';
+      err.hidden = false;
+      return;
+    }
+    const { doc, said } = nameColumn(state.doc, f.id, c.name, { title: name.value, description: mean.value, values: Object.fromEntries(labels.map((x) => [x.value, x.input.value])) });
+    if (!said) return close();
+    const issues = validateDocument(doc);
+    if (issues.length) {
+      err.textContent = `That can’t be saved: ${issues[0]!.message}.`;
+      err.hidden = false;
+      return;
+    }
+    save.disabled = true;
+    state.doc = doc;
+    setStatus(`${said}. Recorded; the next run uses it.`, false);
+    void flowEdited(said);
+    requestCanvas();
+    if (state.selected) void renderSheet();
+    // The page drawn again from the edited document, the card that was edited brought back under the eye.
+    void renderOntology().then(() => requestAnimationFrame(() => Array.from(document.querySelectorAll<HTMLElement>('#ontology-files .of-item.open .of-col')).find((el) => el.dataset.column === c.name)?.scrollIntoView({ block: 'nearest' })));
+  });
+  return form;
 }
 
 /** A file's section: what it is, its own rules, a card a column (drawn once the load has been looked into), and what
  * was discovered. `refused` says the load's file wasn't read (ADR 0014 §2): its cards are the columns the data list
  * declares, with their meanings and rules, which don't depend on the day, and nothing drawn. */
 function fileSection(f: FileSection, refused: boolean, day: string | null): HTMLElement {
-  const slots = new Map<string, { slot: HTMLElement; meaning: PropertyType | undefined }>();
+  const slots = new Map<string, { slot: HTMLElement; meaning: PropertyType | undefined; seen: string[] }>();
+  const owner = isOwner();
   const cards = (f.columns ?? []).map((c) => {
     const p = c.property;
     const slot = h('div', { class: 'of-draw' }, refused ? h('p', { class: 'colline' }, 'Nothing to draw: the file wasn’t read.') : h('span', { class: 'mini-wait' }));
-    if (!refused) slots.set(c.name, { slot, meaning: p });
+    const drawn = { slot, meaning: p, seen: [] as string[] };
+    if (!refused) slots.set(c.name, drawn);
     // The file's own rules about this column first (its key has to be there, it must be an object the file covers),
     // then the column's own: no card says it has no rule under a rule that names its column.
     const lines = [...c.fileRules.map((x) => ruleLine(x.rule, x.said)), ...c.rules.map((r) => ruleLine(r))];
-    return h('article', { class: 'of-col', 'data-column': c.name },
-      h('div', { class: 'of-col-head' }, h('h4', {}, c.title), c.title !== c.name ? h('code', {}, ...breakable(c.name)) : null, p?.unit ? h('span', { class: 'unit' }, p.unit) : null),
+    // Only the values whose meaning says more than the value does (`standFor`): no list of "yes: Yes".
+    const codes = c.standFor;
+    // Its names are the owner's to change, in place (`columnForm`): a reader sees no Edit.
+    const edit = owner ? h('button', { type: 'button', class: 'of-edit', 'aria-expanded': 'false', 'aria-label': `Edit ${c.title}: its name, what it means and its values’ labels` }, 'Edit') : null;
+    const card = h('article', { class: 'of-col', 'data-column': c.name },
+      // Its name as the file writes it beside its title only where the two differ ("Application", app_id; never "Name", name).
+      h('div', { class: 'of-col-head' }, h('div', { class: 'of-col-names' }, h('h4', {}, c.title), c.asWritten ? h('code', {}, ...breakable(c.asWritten)) : null, p?.unit ? h('span', { class: 'unit' }, p.unit) : null), edit),
       slot,
       c.description ? h('p', { class: 'of-mean' }, c.description) : h('p', { class: 'of-none' }, 'Not described yet.'),
-      c.values.length ? h('details', { class: 'whole' }, h('summary', {}, c.values.length === 1 ? 'What its value stands for' : `What its ${c.values.length} values stand for`), h('dl', { class: 'codes' }, ...c.values.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))) : null,
+      codes.length ? h('details', { class: 'whole' }, h('summary', {}, codes.length === 1 ? 'What its value stands for' : `What its ${codes.length} values stand for`), h('dl', { class: 'codes' }, ...codes.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))) : null,
       p?.note ? h('p', { class: 'note' }, p.note) : null,
       p?.lookup && visible(p.lookup.dataset) ? h('p', { class: 'of-from' }, 'Reads as its ', h('b', {}, p.lookup.label), ' in ', h('b', {}, p.lookup.dataset)) : null,
       citedLine(p),
       h('div', { class: 'of-col-rules' }, h('p', { class: 'of-h2' }, 'Rules'), lines.length ? h('ul', { class: 'of-rules' }, ...lines) : h('p', { class: 'of-none' }, 'No rules yet.')));
+    edit?.addEventListener('click', () => {
+      if (card.querySelector('.of-form')) return;
+      const close = () => {
+        card.querySelector('.of-form')?.remove();
+        card.classList.remove('editing');
+        edit.setAttribute('aria-expanded', 'false');
+        edit.hidden = false;
+        edit.focus();
+        // A run that ended while the form was open left the panel as it was: it catches up now.
+        void renderOntology();
+      };
+      const form = columnForm(f, c, drawn.seen, close);
+      card.querySelector('.of-col-head')!.after(form);
+      card.classList.add('editing');
+      edit.setAttribute('aria-expanded', 'true');
+      edit.hidden = true;
+      form.querySelector('input')?.focus();
+    });
+    return card;
   });
   const wait = h('p', { class: 'of-none' },
     refused ? (cards.length ? `${day ? `${dayLabel(day)}’s` : 'This load’s'} file was refused, so none of it was read. These are the columns the flow expects, with their rules.` : 'This load’s file was refused: its columns weren’t read.')
@@ -7887,8 +8114,10 @@ function fileSection(f: FileSection, refused: boolean, day: string | null): HTML
       }
       for (const [name, x] of slots) {
         const p = q.profiles.find((y) => y.name.toLowerCase() === name.toLowerCase());
-        if (p) drawColumn(x.slot, p, x.meaning);
-        else x.slot.remove();
+        if (p) {
+          drawColumn(x.slot, p, x.meaning);
+          x.seen = namedValues(p);
+        } else x.slot.remove();
       }
     })().catch(() => { for (const x of slots.values()) x.slot.remove(); });
   return sec;
@@ -7905,6 +8134,9 @@ async function renderFiles(stale: () => boolean): Promise<void> {
   const day = shownDay();
   const from = JSON.stringify([run?.result.run ?? null, run?.result.hash ?? null, day ?? null, state.viewer, page.files.map((f) => [f.id, f.columns?.map((c) => c.name) ?? null])]);
   if (ontologyFiles.doc === state.doc && ontologyFiles.from === from && $('ontology-files').querySelector('.of-list')) return;
+  // Someone is typing in a card's form: the panel under it stays as it is until they save or cancel (which draws
+  // it). Another viewer is another panel: theirs is drawn, and the form goes with the owner's.
+  if (ontologyFiles.doc === state.doc && ontologyFiles.who === state.viewer && $('ontology-files').querySelector('.of-form')) return;
   const rows = new Map<string, number>();
   // A file the engine couldn't read as declared (ADR 0014 §2): the run built nothing from it, and the row says so.
   const refused = new Set((run?.result.manifest.nodes ?? []).filter((n) => n.status === 'refused').map((n) => n.origin));
@@ -7917,14 +8149,16 @@ async function renderFiles(stale: () => boolean): Promise<void> {
     }
   }
   if (stale()) return;
-  [ontologyFiles.doc, ontologyFiles.from] = [state.doc, from];
-  const items = new Map<string, { el: HTMLElement; row: HTMLElement; f: FileSection }>();
+  [ontologyFiles.doc, ontologyFiles.from, ontologyFiles.who] = [state.doc, from, state.viewer];
+  const items = new Map<string, { el: HTMLElement; row: HTMLElement; what: HTMLElement | null; f: FileSection }>();
   const show = (id: string | null, jump: boolean) => {
     ontologyFiles.open = id;
     for (const [k, x] of items) {
       const on = k === id;
       x.row.setAttribute('aria-expanded', String(on));
       x.el.classList.toggle('open', on);
+      // What the file is, said once: the open section says all of it, so its row drops the opening line.
+      if (x.what) x.what.hidden = on;
       const sec = x.el.querySelector('.of-sec');
       if (on && !sec) x.el.append(fileSection(x.f, refused.has(k), day ?? null));
       else if (!on && sec) sec.remove();
@@ -7935,14 +8169,15 @@ async function renderFiles(stale: () => boolean): Promise<void> {
   const list = h('div', { class: 'of-list' },
     ...page.files.map((f) => {
       const n = rows.get(f.id);
+      const what = f.summary ? h('span', { class: 'of-what' }, f.summary) : null;
       const row = h('button', { type: 'button', class: 'of-row', 'aria-expanded': 'false', 'aria-controls': `of-sec-${f.id}`, onclick: () => show(ontologyFiles.open === f.id ? null : f.id, true) },
         h('span', { class: 'of-chev', 'aria-hidden': 'true' }),
         h('span', { class: 'of-main' },
           h('span', { class: 'of-name' }, ...breakable(f.id)),
-          f.summary ? h('span', { class: 'of-what' }, f.summary) : null,
+          what,
           h('span', { class: 'of-nums' }, `${n !== undefined ? `${counted(n, f.noun)} · ` : refused.has(f.id) ? 'file refused · ' : ''}${f.count ? plural(f.count, 'rule') : 'no rules yet'}`)));
       const el = h('div', { class: 'of-item', 'data-file': f.id }, row);
-      items.set(f.id, { el, row, f });
+      items.set(f.id, { el, row, what, f });
       return el;
     }));
   $('ontology-files').replaceChildren(
@@ -7960,6 +8195,8 @@ async function renderOntology(): Promise<void> {
   const stale = () => token !== ontologyRender;
   await useLookups(state.viewer);
   if (stale()) return;
+  // The edits made to the flow here, if any, with the way back to the flow as shipped.
+  renderFlowEdits();
   // The files first (ADR 0015 amendment 1): what the flow reads, each with its columns and its rules. A flow with no
   // ontology still has its files, with nothing said of them yet.
   await renderFiles(stale);
@@ -9469,22 +9706,36 @@ async function run(): Promise<void> {
  * decision names; a failed one with why. Before it, the flow, when it changed since the record last saw it, whatever
  * changed it.
  */
-/** The flow, when it changed since the record last saw it, kept by hash with whatever changed it (a toggle's reason). */
-async function recordFlowChange(reason: string | null): Promise<void> {
-  if (!ledger) return;
-  const fh = await flowHash(state.doc);
-  const last = ledger.last('flow');
-  const before = (last?.about as { after?: string } | null)?.after ?? null;
-  if (before === fh) return;
-  const doc = await ledger.keep('flow', withoutDisplay(state.doc));
-  await ledger.append('flow', state.viewer, { before, after: fh, doc }, reason);
+/**
+ * The flow, when it changed since the record last saw it, kept by hash with whatever changed it (an edit's reason in
+ * words). One at a time, each for the document as it was when asked: an edit recorded with its reason and the run
+ * that follows it never both record the one change, and a run under way never takes an edit's entry without its
+ * reason.
+ */
+let flowRecording: Promise<void> = Promise.resolve();
+function recordFlowChange(reason: string | null, doc: FlowDocument = state.doc): Promise<void> {
+  const next = flowRecording.then(async () => {
+    if (!ledger) return;
+    const fh = await flowHash(doc);
+    const last = ledger.last('flow');
+    const before = (last?.about as { after?: string } | null)?.after ?? null;
+    if (before === fh) return;
+    const kept = await ledger.keep('flow', withoutDisplay(doc));
+    await ledger.append('flow', state.viewer, { before, after: fh, doc: kept }, reason);
+    renderRecord();
+  });
+  flowRecording = next.catch(() => undefined);
+  return next;
 }
 
 async function recordRun(rec: RunRecord | null, error: string | null): Promise<void> {
   if (!ledger) return;
   const result = rec?.result ?? null;
   try {
-    await recordFlowChange(null);
+    // What the page itself did to the flow since the record last saw it (it dropped what it kept) says so.
+    const why = flowReason;
+    flowReason = null;
+    await recordFlowChange(why);
     // The day whose file the engine had pinned: what the run read, whatever day is on screen.
     const load = loads.list[loads.pinned]?.day ?? null;
     if (result) {
@@ -9717,10 +9968,12 @@ async function decideNow(target: RunRecord | string, option: DecisionOption, sco
     if (out?.outcome === 'refused') refused = out.why;
     // The band accepted is written into the ontology (ADR 0014 §3): the decision is recorded, the document edited from it.
     else if (option === 'accept' && level?.band && loadSource()) {
-      if (applyBand(level.source, level.band)) {
-        storyCache.clear();
-        planKindCache.doc = null;
-        setStatus(`The new band is in the ontology: ${NEWS_NAMES.column(level.band.column)} ${level.band.value} ${Math.round(level.band.share[0] * 100)}–${Math.round(level.band.share[1] * 100)}%. The next run records the change.`, false);
+      const banded = applyBand(state.doc, level.source, level.band);
+      if (banded) {
+        state.doc = banded.doc;
+        // Kept across a reload and recorded at once with its reason, as every edit of the flow is.
+        await flowEdited(`${banded.said}, by decision #${entry.seq}`);
+        setStatus(`The new band is in the ontology: ${NEWS_NAMES.column(level.band.column)} ${level.band.value} ${Math.round(level.band.share[0] * 100)}–${Math.round(level.band.share[1] * 100)}%. Recorded; the next run judges by it.`, false);
       }
     }
   } else if (derived && dkeys) {
@@ -9786,28 +10039,6 @@ function acceptFor(r: RunRecord): { offer: Offer; level: { source: string; from:
   // A band missed (ADR 0014 §3): the Accept is of a new band, which the decision records and the ontology is edited from.
   const label = level.band ? `Accept the new band: ${Math.round(level.band.share[0] * 100)}–${Math.round(level.band.share[1] * 100)}%` : 'Accept the new level';
   return { offer: { option: 'accept', label, ...(later ? { off: `${dayShort(later)} is published` } : {}) }, level };
-}
-
-/**
- * The ontology edited from an accepted band (ADR 0014 §3): the property of the column, for this source, gets the band
- * as its expect entry for the value (a general entry stays for the other datasets). The document changes, so the
- * flow hash does: the next run records the change as any edit is recorded (`recordRun`).
- */
-function applyBand(source: string, band: { column: string; value: string; share: [number, number] }): boolean {
-  const o = state.doc.ontology;
-  if (!o) return false;
-  const props = o.properties ?? [];
-  const own = propertyOf(o, source, band.column);
-  if (!own) return false;
-  const list = [...(own.expect ?? [])];
-  const mine = list.findIndex((b) => b.value === band.value && (b.datasets ? b.datasets.some((d) => d.toLowerCase() === source.toLowerCase()) : false));
-  const general = list.findIndex((b) => b.value === band.value && !b.datasets);
-  if (mine >= 0) list[mine] = { ...list[mine]!, share: band.share };
-  else if (general >= 0 && own.datasets?.some((d) => d.toLowerCase() === source.toLowerCase())) list[general] = { ...list[general]!, share: band.share };
-  else list.push({ value: band.value, share: band.share, datasets: [source] });
-  const edited = { ...own, expect: list };
-  state.doc = { ...state.doc, ontology: { ...o, properties: props.map((p) => (p === own ? edited : p)) } };
-  return true;
 }
 
 /**
@@ -10388,7 +10619,8 @@ const KIND_WORD: Record<string, (e: { seq: number; about: Record<string, unknown
     if (ctx.reapplied.has(seq)) return `Applied decision #${String(a.decision)} again in a new engine: ${plural(changed.length, 'output')} of ${runSaid(a)}${ends}`;
     return `Released ${plural(changed.length, 'output')} of ${runSaid(a)}, by decision #${String(a.decision)}${ends}`;
   },
-  flow: ({ about: a }) => (a.before ? `The flow changed: ${String(a.before).slice(0, 12)}… to ${String(a.after).slice(0, 12)}…` : `The flow as it first ran here: ${String(a.after).slice(0, 12)}…`),
+  // A change says why where it was recorded with its reason (an edit made here), then the two hashes.
+  flow: ({ about: a, reason }) => (a.before ? `The flow changed${reason ? `: ${reason}` : ''} · ${String(a.before).slice(0, 12)}… to ${String(a.after).slice(0, 12)}…` : `The flow as it first ran here: ${String(a.after).slice(0, 12)}…`),
   // A file of a source closed to the viewer names neither the source nor its file (round 3, #6).
   file: ({ about: a }) => (fileSeen(String(a.path ?? '')) ? describeFile(a as unknown as FileCheck).title : 'A closed part’s file, checked against the data’s list'),
   // What was done is said to anyone; what it was done about only to someone who reads all of its dataset, or who did it,
@@ -10647,6 +10879,8 @@ async function start(): Promise<void> {
       opening = e;
     }
   }
+  // What this browser kept of the flow as edited here, by the hash of the document shipped (ADR 0015 §4).
+  shippedHash = await flowHash(shippedDoc);
   loadFlow();
   loadArrangement();
   state.collapsed = new Set((state.doc.groups ?? []).filter((g) => g.collapsed).map((g) => g.id));
