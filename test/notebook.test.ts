@@ -56,7 +56,7 @@ describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
     expect(doc.steps[0]).toMatchObject({ rules: checks.rules, maxDropped: checks.maxDropped });
     // Each step knows its cell, and the canvas gets a section a notebook (display only, out of every hash).
     expect(doc.cells).toEqual({
-      auth_valid: { notebook: 'checks.nb.ts', cell: 'auth_valid', lang: 'ts', line: 15, endLine: 23 },
+      auth_valid: { notebook: 'checks.nb.ts', cell: 'auth_valid', lang: 'ts', line: 15, endLine: 24 },
       signins_by_hour: { notebook: 'counts.nb.ts', cell: 'signins_by_hour', lang: 'sql', line: 10, endLine: 14 },
       failures_by_country: { notebook: 'counts.nb.ts', cell: 'failures_by_country', lang: 'sql', line: 19, endLine: 23 },
     });

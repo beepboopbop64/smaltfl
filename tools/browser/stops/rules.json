@@ -13,8 +13,13 @@
         "Latency is from 0 to 30,000 ms: else flag the row and keep it",
         "Country is never blank: else flag the row and keep it"
       ],
-      "noText": ["Not checked: switched off on the import card"],
-      "count": { "#ontology-files .of-col .of-rule-acts": 3, "#ontology-files .of-add": 7 }
+      "noText": [
+        "Not checked: switched off in auth_valid’s cell"
+      ],
+      "count": {
+        "#ontology-files .of-col .of-rule-acts": 3,
+        "#ontology-files .of-add": 7
+      }
     }
   },
   {
@@ -22,24 +27,41 @@
     "what": "The owner taps Add a rule on the User card: the form in place of the button, what User must be (never blank by default), what a row that breaks it does, Add the rule and Cancel",
     "view": "ontology",
     "viewFirst": true,
-    "clicks": [".of-col[data-column=\"user\"] .of-add"],
+    "clicks": [
+      ".of-col[data-column=\"user\"] .of-add"
+    ],
     "full": true,
     "expect": {
-      "count": { "#ontology-files .of-rule-form": 1 },
-      "pageText": ["User must be", "A row that breaks it", "Add the rule", "For auth only. On once saved"]
+      "count": {
+        "#ontology-files .of-rule-form": 1
+      },
+      "pageText": [
+        "User must be",
+        "A row that breaks it",
+        "Add the rule",
+        "For auth only. On once saved"
+      ]
     }
   },
   {
     "name": "rules-added",
-    "what": "The rule added: User is never blank, else flag the row and keep it, listed on the User card and among the changes above the files",
+    "what": "The rule added: User is never blank, else flag the row and keep it, listed on the User card and among the changes above the files; the check cell auth_valid gains user_required: 'on' in its ontology list",
     "view": "ontology",
     "viewFirst": true,
-    "clicks": [".of-rule-form .of-save"],
+    "clicks": [
+      ".of-rule-form .of-save"
+    ],
     "waitFor": ".of-col[data-column=\"user\"] .of-rule-acts",
     "full": true,
     "expect": {
-      "pageText": ["User is never blank: else flag the row and keep it", "Added a rule to auth: User is never blank, else flag the row and keep it"],
-      "count": { "#ontology-files .of-rule-form": 0, "#ontology-files .of-col .of-rule-acts": 4 }
+      "pageText": [
+        "User is never blank: else flag the row and keep it",
+        "Added a rule to auth: User is never blank, else flag the row and keep it"
+      ],
+      "count": {
+        "#ontology-files .of-rule-form": 0,
+        "#ontology-files .of-col .of-rule-acts": 4
+      }
     }
   },
   {
@@ -49,20 +71,39 @@
     "tab": "Rules",
     "full": true,
     "expect": {
-      "text": ["Method is Password, Single sign-on, MFA push, Passkey or API key", "Else: hold the day", "Latency is from 0 to 30,000 ms", "User is never blank", "4 OF 4 RULES ON"],
-      "count": { "#sheet .rl-switch": 4, "#sheet .rl-switch[aria-checked=\"true\"]": 4 }
+      "text": [
+        "Method is Password, Single sign-on, MFA push, Passkey or API key",
+        "Else: hold the day",
+        "Latency is from 0 to 30,000 ms",
+        "User is never blank",
+        "4 OF 4 RULES ON"
+      ],
+      "count": {
+        "#sheet .rl-switch": 4,
+        "#sheet .rl-switch[aria-checked=\"true\"]": 4
+      }
     }
   },
   {
     "name": "rules-switched-off",
-    "what": "Latency's rule switched off on the import card: struck through, Off, not enforced, recorded as a flow change",
+    "what": "Latency's rule switched off on the import card: struck through, Off, not enforced, written into the check cell auth_valid (its ontology list), recorded as a flow change",
     "card": "auth",
     "tab": "Rules",
-    "clicks": ["#sheet .rl-item[data-rule=\"latency_ms_range\"] .rl-switch"],
+    "clicks": [
+      "#sheet .rl-item[data-rule=\"latency_ms_range\"] .rl-switch",
+      "#sheet .cell-part summary"
+    ],
     "full": true,
     "expect": {
-      "text": ["3 OF 4 RULES ON", "switched off: not enforced"],
-      "count": { "#sheet .rl-switch[aria-checked=\"false\"]": 1 },
+      "text": [
+        "3 OF 4 RULES ON",
+        "switched off: not enforced",
+        "latency_ms_range: 'off'",
+        "user_required: 'on'"
+      ],
+      "count": {
+        "#sheet .rl-switch[aria-checked=\"false\"]": 1
+      },
       "status": "Switched off a rule of auth"
     }
   },
@@ -74,18 +115,28 @@
     "tab": "Rules",
     "full": true,
     "expect": {
-      "text": ["3 OF 4 RULES ON", "User is never blank"],
-      "count": { "#sheet .rl-switch": 4, "#sheet .rl-switch[aria-checked=\"false\"]": 1 }
+      "text": [
+        "3 OF 4 RULES ON",
+        "User is never blank"
+      ],
+      "count": {
+        "#sheet .rl-switch": 4,
+        "#sheet .rl-switch[aria-checked=\"false\"]": 1
+      }
     }
   },
   {
     "name": "rules-ontology-off",
-    "what": "The Ontology view says Latency's rule is switched off on the import card",
+    "what": "The Ontology view says Latency's rule is switched off in auth_valid's cell",
     "view": "ontology",
     "viewFirst": true,
     "click": ".of-item[data-file=\"auth\"] .of-row",
     "full": true,
-    "expect": { "text": ["Not checked: switched off on the import card"] }
+    "expect": {
+      "text": [
+        "Not checked: switched off in auth_valid’s cell"
+      ]
+    }
   },
   {
     "name": "rules-tab-dark",
@@ -94,6 +145,10 @@
     "card": "auth",
     "tab": "Rules",
     "full": true,
-    "expect": { "count": { "#sheet .rl-switch": 3 } }
+    "expect": {
+      "count": {
+        "#sheet .rl-switch": 3
+      }
+    }
   }
 ]

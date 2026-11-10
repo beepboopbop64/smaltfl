@@ -38,7 +38,7 @@ import { sha256Hex } from '../core/hash.js';
 import { counted, glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, saysMore, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
 import { ontologyPage, originSaid, typesShown, type ColumnCard, type FileSection, type Rule } from '../core/ontologypage.js';
 import { applyBand, asShipped, keptOf as keptFlow, nameColumn, removeRule, restoreKept, setRule, switchRule, type FlowEdit, type RuleInput } from '../core/flowedit.js';
-import { ACTION_SAID, checkStepOf, RULE_ACTIONS, rulesOf, ruleSaid, type OntologyRule, type OntologyRuleKind, type RuleAction } from '../core/rules.js';
+import { ACTION_SAID, checkStepOf, RULE_ACTIONS, ruleOn, rulesOf, ruleSaid, type OntologyRule, type OntologyRuleKind, type RuleAction } from '../core/rules.js';
 import { DECIDE, DECIDE_OPTIONS, checkDecision, checkRun, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
@@ -3302,13 +3302,13 @@ async function rulesTab(card: string, id: string): Promise<HTMLElement> {
   const run = onScreen() ?? latest();
   const counted = new Map((run?.result.manifest.nodes.find((n) => n.origin === step?.id)?.expectations?.rules ?? []).map((x) => [x.name, x.failed]));
   const box = h('div', { class: 'rules-tab' });
-  box.append(h('p', { class: 'lede' }, `The rules set on ${id}’s columns. Each one runs as the file comes into the flow; switched off, it is kept but not enforced.`));
+  box.append(h('p', { class: 'lede' }, `The rules the ontology sets on ${id}’s columns, each switched on or off in ${step ? `${step.id}, the check cell that runs them` : 'the check cell that runs them'}. Switched off, a rule is kept but not enforced.`));
   if (!step) box.append(h('p', { class: 'status warn' }, `No check step reads ${id} directly, so its rules are said and not enforced. A check(${id}, …) cell enforces them.`));
   if (!rules.length) box.append(h('p', { class: 'of-none' }, `${id} has no rules yet.`));
   else {
     const list = h('ul', { class: 'rl-list', 'aria-label': `${id}’s rules` });
     for (const r of rules) {
-      const on = !r.off;
+      const on = ruleOn(step, r.id);
       const n = counted.get(r.id);
       const today: Child = !on ? h('span', { class: 'ch-quiet' }, 'switched off: not enforced')
         : !step ? h('span', { class: 'ch-quiet' }, 'not enforced: no check step')
@@ -3317,7 +3317,7 @@ async function rulesTab(card: string, id: string): Promise<HTMLElement> {
         : n === 0 ? h('span', { class: 'ch-ok' }, glyphEl('publish', 14), ' every row keeps it')
         : h('span', { class: `ch-today ${r.action === 'hold' ? 'alert' : 'warn'}` }, glyphEl(r.action === 'hold' ? 'alert' : 'warn', 14), ` ${fmtInt(n)} ${n === 1 ? 'row breaks' : 'rows break'} it`);
       const label = `${ruleSaid(state.doc.ontology, r)}: ${on ? 'on' : 'off'}`;
-      const sw = h('button', { type: 'button', class: 'vf-switch rl-switch', role: 'switch', 'aria-checked': String(on), 'aria-label': label, ...(owner ? {} : { disabled: 'disabled', title: 'The owner switches rules' }) },
+      const sw = h('button', { type: 'button', class: 'vf-switch rl-switch', role: 'switch', 'aria-checked': String(on), 'aria-label': label, ...(owner && step ? {} : { disabled: 'disabled', title: step ? 'The owner switches rules' : 'No check cell runs them' }) },
         h('span', { class: 'vf-switch-k', 'aria-hidden': 'true' }), h('span', { class: 'rl-state' }, on ? 'On' : 'Off'));
       sw.addEventListener('click', () => void ruleEdited(switchRule(state.doc, id, r.id, !on)));
       list.append(h('li', { class: `rl-item${on ? '' : ' off'}`, 'data-rule': r.id },
@@ -3327,7 +3327,18 @@ async function rulesTab(card: string, id: string): Promise<HTMLElement> {
           h('span', { class: 'rl-does' }, `Else: ${ACTION_SAID[r.action]}`),
           h('span', { class: 'rl-today' }, today))));
     }
-    box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, `${rules.filter((r) => !r.off).length} of ${plural(rules.length, 'rule')} on${run ? ` · ${runName(run)}` : ''}`), list));
+    box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, `${rules.filter((r) => ruleOn(step, r.id)).length} of ${plural(rules.length, 'rule')} on${run ? ` · ${runName(run)}` : ''}`), list));
+  }
+  // Where the switches are written: the check cell, as the notebook has it now.
+  const ref = step ? state.doc.cells?.[step.id] : undefined;
+  const nb = ref ? state.doc.notebooks?.find((n) => n.path === ref.notebook) : undefined;
+  if (ref && nb) {
+    const lines = nb.source.split('\n').slice(ref.line - 1, ref.endLine);
+    while (lines.length && lines[lines.length - 1]!.trim() === '') lines.pop();
+    box.append(h('details', { class: 'part cell-part' },
+      h('summary', {}, `The check cell · ${ref.notebook} · lines ${ref.line}–${ref.endLine}`),
+      h('pre', { class: 'cell-code', tabindex: '0', 'aria-label': `The check cell ${ref.cell} in ${ref.notebook}` }, h('code', {}, lines.join('\n'))),
+      h('p', { class: 'foot' }, 'A switch writes the cell’s ontology list. What each rule checks is the ontology’s: change a rule there, and every check cell that runs it follows.')));
   }
   box.append(h('div', { class: 'part' },
     h('button', { type: 'button', class: 'btn quiet', onclick: () => openFileRules(id) }, owner ? 'Add or change rules on the Ontology page' : 'See the rules on the Ontology page'),

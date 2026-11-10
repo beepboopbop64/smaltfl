@@ -14,7 +14,7 @@
 import { sourceOf, type FlowDocument } from './document.js';
 import { gateChecksOf, writtenRules, type CheckName } from './gates.js';
 import { marksOn, meaningOf, nounOf, propertyOf, rowsOf, saysMore, type Noun, type ObjectType, type Ontology, type PropertyType } from './ontology.js';
-import { ACTION_SAID, checkStepOf, rulesOf, ruleSaid, type OntologyRule } from './rules.js';
+import { ACTION_SAID, checkStepOf, ruleOn, rulesOf, ruleSaid, type OntologyRule } from './rules.js';
 
 /**
  * How a rule came to be. Today every rule is set by hand, in the ontology or in the notebook's gate cell. The two
@@ -214,7 +214,7 @@ export function ontologyPage(doc: PageDoc, columns: (file: string) => readonly s
     const setRules = rulesOf(o, id);
     const enforcer = checkStepOf(doc as Parameters<typeof checkStepOf>[0], id);
     const setRule = (r: OntologyRule): Rule => {
-      const why = r.off ? 'switched off on the import card' : !enforcer ? 'no check step reads this file directly' : undefined;
+      const why = !enforcer ? 'no check step reads this file directly' : !ruleOn(enforcer, r.id) ? `switched off in ${enforcer.id}’s cell` : undefined;
       return { id: `${id}/${lower(r.column)}/set=${r.id}`, kind: 'set', said: `${ruleSaid(o, r)}: else ${ACTION_SAID[r.action]}`, ...(r.values ? { values: [...r.values] } : {}), ...(r.min !== undefined || r.max !== undefined ? { numbers: { ...(r.min !== undefined ? { low: r.min } : {}), ...(r.max !== undefined ? { high: r.max } : {}) } } : {}), origin: { how: 'set', in: 'ontology' }, def: r, ...(why ? { unchecked: why } : {}) };
     };
     // A card a column the load has, each with the rules its marks give in this file (`marksOn`, as the plan reads them).

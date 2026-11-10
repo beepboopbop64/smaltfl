@@ -13,7 +13,8 @@
 import { canonicalJSON } from './canonical.js';
 import { validateDocument, type FlowDocument, type StepDef } from './document.js';
 import { propertyOf, saysMore, type Ontology, type PropertyType } from './ontology.js';
-import { ACTION_SAID, newRuleId, ruleSaid, type OntologyRule } from './rules.js';
+import { syncRuleCells, writeRuleSwitches } from './gatecell.js';
+import { ACTION_SAID, checkStepOf, newRuleId, ruleOn, ruleSaid, switchesFor, type OntologyRule } from './rules.js';
 
 const lower = (x: string) => x.toLowerCase();
 
@@ -137,7 +138,7 @@ export type RuleInput = Omit<OntologyRule, 'id' | 'off'> & { id?: string };
 const ontologyOf = (doc: FlowDocument): Ontology => doc.ontology ?? { objectTypes: [], linkTypes: [], actionTypes: [] };
 
 /** The rule's entry, in the canonical shape the document keeps: its settings in one order, only what its kind has. */
-function ruleEntry(r: RuleInput & { id: string; off?: true }): OntologyRule {
+function ruleEntry(r: RuleInput & { id: string }): OntologyRule {
   return {
     id: r.id,
     file: r.file,
@@ -148,7 +149,6 @@ function ruleEntry(r: RuleInput & { id: string; off?: true }): OntologyRule {
     ...(r.kind === 'range' && r.max !== undefined ? { max: r.max } : {}),
     ...(r.kind === 'when' && r.when ? { when: { column: r.when.column, values: [...new Set(r.when.values.map((v) => v.trim()).filter((v) => v !== ''))] } } : {}),
     action: r.action,
-    ...(r.off ? { off: true as const } : {}),
   };
 }
 
@@ -159,8 +159,9 @@ function ruleProblem(doc: FlowDocument): string | null {
 }
 
 /**
- * A rule added to its file, or one of its rules changed (by `id`, its switch kept): the document with it, and the
- * change in words, or the reason the rule can't be kept. It runs from the next run (Q-141): a rule is on once set.
+ * A rule added to its file, or one of its rules changed (by `id`): the document with it, every check cell that reads
+ * the file brought in step (`syncRuleCells`: a new rule on, a changed one switched as it was), and the change in words,
+ * or the reason the rule can't be kept. It runs from the next run (Q-141): a rule is on once set.
  */
 export function setRule(doc: FlowDocument, input: RuleInput): { doc: FlowDocument; said: string } | { problem: string } {
   const o = ontologyOf(doc);
@@ -168,35 +169,39 @@ export function setRule(doc: FlowDocument, input: RuleInput): { doc: FlowDocumen
   const at = input.id === undefined ? -1 : rules.findIndex((r) => lower(r.file) === lower(input.file) && r.id === input.id);
   if (input.id !== undefined && at < 0) return { problem: `${input.file} has no rule ${input.id}` };
   const was = at >= 0 ? rules[at]! : null;
-  const entry = ruleEntry({ ...input, id: was?.id ?? newRuleId(doc, input.file, input.column, input.kind), ...(was?.off ? { off: true as const } : {}) });
-  const next: FlowDocument = { ...doc, ontology: { ...o, rules: was ? rules.map((r, k) => (k === at ? entry : r)) : [...rules, entry] } };
-  const problem = ruleProblem(next);
+  const entry = ruleEntry({ ...input, id: was?.id ?? newRuleId(doc, input.file, input.column, input.kind) });
+  const defined: FlowDocument = { ...doc, ontology: { ...o, rules: was ? rules.map((r, k) => (k === at ? entry : r)) : [...rules, entry] } };
+  const problem = ruleProblem(defined);
   if (problem) return { problem };
+  const next = syncRuleCells(defined);
   const words = `${ruleSaid(next.ontology, entry)}, else ${ACTION_SAID[entry.action]}`;
   return { doc: next, said: was ? `Changed a rule in ${entry.file}: ${words} (it was: ${ruleSaid(o, was)}, else ${ACTION_SAID[was.action]})` : `Added a rule to ${entry.file}: ${words}` };
 }
 
-/** A file's rule taken away: the document without it, and the change in words; null when there is no such rule. */
+/** A file's rule taken away: the document without it, the check cells that listed it written without it, and the change
+ * in words; null when there is no such rule. */
 export function removeRule(doc: FlowDocument, file: string, id: string): { doc: FlowDocument; said: string } | null {
   const o = doc.ontology;
   const was = o?.rules?.find((r) => lower(r.file) === lower(file) && r.id === id);
   if (!o || !was) return null;
   const rules = o.rules!.filter((r) => r !== was);
   const { rules: _rules, ...rest } = o;
-  return { doc: { ...doc, ontology: rules.length ? { ...rest, rules } : rest }, said: `Removed a rule from ${was.file}: ${ruleSaid(o, was)}` };
+  return { doc: syncRuleCells({ ...doc, ontology: rules.length ? { ...rest, rules } : rest }), said: `Removed a rule from ${was.file}: ${ruleSaid(o, was)}` };
 }
 
 /**
- * A file's rule switched on or off on its import card (Q-141): kept and said either way, enforced only while on. Null
- * when there is no such rule, or it is already so.
+ * A file's rule switched on or off on its import card (Q-141, Q-148): written in the check cell that enforces the file
+ * (`ontology: { name: 'off' }`), every rule of the file listed there as it is switched; the ontology's definition is
+ * untouched. Kept and said either way, enforced only while on. Null when there is no such rule, no check step reads the
+ * file directly, or it is already so.
  */
-export function switchRule(doc: FlowDocument, file: string, id: string, on: boolean): { doc: FlowDocument; said: string } | null {
+export function switchRule(doc: FlowDocument, file: string, id: string, on: boolean): { doc: FlowDocument; said: string; step: string } | null {
   const o = doc.ontology;
   const was = o?.rules?.find((r) => lower(r.file) === lower(file) && r.id === id);
-  if (!o || !was || !was.off === on) return null;
-  const entry = ruleEntry({ ...was, ...(on ? {} : { off: true as const }) });
-  if (on) delete entry.off;
-  return { doc: { ...doc, ontology: { ...o, rules: o.rules!.map((r) => (r === was ? entry : r)) } }, said: `Switched ${on ? 'on' : 'off'} a rule of ${was.file}: ${ruleSaid(o, was)}` };
+  const step = checkStepOf(doc, file);
+  if (!o || !was || !step || ruleOn(step, id) === on) return null;
+  const next = writeRuleSwitches(doc, step.id, switchesFor(doc, step, { [id]: on ? 'on' : 'off' }));
+  return { doc: next, said: `Switched ${on ? 'on' : 'off'} a rule of ${was.file}: ${ruleSaid(o, was)}, in ${step.id}`, step: step.id };
 }
 
 // ------------------------------------------------------------------ what the page keeps of an edited flow

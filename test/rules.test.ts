@@ -13,13 +13,15 @@ import smaltfl from '../src/plugin/index.js';
 import { validateDocument } from '../src/core/document.js';
 import { emitRuleCheck } from '../src/core/emit.js';
 import { removeRule, setRule, switchRule } from '../src/core/flowedit.js';
+import { rewriteCheckCall, syncRuleCells } from '../src/core/gatecell.js';
+import { expandNotebooks } from '../src/core/notebook.js';
 import { utf8 } from '../src/core/hash.js';
 import { checkStepOf, newRuleId, ruleSaid, rulesOf, type OntologyRule } from '../src/core/rules.js';
 import { pinFile, runFlow, translate, verifyRun, type FlowDocument } from '../src/index.js';
 import { pinnedDdl, type DataBindings } from '../examples/sources.js';
 import { csvOf, securityDays, securityRows } from './fixtures/security.js';
 import { SMALTDB } from './helpers/engine.js';
-import { loadFlowDir, signinsDir } from './helpers/notebooks.js';
+import { loadFlowDir, signinsDir, ts } from './helpers/notebooks.js';
 
 const data = JSON.parse(readFileSync(new URL('../examples/security-signins.data.json', import.meta.url), 'utf8')) as DataBindings;
 const signins = () => loadFlowDir(signinsDir);
@@ -75,9 +77,9 @@ describe('what the document accepts', () => {
     expect(issues(withRules(doc, [rule({ kind: 'nope' })]))).toEqual(['$.ontology.rules[0].kind: required, oneOf, range, when']);
     expect(issues(withRules(doc, [rule({ file: 'nowhere' })]))).toEqual(['$.ontology.rules[0].file: no source nowhere: a rule is a file’s own']);
     expect(issues(withRules(doc, [rule({ action: 'shout' })]))).toEqual(['$.ontology.rules[0].action: flag, drop, hold: what a row that breaks it does']);
-    expect(issues(withRules(doc, [rule({ colour: 'red' })]))).toEqual(["$.ontology.rules[0].colour: colour isn't a rule's setting (id, file, column, kind, values, min, max, when, action, off): refused rather than ignored"]);
+    expect(issues(withRules(doc, [rule({ colour: 'red' })]))).toEqual(["$.ontology.rules[0].colour: colour isn't a rule's setting (id, file, column, kind, values, min, max, when, action): refused rather than ignored"]);
     expect(issues(withRules(doc, [rule({ id: '1st' })]))).toEqual(['$.ontology.rules[0].id: a name of letters, digits and underscores, starting with a letter']);
-    expect(issues(withRules(doc, [rule({ off: false })]))).toEqual(['$.ontology.rules[0].off: true, or left out while it is on']);
+    expect(issues(withRules(doc, [rule({ off: true })]))).toEqual(["$.ontology.rules[0].off: a rule is switched in the check cell that enforces its file (ontology: { name: 'off' }), not in the ontology"]);
   });
 
   it('asks each kind for what it needs and nothing else', async () => {
@@ -125,11 +127,12 @@ describe('the edits the page makes', () => {
     expect(validateDocument(r.doc)).toEqual([]);
   });
 
-  it('changes a rule by its name, keeping its switch, and keeps only what its kind has', async () => {
+  it('changes a rule by its name, keeping its switch in the cell, and keeps only what its kind has', async () => {
     const doc = switchRule(await signins(), 'auth', 'latency_ms_range', false)!.doc;
     const r = setRule(doc, { id: 'latency_ms_range', file: 'auth', column: 'latency_ms', kind: 'range', min: 0, max: 5000, values: ['stray'], action: 'hold' });
     if (!('doc' in r)) throw new Error(r.problem);
-    expect(rulesOf(r.doc.ontology, 'auth').find((x) => x.id === 'latency_ms_range')).toEqual({ id: 'latency_ms_range', file: 'auth', column: 'latency_ms', kind: 'range', min: 0, max: 5000, action: 'hold', off: true });
+    expect(rulesOf(r.doc.ontology, 'auth').find((x) => x.id === 'latency_ms_range')).toEqual({ id: 'latency_ms_range', file: 'auth', column: 'latency_ms', kind: 'range', min: 0, max: 5000, action: 'hold' });
+    expect(checkStepOf(r.doc, 'auth')).toMatchObject({ ontology: { latency_ms_range: 'off' } });
     expect(r.said).toBe('Changed a rule in auth: Latency is from 0 to 5,000 ms, else hold the day (it was: Latency is from 0 to 30,000 ms, else flag the row and keep it)');
   });
 
@@ -141,7 +144,9 @@ describe('the edits the page makes', () => {
   it('switches a rule off and on, and removes one', async () => {
     const doc = await signins();
     const off = switchRule(doc, 'auth', 'country_required', false)!;
-    expect(off.said).toBe('Switched off a rule of auth: Country is never blank');
+    expect(off.said).toBe('Switched off a rule of auth: Country is never blank, in auth_valid');
+    // The ontology's definition is untouched: the switch is the check cell's.
+    expect(off.doc.ontology).toEqual(doc.ontology);
     expect(switchRule(off.doc, 'auth', 'country_required', false)).toBeNull();
     const on = switchRule(off.doc, 'auth', 'country_required', true)!;
     expect(rulesOf(on.doc.ontology, 'auth')).toEqual(rulesOf(doc.ontology, 'auth'));
@@ -151,6 +156,79 @@ describe('the edits the page makes', () => {
     // The last rule taken away takes the list with it: the ontology as it was before any rule.
     const empty = ['method_one_of', 'latency_ms_range'].reduce((d, id) => removeRule(d, 'auth', id)!.doc, gone.doc);
     expect(empty.ontology).not.toHaveProperty('rules');
+  });
+});
+
+describe('the check cell that runs them (Q-148)', () => {
+  /** What smaltnb derives from the notebooks as written, against what the edit derived by hand. */
+  const agrees = async (doc: FlowDocument) => {
+    const again = await expandNotebooks(doc, ts);
+    expect(again.steps).toEqual(doc.steps);
+    expect(again.cells).toEqual(doc.cells);
+    expect(validateDocument(doc)).toEqual([]);
+  };
+  const cellOf = (doc: FlowDocument, step: string) => {
+    const ref = doc.cells![step]!;
+    return doc.notebooks!.find((n) => n.path === ref.notebook)!.source.split('\n').slice(ref.line - 1, ref.endLine).join('\n');
+  };
+
+  it('lists the file’s rules in the cell, each on, as the sign-in log ships', async () => {
+    const doc = await signins();
+    expect(cellOf(doc, 'auth_valid')).toContain("ontology: { method_one_of: 'on', latency_ms_range: 'on', country_required: 'on' },");
+    expect(checkStepOf(doc, 'auth')).toMatchObject({ ontology: { method_one_of: 'on', latency_ms_range: 'on', country_required: 'on' } });
+  });
+
+  it('writes a switch into the cell, which smaltnb reads back as the step the edit derived', async () => {
+    const off = switchRule(await signins(), 'auth', 'latency_ms_range', false)!;
+    expect(off.step).toBe('auth_valid');
+    expect(cellOf(off.doc, 'auth_valid')).toContain("ontology: { method_one_of: 'on', latency_ms_range: 'off', country_required: 'on' },");
+    await agrees(off.doc);
+    await agrees(switchRule(off.doc, 'auth', 'latency_ms_range', true)!.doc);
+  });
+
+  it('follows the ontology: a rule added is on in the cell, one removed is gone from it, one changed keeps its switch', async () => {
+    const doc = switchRule(await signins(), 'auth', 'country_required', false)!.doc;
+    const added = setRule(doc, { file: 'auth', column: 'user', kind: 'required', action: 'flag' });
+    if (!('doc' in added)) throw new Error(added.problem);
+    expect(cellOf(added.doc, 'auth_valid')).toContain("ontology: { method_one_of: 'on', latency_ms_range: 'on', country_required: 'off', user_required: 'on' },");
+    await agrees(added.doc);
+    const gone = removeRule(added.doc, 'auth', 'method_one_of')!;
+    expect(cellOf(gone.doc, 'auth_valid')).toContain("ontology: { latency_ms_range: 'on', country_required: 'off', user_required: 'on' },");
+    await agrees(gone.doc);
+    // Every rule taken away: the cell says nothing of the ontology.
+    const none = ['latency_ms_range', 'country_required', 'user_required'].reduce((d, id) => removeRule(d, 'auth', id)!.doc, gone.doc);
+    expect(cellOf(none, 'auth_valid')).not.toContain('ontology');
+    await agrees(none);
+  });
+
+  it('brings every check cell in step with an ontology changed elsewhere, and leaves cells in step as written', async () => {
+    const doc = await signins();
+    expect(syncRuleCells(doc)).toBe(doc);
+    // The ontology edited by hand: a rule more, one fewer. Until the cells are written, the new rule is on and the old
+    // entry says nothing; then the cell lists what the ontology has.
+    const rules = [...doc.ontology!.rules!.filter((r) => r.id !== 'country_required'), { id: 'user_required', file: 'auth', column: 'user', kind: 'required', action: 'flag' } as OntologyRule];
+    const edited = withRules(doc, rules);
+    expect(validateDocument(edited)).toEqual([]);
+    const names = async (d: FlowDocument) => {
+      const n = (await translate(d, { day: '2024-03-11' })).nodes.find((x) => x.origin === 'auth_valid');
+      return n?.op === 'expect' ? n.rules.map(([name]) => name).slice(3) : [];
+    };
+    expect(await names(edited)).toEqual(['method_one_of', 'latency_ms_range', 'user_required']);
+    const synced = syncRuleCells(edited);
+    expect(cellOf(synced, 'auth_valid')).toContain("ontology: { method_one_of: 'on', latency_ms_range: 'on', user_required: 'on' },");
+    expect(await names(synced)).toEqual(await names(edited));
+    await agrees(synced);
+  });
+
+  it('rewrites the call’s ontology property wherever the cell writes it', () => {
+    const lit = "{ a: 'on' }";
+    expect(rewriteCheckCall("const v = check(x, { rules: [], maxDropped: 0.1 });", lit)).toBe("const v = check(x, { rules: [], maxDropped: 0.1, ontology: { a: 'on' } });");
+    expect(rewriteCheckCall("const v = check(x, {\n  rules: [],\n  maxDropped: 0.1,\n});", lit)).toBe("const v = check(x, {\n  rules: [],\n  maxDropped: 0.1,\n  ontology: { a: 'on' },\n});");
+    expect(rewriteCheckCall("const v = check(x, {\n    rules: []\n});", lit)).toBe("const v = check(x, {\n    rules: [],\n    ontology: { a: 'on' }\n});");
+    expect(rewriteCheckCall("check(x, { rules: [], ontology: { a: 'off' } })", lit)).toBe("check(x, { rules: [], ontology: { a: 'on' } })");
+    expect(rewriteCheckCall("check(x, { rules: [], ontology: { a: 'off' } })", null)).toBe('check(x, { rules: [] })');
+    expect(rewriteCheckCall("check(x, {\n  rules: [],\n  ontology: { a: 'off' },\n})", null)).toBe('check(x, {\n  rules: [],\n})');
+    expect(() => rewriteCheckCall('const v = sql`SELECT 1`;', lit)).toThrow(/no check/);
   });
 });
 

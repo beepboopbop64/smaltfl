@@ -585,7 +585,7 @@ the ontology. Let the user add rules if they want, and for the security test dat
 sense."* The choices made here are Q-148 to Q-151.
 
 - **A rule is the ontology's, and its file's own** (`ontology.rules`, `OntologyRule`, `src/core/rules.ts`; Q-140):
-  `{ id, file, column, kind, values?, min?, max?, when?, action, off? }`. Kinds: `required` (never blank), `oneOf`
+  `{ id, file, column, kind, values?, min?, max?, when?, action }`. Kinds: `required` (never blank), `oneOf`
   (one of some values), `range` (a number from `min` to `max`, either left out), `when` (one of some values where
   another column has one of its own). `action` is what a row that breaks it does: `flag` (kept and counted), `drop`
   (left out of what goes on), `hold` (the day holds). Validated by `rulesIssues` from `validateDocument`: every setting
@@ -605,18 +605,30 @@ sense."* The choices made here are Q-148 to Q-151.
   and its values for `when`, and what a broken row does. A rule people set is listed with the column's other rules,
   "…: else hold the day", with **Change** and **Remove** (asked twice). A rule the document can't keep is refused with
   the reason. A rule on a column no card shows is listed with the file's own.
-- **The import card has a Rules tab with a switch a rule** (Q-141, Q-148; `rulesTab`, `switchRule`). Every source's
-  card has it, beside Columns: each rule in words, what a broken row does, a switch of 44 px, and what the run on
-  screen counted ("every row keeps it", "3 rows break it", "switched off: not enforced", "not in this run: the next one
-  enforces it"). Switched off, a rule is kept and said (struck through; on the Ontology page "Not checked: switched off
-  on the import card") and left out of the plan. A reader sees the switches and can't move them. The tab links to the
+- **A rule is defined in the ontology and switched in the notebook** (Q-148, the maintainer's answer). The check cell
+  that enforces a file lists the file's rules, each on or off: `check(auth, { rules, maxDropped, ontology: {
+  method_one_of: 'on', latency_ms_range: 'off' } })`, derived onto the step (`ExpectationsStep.ontology`) and read by
+  `enforcedBy` (`ruleOn`). The switch writes the list in the cell (`switchRule`, `writeRuleSwitches`, `rewriteCheckCall`
+  in `gatecell.ts`: the property rewritten where it is, else added on a line of its own at the options' indent).
+  Adding, changing or removing a rule in the ontology writes the list again in every check cell that reads the file
+  (`syncRuleCells`: a new rule on, a removed one gone, the others as switched; cells in step left as written). A rule a
+  cell doesn't list yet is on (Q-141), and an entry for a rule the ontology no longer has says nothing, so a flow whose
+  ontology changed before its cells were written still runs. `test/rules.test.ts` holds each written cell to what
+  smaltnb's parser derives from it. An `off` on a rule in the ontology is refused, with where a rule is switched.
+- **The import card has a Rules tab with a switch a rule** (`rulesTab`). Every source's card has it, beside Columns:
+  each rule in words, what a broken row does, a switch of 44 px, and what the run on screen counted ("every row keeps
+  it", "3 rows break it", "switched off: not enforced", "not in this run: the next one enforces it"), then the check
+  cell as the notebook has it now, behind a tap. Switched off, a rule is kept and said (struck through; on the Ontology
+  page "Not checked: switched off in auth_valid's cell") and left out of the plan. A reader sees the switches and
+  can't move them; with no check cell for the file they are off-limits and the tab says why. The tab links to the
   file's section on the Ontology page.
 - **Every change is a flow change** (`ruleEdited`): kept in this browser, recorded at once with its reason ("Added a
   rule to auth: User is never blank, else flag the row and keep it", "Switched off a rule of auth: …"), listed above
   the files, taken away by Back to the flow as shipped, and refused while a run is under way.
 - **The sign-in log ships three rules** (Q-151), in both its forms (`examples/security-signins/flow.json`,
   `examples/security-signins.smaltfl.json`): Method one of its five values (hold), Latency from 0 to 30,000 ms (flag),
-  Country never blank (flag). Its history, built by `scripts/data/history.ts` from the plan, counts them.
+  Country never blank (flag), each listed on in the check cell `auth_valid`. Its history, built by
+  `scripts/data/history.ts` from the plan, counts them.
 - **Tests:** `test/rules.test.ts` (the shipped rules and their words, the plan's rules and a switched-off rule left
   out with the node as written, what the document refuses and why, the engine's reading of each kind, the edits and
   their words, and three runs through the engine: a flagged row counted, kept and verified at `rerun`; a `hold` rule
@@ -624,6 +636,7 @@ sense."* The choices made here are Q-148 to Q-151.
   through once the rule is switched off, verified). `test/ontologypage.test.ts` gains the sign-in log's rules on their
   cards. `tools/browser/stops/rules.json` drives the sign-ins app at phone size through the Ontology page, a rule
   added, the Rules tab, a switch, a reload and dark: no problems, no page error.
-- **Not built yet:** a range derived from the last days and kept fixed or rolling (Q-142); a rule across files or on
+- **Not built yet:** an ontology shared by several flow documents (each carries its own; a change reaches every check
+  cell of the flow it is made in); a range derived from the last days and kept fixed or rolling (Q-142); a rule across files or on
   a dataset the flow makes (Q-144 is still open); rules drawn against today's number with the last four weeks (§5);
   the Discovered section's proposals.

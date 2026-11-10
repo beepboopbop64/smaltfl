@@ -20,6 +20,7 @@ export const auth_valid = check(auth, {
     { name: 'has_user', check: 'user IS NOT NULL', onFail: 'warn' },
   ],
   maxDropped: 0.05,
+  ontology: { method_one_of: 'on', latency_ms_range: 'on', country_required: 'on' },
 });
 
 cell('published');

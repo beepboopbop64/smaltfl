@@ -341,6 +341,10 @@ export interface ExpectationsStep extends StepBase {
   rules: ExpectationRule[];
   /** Fail the run if more than this fraction of rows is dropped (0 to 1). */
   maxDropped?: number;
+  /** The ontology's rules of the file this step reads, each switched on or off (rules.ts): written in the step's cell by
+   * the file's import card, kept in step with the ontology when it changes. A rule not listed is on; an entry for a rule
+   * the ontology no longer has says nothing. */
+  ontology?: Record<string, 'on' | 'off'>;
 }
 
 /**
@@ -958,6 +962,7 @@ function validateConfig(s: Record<string, unknown>, at: string, add: (path: stri
         });
       }
       if (s.maxDropped !== undefined && (typeof s.maxDropped !== 'number' || !(s.maxDropped >= 0 && s.maxDropped <= 1))) add(`${at}.maxDropped`, 'a fraction from 0 to 1');
+      if (s.ontology !== undefined && (!isRecord(s.ontology) || Object.entries(s.ontology).some(([k, v]) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(k) || (v !== 'on' && v !== 'off')))) add(`${at}.ontology`, "the ontology's rules of the file it reads, each by its name: 'on' or 'off'");
       break;
     }
     case 'fill': {

@@ -301,7 +301,7 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
         if (!input) {
           if (resolve(parsed, c.input)?.kind !== 'broken') add(where, `${c.kind}() reads a source or step by its name; nothing defines ${c.input} as one`);
         }
-        else if (c.kind === 'check') step = { kind: 'expectations', inputs: [input], rules: c.rules, ...(c.maxDropped !== undefined ? { maxDropped: c.maxDropped } : {}), ...base };
+        else if (c.kind === 'check') step = { kind: 'expectations', inputs: [input], rules: c.rules, ...(c.maxDropped !== undefined ? { maxDropped: c.maxDropped } : {}), ...(c.ontology !== undefined ? { ontology: c.ontology } : {}), ...base };
         else step = { kind: 'fill', inputs: [input], time: c.time, shift: c.shift, ...base };
       } else if (c.kind === 'df') {
         if (!options.df) add(where, 'a df cell needs a frame compiler (expandNotebooks options.df): this build has none');
@@ -422,7 +422,7 @@ type Classified =
   | { kind: 'source'; id: string }
   | { kind: 'params' }
   | { kind: 'sql'; text: string }
-  | { kind: 'check'; input: string; rules: ExpectationRule[]; maxDropped?: number }
+  | { kind: 'check'; input: string; rules: ExpectationRule[]; maxDropped?: number; ontology?: Record<string, 'on' | 'off'> }
   | { kind: 'fill'; input: string; time: string; shift: string[] }
   | { kind: 'gate'; input: string; options: Record<string, unknown> }
   | { kind: 'df' };
@@ -486,7 +486,7 @@ function classify(parsed: Parsed, cell: Cell, ts: TypeScriptKit, sources: Map<st
         add(where, 'check() needs rules: [{ name, check, onFail }]');
         return null;
       }
-      return { kind: 'check', input, rules: opts.rules as ExpectationRule[], ...(opts.maxDropped !== undefined ? { maxDropped: opts.maxDropped as number } : {}) };
+      return { kind: 'check', input, rules: opts.rules as ExpectationRule[], ...(opts.maxDropped !== undefined ? { maxDropped: opts.maxDropped as number } : {}), ...(opts.ontology !== undefined ? { ontology: opts.ontology as Record<string, 'on' | 'off'> } : {}) };
     }
     return { kind: 'fill', input, time: opts.time as string, shift: Array.isArray(opts.shift) ? (opts.shift as string[]) : [] };
   }

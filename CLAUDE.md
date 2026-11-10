@@ -157,9 +157,11 @@ match smaltdb's `CLAUDE.md`.
   rename, a toggle, an accepted band via `applyBand`), listed above the files with **Back to the flow as shipped**
   (`asShipped`, `backToShipped`); `test/flowedit.test.ts`, `estate.json`'s `names-` stops. Rules people set (pieces b
   and c, second stage): `ontology.rules` (`src/core/rules.ts`: a file's own, kinds `required`, `oneOf`, `range`, `when`,
-  actions `flag`, `drop`, `hold`, `off` when switched off), enforced by the check step that reads the file
-  (`enforcedBy` in `translate`, `emitRuleCheck`), edited on the Ontology page (`setRule`, `removeRule`; `ruleForm`) and
-  switched on each source's **Rules** tab (`switchRule`; `rulesTab`); the sign-in log ships three;
+  actions `flag`, `drop`, `hold`), enforced by the check step that reads the file (`enforcedBy` in `translate`,
+  `emitRuleCheck`), edited on the Ontology page (`setRule`, `removeRule`; `ruleForm`) and switched on each source's
+  **Rules** tab, which writes the check cell's `ontology: { name: 'on' | 'off' }` list (`switchRule`,
+  `writeRuleSwitches`, `rewriteCheckCall`; `syncRuleCells` writes every check cell again when the ontology changes;
+  `rulesTab`); the sign-in log ships three;
   `test/rules.test.ts`, `tools/browser/stops/rules.json`.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);

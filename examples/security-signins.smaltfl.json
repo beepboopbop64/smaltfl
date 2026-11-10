@@ -45,7 +45,12 @@
       "dataset": {
         "description": "Checked sign-ins"
       },
-      "description": "Sign-ins with a known result, on the day"
+      "description": "Sign-ins with a known result, on the day",
+      "ontology": {
+        "method_one_of": "on",
+        "latency_ms_range": "on",
+        "country_required": "on"
+      }
     },
     {
       "id": "signins_by_hour",

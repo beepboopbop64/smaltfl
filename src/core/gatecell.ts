@@ -7,8 +7,9 @@
  * `expandNotebooks` would derive them (test/gate-toggle.test.ts holds the two together). A node without a gate cell
  * gains one at the end of the notebook that defines it, its layer written out.
  */
-import type { CellRef, FlowDocument, NotebookDef, OutlineCell } from './document.js';
+import type { CellRef, FlowDocument, NotebookDef, OutlineCell, StepDef } from './document.js';
 import { CHECK_NAMES, layerOf, type CheckMode, type CheckName, type GateDef } from './gates.js';
+import { checkStepOf, switchesFor } from './rules.js';
 
 export const NOTEBOOK_IMPORT = 'smaltfl/notebook';
 
@@ -220,4 +221,92 @@ function shifted(doc: FlowDocument, nb: NotebookDef, source: string, fromLine: n
   const cells = Object.fromEntries(Object.entries(doc.cells ?? {}).map(([k, r]) => [k, r.notebook === nb.path ? move(r) : r]));
   const outline = (doc.outline ?? []).map((o) => (o.path === nb.path ? { ...o, cells: o.cells.map(move) } : o));
   return { ...doc, notebooks: (doc.notebooks ?? []).map((n) => (n.path === nb.path ? { ...n, source } : n)), cells, outline };
+}
+
+// ------------------------------------------------------------------ a check cell's switches for the ontology's rules
+
+/** The switches a check cell writes, as its `ontology` literal: each rule by its name, in the ontology's order. */
+export function switchesLiteral(switches: Record<string, 'on' | 'off'>): string {
+  return `{ ${Object.entries(switches).map(([id, v]) => `${id}: '${v}'`).join(', ')} }`;
+}
+
+/**
+ * The cell's text with its `check(x, {...})` call's `ontology` property set to the literal given (or dropped, for null):
+ * rewritten where it is; else added after the last property, on a line of its own where the options are written a
+ * property a line, at their indent.
+ */
+export function rewriteCheckCall(text: string, literal: string | null): string {
+  const m = /check\s*\(\s*([A-Za-z_$][\w$]*)\s*,\s*\{/.exec(text);
+  if (!m) throw new Error('the cell has no check(x, { … }) call');
+  const open = m.index + m[0].length - 1;
+  const close = closeOf(text, open);
+  if (close < 0) throw new Error('the check() call is unbalanced');
+  const inner = text.slice(open + 1, close);
+  const had = propertyOf(inner, 'ontology');
+  let next: string;
+  if (had) {
+    if (literal !== null) next = `${inner.slice(0, had.start)}ontology: ${literal}${inner.slice(had.end)}`;
+    else {
+      // The property and the line or comma it stood on taken away.
+      const lineStart = inner.lastIndexOf('\n', had.start - 1);
+      const onOwnLine = lineStart >= 0 && inner.slice(lineStart + 1, had.start).trim() === '';
+      const tail = inner.slice(had.end).replace(/^\s*,/, '');
+      next = onOwnLine ? `${inner.slice(0, lineStart)}${tail.startsWith('\n') || !tail.trim() ? tail : `\n${tail}`}` : `${inner.slice(0, had.start).replace(/,\s*$/, '')}${tail}`;
+    }
+  } else if (literal === null) next = inner;
+  else if (inner.includes('\n')) {
+    // A property a line: the new one after the last, at the same indent, the trailing comma kept as written.
+    const body = inner.replace(/\s*$/, '');
+    const end = inner.slice(body.length);
+    const indent = /\n([ \t]*)\S[^\n]*$/.exec(body)?.[1] ?? '  ';
+    const comma = body.endsWith(',');
+    next = `${body}${comma ? '' : ','}\n${indent}ontology: ${literal}${comma ? ',' : ''}${end}`;
+  } else {
+    const body = inner.replace(/\s*,?\s*$/, '');
+    next = `${body}, ontology: ${literal} `;
+  }
+  return `${text.slice(0, open + 1)}${next}${text.slice(close)}`;
+}
+
+/**
+ * A check step's switches for its file's rules written: in its cell where it has one (the notebook is where a rule is
+ * switched, Q-148), and on the step, as `expandNotebooks` would derive it. Null switches take the property away.
+ */
+export function writeRuleSwitches(doc: FlowDocument, stepId: string, switches: Record<string, 'on' | 'off'> | null): FlowDocument {
+  const steps = doc.steps.map((s): StepDef => {
+    if (s.id !== stepId || s.kind !== 'expectations') return s;
+    const { ontology: _o, ...rest } = s;
+    return switches ? { ...rest, ontology: switches } : rest;
+  });
+  const ref = doc.cells?.[stepId];
+  const nb = ref ? (doc.notebooks ?? []).find((n) => n.path === ref.notebook) : undefined;
+  if (!ref || !nb) return { ...doc, steps };
+  const lines = nb.source.split('\n');
+  const cellText = lines.slice(ref.line - 1, ref.endLine).join('\n');
+  const written = rewriteCheckCall(cellText, switches ? switchesLiteral(switches) : null);
+  if (written === cellText) return { ...doc, steps };
+  const newLines = written.split('\n');
+  const delta = newLines.length - (ref.endLine - ref.line + 1);
+  lines.splice(ref.line - 1, ref.endLine - ref.line + 1, ...newLines);
+  const next = shifted({ ...doc, steps }, nb, lines.join('\n'), ref.endLine, delta);
+  next.cells = { ...next.cells, [stepId]: { ...ref, endLine: ref.endLine + delta } };
+  return next;
+}
+
+/**
+ * Every check cell in step with the ontology (Q-148): the step that enforces each file lists every rule the ontology
+ * has for it, a new one on, one the ontology dropped taken away, each other as it was switched. What the ontology says
+ * is said once; the cells that run it follow. Cells already in step are left as written.
+ */
+export function syncRuleCells(doc: FlowDocument): FlowDocument {
+  let out = doc;
+  for (const src of doc.sources) {
+    const step = checkStepOf(out, src.id);
+    if (!step || step.kind !== 'expectations') continue;
+    const want = switchesFor(out, step);
+    const had = step.ontology ?? null;
+    if (JSON.stringify(want) === JSON.stringify(had)) continue;
+    out = writeRuleSwitches(out, step.id, want);
+  }
+  return out;
 }

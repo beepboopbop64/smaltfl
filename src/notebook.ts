@@ -24,6 +24,9 @@ export function source(id: string): Source {
 export interface CheckOptions {
   rules: ExpectationRule[];
   maxDropped?: number;
+  /** The ontology's rules of the file it reads, each by its name, switched on or off: the import card writes it, and
+   * the ontology's definition of each rule is what runs. A rule the ontology has and this doesn't list is on. */
+  ontology?: Record<string, 'on' | 'off'>;
 }
 
 /**

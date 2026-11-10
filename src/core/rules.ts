@@ -2,8 +2,11 @@
  * Rules people set on a file's columns (ADR 0015 amendment 1, piece b; Q-140 to Q-143): kept in the ontology, each one
  * file's own, enforced when the file comes into a flow. A rule says what a column must hold (a value, one of some
  * values, a number in a range, or one of some values where another column has one of its own) and what a row that
- * breaks it does: it is flagged and kept, left out, or holds the day. It runs once it is set (Q-141); the file's import
- * card switches it off and on again.
+ * breaks it does: it is flagged and kept, left out, or holds the day. The ontology is where a rule is defined, once; the
+ * notebook is where it is switched (Q-148): the check cell that enforces its file lists the file's rules, each `'on'` or
+ * `'off'` (`ontology: { … }`), the file's import card writes that list, and a change to the ontology writes it again
+ * in every check cell that reads the file (`syncRuleCells`, gatecell.ts). A rule runs once it is set (Q-141): one the
+ * cell doesn't list yet is on, and an entry for a rule the ontology no longer has says nothing.
  *
  * A rule is enforced by the check step that reads its file directly: `translate` (plan.ts) adds it to that step's rules
  * by its id, written for the engine by `emitRuleCheck` (emit.ts), so the run counts it, the manifest keeps its count,
@@ -52,12 +55,10 @@ export interface OntologyRule {
   /** `when`: the rows the rule is about, by another column's values. */
   when?: { column: string; values: string[] };
   action: RuleAction;
-  /** Switched off on the file's import card: kept, said, and not enforced. */
-  off?: true;
 }
 
 /** A rule's settings: any other is refused by name. */
-export const RULE_FIELDS = ['id', 'file', 'column', 'kind', 'values', 'min', 'max', 'when', 'action', 'off'] as const;
+export const RULE_FIELDS = ['id', 'file', 'column', 'kind', 'values', 'min', 'max', 'when', 'action'] as const;
 
 type RulesDoc = Pick<FlowDocument, 'sources'> & Partial<Pick<FlowDocument, 'steps' | 'ontology'>>;
 
@@ -65,9 +66,21 @@ const lower = (x: string) => x.toLowerCase();
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 const values = (v: unknown): v is string[] => Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string' && x !== '') && new Set(v).size === v.length;
 
-/** A file's rules in the ontology's order: every one, or with `on` only the ones switched on. */
-export function rulesOf(o: Ontology | undefined, file: string, which: 'all' | 'on' = 'all'): OntologyRule[] {
-  return (o?.rules ?? []).filter((r) => lower(r.file) === lower(file) && (which === 'all' || !r.off));
+/** A file's rules in the ontology's order. */
+export function rulesOf(o: Ontology | undefined, file: string): OntologyRule[] {
+  return (o?.rules ?? []).filter((r) => lower(r.file) === lower(file));
+}
+
+/** Whether a check step's cell has a rule switched on: what it writes, else on (Q-141). */
+export const ruleOn = (step: StepDef | null | undefined, id: string): boolean => !(step?.kind === 'expectations' && step.ontology?.[id] === 'off');
+
+/** What a check step's cell should say of its file's rules: every rule the ontology has, in its order, as the cell had it
+ * (on where it said nothing), with `set` applied. Null when the file has no rule (the cell says nothing). */
+export function switchesFor(doc: RulesDoc, step: StepDef, set: Record<string, 'on' | 'off'> = {}): Record<string, 'on' | 'off'> | null {
+  if (step.kind !== 'expectations' || step.inputs.length !== 1) return null;
+  const rules = rulesOf(doc.ontology, step.inputs[0]!);
+  if (!rules.length) return null;
+  return Object.fromEntries(rules.map((r) => [r.id, set[r.id] ?? (ruleOn(step, r.id) ? 'on' : 'off')]));
 }
 
 /** The check step that enforces a file's rules: the first, in the flow's order, whose one input is the file itself. */
@@ -75,12 +88,13 @@ export function checkStepOf(doc: RulesDoc, file: string): StepDef | null {
   return (doc.steps ?? []).find((s) => s.kind === 'expectations' && s.inputs.length === 1 && lower(s.inputs[0]!) === lower(file)) ?? null;
 }
 
-/** The rules a check step enforces beside its own: the ones switched on of the file it reads, if it is that file's. */
+/** The rules a check step enforces beside its own: the ones its cell has switched on of the file it reads, if it is
+ * that file's check step. */
 export function enforcedBy(doc: RulesDoc, step: StepDef): OntologyRule[] {
   if (step.kind !== 'expectations' || step.inputs.length !== 1) return [];
   const file = doc.sources.find((s) => lower(s.id) === lower(step.inputs[0]!));
   if (!file || checkStepOf(doc, file.id)?.id !== step.id) return [];
-  return rulesOf(doc.ontology, file.id, 'on');
+  return rulesOf(doc.ontology, file.id).filter((r) => ruleOn(step, r.id));
 }
 
 /** "A", "A or B", "A, B or C". */
@@ -132,13 +146,15 @@ export function rulesIssues(doc: { sources?: unknown; steps?: unknown }, rules: 
   rules.forEach((r: unknown, i: number) => {
     const at = `$.ontology.rules[${i}]`;
     if (!isRecord(r)) return add(at, '{ id, file, column, kind, action }');
-    for (const k of Object.keys(r)) if (!(RULE_FIELDS as readonly string[]).includes(k)) add(`${at}.${k}`, `${k} isn't a rule's setting (${RULE_FIELDS.join(', ')}): refused rather than ignored`);
+    for (const k of Object.keys(r)) {
+      if (k === 'off') add(`${at}.off`, "a rule is switched in the check cell that enforces its file (ontology: { name: 'off' }), not in the ontology");
+      else if (!(RULE_FIELDS as readonly string[]).includes(k)) add(`${at}.${k}`, `${k} isn't a rule's setting (${RULE_FIELDS.join(', ')}): refused rather than ignored`);
+    }
     if (typeof r.id !== 'string' || !/^[A-Za-z][A-Za-z0-9_]*$/.test(r.id)) add(`${at}.id`, 'a name of letters, digits and underscores, starting with a letter');
     if (typeof r.file !== 'string' || !sources.some((s) => lower(s.id) === lower(r.file as string))) add(`${at}.file`, `no source ${String(r.file)}: a rule is a file’s own`);
     if (typeof r.column !== 'string' || r.column === '') add(`${at}.column`, 'the column it is about, as the file writes it');
     if (!(RULE_KINDS as readonly unknown[]).includes(r.kind)) add(`${at}.kind`, RULE_KINDS.join(', '));
     if (!(RULE_ACTIONS as readonly unknown[]).includes(r.action)) add(`${at}.action`, `${RULE_ACTIONS.join(', ')}: what a row that breaks it does`);
-    if (r.off !== undefined && r.off !== true) add(`${at}.off`, 'true, or left out while it is on');
     const needs = (field: 'values' | 'min' | 'max' | 'when', wanted: boolean) => {
       if (!wanted && r[field] !== undefined) add(`${at}.${field}`, `a ${String(r.kind)} rule has no ${field}`);
     };
