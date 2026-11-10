@@ -133,6 +133,11 @@ export async function measureLoad(db: PluginCaller, table: string, settings: Mea
   return (await db.callPlugin(PLUGIN_NAME, 'measure', [{ table, settings }], { lock: true })) as Measures;
 }
 
+/** A table's kept rows (ADR 0014 §5): a few hundred, stratified by the columns given, as the classifier learns from them. */
+export async function sampleLoad(db: PluginCaller, table: string, settings: { keep: number; strata: string[] }): Promise<{ columns: string[]; rows: unknown[][] }> {
+  return (await db.callPlugin(PLUGIN_NAME, 'sample', [{ table, settings }], { lock: true })) as { columns: string[]; rows: unknown[][] };
+}
+
 /** Pin a source file's bytes in the engine (served as smaltfl:<name>), refused unless they hash to `sha256` when given. */
 export async function pinFile(db: PluginCaller, name: string, bytes: Uint8Array | null, sha256?: string): Promise<{ name: string; sha256: string; bytes: number }> {
   // A pinned file lives in the engine worker: a new worker (another tab taking over a shared database) gets it again,

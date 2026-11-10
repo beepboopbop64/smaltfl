@@ -74,8 +74,11 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   engine beside every other measure and kept in the history, said in words and holding at five rows past the usual;
   upstream attribution: a step's finding about a source's column follows the source, and a wrong source explains the
   step's day. The estate: the contradiction holds on the posture's dependency, the scope days on the WAF's and TLS's
-  scope, and the posture no longer repeats the controls. Slices 4 to 7 follow ADR 0014's order; each moves the test's
-  "still wrong" assertions as a decision.
+  scope, and the posture no longer repeats the controls.
+- **Gates, slice 4** (ADR 0014 §"As built", 2026-11-10): the kept sample beside each history (two hundred rows a day,
+  stratified, eight weeks, `sample.<watch>.json`, pinned and appended by each run) and the classifier (boosted stumps,
+  held-out AUC against chance and random labels, explained by permutation), an `apart` finding that warns. Slices 5
+  to 7 follow ADR 0014's order; each moves the test's "still wrong" assertions as a decision.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

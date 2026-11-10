@@ -1,6 +1,6 @@
 # ADR 0014: Gates: bronze, silver and gold checks in the notebook, written bands and due dates in the ontology, a sealed gold
 
-- **Status:** accepted, 2026-11-09; slices 1 to 3 built 2026-11-10 (§"As built"), slices 4 to 7 in order. It records the
+- **Status:** accepted, 2026-11-09; slices 1 to 4 built 2026-11-10 (§"As built"), slices 5 to 7 in order. It records the
   maintainer's plan and answers of 2026-11-09 (Q-110 to Q-117, docs/OPEN_QUESTIONS.md), given after a survey of how
   layered data-quality checks are built and shown (§Sources). The control estate (ADR 0013 §8) is its answer key.
 - **Date:** 2026-11-09
@@ -324,6 +324,42 @@ and that no silver finding repeats a bronze cause.
   (the empty MFA file, the doubled TLS file, the look-alike clusters hold or publish by the controls alone).
   **Still wrong against the key:** the pentest cluster and the DR day, as in slice 2 (the short base); the refused
   file (slice 7); nothing is sealed (slice 5).
+
+### Slice 4 (2026-11-10): the kept sample and the classifier
+
+- **The kept sample** (`src/core/apart.ts`, `SampleFile`, smaltfl-sample/0): a few hundred rows a day per watched node
+  (`SAMPLE_KEEP`, 200), stratified by the counted columns (`keepSample`: every stratum present gets at least one row,
+  the rest in proportion, taken evenly through the rows as they came, so the same rows always give the same kept
+  rows), the last eight weeks kept (`SAMPLE_WINDOW`, `appendSample` drops older days). The plugin's `sample` op
+  (`src/plugin/sample.ts`, `sampleLoad`) takes them from a table: an even sample of at most four times the keep, then
+  stratified. The history builder writes one beside each history (`--sample`), the app build ships it where the flow
+  has gates (`samples` in loads.json, hashed in the data list, `sample.<watch>.json`), the app fetches and pins each,
+  samples a source's load before its run, takes a step's kept rows from the run (`RunResult.kept`) and appends both
+  (`keepDay`); the engine takes a watched step's kept rows itself when its sample is pinned. The sample is the one
+  place raw rows leave the engine for a file: a flow with no gate keeps none.
+- **The classifier** (`tellApart`): today's kept rows against the like days' rows of the sample (`likeDays`: the four
+  weeks before under no pattern, the same weekday over eight weeks under the weekly one; the record's days left out),
+  both subsampled to the smaller side (at least thirty), split in half by turns; fifty boosted stumps on the log loss
+  (Newton leaves, learning rate 0.3) over the one-hot of the coded columns' twelve commonest values (plus "other"),
+  the standardized measures and a missing flag; judged by the held-out AUC (`aucOf`) against chance (Hanley and
+  McNeil's null variance, `z`) and against the AUCs three random labellings reach on the same rows (`floor`);
+  explained by each column's share of the AUC lost when its values are shuffled in the held-out half. Twenty-five
+  milliseconds on two hundred rows a side.
+- **The finding** (`newsOf`, kind `apart`, check `classifier`): told at three standard errors over chance, an AUC of
+  0.6 or more and over the floor ("Rows unlike earlier days: AUC 0.80"; "Status and exposed explain 88% of what tells
+  today's rows from 27 earlier days' (200 a side; chance reaches 0.52)"); something wrong at four standard errors and
+  0.7, which the layer's defaults make unusual (learned). Silent without a sample, or under a gate with the check off,
+  or in a flow with no gate.
+- **Like days by the pattern** (`likeDays`, as the ranges have them, ADR 0010 §3): the same weekday over eight weeks
+  (`weekly`), the same day of the months before with a day either side (`monthly`), else the four weeks before. The
+  vulnerability file's watch is monthly in the estate: its open findings land on Patch Tuesday and are fixed over the
+  month, so against the four weeks before every day read as unlike (AUC 0.70–0.77), and against the month before only
+  Patch Tuesday does (0.81). Dates written as text, times, ids (over fifty distinct values) and clocks (a number or a
+  coded number whose day's median climbs with the day: a key's age, the days overdue) are left out of the features:
+  each tells today from any earlier day by itself, which is no news.
+- **Against the key** (`test/estate-flow.test.ts`): every watch has its sample; the classifier holds nothing, is quiet
+  on the look-alike and calm days, and warns on Patch Tuesday for the vulnerability file, as the key allows ("told as
+  unusual where they speak").
 
 ## Sources (the survey of 2026-11-09)
 

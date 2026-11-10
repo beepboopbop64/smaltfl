@@ -30,6 +30,8 @@ import { isPublish2, validatePlan, watchesOf } from '../core/plan.js';
 import { carry, heldOutputs, spare, holdsOf, judgeClaims, judgeDonors, tailPath, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef, type StoryClaim2 } from '../core/hold.js';
 import { measuresHash, settingsFor, type MeasureSettings, type Measures } from '../core/measures.js';
 import { tellClaim } from './tell.js';
+import { sampleTable } from './sample.js';
+import { SAMPLE_KEEP, samplePath } from '../core/apart.js';
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 import { measureSnapshot, pinnedHeader, pinnedTail } from './measure.js';
@@ -212,6 +214,8 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   // Watched steps' claims, told here (ADR 0013 §4), and why one couldn't be.
   const engineClaims: StoryClaim2[] = [];
   const untold = new Map<number, string>();
+  /** Watched steps' kept rows (ADR 0014 §5), for the page to append to their samples. */
+  const kept: Record<string, unknown[][]> = {};
   if (plan.publish && isPublish2(plan.publish)) {
     if (stage) {
       told = heldMeasures(db, stage, plan, records);
@@ -252,7 +256,10 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
           // What the page said of each watched source's day (ADR 0014 §2): a finding of the step that repeats a source's
           // is told as following from it.
           const upstream = (context.claims ?? []).flatMap((c) => (isRecord(c) && typeof c.source === 'string' && typeof c.state === 'string' && typeof c.head === 'string' ? [{ source: c.source, state: c.state, head: c.head }] : []));
-          const told = await tellClaim({ doc: context.doc as FlowDocument, source: n.origin, history: w.history, flow: plan.flow.hash, measures: m, settings, tell, build: commit, upstream });
+          // The step's kept rows (ADR 0014 §5): the classifier's today, when a sample is pinned for the step.
+          const sampled = pinned(samplePath(n.origin)) ? (await sampleTable(db, table, { keep: SAMPLE_KEEP, strata: settings.counted })).rows : null;
+          if (sampled) kept[n.origin] = sampled;
+          const told = await tellClaim({ doc: context.doc as FlowDocument, source: n.origin, history: w.history, flow: plan.flow.hash, measures: m, settings, tell, build: commit, upstream, ...(sampled ? { kept: sampled } : {}) });
           if ('problem' in told) untold.set(w.node, told.problem);
           else engineClaims.push(told.claim);
         }
@@ -303,6 +310,7 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     run, hash, manifest, holds, published: plan.outputs.map((o) => o.name).filter((name) => !holding.has(name)), waiting,
     ...(derived ? { derived: { holds: derived.holds, filled: derived.filled } } : {}),
     ...(measured.size ? { measures: [...measured.values()].map((m) => m.measures) } : {}),
+    ...(Object.keys(kept).length ? { kept } : {}),
   };
 }
 

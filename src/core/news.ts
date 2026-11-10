@@ -14,6 +14,7 @@
  */
 import { daysBetween, namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
+import { clockColumns, likeDays, sampleRows, tellApart, type Apart, type SampleFile } from './apart.js';
 import { gated, gateChecksOf, type CheckName, type GateChecks, type NeedsRule } from './gates.js';
 import { HistoryRanges, lateAt, lateUsual, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
@@ -29,7 +30,7 @@ export type Act = 'expected' | 'incident' | 'notify' | 'rule' | 'quarantine' | '
 
 export interface Finding {
   key: string;
-  kind: 'volume' | 'hours' | 'gone' | 'share' | 'band' | 'due' | 'scope' | 'needs' | 'new' | 'pair' | 'combo' | 'unlike' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
+  kind: 'volume' | 'hours' | 'gone' | 'share' | 'band' | 'due' | 'scope' | 'needs' | 'apart' | 'new' | 'pair' | 'combo' | 'unlike' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
   severity: Severity;
   /** How far out, in typical misses (capped): what ranks findings of a severity. */
   score: number;
@@ -71,6 +72,8 @@ export interface Finding {
   /** A due mark's counts (a `due` finding): what was due in the window, what is still missed, the window in days, and
    * the usual late share where the history has one. */
   due?: { due: number; late: number; within: number; usual?: number };
+  /** What the classifier found (an `apart` finding, ADR 0014 §5). */
+  apart?: Apart;
 }
 
 /** How a column and a value are said: a column's title, and a code with what it stands for. */
@@ -324,7 +327,7 @@ const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  * A day's findings, most important first; `checks` says whether the flow's checks are the ones the history counted, and
  * `judge` how the source is judged (ADR 0010 §4: bad values, serious columns, floors; the legacy form by default).
  */
-export function newsOf(h: HistoryRanges, day: string, names: Names, options: { checks?: boolean; judge?: JudgeSettings } = {}): Finding[] {
+export function newsOf(h: HistoryRanges, day: string, names: Names, options: { checks?: boolean; judge?: JudgeSettings; apart?: { sample: SampleFile; today: readonly (readonly unknown[])[] } } = {}): Finding[] {
   const file = h.file;
   const k = file.days.indexOf(day);
   if (k < 0) return [];
@@ -754,6 +757,27 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     else if (rain >= 15) out.push({ key: 'weather', kind: 'weather', severity: 'note', score: rain / 10, title: `Heavy rain: ${rain.toFixed(0)} mm${inPlace}`, detail: `${sentence(temps)}.`, look: 'history', acts: [] });
     else out.push({ key: 'weather', kind: 'weather', severity: 'ok', score: 0, title: rain >= 1 ? `Some rain: ${rain.toFixed(0)} mm${inPlace}` : `A dry day${inPlace}`, detail: `${sentence(temps)}${gaps.length ? '' : ', every district’s 24 hours on record'}.`, look: 'history', acts: [] });
     if (gaps.length) out.push({ key: 'weather-gaps', kind: 'weather', severity: 'note', score: 1, title: `The weather has hours missing`, detail: `${listed(gaps)}: fewer than 24 hours on record.`, look: 'history', acts: ['notify'] });
+  }
+
+  // The classifier (ADR 0014 §5): today's kept rows against the like days' rows of the sample, under a gate whose
+  // classifier is on; told as unusual at most under the layer's defaults (learned). Nothing with too few rows a side.
+  if (options.apart && judge.checks && judge.checks.classifier !== 'off') {
+    const { sample, today } = options.apart;
+    const days = likeDays(sample, day, judge.pattern, (d) => !h.learnsFrom(d));
+    const reference = sampleRows(sample, days);
+    const found = tellApart(today, reference, sample.columns, sample.kinds, { days: days.length, seed: 2017, leaveOut: new Set(clockColumns(sample, days)) });
+    // Told at an AUC of 0.7 and four standard errors over chance (and over what random labels reach): a slow drift
+    // tells days apart a little, and a little is not news.
+    if (found && found.z >= 4 && found.auc >= 0.7 && found.auc > found.floor + 0.05) {
+      const top = found.columns.slice(0, 2);
+      const share = Math.round(top.reduce((t, c) => t + c.share, 0) * 100);
+      const said = top.map((c) => names.column(c.column)).join(' and ');
+      out.push({
+        key: 'apart', kind: 'apart', severity: found.z >= 6 && found.auc >= 0.8 ? 'alert' : 'warn', score: Math.min(99, found.z), title: `Rows unlike earlier days: AUC ${found.auc.toFixed(2)}`,
+        detail: `${sentence(said)} explain ${share}% of what tells today’s ${noun()} from ${found.days} earlier days’ (${fmtInt(found.n)} a side; chance reaches ${found.floor.toFixed(2)}).`,
+        look: 'rows', columns: top.map((c) => c.column), value: found.auc, rows: today.length, apart: found, acts: ['expected', 'notify'],
+      });
+    }
   }
 
   // The gate's rule on each finding (ADR 0014 §2, Q-114): under a check that warns, something wrong is unusual at most

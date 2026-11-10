@@ -18,6 +18,10 @@
  * - the contradiction holds on the posture's dependency; the scope days hold on the WAF's and TLS's scope rule;
  * - the posture no longer repeats a control's finding as its own: a column named for a source is the source's to judge,
  *   and a wrong source explains the step's day.
+ * Slice 4 (the kept sample and the classifier):
+ * - every watch has a sample of its last eight weeks beside its history; the classifier holds nothing, is quiet on the
+ *   look-alike days and the calm days, and speaks as unusual where a day's rows are unlike the like days' (the
+ *   vulnerability file on Patch Tuesday, when the month's findings land).
  * - still wrong against the key: the pentest cluster holds by the bad value and the DR problem by the new value,
  *   since with two and a half months of history neither control has had twenty due dates for the due check to
  *   learn from (the app's year of history judges both; the test's base is short for speed); the refused file is a
@@ -131,6 +135,27 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(said(plusDays(ESTATE_PLANTED.drLate, 2), 'dr_exercise')).toMatch(/^Rto_met no: 2\d%$/);
     // What a control's file says is the control's to tell (slice 3): the posture holds on none of these days.
     for (const day of [plusDays(ESTATE_PLANTED.vulnCluster, 1), plusDays(ESTATE_PLANTED.pentestCluster, 1), plusDays(ESTATE_PLANTED.reviewCluster, 1), plusDays(ESTATE_PLANTED.drLate, 1)]) expect(said(day, 'posture'), day).toBeNull();
+  });
+
+  it('keeps a sample of every watch, and the classifier warns where a day’s rows are unlike the like days’ but never holds (slice 4)', () => {
+    for (const id of ESTATE_WATCHES) {
+      expect(w.samples[id]!.days.length, id).toBeGreaterThanOrEqual(50);
+      expect(w.samples[id]!.rows.at(-1)!.length, id).toBeGreaterThan(0);
+      expect(w.samples[id]!.rows.at(-1)!.length, id).toBeLessThanOrEqual(id === 'posture' ? 600 : 200);
+    }
+    for (let day = '2024-03-01'; day <= '2024-03-31'; day = plusDays(day, 1)) {
+      const r = w.results.get(day);
+      if (!r || r instanceof Error) continue;
+      expect(r.holds.some((h) => h.said.startsWith('Rows unlike')), day).toBe(false);
+    }
+    // Patch Tuesday: the month's findings land, and the vulnerability file's rows are unlike the month before's.
+    expect(claim(ESTATE_PLANTED.collapse, 'vuln_sla')).toMatchObject({ state: 'unusual' });
+    expect(claim(ESTATE_PLANTED.collapse, 'vuln_sla')!.head).toMatch(/^Rows unlike earlier days: AUC 0\.[78]\d$/);
+    // The look-alike days and the calm days: no word from it.
+    for (const [day, source] of [[plusDays(ESTATE_PLANTED.vulnCluster, 1), 'vuln_sla'], [plusDays(ESTATE_PLANTED.pentestCluster, 1), 'pentest'], ['2024-03-06', 'tls'], ['2024-03-20', 'backup'], ['2024-03-28', 'posture']] as const) {
+      const c = claim(day, source);
+      expect(c?.head ?? '', `${source} ${day}`).not.toMatch(/^Rows unlike/);
+    }
   });
 
   it('holds the contradiction day on the posture’s dependency rule alone, said with the rule (slice 3)', () => {

@@ -205,7 +205,7 @@ export const ACT_VERB: Record<Act, string> = {
 };
 
 /** The health row's cells (ADR 0008 §6), in order, each with the kinds of finding it holds and its name on screen. */
-export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'band', 'due', 'scope', 'needs', 'new', 'pair', 'combo', 'unlike', 'missing'], shape: ['shape'] };
+export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'band', 'due', 'scope', 'needs', 'new', 'pair', 'combo', 'unlike', 'apart', 'missing'], shape: ['shape'] };
 export const CELL_NAMES: Record<Cell, string> = { file: 'File', amount: 'Amount', hours: 'Hours', values: 'Values', shape: 'Shape' };
 /** The health row's heading: what the five cells are, said once and counted at a glance. */
 export const HEALTH_HEAD = 'Health';
@@ -216,7 +216,7 @@ export const SETTLE_LINE = 'Total in range · nothing to do';
 
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const VALUE_KINDS = new Set<Finding['kind']>(['gone', 'share', 'missing']);
-const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'combo', 'unlike', 'band', 'due', 'scope', 'needs', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
+const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'combo', 'unlike', 'apart', 'band', 'due', 'scope', 'needs', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const worst = (xs: readonly Severity[]): Severity => xs.reduce<Severity>((a, b) => (RANK[b] < RANK[a] ? b : a), 'ok');
 const weekdayOf = (day: string) => WEEKDAYS[new Date(`${day}T12:00:00Z`).getUTCDay()]!;

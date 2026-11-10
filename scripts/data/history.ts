@@ -8,7 +8,9 @@
  *
  *   node scripts/data/history.mjs --flow DOC --watch SOURCE --files LIST.json [--bind DATA.json]
  *        [--count a,b] [--follow c,d] [--pair a,b] [--time COLUMN] [--zone ZONE] [--param name={slot}|{slot:7}|value]
- *        [--fixed source=path …] OUT.json                 a fixed source's file (an inventory a gate's scope reads, ADR 0014 §4)
+ *        [--fixed source=path …] [--sample SAMPLE.json] OUT.json
+ *   --fixed: a fixed source's file (an inventory a gate's scope reads, ADR 0014 §4); --sample: write the kept sample
+ *   beside the history (ADR 0014 §5: the last eight weeks' loads, a few hundred rows each, stratified by the counted columns)
  *   node scripts/data/history.mjs DAYS_DIR OUT.json      the taxi example, as before: its trips, its legacy columns
  *
  * LIST.json is `[{ "file": path, "slot": "2024-01-31" }, …]`. DATA.json is the flow's bindings (default
@@ -27,7 +29,8 @@ import io from '@smaltdb/io';
 import external from '@smaltdb/external';
 import parquet from '@smaltdb/parquet';
 import smaltfl from '../../src/plugin/index.js';
-import { measureLoad, pinFile, runFlow, translate, type FlowDocument, type WatchDef } from '../../src/index.js';
+import { measureLoad, pinFile, runFlow, sampleLoad, translate, type FlowDocument, type WatchDef } from '../../src/index.js';
+import { appendSample, emptySample, SAMPLE_KEEP } from '../../src/core/apart.js';
 import { bindingsPath, readFlow } from '../flow.js';
 import { type DayError, type HistoryFile } from '../../src/core/history.js';
 import { appendPeriods, checksOf, emptyHistory, SAMPLE, settingsFor, watchColumns, type MeasureSettings, type Measures } from '../../src/core/measures.js';
@@ -70,6 +73,14 @@ interface Job {
   /** Fixed sources' files (`--fixed id=path`): the inventory a gate's scope rule reads (ADR 0014 §4), pinned beside
    * each load in source mode. */
   fixed: Record<string, string>;
+  /** Whether each load's kept rows are taken too (`--sample`), for the sample file beside the history (ADR 0014 §5). */
+  sample: boolean;
+}
+
+/** What a worker says of a load: its measures, and its kept rows when the job keeps a sample. */
+interface Measured {
+  measures: Measures;
+  kept?: unknown[][];
 }
 
 /** A parameter's value for a load: `{slot}`, `{slot:N}` (its first N characters), or as written. */
@@ -96,7 +107,7 @@ function rulesFor(plan: Awaited<ReturnType<typeof translate>>, node: number, ste
   return { ...(st?.due ? { due: st.due } : {}), ...(st?.scope ? { scope: st.scope } : {}), ...(st?.needs?.length ? { needs: st.needs } : {}) };
 }
 
-async function measure(job: Job, load: LoadFiles): Promise<Measures> {
+async function measure(job: Job, load: LoadFiles): Promise<Measured> {
   const db = Database.openMemory({ plugins: [io, external, parquet, smaltfl] });
   try {
     const values = valuesFor(job, load.slot);
@@ -114,7 +125,8 @@ async function measure(job: Job, load: LoadFiles): Promise<Measures> {
       }
       const node = plan.nodes.findIndex((n) => n.op === 'table' && n.origin === job.source);
       const c = checksOf(plan, node, job.doc.steps);
-      return await measureLoad(db, job.binding.table, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null, ...rulesFor(plan, node, job.doc.steps) });
+      const measures = await measureLoad(db, job.binding.table, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null, ...rulesFor(plan, node, job.doc.steps) });
+      return { measures, ...(job.sample ? { kept: (await sampleLoad(db, job.binding.table, { keep: SAMPLE_KEEP, strata: job.settings.counted })).rows } : {}) };
     }
     for (const [source, b] of Object.entries(job.bindings)) {
       const path = load.files?.[source];
@@ -128,7 +140,8 @@ async function measure(job: Job, load: LoadFiles): Promise<Measures> {
     if (!r.published.includes(job.source)) throw new Error(`${load.slot}: the run didn't publish ${job.source}`);
     const node = plan.nodes.findIndex((n) => n.origin === job.source);
     const c = checksOf(plan, node, job.doc.steps);
-    return await measureLoad(db, job.source, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null, ...rulesFor(plan, node, job.doc.steps) });
+    const measures = await measureLoad(db, job.source, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null, ...rulesFor(plan, node, job.doc.steps) });
+    return { measures, ...(job.sample ? { kept: (await sampleLoad(db, job.source, { keep: SAMPLE_KEEP, strata: job.settings.counted })).rows } : {}) };
   } finally {
     db.close();
   }
@@ -148,7 +161,7 @@ async function worker(): Promise<void> {
 const list = (v: string | undefined) => (v === undefined ? undefined : v.split(',').map((x) => x.trim()).filter(Boolean));
 
 /** What to build, from the arguments. */
-async function jobOf(args: string[]): Promise<{ job: Job; out: string }> {
+async function jobOf(args: string[]): Promise<{ job: Job; out: string; samplePath?: string }> {
   const flags = new Map<string, string[]>();
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -199,26 +212,30 @@ async function jobOf(args: string[]): Promise<{ job: Job; out: string }> {
     if (at <= 0) throw new Error(`--fixed names a source and its file: --fixed apps=path/to/apps.csv (got ${f})`);
     return [f.slice(0, at), f.slice(at + 1)];
   }));
-  return { job: { doc, source, binding, bindings: data.sources, settings: { source, every: 'day', counted: [...new Set(count)], followed: [...new Set(follow)], paired: [...new Set(pair)], time: one('time') ?? w?.time ?? null, zone: one('zone') ?? w?.zone ?? null, sample: SAMPLE }, params, files, fixed }, out };
+  return { job: { doc, source, binding, bindings: data.sources, settings: { source, every: 'day', counted: [...new Set(count)], followed: [...new Set(follow)], paired: [...new Set(pair)], time: one('time') ?? w?.time ?? null, zone: one('zone') ?? w?.zone ?? null, sample: SAMPLE }, params, files, fixed, sample: one('sample') !== undefined }, out, samplePath: one('sample') };
 }
 
 async function main(): Promise<void> {
-  const { job, out } = await jobOf(process.argv.slice(2));
+  const { job, out, samplePath } = await jobOf(process.argv.slice(2));
   const files = [...job.files].sort((a, b) => (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0));
   if (!files.length) throw new Error('no loads to measure');
   const n = Math.max(1, Math.min(availableParallelism(), files.length));
   const started = Date.now();
   const results: Measures[] = [];
+  const kept = new Map<string, unknown[][]>();
   const failures: DayError[] = [];
   await Promise.all(Array.from({ length: n }, (_, w) => new Promise<void>((resolve, reject) => {
     // Every n-th load to each worker, so each has loads from the whole span.
     const mine = files.filter((_, k) => k % n === w);
     const t = new Worker(new URL(import.meta.url), { workerData: { job, mine } });
-    t.on('message', (d: Measures | DayError) => {
+    t.on('message', (d: Measured | DayError) => {
       if ('error' in d) {
         failures.push(d);
         console.log(`${d.day}: not measured: ${d.error}`);
-      } else results.push(d);
+      } else {
+        results.push(d.measures);
+        if (d.kept) kept.set(d.measures.slot, d.kept);
+      }
       const done = results.length + failures.length;
       if (done % 25 === 0 || done === files.length) console.log(`${done} of ${files.length} loads (${((Date.now() - started) / 1000).toFixed(0)} s)`);
     });
@@ -250,6 +267,15 @@ async function main(): Promise<void> {
   const text = JSON.stringify(history) + '\n';
   if (text.length > LIMIT) throw new Error(`${out} would be ${(text.length / 1048576).toFixed(1)} MB, past the ${LIMIT / 1048576} MB a page fetches`);
   writeFileSync(out, text);
+  // The kept sample (ADR 0014 §5): the last eight weeks' loads' kept rows, in the loads' columns.
+  if (samplePath) {
+    let sampleFile = emptySample({ flow: job.doc.id, source: job.source, columns: first.columns, kinds, keep: SAMPLE_KEEP });
+    for (const r of results) if (kept.has(r.slot)) sampleFile = appendSample(sampleFile, r.slot, kept.get(r.slot)!);
+    const sampleText = JSON.stringify(sampleFile) + '\n';
+    if (sampleText.length > LIMIT) throw new Error(`${samplePath} would be ${(sampleText.length / 1048576).toFixed(1)} MB, past the ${LIMIT / 1048576} MB a page fetches`);
+    writeFileSync(samplePath, sampleText);
+    console.log(`${samplePath}: ${sampleFile.days.length} days' kept rows of ${job.source}, ${(sampleText.length / 1048576).toFixed(2)} MB`);
+  }
   console.log(`${out}: ${results.length} loads of ${job.source}, ${history.days[0]} to ${history.days.at(-1)}, ${(text.length / 1048576).toFixed(2)} MB, in ${((Date.now() - started) / 1000).toFixed(0)} s on ${n} threads`);
 }
 

@@ -71,6 +71,9 @@ export interface VerifyOptions extends RunOptions {
 export interface RunResult {
   /** The run's number in this database. */
   run: number;
+  /** Watched steps' kept rows (ADR 0014 §5), by step, where a sample is pinned for the step: the page appends them to
+   * the step's sample. */
+  kept?: Record<string, unknown[][]>;
   /** The manifest's hash. */
   hash: string;
   manifest: RunManifest;

@@ -854,7 +854,7 @@
       },
       "vuln_sla": {
         "history": "history.vuln_sla.json",
-        "pattern": "none"
+        "pattern": "monthly"
       },
       "mfa": {
         "history": "history.mfa.json",

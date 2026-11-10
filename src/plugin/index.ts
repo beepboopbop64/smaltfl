@@ -31,6 +31,7 @@ import type { RunManifest } from '../core/manifest.js';
 import { PLUGIN_NAME, type RunOptions, type VerifyOptions } from '../core/protocol.js';
 import { act, listEdits, verifyEdits, type ActInput } from './actions.js';
 import { measure } from './measure.js';
+import { sample } from './sample.js';
 import { pin, pinnedSource } from './pinned.js';
 import { release } from './release.js';
 import { RunError, runPlan } from './runtime.js';
@@ -54,6 +55,7 @@ const smaltfl: SmaltPlugin = {
     host.addMethod('release', (ctx, [input]) => release(ctx.db, input));
     host.addMethod('verify', (ctx, [run, options]) => verifyRun(ctx.db, Number(run), options as VerifyOptions, ctx.signal));
     host.addMethod('measure', (ctx, [input]) => measure(ctx.db, input));
+    host.addMethod('sample', (ctx, [input]) => sample(ctx.db, input));
     host.addMethod('pin', (_ctx, [name, bytes, sha256]) => pin(name, bytes, sha256));
     host.addMethod('act', (ctx, [input]) => act(ctx.db, input as ActInput));
     host.addMethod('edits', (ctx) => listEdits(ctx.db));

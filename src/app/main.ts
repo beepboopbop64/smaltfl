@@ -42,7 +42,8 @@ import { flowHash, isPublish2, planPeriod, translate, type Column, type FlowPlan
 import { checksOver, clockText, columnSql, fillGaps, growForest, isolationPath, madsOf, minuteOfDay, needOf, needWords, pathLength, principalComponents, profileColumn, quantile, renamesOf, scoreOf, secondsText, suggestChecks, unusual, type Cut, type Drift, type Forest, type Judge, type Profile, type Suggestion, type Unusual } from '../core/quality.js';
 import type { ReleaseResult, RunResult, TellFor, VerifyLevel, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
-import { measureLoad, pinFile, releaseRun, runFlow, verifyRun } from '../index.js';
+import { measureLoad, pinFile, releaseRun, runFlow, sampleLoad, verifyRun } from '../index.js';
+import { appendSample, isSample, SAMPLE_KEEP, samplePath, type SampleFile } from '../core/apart.js';
 import { appendPeriods, hourValuesOf, settingsFor, tailBefore, type Measures } from '../core/measures.js';
 import { utf8 } from '../core/hash.js';
 import { describe as describeFile, severityOf as fileSeverity, type FileCheck } from '../core/integrity.js';
@@ -2980,7 +2981,8 @@ function loadFindings(id: string, day: string): Finding[] {
   if (id === loadSource()) return dayNews(day);
   const h = rangesForLoad(id);
   if (!h || !h.file.days.includes(day)) return [];
-  return newsOf(h, day, flowNames(state.doc, id), { checks: countedChecks(state.doc, h, id), judge: judgeOf(state.doc, id) });
+  const apart = apartFor(id, day);
+  return newsOf(h, day, flowNames(state.doc, id), { checks: countedChecks(state.doc, h, id), judge: judgeOf(state.doc, id), ...(apart ? { apart } : {}) });
 }
 
 /**
@@ -3006,6 +3008,7 @@ async function checksTab(card: string, id: string): Promise<HTMLElement> {
     const worst = mine[0];
     const today: Child = mode === 'off' ? h('span', { class: 'ch-quiet' }, 'off')
       : !JUDGED.has(name) ? h('span', { class: 'ch-quiet' }, 'not judged in this build')
+      : name === 'classifier' && !samples.has(id) ? h('span', { class: 'ch-quiet' }, 'no kept sample for it: nothing to learn from')
       : !judged ? h('span', { class: 'ch-quiet' }, 'no day to judge')
       : worst ? h('span', { class: 'ch-found' },
         ...mine.slice(0, 3).map((f) => h('button', { type: 'button', class: `ch-today ${f.severity}`, onclick: () => (openTab(card, 'news'), void Promise.resolve().then(() => document.getElementById(`finding-${f.key}`)?.scrollIntoView({ block: 'center' }))) }, glyphEl(f.severity === 'ok' ? 'publish' : f.severity, 14), ` ${f.title}`)),
@@ -3416,13 +3419,14 @@ function storyFor(day: string): Story | null {
   const own = loaded && gate && !state.failed ? onScreen() : undefined;
   const held = loaded && gate && ((state.failed && !state.failed.file && state.failed.origin === gate.step) || own?.result.holds.some((x) => x.by === 'checks' && x.origin === gate.step)) ? true : undefined;
   const refused = loaded && !!state.failed?.file;
-  const key = `${day}|${checksAsCounted()}|${dataLog.version}|${[...hidden].sort().join(',')}|${held ?? ''}|${refused}|${byHour ? byHour.column : ''}|${upstreamFor(day).map((u) => `${u.source}=${u.state}`).join(',')}`;
+  const key = `${day}|${checksAsCounted()}|${dataLog.version}|${[...hidden].sort().join(',')}|${held ?? ''}|${refused}|${byHour ? byHour.column : ''}|${upstreamFor(day).map((u) => `${u.source}=${u.state}`).join(',')}|${apartFor(loadSource() ?? '', day) ? samples.get(loadSource() ?? '')!.days.length : ''}`;
   let told = storyCache.get(key);
   if (!told) {
     // Judged as the document says (ADR 0010 §10): the watch's settings and the marks on its source; a legacy watch's are
     // the settings every flow had.
     const judge = judgeOf(state.doc, loadSource() ?? '');
-    const found = newsOf(history, day, NEWS_NAMES, { checks: checksAsCounted(), judge });
+    const apart = apartFor(loadSource() ?? '', day);
+    const found = newsOf(history, day, NEWS_NAMES, { checks: checksAsCounted(), judge, ...(apart ? { apart } : {}) });
     const acknowledged = new Set(found.filter((f) => logOf(day, f.key).some((e) => e.act === 'expected')).map((f) => f.key));
     // What the other watched loads said of the day (ADR 0014 §2): a finding of the judged step that repeats a source's
     // follows from it.
@@ -8288,6 +8292,24 @@ let historyPin: HistoryRef | null = null;
 let baseHistory: HistoryFile | null = null;
 /** Every watch's base history and its pin (ADR 0013 §5), by watched id: the judged one's is `baseHistory`. */
 const bases = new Map<string, { file: HistoryFile; ref: HistoryRef }>();
+/** Each watched node's kept sample (ADR 0014 §5), by id: the build's, with the days run in this browser appended. */
+const samples = new Map<string, SampleFile>();
+/** The kept rows of each load run in this browser (ADR 0014 §5), by watched id and day: the classifier's today. */
+const keptRows = new Map<string, Map<string, unknown[][]>>();
+/** A day's kept rows added to a node's sample, once, in order; a day out of order is kept for its own story only. */
+function keepDay(id: string, day: string, rows: unknown[][]): void {
+  const mine = keptRows.get(id) ?? new Map<string, unknown[][]>();
+  if (!mine.has(day)) mine.set(day, rows);
+  keptRows.set(id, mine);
+  const file = samples.get(id);
+  if (file && !file.days.includes(day) && (file.days.length === 0 || day > file.days.at(-1)!)) samples.set(id, appendSample(file, day, rows));
+}
+/** The classifier's rows for a node's day (ADR 0014 §5): its sample and the day's kept rows, where both are had. */
+function apartFor(id: string, day: string): { sample: SampleFile; today: unknown[][] } | undefined {
+  const sample = samples.get(id);
+  const today = keptRows.get(id)?.get(day);
+  return sample && today ? { sample, today } : undefined;
+}
 /**
  * Each watched source's tail (ADR 0010 §6, C5): the measures of its loads the base lacks, from their own runs in this
  * browser, one a slot (the first to arrive), rebuilt from the record when the page opens. A derived run adds none.
@@ -8393,6 +8415,9 @@ async function claimsForRun(engine: Engine, day: string | undefined, parameters:
       // history and tail pinned under the watch's names and what the record says; its tail is pinned here.
       const tail = tailBefore(tails.get(source) ?? [], day);
       await pinFile(engine, tailPath(source), tail.length ? utf8(canonicalJSON(tail as unknown as Parameters<typeof canonicalJSON>[0])) : null);
+      // The step's sample with the days run here appended (ADR 0014 §5), pinned again, so the engine's reference is current.
+      const sample = samples.get(source);
+      if (sample) await pinFile(engine, samplePath(source), utf8(JSON.stringify(sample)));
       tell[source] = { skip: recordedSkips(), levels: levelsOf(ledger?.entries ?? [], source) };
       continue;
     }
@@ -8402,7 +8427,15 @@ async function claimsForRun(engine: Engine, day: string | undefined, parameters:
     if (!settings) continue;
     const m = await measureLoad(engine, b.table, settings);
     measuring.push(m);
-    const told = await loadClaim({ doc: state.doc, source, flow: plan.flow.hash, base: ref ? base : null, baseRef: ref, tail: tails.get(source) ?? [], measures: m, settings, skip: recordedSkips(), levels: levelsOf(ledger?.entries ?? [], source), build: BUILD_COMMIT });
+    // The load's kept rows (ADR 0014 §5), where the node keeps a sample: the classifier's today, told with the claim.
+    let kept: unknown[][] | undefined;
+    if (samples.has(source)) {
+      kept = (await sampleLoad(engine, b.table, { keep: SAMPLE_KEEP, strata: settings.counted })).rows;
+      const mine = keptRows.get(source) ?? new Map<string, unknown[][]>();
+      mine.set(day, kept);
+      keptRows.set(source, mine);
+    }
+    const told = await loadClaim({ doc: state.doc, source, flow: plan.flow.hash, base: ref ? base : null, baseRef: ref, tail: tails.get(source) ?? [], measures: m, settings, skip: recordedSkips(), levels: levelsOf(ledger?.entries ?? [], source), build: BUILD_COMMIT, ...(kept && samples.get(source) ? { sample: samples.get(source)!, kept } : {}) });
     await pinFile(engine, tailPath(source), told?.tail.length ? utf8(canonicalJSON(told.tail as unknown as Parameters<typeof canonicalJSON>[0])) : null);
     const key = `${day}|${source}|${flowHistory ? countedChecks(state.doc, flowHistory, source) : false}`;
     claims.set(key, told?.claim ?? null);
@@ -8983,6 +9016,16 @@ async function run(): Promise<void> {
     state.runs.unshift(rec);
     // Each watched load's measures to its source's tail, the first time its slot runs (C5).
     for (const m of result.measures ?? []) addToTail(m);
+    // Each load's kept rows to its node's sample (ADR 0014 §5): the sources' as the page kept them, the steps' as the
+    // engine did.
+    for (const m of result.measures ?? []) {
+      const rows = keptRows.get(m.source)?.get(m.slot);
+      if (rows) keepDay(m.source, m.slot, rows);
+    }
+    for (const [id, rows] of Object.entries(result.kept ?? {})) {
+      const m = result.measures?.find((x) => x.source === id);
+      if (m) keepDay(id, m.slot, rows);
+    }
     noteShown(rec, result.published);
     // What is shown is what ran: after a refused day, a run on the day still pinned shows that day.
     if (loads.pinned >= 0) loads.at = loads.pinned;
@@ -10290,6 +10333,16 @@ async function start(): Promise<void> {
       const ref = { path: pin.name, sha256: pin.sha256, bytes: pin.bytes };
       bases.set(id, { file, ref });
       if (id === watched && flowHistory) historyPin = ref;
+    }
+    // Each kept sample (ADR 0014 §5), checked, kept here and pinned for the engine under the node's sample path, so a
+    // watched step's claim reads it; a source's classifier runs here, from the same file.
+    for (const [id, entry] of Object.entries(list.samples)) {
+      if (!state.doc.publish?.watch || !Object.keys(state.doc.publish.watch).some((w) => w.toLowerCase() === id.toLowerCase())) continue;
+      const bytes = await checked(entry.path, entry);
+      const file = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      if (!isSample(file)) continue;
+      samples.set(id, file);
+      await pinFile(engine, samplePath(id), bytes, entry.sha256);
     }
     if (first) loads.pinned = 0;
     if (first) loads.at = 0;

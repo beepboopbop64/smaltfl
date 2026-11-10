@@ -19,7 +19,8 @@ import type { HistoryFile } from '../../src/core/history.js';
 import { loadClaim, tailPath, type Claim, type HistoryRef, type StoryClaim2 } from '../../src/core/hold.js';
 import { appendPeriods, emptyHistory, settingsFor, tailBefore, watchColumns, type Measures } from '../../src/core/measures.js';
 import type { RunResult } from '../../src/core/protocol.js';
-import { measureLoad, pinFile, runFlow, translate } from '../../src/index.js';
+import { measureLoad, pinFile, runFlow, sampleLoad, translate } from '../../src/index.js';
+import { appendSample, emptySample, SAMPLE_KEEP, samplePath, type SampleFile } from '../../src/core/apart.js';
 import { pinnedDdl, type DataBindings } from '../../examples/sources.js';
 import { appsCsv, csvOf, ESTATE_CONTROLS, estateApps, estateRows, type EstateApp, type EstateOptions } from '../fixtures/estate.js';
 import { SMALTDB } from './engine.js';
@@ -33,6 +34,8 @@ export interface EstateWorld {
   db: Database;
   apps: EstateApp[];
   bases: Record<string, HistoryFile>;
+  /** Each watch's kept sample (ADR 0014 §5): the base's days, with each load's kept rows appended as it arrives. */
+  samples: Record<string, SampleFile>;
   /** Each day's run, or the error that stopped it (a file the engine refused). */
   results: Map<string, RunResult | Error>;
   /** Each day's claims as the page told them for the controls, by source. */
@@ -51,6 +54,7 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
   const db = Database.openMemory({ plugins: [io, external, smaltfl] });
   const apps = estateApps(o);
   const bases: Record<string, HistoryFile> = {};
+  const samples: Record<string, SampleFile> = {};
   const refs: Record<string, HistoryRef> = {};
   const tails: Record<string, Measures[]> = Object.fromEntries(ESTATE_WATCHES.map((w) => [w, []]));
   const results = new Map<string, RunResult | Error>();
@@ -78,21 +82,29 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     const claims: Claim[] = [];
     const told: Record<string, StoryClaim2 | null> = {};
     const measured: Record<string, Measures> = {};
+    const kept: Record<string, unknown[][]> = {};
     for (const c of ESTATE_CONTROLS) {
       const { plan, s } = await settingsOf(day, c);
       const m = await measureLoad(db, `${c}_file`, s);
       measured[c] = m;
       await pinTail(c);
-      const t = await loadClaim({ doc, source: c, flow: plan.flow.hash, base: bases[c]!, baseRef: refs[c]!, tail: tails[c]!, measures: m, settings: s, skip: [], build: 'dev' });
+      // The load's kept rows (ADR 0014 §5): the classifier's today, against the sample's like days.
+      kept[c] = (await sampleLoad(db, `${c}_file`, { keep: SAMPLE_KEEP, strata: s.counted })).rows;
+      const t = await loadClaim({ doc, source: c, flow: plan.flow.hash, base: bases[c]!, baseRef: refs[c]!, tail: tails[c]!, measures: m, settings: s, skip: [], build: 'dev', sample: samples[c]!, kept: kept[c] });
       told[c] = t?.claim ?? null;
       if (t) claims.push(t.claim);
     }
     claimsTold.set(day, told);
     await pinTail('posture');
+    await pinFile(db, samplePath('posture'), utf8(JSON.stringify(samples.posture)));
     const r = await runFlow(db, doc, { smaltdb: SMALTDB, parameters: { day }, claims, tell: { posture: { skip: [], levels: [] } } });
-    for (const c of ESTATE_CONTROLS) tails[c]!.push(measured[c]!);
+    for (const c of ESTATE_CONTROLS) {
+      tails[c]!.push(measured[c]!);
+      samples[c] = appendSample(samples[c]!, day, kept[c]!);
+    }
     const p = r.measures?.find((m) => m.source === 'posture');
     if (p) tails.posture!.push(p);
+    if (r.kept?.posture) samples.posture = appendSample(samples.posture!, day, r.kept.posture);
     return r;
   };
 
@@ -101,12 +113,19 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
   const bare: FlowDocument = { ...doc };
   delete bare.publish;
   const periods: Record<string, Measures[]> = Object.fromEntries(ESTATE_WATCHES.map((w) => [w, []]));
+  const keptDays: Record<string, [string, unknown[][]][]> = Object.fromEntries(ESTATE_WATCHES.map((w) => [w, []]));
   for (let day = o.baseFrom; day <= o.baseTo; day = plusDays(day, 1)) {
     await pinDay(day);
-    for (const c of ESTATE_CONTROLS) periods[c]!.push(await measureLoad(db, `${c}_file`, (await settingsOf(day, c)).s));
+    for (const c of ESTATE_CONTROLS) {
+      const s = (await settingsOf(day, c)).s;
+      periods[c]!.push(await measureLoad(db, `${c}_file`, s));
+      keptDays[c]!.push([day, (await sampleLoad(db, `${c}_file`, { keep: SAMPLE_KEEP, strata: s.counted })).rows]);
+    }
     const r = await runFlow(db, bare, { smaltdb: SMALTDB, parameters: { day } });
     if (!r.published.includes('posture')) throw new Error(`${day}: the bare run didn't publish the posture`);
-    periods.posture!.push(await measureLoad(db, 'posture', (await settingsOf(day, 'posture')).s));
+    const ps = (await settingsOf(day, 'posture')).s;
+    periods.posture!.push(await measureLoad(db, 'posture', ps));
+    keptDays.posture!.push([day, (await sampleLoad(db, 'posture', { keep: SAMPLE_KEEP, strata: ps.counted })).rows]);
   }
   for (const w of ESTATE_WATCHES) {
     const ms = periods[w]!;
@@ -119,6 +138,9 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     const bytes = utf8(JSON.stringify(bases[w]));
     refs[w] = { path, sha256: await sha256Hex(bytes), bytes: bytes.byteLength };
     await pinFile(db, path, bytes, refs[w]!.sha256);
+    let sample = emptySample({ flow: doc.id, source: w, columns: m0.columns, kinds: m0.kinds });
+    for (const [day, rows] of keptDays[w]!) sample = appendSample(sample, day, rows);
+    samples[w] = sample;
   }
   for (let day = plusDays(o.baseTo, 1); day <= o.loadsTo; day = plusDays(day, 1)) {
     try {
@@ -128,7 +150,7 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     }
   }
   return {
-    doc, db, apps, bases, results, claims: claimsTold,
+    doc, db, apps, bases, samples, results, claims: claimsTold,
     result(day) {
       const r = results.get(day);
       if (!r || r instanceof Error) throw new Error(`${day}: ${r ? r.message : 'not run'}`);

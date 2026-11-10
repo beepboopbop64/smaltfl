@@ -6,6 +6,7 @@
  * step's tail path, the measures it has just taken of the built dataset, and what the page said of the record
  * (RunContext.tell: the days left out, the levels accepted). The claim then goes through the same judge as any.
  */
+import { isSample, samplePath, type SampleFile } from '../core/apart.js';
 import type { FlowDocument } from '../core/document.js';
 import { isHistory, type HistoryFile } from '../core/history.js';
 import { loadClaim, tailPath, type StoryClaim2 } from '../core/hold.js';
@@ -26,6 +27,8 @@ export interface TellInput {
   build: string;
   /** The claims the page told for the watched sources (ADR 0014 §2): what each said of the day. */
   upstream?: readonly { source: string; state: string; head: string }[];
+  /** The load's kept rows (ADR 0014 §5), for the classifier, with the sample pinned under `samplePath(source)`. */
+  kept?: readonly (readonly unknown[])[];
 }
 
 /** The pinned file's JSON, or undefined when none is pinned or it isn't JSON. */
@@ -57,6 +60,9 @@ export async function tellClaim(o: TellInput): Promise<{ claim: StoryClaim2 } | 
     }
     tail = t.value as Measures[];
   }
-  const told = await loadClaim({ doc: o.doc, source: o.source, flow: o.flow, base, baseRef: h ? { path: o.history, sha256: h.sha256, bytes: h.bytes } : null, tail, measures: o.measures, settings: o.settings, skip: o.tell.skip, levels: o.tell.levels, build: o.build, ...(o.upstream ? { upstream: o.upstream } : {}) });
+  // The sample pinned beside the history (ADR 0014 §5): the classifier's reference, with the load's own kept rows.
+  const sp = o.kept ? pinnedJSON(samplePath(o.source)) : undefined;
+  if (sp && !isSample(sp.value)) return { problem: `${samplePath(o.source)} is pinned but isn't a sample file` };
+  const told = await loadClaim({ doc: o.doc, source: o.source, flow: o.flow, base, baseRef: h ? { path: o.history, sha256: h.sha256, bytes: h.bytes } : null, tail, measures: o.measures, settings: o.settings, skip: o.tell.skip, levels: o.tell.levels, build: o.build, ...(o.upstream ? { upstream: o.upstream } : {}), ...(sp && o.kept ? { sample: sp.value as SampleFile, kept: o.kept } : {}) });
   return told ? { claim: told.claim } : { problem: `${o.source}'s load can't be judged against its history (its slot is in the base already, or before its last period, with other numbers)` };
 }

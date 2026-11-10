@@ -118,7 +118,10 @@ match smaltdb's `CLAUDE.md`.
   `NeedsRule`; the notebook resolves the datasets they name), counted in the engine (`emitScopeCounts`,
   `emitNeedsCounts`, `Measures.gate`, `HistoryFile.gate`), the `scope` and `needs` findings, and upstream attribution
   (`StoryOptions.upstream`: a step's finding about a source's column follows the source; a wrong source explains the
-  step's day). Slices 4 to 7 are ADR 0014's order.
+  step's day). Slice 4: the kept sample (`src/core/apart.ts` `SampleFile`, `keepSample`, `appendSample`; the plugin's
+  `sample` op and `sampleLoad`; the builder's `--sample`, loads.json `samples`, the app's `samples`/`keptRows`;
+  `RunResult.kept`) and the classifier (`tellApart`, `likeDays`, the `apart` finding, check `classifier`). Slices 5 to
+  7 are ADR 0014's order.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
@@ -131,7 +134,7 @@ match smaltdb's `CLAUDE.md`.
   the controls example; its Q-104 to Q-109 are the maintainers' to confirm. **Now:** [ADR 0014](docs/adr/0014-gates.md),
   gates (bronze, silver, gold checks as a `gate()` cell in the notebook, written bands and due marks in the ontology,
   scope and dependency rules, the classifier on a kept sample, a sealed gold), in its seven slices, judged against the
-  control estate's answer key (its §"The answer key"); slices 1 to 3 are built (its §"As built"), slices 4 to 7 follow
+  control estate's answer key (its §"The answer key"); slices 1 to 4 are built (its §"As built"), slices 5 to 7 follow
   in order.
 
 ## Rules for this repository
