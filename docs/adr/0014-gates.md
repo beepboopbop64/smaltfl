@@ -1,6 +1,6 @@
 # ADR 0014: Gates: bronze, silver and gold checks in the notebook, written bands and due dates in the ontology, a sealed gold
 
-- **Status:** accepted, 2026-11-09; slices 1 and 2 built 2026-11-10 (§"As built"), slices 3 to 7 in order. It records the
+- **Status:** accepted, 2026-11-09; slices 1 to 3 built 2026-11-10 (§"As built"), slices 4 to 7 in order. It records the
   maintainer's plan and answers of 2026-11-09 (Q-110 to Q-117, docs/OPEN_QUESTIONS.md), given after a survey of how
   layered data-quality checks are built and shown (§Sources). The control estate (ADR 0013 §8) is its answer key.
 - **Date:** 2026-11-09
@@ -290,6 +290,40 @@ and that no silver finding repeats a bronze cause.
   because in the test's short base neither control has had twenty due dates for the due check to learn from (the
   app, built on a year, judges both: Mar 16 publishes, Mar 23 holds as "Late: 30 of 49 due"); the posture repeats each
   control's finding as its own (slice 3); the contradiction day publishes (slice 3).
+
+### Slice 3 (2026-11-10): scope and dependency rules, counted in the engine; what the joins introduce is silver's own
+
+- **The rules in the gate** (`gate()`, `src/notebook.ts`; `GateDef.scope`, `GateDef.needs`, `gates.ts`): `scope: { of: apps,
+  key: 'app_id', where: "internet_facing = 'yes'", own? }`, the inventory named by its name in the notebook (a source of
+  the flow: the notebook reader resolves the name, `NameRef`, and refuses a step), its key column, the condition a
+  key in scope meets (SQL over the inventory, bound as any SQL is) and the node's own key column when it differs;
+  `needs: { when: { key_rotation: 'pass' }, then: { encryption: ['pass', 'exception', 'not_assessed'] } }`, a row
+  matching `when` must match `then` (a value may be a list; a blank never holds), within the row or, with `from` (a
+  source) and `key`, with `when` read on that source's row with the same key. plan/4's watch carries them (`scope` by
+  the inventory's table, `needs` with each dataset's table), validated.
+- **Counted in the engine** beside every other measure (`emitScopeCounts`, `emitNeedsCounts` in `emit.ts`; the
+  plugin's `measureTable`): the rows out of scope (a blank key among them), the keys in scope with no row, the keys in
+  scope, and each rule's contradictions; `Measures.gate`, `HistoryFile.gate` (only where the gate writes a rule), the
+  history builder and the test worlds keep them, and `scopeOut`, `scopeMissing` and `needs` are series. The judge
+  (`newsOf`) says them in words ("40 apps out of scope"; "50 in scope with no app"; "41 apps: key_rotation pass needs
+  encryption pass/exception/not_assessed"): something wrong at five rows or more past twice the usual high (or with no
+  history), a note for a few, since an inventory lags; a broken rule leads the day after a bad value, a band and a due
+  share (`story.ts`, `ruleLead`), so the scope creep reads as scope, not as more rows.
+- **Upstream attribution** (§2, §7): a watched step's story is told with what each watched source it reads said of the
+  day (`StoryOptions.upstream`; `loadClaim`'s `upstream`; the engine passes the page's claims to `tellClaim`, the app
+  the other loads' claims, `upstreamFor`). A finding about a column that carries a source's name (the posture's
+  `tls`, from the source `tls`) is that source's to tell, whatever its day said: it follows from the source (`tier:
+  follows`, `because: upstream:tls`) and is never loud here. When a source upstream had something wrong and the
+  step's rows moved, the step's whole day follows from it (its rows are its sources'), a written rule excepted. Only
+  what the joins introduce is silver's own: a dependency, a pair across datasets, the forest.
+- **The estate** writes a scope on TLS and the WAF (internet-facing applications of the inventory) and the dependency
+  on the posture (key rotation passing needs encryption passing, excepted or not assessed).
+- **Against the key** (`test/estate-flow.test.ts`): the contradiction day holds on the posture's `needs` ("41 apps:
+  key_rotation pass needs encryption pass/exception/not_assessed"); the scope days hold on the WAF's and TLS's scope
+  ("40 apps out of scope"; "50 in scope with no app"); the posture no longer repeats a control's finding as its own
+  (the empty MFA file, the doubled TLS file, the look-alike clusters hold or publish by the controls alone).
+  **Still wrong against the key:** the pentest cluster and the DR day, as in slice 2 (the short base); the refused
+  file (slice 7); nothing is sealed (slice 5).
 
 ## Sources (the survey of 2026-11-09)
 

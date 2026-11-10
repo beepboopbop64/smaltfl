@@ -29,7 +29,7 @@ export type CheckMode = (typeof CHECK_MODES)[number];
 export const WRITTEN: ReadonlySet<CheckName> = new Set<CheckName>(['schema', 'amount', 'blanks', 'values', 'rules', 'scope', 'needs', 'due', 'reconcile']);
 
 /** The checks this build judges: the others are named, switchable and not yet told (ADR 0014's slices 2 to 5). */
-export const JUDGED: ReadonlySet<CheckName> = new Set<CheckName>(['schema', 'amount', 'blanks', 'values', 'rules', 'due', 'shares', 'shape', 'hours', 'pairs', 'forest']);
+export const JUDGED: ReadonlySet<CheckName> = new Set<CheckName>(['schema', 'amount', 'blanks', 'values', 'rules', 'scope', 'needs', 'due', 'shares', 'shape', 'hours', 'pairs', 'forest']);
 
 /** What each check says, in a few words, for the Checks tab. */
 export const CHECK_SAID: Record<CheckName, string> = {
@@ -57,10 +57,38 @@ export const LAYER_DEFAULTS: Record<Layer, Record<CheckName, CheckMode>> = {
   gold: { schema: 'hold', amount: 'off', blanks: 'off', values: 'off', rules: 'hold', scope: 'off', needs: 'off', due: 'off', reconcile: 'hold', shares: 'off', shape: 'off', hours: 'off', pairs: 'off', forest: 'off', classifier: 'off' },
 };
 
-/** A gate as the document keeps it (ADR 0014 §1): its layer, and the checks it sets apart from the layer's defaults. */
+/** A gate as the document keeps it (ADR 0014 §1): its layer, the checks it sets apart from the layer's defaults, and
+ * its written rules (§4): the scope its rows must fall in, and what another value forbids. */
 export interface GateDef {
   layer: Layer;
   checks: Partial<Record<CheckName, CheckMode>>;
+  scope?: ScopeRule;
+  needs?: NeedsRule[];
+}
+
+/**
+ * The scope rule (ADR 0014 §4): the inventory (a source, by id), its key column, the key column of the gated node
+ * (`key` when they share a name) and the condition a key must meet to be in scope. The check counts the rows for keys
+ * out of scope and the keys in scope with no row.
+ */
+export interface ScopeRule {
+  of: string;
+  key: string;
+  where: string;
+  /** The gated node's own key column, when it isn't `key`. */
+  own?: string;
+}
+
+/**
+ * A dependency rule (ADR 0014 §4): a row that matches `when` must match `then`; one that doesn't is a contradiction,
+ * counted. Within the row, or, with `from` (a source, by id) and `key`, against the other dataset's row with the same
+ * key, `when` read there. A value may be one of several.
+ */
+export interface NeedsRule {
+  from?: string;
+  key?: string;
+  when: Record<string, string | string[]>;
+  then: Record<string, string | string[]>;
 }
 
 /** A gate with every check's mode filled in from its layer: what the plan carries and the judges read. */
@@ -135,6 +163,8 @@ export function checkOf(kind: Finding['kind']): CheckName | null {
     case 'new': return 'values';
     case 'band': return 'values';
     case 'due': return 'due';
+    case 'scope': return 'scope';
+    case 'needs': return 'needs';
     case 'missing': return 'blanks';
     case 'shape': return 'shape';
     case 'dropped': return 'rules';
@@ -168,7 +198,22 @@ export function gateProblems(g: unknown): string[] {
   const out: string[] = [];
   if (typeof g !== 'object' || g === null || Array.isArray(g)) return [`a gate is { layer: ${LAYERS.join(' | ')}, checks: { name: ${CHECK_MODES.join(' | ')} } }`];
   const r = g as Record<string, unknown>;
-  for (const k of Object.keys(r)) if (k !== 'layer' && k !== 'checks') out.push(`${k} isn't a gate's setting (layer, checks): refused rather than ignored`);
+  for (const k of Object.keys(r)) if (!['layer', 'checks', 'scope', 'needs'].includes(k)) out.push(`${k} isn't a gate's setting (layer, checks, scope, needs): refused rather than ignored`);
+  const values = (v: unknown) => typeof v === 'string' || (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string'));
+  const match = (m: unknown) => typeof m === 'object' && m !== null && !Array.isArray(m) && Object.keys(m).length > 0 && Object.values(m).every(values);
+  if (r.scope !== undefined) {
+    const sc = r.scope as Record<string, unknown> | null;
+    if (typeof sc !== 'object' || sc === null || Array.isArray(sc) || typeof sc.of !== 'string' || typeof sc.key !== 'string' || sc.key === '' || typeof sc.where !== 'string' || sc.where.trim() === '' || (sc.own !== undefined && (typeof sc.own !== 'string' || sc.own === '')) || Object.keys(sc).some((k) => !['of', 'key', 'where', 'own'].includes(k)))
+      out.push('scope is { of: a source, key, where, own? }: the inventory, its key column, the condition a key in scope meets, and the node’s own key column when it differs');
+  }
+  if (r.needs !== undefined) {
+    const list = Array.isArray(r.needs) ? r.needs : [r.needs];
+    list.forEach((n, i) => {
+      const x = n as Record<string, unknown> | null;
+      if (typeof x !== 'object' || x === null || Array.isArray(x) || !match(x.when) || !match(x.then) || (x.from !== undefined && typeof x.from !== 'string') || (x.key !== undefined && (typeof x.key !== 'string' || x.key === '')) || (x.from !== undefined && x.key === undefined) || Object.keys(x).some((k) => !['from', 'key', 'when', 'then'].includes(k)))
+        out.push(`needs${list.length > 1 ? `[${i}]` : ''} is { when: { column: value }, then: { column: value }, from?: a source, key? }: a row matching when must match then (a value may be a list), within the row or, with from and key, against the other dataset’s row with the same key`);
+    });
+  }
   if (!(LAYERS as readonly unknown[]).includes(r.layer)) out.push(`layer is one of ${LAYERS.join(', ')}`);
   if (r.checks !== undefined) {
     if (typeof r.checks !== 'object' || r.checks === null || Array.isArray(r.checks)) out.push(`checks is { name: ${CHECK_MODES.join(' | ')} }`);

@@ -155,6 +155,15 @@ export interface StoryOptions {
   acknowledged?: ReadonlySet<string>;
   /** Columns the viewer's policy removes: no finding, split or prediction is told from them. */
   hidden?: ReadonlySet<string>;
+  /**
+   * The watched sources upstream of this node, each with what its own day said (ADR 0014 §2, §7): a finding about a
+   * column that carries a source's name (the posture's `tls`, from the source `tls`) is that source's to tell, whatever
+   * its own day said: that source's gate judges the column, so it is told here as following from it ("because tls"),
+   * never counted twice; and when a source upstream had something wrong and the step's rows moved, the step's amount
+   * and what moved with it follow from the source. Only what the joins introduce is the step's own. Read only under a
+   * gate (`judge.checks`): a flow with no gate is judged as it always was (ADR 0013's controls example).
+   */
+  upstream?: readonly { source: string; state: string; head: string }[];
   /** Whether to look at the days before for an episode or a recovery (default true; a calendar of every day skips it). */
   episode?: boolean;
   /** How the source is judged (ADR 0010 §4, §8): the legacy form by default. */
@@ -196,7 +205,7 @@ export const ACT_VERB: Record<Act, string> = {
 };
 
 /** The health row's cells (ADR 0008 §6), in order, each with the kinds of finding it holds and its name on screen. */
-export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'band', 'due', 'new', 'pair', 'combo', 'unlike', 'missing'], shape: ['shape'] };
+export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'band', 'due', 'scope', 'needs', 'new', 'pair', 'combo', 'unlike', 'missing'], shape: ['shape'] };
 export const CELL_NAMES: Record<Cell, string> = { file: 'File', amount: 'Amount', hours: 'Hours', values: 'Values', shape: 'Shape' };
 /** The health row's heading: what the five cells are, said once and counted at a glance. */
 export const HEALTH_HEAD = 'Health';
@@ -207,7 +216,7 @@ export const SETTLE_LINE = 'Total in range · nothing to do';
 
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const VALUE_KINDS = new Set<Finding['kind']>(['gone', 'share', 'missing']);
-const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'combo', 'unlike', 'band', 'due', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
+const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'combo', 'unlike', 'band', 'due', 'scope', 'needs', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const worst = (xs: readonly Severity[]): Severity => xs.reduce<Severity>((a, b) => (RANK[b] < RANK[a] ? b : a), 'ok');
 const weekdayOf = (day: string) => WEEKDAYS[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
@@ -643,7 +652,13 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const live = findings.filter((f) => f.kind !== 'calm' && f.kind !== 'unlearned' && shown(f));
   const volume = live.find((f) => f.kind === 'volume') ?? null;
   const hoursF = live.find((f) => f.kind === 'hours') ?? null;
-  const loud = (f: Finding) => (f.severity === 'alert' || f.severity === 'warn') && !ack.has(f.key);
+  // Explained upstream (ADR 0014 §2): a finding about a column carrying a watched source's name on a day that source's
+  // own story wasn't calm is never loud here; it follows from the source.
+  const upstream = o.judge?.checks ? o.upstream : undefined;
+  const explained = (f: Finding): boolean => !!upstream?.length && f.kind !== 'needs' && f.kind !== 'scope'
+    && upstream.some((x) => [...(f.columns ?? []), ...(f.members ?? []).map((m) => m.column)].some((c) => c.toLowerCase() === x.source.toLowerCase() || c.toLowerCase().startsWith(`${x.source.toLowerCase()}_`)));
+  const loudRaw = (f: Finding) => (f.severity === 'alert' || f.severity === 'warn') && !ack.has(f.key);
+  const loud = (f: Finding) => loudRaw(f) && !explained(f);
   const valueStories = live.filter((f) => VALUE_KINDS.has(f.kind) && loud(f)).length;
   // A value marked bad that is something wrong leads the day (ADR 0010 §4, the owner: always alert, an incident): told
   // by its own finding unless a split leads with that value surging or vanishing.
@@ -659,7 +674,9 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const bandLead = live.filter((f) => f.kind === 'band' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
   // A due mark's late share beyond its usual (ADR 0014 §3) leads too: the lateness is the cause of the misses.
   const dueLead = live.filter((f) => f.kind === 'due' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
-  const lead = (badLead && badLead.kind !== 'band' ? badLead : null) ?? bandLead ?? dueLead ?? newLead ?? blankLead;
+  // A written rule broken (ADR 0014 §4) leads too: rows out of scope, or a contradiction, say more than the amount.
+  const ruleLead = live.filter((f) => (f.kind === 'scope' || f.kind === 'needs') && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  const lead = (badLead && badLead.kind !== 'band' ? badLead : null) ?? bandLead ?? dueLead ?? ruleLead ?? newLead ?? blankLead;
   const splitFound = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden, judge) : null;
   const split = splitFound && (!lead || (splitFound.bad && splitFound.kind !== 'held' && !blankLead)) ? splitFound : null;
   const gate = k >= 0 && o.step ? gateOf(h, day, o.step, o.limit ?? null) : null;
@@ -679,7 +696,15 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     : hoursF ? (hoursF.rows ?? 0)
     : volume && volume.range && volume.value !== undefined ? Math.abs(volume.value - volume.range.expected) : 0;
   const caused = !!(basis || hoursF || (volume && loud(volume)));
-  const hero: Hero = o.refused ? 'refused' : hoursF ? 'hours' : split ? 'split' : lead ? 'finding' : volume && loud(volume) ? 'amount' : gate?.held ? 'gate' : 'finding';
+  // A step's rows are its sources' (ADR 0014 §2): when a source upstream had something wrong on the day, the step's
+  // amount, and a bad value whose share is as usual but whose rows moved with the amount, follow from it.
+  const wrongUpstream = upstream?.find((u) => u.state === 'wrong' || u.state === 'refused') ?? null;
+  const viaRows = (f: Finding): string | null => {
+    if (!wrongUpstream || !volume || !loudRaw(volume)) return null;
+    if (f.kind === 'needs' || f.kind === 'scope') return null;
+    return `upstream:${wrongUpstream.source}`;
+  };
+  const hero: Hero = o.refused ? 'refused' : hoursF ? 'hours' : split ? 'split' : lead ? 'finding' : volume && loud(volume) && !viaRows(volume) ? 'amount' : gate?.held ? 'gate' : 'finding';
 
   // Tier each finding.
   const n = k >= 0 ? file.rows[k]! : 0;
@@ -712,8 +737,17 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const members = (f: Finding): { column: string; value: string }[] =>
     f.members?.map((m) => ({ column: m.column, value: m.value })) ?? (f.columns ?? []).map((c, i) => ({ column: c, value: f.values?.[i] ?? 'null' }));
   const blankCols = new Set(basis?.blank ?? []);
+  // What an upstream source's own day explains (ADR 0014 §2): a finding about a column named for it, when its story
+  // said something that day. Its key is the finding's `because`.
+  const upstreamOf = (f: Finding): string | null => {
+    if (!upstream?.length || f.kind === 'needs' || f.kind === 'scope') return null;
+    const columns = [...(f.columns ?? []), ...(f.members ?? []).map((m) => m.column)].map((c) => c.toLowerCase());
+    const u = upstream.find((x) => columns.some((c) => c === x.source.toLowerCase() || c.startsWith(`${x.source.toLowerCase()}_`)));
+    return u ? `upstream:${u.source}` : null;
+  };
   const tierOf = (f: Finding): { tier: Tier; predicted?: number } => {
     if (ack.has(f.key)) return { tier: 'note' };
+    if (upstreamOf(f) || viaRows(f)) return { tier: 'follows' };
     // A column gone blank: its values' shares falling away, and anything about its values, are the blanks (ADR 0013).
     if (blankLead && f !== blankLead && (f.columns ?? []).some((c) => blankLead.columns?.includes(c)) && f.kind !== 'new') return { tier: 'absorbed' };
     if (f === popFinding && population) return { tier: 'cause' };
@@ -755,7 +789,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const told: Told[] = live.map((f) => {
     const t = tierOf(f);
     const severity: Severity = t.tier === 'cause' || t.tier === 'standalone' ? f.severity : f.severity === 'ok' ? 'ok' : 'note';
-    return { ...f, severity, was: f.severity, tier: t.tier, ...(ack.has(f.key) ? { acknowledged: true } : {}), ...(t.predicted !== undefined ? { predicted: t.predicted } : {}), ...(t.tier === 'absorbed' || t.tier === 'follows' || t.tier === 'sameDay' ? { because: (hoursF ?? popFinding ?? volume)?.key ?? 'split' } : {}) };
+    const up = upstreamOf(f) ?? viaRows(f);
+    return { ...f, severity, was: f.severity, tier: t.tier, ...(ack.has(f.key) ? { acknowledged: true } : {}), ...(t.predicted !== undefined ? { predicted: t.predicted } : {}), ...(up ? { because: up } : t.tier === 'absorbed' || t.tier === 'follows' || t.tier === 'sameDay' ? { because: (hoursF ?? popFinding ?? volume)?.key ?? 'split' } : {}) };
   });
   const byRank = (a: Told, b: Told) => RANK[a.severity] - RANK[b.severity] || b.score - a.score;
   const standalone = told.filter((f) => f.tier === 'standalone').sort(byRank);

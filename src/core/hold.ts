@@ -242,14 +242,33 @@ export type FlowFor = Pick<FlowDocument, 'steps' | 'ontology' | 'publish' | 'cal
  * names): leaving incident days out is one browser's choice, not the flow's. It must have the flow's calendar for the
  * source.
  */
-export function flowStory(h: HistoryRanges, day: string, doc: FlowFor, source: string): Story {
+export function flowStory(h: HistoryRanges, day: string, doc: FlowFor, source: string, upstream?: readonly { source: string; state: string; head: string }[]): Story {
   if (h.skipped > 0) throw new Error("the flow's verdict learns from every day of the history but those the record leaves out: these ranges leave out days one viewer marked");
   const judge = judgeOf(doc, source);
   if (h.calendar.base !== judge.calendar.base) throw new Error(`the flow judges ${source} by the ${judge.calendar.base} calendar: these ranges were made with ${h.calendar.base}`);
   if (canonicalJSON(h.calendar as never) !== canonicalJSON(judge.calendar as never)) throw new Error(`the flow judges ${source} by its own calendar's days: these ranges were made with other days`);
   if (h.settings !== rangeSettings(rangesFor(doc, source))) throw new Error(`the flow judges ${source} by its watch's pattern and re-learning: these ranges were made with other settings`);
   const names = flowNames(doc, source);
-  return storyOf(h, day, newsOf(h, day, names, { checks: countedChecks(doc, h, source), judge }), { names, episode: false, judge });
+  // Only the sources this node reads may explain its findings (ADR 0014 §2).
+  const reads = upstream?.length ? new Set([...upstreamSources(doc, source)].map((x) => x.toLowerCase())) : null;
+  const up = reads ? upstream!.filter((u) => reads.has(u.source.toLowerCase())) : undefined;
+  return storyOf(h, day, newsOf(h, day, names, { checks: countedChecks(doc, h, source), judge }), { names, episode: false, judge, ...(up?.length ? { upstream: up } : {}) });
+}
+
+/** The sources a step reads, directly or through other steps; a source reads itself. */
+export function upstreamSources(doc: Pick<FlowDocument, 'steps'>, id: string): Set<string> {
+  const out = new Set<string>();
+  const seen = new Set<string>();
+  const stack = [id];
+  while (stack.length) {
+    const x = stack.pop()!;
+    if (seen.has(x.toLowerCase())) continue;
+    seen.add(x.toLowerCase());
+    const step = doc.steps.find((s) => s.id.toLowerCase() === x.toLowerCase());
+    if (!step) out.add(x);
+    else stack.push(...step.inputs);
+  }
+  return out;
 }
 
 /** The calendar a flow judges a watched source by (ADR 0010 §2): what its history's ranges must be made with. */
@@ -320,6 +339,9 @@ export interface LoadClaimInput {
   /** The levels the record accepted for the source (`levelsOf`). */
   levels?: readonly ClaimLevel[];
   build: string;
+  /** For a watched step (ADR 0014 §2): what each watched source upstream of it said of the day, so a finding that
+   * repeats a source's is told as following from it. */
+  upstream?: readonly { source: string; state: string; head: string }[];
 }
 
 /**
@@ -355,7 +377,7 @@ export async function loadClaim(o: LoadClaimInput): Promise<{ claim: StoryClaim2
   const slotted = every !== 'day';
   const own = (d: string) => !slotted || d.slice(10) === slot.slice(10);
   const ranges = new HistoryRanges(slotted ? slotSeries(file, slot) : file, { ...rangesFor(o.doc, o.source), recorded: new Set(skip.filter(own).map(dayOfSlot)), levels: levels.filter((l) => own(l.from)).map((l) => ({ ...l, from: dayOfSlot(l.from) })) });
-  const s = flowStory(ranges, dayOfSlot(slot), o.doc, o.source);
+  const s = flowStory(ranges, dayOfSlot(slot), o.doc, o.source, o.upstream);
   const claim: StoryClaim2 = {
     by: 'story', v: 2, source: o.source, slot, every, state: s.state, below: belowOf(s), head: s.head, build: o.build, flow: o.flow,
     history: { base: o.baseRef ? { path: o.baseRef.path, sha256: o.baseRef.sha256, bytes: o.baseRef.bytes } : null, tail: tailRef(ms) },

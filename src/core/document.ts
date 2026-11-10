@@ -581,6 +581,13 @@ function validateGates(doc: Record<string, unknown>, add: (path: string, message
     if (!sources.has(lower) && !stepIds.has(lower)) add(at, `no source or step ${id}: a gate judges a source, or a step the flow publishes or watches`);
     else if (stepIds.has(lower) && !published.has(lower) && !watched.has(lower)) add(at, `${id} is a step nothing publishes or watches: a gate judges what the flow judges or lets out`);
     for (const m of gateProblems(gate)) add(at, m);
+    // The rules' other datasets (ADR 0014 §4) are sources: the inventory and the dataset a dependency is read from are
+    // files the page has before the run, so the counts can be measured where every other measure is.
+    if (isRecord(gate)) {
+      const sc = gate.scope;
+      if (isRecord(sc) && typeof sc.of === 'string' && !sources.has(sc.of.toLowerCase())) add(`${at}.scope.of`, `${sc.of} isn't a source: the scope's inventory is a source of the flow`);
+      for (const n of Array.isArray(gate.needs) ? gate.needs : gate.needs !== undefined ? [gate.needs] : []) if (isRecord(n) && typeof n.from === 'string' && !sources.has(n.from.toLowerCase())) add(`${at}.needs.from`, `${n.from} isn't a source: a dependency is read from a source of the flow`);
+    }
   }
 }
 

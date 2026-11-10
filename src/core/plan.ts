@@ -167,6 +167,24 @@ export interface WatchPlan {
    * its due marks, `[column, status, miss, within]`, each sorted by column. */
   expect?: [column: string, value: string, low: number, high: number][];
   due?: [column: string, status: string, miss: string, within: number][];
+  /** plan/4 only (ADR 0014 §4): the gate's scope rule, the inventory by its table, and its dependency rules, each
+   * `when` and `then` as `[column, values]` sorted by column, `from` by its table (null within the row). */
+  scope?: ScopePlan | null;
+  needs?: NeedsPlan[];
+}
+
+export interface ScopePlan {
+  table: string;
+  key: string;
+  own: string;
+  where: string;
+}
+
+export interface NeedsPlan {
+  table: string | null;
+  key: string | null;
+  when: [column: string, values: string[]][];
+  then: [column: string, values: string[]][];
 }
 
 /**
@@ -322,7 +340,23 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   // its block's, or none (the owner, Q-58: "None unless chosen"), whatever form its watches take.
   const legacy = doc.smaltfl < 3 && doc.calendar === undefined && entries.every((e) => !isGeneralWatch(e.w));
   const calendar = resolveCalendar(doc.calendar, legacy);
-  const watch = entries.map((e): [number, WatchPlan] => [e.node, { ...watchPlan(e.w, e.id, p.period ?? null, doc.ontology, gates), ...(gates ? { checks: gateChecksOf(doc, e.id)! } : {}) }]);
+  // A gate's rules (ADR 0014 §4) in the plan: the inventory and a dependency's dataset by their tables (sources), the
+  // scope's condition bound as any SQL is.
+  const tableOf = (id: string): string => {
+    const node = index.get(id.toLowerCase());
+    const n = node === undefined ? undefined : nodes[node];
+    if (!n || n.op !== 'table') throw new PlanError(`${id} isn't a source: a gate's rule reads a source of the flow`, [{ path: `$.gates.${id}`, message: 'not a source' }]);
+    return n.table;
+  };
+  const rulesOf = (id: string): Pick<WatchPlan, 'scope' | 'needs'> => {
+    const g = Object.entries(doc.gates ?? {}).find(([k]) => k.toLowerCase() === id.toLowerCase())?.[1];
+    const sorted = (m: Record<string, string | string[]>): [string, string[]][] => Object.entries(m).map(([c, v]): [string, string[]] => [c, [...(Array.isArray(v) ? v : [v])].sort()]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return {
+      scope: g?.scope ? { table: tableOf(g.scope.of), key: g.scope.key, own: g.scope.own ?? g.scope.key, where: bind(g.scope.where, `$.gates.${id}.scope.where`) } : null,
+      needs: (g?.needs ?? []).map((n): NeedsPlan => ({ table: n.from ? tableOf(n.from) : null, key: n.key ?? null, when: sorted(n.when), then: sorted(n.then) })),
+    };
+  };
+  const watch = entries.map((e): [number, WatchPlan] => [e.node, { ...watchPlan(e.w, e.id, p.period ?? null, doc.ontology, gates), ...(gates ? { checks: gateChecksOf(doc, e.id)!, ...rulesOf(e.id) } : {}) }]);
   return { ...plan, smaltflPlan: gates ? 4 : notebooks ? 3 : 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: p.meanwhile ?? 'last', until: p.until ?? 'decision' } };
 }
 
@@ -480,7 +514,7 @@ export function validatePlan(plan: unknown): asserts plan is FlowPlan {
 }
 
 const WATCH_PLAN_FIELDS = ['after', 'bad', 'calendar', 'count', 'donor', 'every', 'follow', 'history', 'holds', 'newValues', 'pattern', 'period', 'relearn', 'scale', 'time', 'zone'];
-const WATCH_PLAN_FIELDS_4 = [...WATCH_PLAN_FIELDS, 'checks', 'due', 'expect'].sort();
+const WATCH_PLAN_FIELDS_4 = [...WATCH_PLAN_FIELDS, 'checks', 'due', 'expect', 'needs', 'scope'].sort();
 
 /** plan/2's publish block: every field there, each one this version reads, each value one it can judge. */
 function validatePublish2(p: FlowPlan, fail: (message: string) => never, gated = false): void {
@@ -539,6 +573,10 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never, gated =
       if (typeof c !== 'object' || c === null || Object.keys(c).join() !== CHECK_NAMES.join() || Object.values(c).some((m) => m !== 'hold' && m !== 'warn' && m !== 'off')) fail(`${at}.checks is every check (${CHECK_NAMES.join(', ')}), each hold, warn or off`);
       rows('expect', (r) => r.length === 4 && typeof r[1] === 'string' && typeof r[2] === 'number' && typeof r[3] === 'number' && (r[2] as number) >= 0 && (r[2] as number) <= (r[3] as number) && (r[3] as number) <= 1);
       rows('due', (r) => r.length === 4 && typeof r[1] === 'string' && typeof r[2] === 'string' && Number.isInteger(r[3]) && (r[3] as number) >= 1);
+      const sc = w.scope as Record<string, unknown> | null;
+      if (sc !== null && (typeof sc !== 'object' || typeof sc.table !== 'string' || typeof sc.key !== 'string' || typeof sc.own !== 'string' || typeof sc.where !== 'string' || Object.keys(sc).sort().join() !== 'key,own,table,where')) fail(`${at}.scope is null or { table, key, own, where }`);
+      const match = (m: unknown) => Array.isArray(m) && m.length > 0 && m.every((x) => Array.isArray(x) && x.length === 2 && typeof x[0] === 'string' && Array.isArray(x[1]) && (x[1] as unknown[]).length > 0 && (x[1] as unknown[]).every((v) => typeof v === 'string'));
+      if (!Array.isArray(w.needs) || (w.needs as unknown[]).some((n) => typeof n !== 'object' || n === null || !('table' in n) || !match((n as NeedsPlan).when) || !match((n as NeedsPlan).then) || Object.keys(n).sort().join() !== 'key,table,then,when')) fail(`${at}.needs is a list of { table, key, when, then }`);
     }
     if (w.holds) holding++;
   });

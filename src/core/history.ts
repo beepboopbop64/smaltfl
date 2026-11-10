@@ -102,6 +102,9 @@ export interface HistoryFile {
    * window in days), each day's rows due that day, and each day's rows still missed by past due date. Only where the
    * ontology marks a column. */
   due?: Record<string, { status: string; miss: string; within: number; on: number[]; late: [date: string, rows: number][][] }>;
+  /** The gate's rules' counts (ADR 0014 §4), day by day, only where the gate writes a rule: the scope's rows out of
+   * scope, keys in scope with no row and keys in scope; each dependency rule's contradictions. */
+  gate?: { scope?: { out: number[]; missing: number[]; inScope: number[] }; needs?: number[][] };
   /** The trips file's own columns, month by month, before they were cast to the month's (scripts/data/build.py). */
   schemas?: { month: string; columns: [string, string][] }[];
   /** Each day's weather in the city (scripts/data/build.py): hours on record per borough, rain and snow, the temperatures;
@@ -133,7 +136,12 @@ export type Metric =
   | { of: 'combo'; pair: string; value: string }
   /** The late share of a due-marked column (ADR 0014 §3): over the window before the day, the rows still missed whose
    * due date fell in it over the rows that were due in it. Null on a day with nothing due in the window. */
-  | { of: 'late'; column: string };
+  | { of: 'late'; column: string }
+  /** The gate's rules' counts (ADR 0014 §4): the rows out of scope, the keys in scope with no row, a dependency
+   * rule's contradictions (by its place in the gate's list). */
+  | { of: 'scopeOut' }
+  | { of: 'scopeMissing' }
+  | { of: 'needs'; rule: number };
 
 /** The quantiles the history keeps of a measure or a time, in order. */
 export const QUANTILES = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
@@ -146,10 +154,12 @@ export const metricKey = (m: Metric) =>
   : m.of === 'count' ? `count:${m.column}=${m.value}`
   : m.of === 'quantile' ? `quantile:${m.column}@${m.q}`
   : m.of === 'late' ? `late:${m.column}`
+  : m.of === 'needs' ? `needs:${m.rule}`
+  : m.of === 'scopeOut' || m.of === 'scopeMissing' ? m.of
   : m.of === 'combo' ? `combo:${m.pair}=${m.value}`
   : `${m.of}:${m.column}`;
 
-const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level', value: 'share', quantile: 'level', count: 'count', droppedRows: 'count', ruleRows: 'count', combo: 'level', late: 'share' };
+const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level', value: 'share', quantile: 'level', count: 'count', droppedRows: 'count', ruleRows: 'count', combo: 'level', late: 'share', scopeOut: 'count', scopeMissing: 'count', needs: 'count' };
 
 /** Whether a metric counts the checks: its periods are comparable only while they were counted with the same rules. */
 const ofChecks = (m: Metric) => m.of === 'dropped' || m.of === 'rule' || m.of === 'droppedRows' || m.of === 'ruleRows';
@@ -184,6 +194,8 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
   const combo = m.of === 'combo' ? comboPlaces(h, m.pair, m.value) : null;
   if (m.of === 'combo' && !combo) return null;
   if (m.of === 'late' && !h.due?.[m.column]) return null;
+  if ((m.of === 'scopeOut' || m.of === 'scopeMissing') && !h.gate?.scope) return null;
+  if (m.of === 'needs' && !h.gate?.needs) return null;
   const start = ofChecks(m) ? checksStart(h) : 0;
   const values = new Array<number | null>(daysBetween(from, h.days.at(-1)!) + 1).fill(null);
   h.days.forEach((day, k) => {
@@ -201,6 +213,9 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
       : m.of === 'quantile' ? (h.quantiles?.[k]?.[column]?.[m.q] ?? null)
       : m.of === 'combo' ? (rows ? comboLogOdds(comboTable(combo!, k, rows)) : null)
       : m.of === 'late' ? (lateAt(h, k, m.column)?.share ?? null)
+      : m.of === 'scopeOut' ? (h.gate!.scope!.out[k] ?? null)
+      : m.of === 'scopeMissing' ? (h.gate!.scope!.missing[k] ?? null)
+      : m.of === 'needs' ? (h.gate!.needs![k]?.[m.rule] ?? null)
       : h.p50[k]![column]!;
     values[daysBetween(from, day)] = v;
   });

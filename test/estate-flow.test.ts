@@ -14,10 +14,14 @@
  * - the WAF collapse and the backup outage hold on their bands, said with the band;
  * - the vulnerability and access-review clusters publish: the miss is the due check's, and the pass share's fall is
  *   unusual at most; Patch Tuesday's next_due filling in is no longer a finding;
+ * Slice 3 (scope and dependency rules, upstream attribution):
+ * - the contradiction holds on the posture's dependency; the scope days hold on the WAF's and TLS's scope rule;
+ * - the posture no longer repeats a control's finding as its own: a column named for a source is the source's to judge,
+ *   and a wrong source explains the step's day.
  * - still wrong against the key: the pentest cluster holds by the bad value and the DR problem by the new value,
  *   since with two and a half months of history neither control has had twenty due dates for the due check to
- *   learn from (the app's year of history judges both; the test's base is short for speed); the posture repeats each
- *   bronze finding as its own (slice 3 attributes it); the contradiction day publishes (slice 3's needs).
+ *   learn from (the app's year of history judges both; the test's base is short for speed); the refused file is a
+ *   failed run (slice 7); nothing is sealed (slice 5).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
@@ -41,9 +45,10 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
   it('is plan/4: TLS’s gate as written, every other watch its layer’s defaults, the outputs gold', async () => {
     expect(validateDocument(w.doc)).toEqual([]);
     expect(Object.keys(w.doc.publish!.watch!)).toEqual([...ESTATE_WATCHES]);
-    expect(Object.keys(w.doc.gates!)).toEqual(['tls', 'posture', 'by_unit', 'by_control', 'by_type']);
-    expect(w.doc.gates!.tls).toEqual({ layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' } });
-    expect(w.doc.gates!.posture).toEqual({ layer: 'silver', checks: {} });
+    expect(Object.keys(w.doc.gates!)).toEqual(['tls', 'waf', 'posture', 'by_unit', 'by_control', 'by_type']);
+    expect(w.doc.gates!.tls).toEqual({ layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' }, scope: { of: 'apps', key: 'app_id', where: "internet_facing = 'yes'" } });
+    expect(w.doc.gates!.waf).toEqual({ layer: 'bronze', checks: {}, scope: { of: 'apps', key: 'app_id', where: "internet_facing = 'yes'" } });
+    expect(w.doc.gates!.posture).toEqual({ layer: 'silver', checks: {}, needs: [{ when: { key_rotation: 'pass' }, then: { encryption: ['pass', 'exception', 'not_assessed'] } }] });
     expect(w.doc.gates!.by_unit).toEqual({ layer: 'gold', checks: {} });
     const plan = await translate(w.doc, { day: '2024-03-04' });
     expect(planKind(plan)).toBe('plan/4');
@@ -60,10 +65,10 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     }
   });
 
-  it('holds the empty MFA file on the amount (bronze), and the posture on the blanks it leaves (silver, slice 3 attributes it)', () => {
-    expect(estateHolds(result(ESTATE_PLANTED.empty))).toEqual(['story:mfa', 'story:posture']);
+  it('holds the empty MFA file on the amount (bronze); the posture’s blank column is MFA’s to tell (slice 3)', () => {
+    expect(estateHolds(result(ESTATE_PLANTED.empty))).toEqual(['story:mfa']);
     expect(said(ESTATE_PLANTED.empty, 'mfa')).toMatch(/^Almost no apps: 0/);
-    expect(said(ESTATE_PLANTED.empty, 'posture')).toMatch(/^Mfa blank: all/);
+    expect(result(ESTATE_PLANTED.empty).published).toEqual([]);
     expect(estateHolds(result(plusDays(ESTATE_PLANTED.empty, 1)))).toEqual([]);
   });
 
@@ -81,10 +86,15 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(said(ESTATE_PLANTED.vulnCluster, 'vuln_sla')).toBeNull();
   });
 
-  it('holds the doubled TLS file and both scope days on the amount (slice 3 says scope)', () => {
+  it('holds the doubled TLS file on the amount, and the TLS file alone: the posture’s fan-out follows from it (slice 3)', () => {
+    expect(estateHolds(result(ESTATE_PLANTED.double))).toEqual(['story:tls']);
     expect(said(ESTATE_PLANTED.double, 'tls')).toMatch(/^More apps: 406 \(\+100%\)$/);
-    expect(said(ESTATE_PLANTED.scopeCreep, 'waf')).toMatch(/^More apps: 243 \(\+20%\)$/);
-    expect(said(ESTATE_PLANTED.scopeLoss, 'tls')).toMatch(/^Fewer apps: 153 \(−25%\)$/);
+  });
+
+  it('holds both scope days on the scope rule, said with the rows and the keys (slice 3)', () => {
+    expect(estateHolds(result(ESTATE_PLANTED.scopeCreep))).toEqual(['story:waf']);
+    expect(said(ESTATE_PLANTED.scopeCreep, 'waf')).toBe('40 apps out of scope');
+    expect(said(ESTATE_PLANTED.scopeLoss, 'tls')).toBe('50 in scope with no app');
     expect(estateHolds(result(plusDays(ESTATE_PLANTED.scopeLoss, 1)))).toEqual([]);
   });
 
@@ -119,12 +129,13 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(said(plusDays(ESTATE_PLANTED.pentestCluster, 1), 'pentest')).toMatch(/^Status fail: 9\.9%$/);
     expect(said(plusDays(ESTATE_PLANTED.drLate, 1), 'dr_exercise')).toMatch(/^New status: fail · 31 apps$/);
     expect(said(plusDays(ESTATE_PLANTED.drLate, 2), 'dr_exercise')).toMatch(/^Rto_met no: 2\d%$/);
-    // The posture repeats what the controls' files say, as its own: slice 3 attributes a silver finding to its bronze cause.
-    expect(said(plusDays(ESTATE_PLANTED.vulnCluster, 1), 'posture')).toMatch(/^vuln_sla fail 4\.\d× usual$/);
-    expect(said(plusDays(ESTATE_PLANTED.reviewCluster, 1), 'posture')).toMatch(/^access_review fail 12\.5× usual$/);
+    // What a control's file says is the control's to tell (slice 3): the posture holds on none of these days.
+    for (const day of [plusDays(ESTATE_PLANTED.vulnCluster, 1), plusDays(ESTATE_PLANTED.pentestCluster, 1), plusDays(ESTATE_PLANTED.reviewCluster, 1), plusDays(ESTATE_PLANTED.drLate, 1)]) expect(said(day, 'posture'), day).toBeNull();
   });
 
-  it('publishes the contradiction day: slice 3’s vector (needs)', () => {
-    expect(estateHolds(result(ESTATE_PLANTED.contradiction))).toEqual([]);
+  it('holds the contradiction day on the posture’s dependency rule alone, said with the rule (slice 3)', () => {
+    expect(estateHolds(result(ESTATE_PLANTED.contradiction))).toEqual(['story:posture']);
+    expect(said(ESTATE_PLANTED.contradiction, 'posture')).toBe('41 apps: key_rotation pass needs encryption pass/exception/not_assessed');
+    expect(estateHolds(result(plusDays(ESTATE_PLANTED.contradiction, 1)))).toEqual([]);
   });
 });

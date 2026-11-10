@@ -30,6 +30,8 @@ import { isPublish2, validatePlan, watchesOf } from '../core/plan.js';
 import { carry, heldOutputs, spare, holdsOf, judgeClaims, judgeDonors, tailPath, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef, type StoryClaim2 } from '../core/hold.js';
 import { measuresHash, settingsFor, type MeasureSettings, type Measures } from '../core/measures.js';
 import { tellClaim } from './tell.js';
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 import { measureSnapshot, pinnedHeader, pinnedTail } from './measure.js';
 import type { RunOptions, RunResult } from '../core/protocol.js';
 import { quoteIdent as q, type ParamValue } from '../core/sqltext.js';
@@ -247,7 +249,10 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
             untold.set(w.node, `${n.origin} is a watched step: its claim is told in the engine from what the page says of the record (tell), and the run was given none`);
             continue;
           }
-          const told = await tellClaim({ doc: context.doc as FlowDocument, source: n.origin, history: w.history, flow: plan.flow.hash, measures: m, settings, tell, build: commit });
+          // What the page said of each watched source's day (ADR 0014 §2): a finding of the step that repeats a source's
+          // is told as following from it.
+          const upstream = (context.claims ?? []).flatMap((c) => (isRecord(c) && typeof c.source === 'string' && typeof c.state === 'string' && typeof c.head === 'string' ? [{ source: c.source, state: c.state, head: c.head }] : []));
+          const told = await tellClaim({ doc: context.doc as FlowDocument, source: n.origin, history: w.history, flow: plan.flow.hash, measures: m, settings, tell, build: commit, upstream });
           if ('problem' in told) untold.set(w.node, told.problem);
           else engineClaims.push(told.claim);
         }

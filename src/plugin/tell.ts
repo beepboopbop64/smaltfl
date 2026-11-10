@@ -24,6 +24,8 @@ export interface TellInput {
   settings: MeasureSettings;
   tell: TellFor;
   build: string;
+  /** The claims the page told for the watched sources (ADR 0014 §2): what each said of the day. */
+  upstream?: readonly { source: string; state: string; head: string }[];
 }
 
 /** The pinned file's JSON, or undefined when none is pinned or it isn't JSON. */
@@ -55,6 +57,6 @@ export async function tellClaim(o: TellInput): Promise<{ claim: StoryClaim2 } | 
     }
     tail = t.value as Measures[];
   }
-  const told = await loadClaim({ doc: o.doc, source: o.source, flow: o.flow, base, baseRef: h ? { path: o.history, sha256: h.sha256, bytes: h.bytes } : null, tail, measures: o.measures, settings: o.settings, skip: o.tell.skip, levels: o.tell.levels, build: o.build });
+  const told = await loadClaim({ doc: o.doc, source: o.source, flow: o.flow, base, baseRef: h ? { path: o.history, sha256: h.sha256, bytes: h.bytes } : null, tail, measures: o.measures, settings: o.settings, skip: o.tell.skip, levels: o.tell.levels, build: o.build, ...(o.upstream ? { upstream: o.upstream } : {}) });
   return told ? { claim: told.claim } : { problem: `${o.source}'s load can't be judged against its history (its slot is in the base already, or before its last period, with other numbers)` };
 }

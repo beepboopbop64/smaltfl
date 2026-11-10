@@ -366,7 +366,27 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
       continue;
     }
     const layer = g.options.layer ?? layerOf({ source, watched: isWatched, published });
-    const def = { layer, checks: g.options.checks ?? {}, ...Object.fromEntries(Object.entries(g.options).filter(([k]) => k !== 'layer' && k !== 'checks')) } as GateDef;
+    // The rules' names (scope.of, needs.from) stand for sources of the flow: resolved, and refused when they don't.
+    let broken = false;
+    const named = (v: unknown, what: string): unknown => {
+      if (!isNameRef(v)) return v;
+      const target = idOf(g.parsed, v.$name);
+      if (target !== null && sources.has(target.toLowerCase())) return target;
+      if (resolve(g.parsed, v.$name)?.kind !== 'broken') add(g.where, `gate(${g.input}, …): ${what} names a source of the flow; ${v.$name} isn't one`);
+      broken = true;
+      return v.$name;
+    };
+    const rules: Record<string, unknown> = {};
+    if (g.options.scope !== undefined) {
+      const sc = g.options.scope;
+      rules.scope = isRecord(sc) ? { ...sc, ...(sc.of !== undefined ? { of: named(sc.of, 'scope.of') } : {}) } : sc;
+    }
+    if (g.options.needs !== undefined) {
+      const list = Array.isArray(g.options.needs) ? g.options.needs : [g.options.needs];
+      rules.needs = list.map((n) => (isRecord(n) && n.from !== undefined ? { ...n, from: named(n.from, 'needs.from') } : n));
+    }
+    if (broken) continue;
+    const def = { layer, checks: g.options.checks ?? {}, ...rules, ...Object.fromEntries(Object.entries(g.options).filter(([k]) => !['layer', 'checks', 'scope', 'needs'].includes(k))) } as GateDef;
     const problems = gateProblems(def);
     if (problems.length) {
       for (const m of problems) add(g.where, `gate(${g.input}, …): ${m}`);
@@ -378,7 +398,7 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
       add(g.where, `${id} has two gates`);
       continue;
     }
-    gates[id] = { layer: def.layer, checks: def.checks };
+    gates[id] = { layer: def.layer, checks: def.checks, ...(def.scope ? { scope: def.scope } : {}), ...(def.needs ? { needs: def.needs } : {}) };
     gateCells[id] = { notebook: g.parsed.def.path, cell: g.cell.id, lang: g.cell.lang, line: g.cell.span.line, endLine: g.cell.span.endLine };
   }
   return { steps, cells, gates, gateCells, groups: groups.filter((g) => g.steps.length > 0), outline, issues };
@@ -424,7 +444,9 @@ function classify(parsed: Parsed, cell: Cell, ts: TypeScriptKit, sources: Map<st
   if (marker === 'gate') {
     const [first, second] = decl!.args;
     const input = first !== undefined && tree.kind[first] === ts.K.Identifier ? tree.textOf(first) : null;
-    const opts = second === undefined ? {} : literalValue(tree, ts, second);
+    // A gate's rules name other nodes (scope.of, needs.from) by their names in the notebook: kept as references, resolved
+    // in step 4.
+    const opts = second === undefined ? {} : literalValue(tree, ts, second, true);
     if (!input) {
       add(where, 'gate() judges a source or step by its name');
       return null;
@@ -543,26 +565,34 @@ function declarationOf(tree: Tree, ts: TypeScriptKit, body: number[], name: stri
   return { callee: callee !== undefined && tree.kind[callee] === K.Identifier ? tree.textOf(callee) : null, args };
 }
 
-/** A literal's value: strings, numbers, booleans, null, arrays and object literals of literals; undefined otherwise. */
-function literalValue(tree: Tree, ts: TypeScriptKit, n: number): unknown {
+/** A name a gate's rule gives in place of a value: the node it stands for is resolved once every cell is classified. */
+export interface NameRef {
+  $name: string;
+}
+const isNameRef = (v: unknown): v is NameRef => typeof v === 'object' && v !== null && typeof (v as NameRef).$name === 'string' && Object.keys(v as object).length === 1;
+
+/** A literal's value: strings, numbers, booleans, null, arrays and object literals of literals; undefined otherwise.
+ * With `names`, an identifier is kept as a reference (`NameRef`) for the caller to resolve. */
+function literalValue(tree: Tree, ts: TypeScriptKit, n: number, names = false): unknown {
   const { K } = ts;
   const k = tree.kind[n];
   const text = tree.textOf(n);
+  if (names && k === K.Identifier) return { $name: text } satisfies NameRef;
   if (k === K.StringLiteral || k === K.NoSubstitutionTemplateLiteral) return unquote(text);
   if (k === K.NumericLiteral) return Number(text);
   if (k === K.TrueKeyword) return true;
   if (k === K.FalseKeyword) return false;
   if (k === K.NullKeyword) return null;
   if (k === K.PrefixUnaryExpression && /^-\s*[\d.]/.test(text)) return -Number(text.slice(1).trim());
-  if (k === K.ParenthesizedExpression || k === K.AsExpression) return literalValue(tree, ts, tree.first[n]!);
-  if (k === K.ArrayLiteralExpression) return tree.children(n).map((c) => literalValue(tree, ts, c));
+  if (k === K.ParenthesizedExpression || k === K.AsExpression) return literalValue(tree, ts, tree.first[n]!, names);
+  if (k === K.ArrayLiteralExpression) return tree.children(n).map((c) => literalValue(tree, ts, c, names));
   if (k === K.ObjectLiteralExpression) {
     const out: Record<string, unknown> = {};
     for (const p of tree.children(n)) {
       if (tree.kind[p] !== K.PropertyAssignment) return undefined;
       const [key, value] = tree.children(p);
       if (key === undefined || value === undefined) return undefined;
-      out[tree.kind[key] === K.Identifier ? tree.textOf(key) : unquote(tree.textOf(key))] = literalValue(tree, ts, value);
+      out[tree.kind[key] === K.Identifier ? tree.textOf(key) : unquote(tree.textOf(key))] = literalValue(tree, ts, value, names);
     }
     return out;
   }

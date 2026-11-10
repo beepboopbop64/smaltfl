@@ -171,9 +171,12 @@ if (days.length) {
   // step's from a run of the flow on each day's files.
   const watches = Object.keys(flowDoc.publish?.watch ?? {});
   const historyName = (w) => (watches.length === 1 ? 'history.json' : `history.${w}.json`);
+  // The generator's fixed sources (an inventory), which a gate's scope rule reads beside each load (ADR 0014 §4).
+  const generated = existsSync(join(work, 'loads.json')) ? JSON.parse(readFileSync(join(work, 'loads.json'), 'utf8')) : null;
+  const fixedArgs = Object.entries((generated && !Array.isArray(generated) && generated.fixed) || {}).flatMap(([id, path]) => ['--fixed', `${id}=${path}`]);
   for (const w of watches) {
     const base = existsSync(join(work, `base.${w}.json`)) ? join(work, `base.${w}.json`) : join(work, 'base.json');
-    execFileSync('node', ['scripts/data/history.mjs', '--flow', flowPath, '--watch', w, '--files', base, join(work, historyName(w))], { stdio: 'inherit' });
+    execFileSync('node', ['scripts/data/history.mjs', '--flow', flowPath, '--watch', w, '--files', base, ...fixedArgs, join(work, historyName(w))], { stdio: 'inherit' });
   }
   mkdirSync(`${out}/data/loads`, { recursive: true });
   const entry = (name, bytes, from) => {

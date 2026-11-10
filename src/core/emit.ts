@@ -334,6 +334,40 @@ export function emitSqlOver(sql: string, bindings: readonly (readonly [name: str
   return `SELECT * FROM (\nWITH ${bindings.map(([name, rel]) => `${q(name)} AS (\n${rel}\n)`).join(', ')}\n${inner}\n)`;
 }
 
+/**
+ * A scope rule's counts (ADR 0014 §4), in one row: the rows whose key is not among the inventory's keys in scope (a
+ * blank key among them), the keys in scope with no row, and the keys in scope.
+ */
+export function emitScopeCounts(sql: string, scope: { table: string; key: string; own: string; where: string }): string {
+  const inScope = `SELECT ${q(scope.key)} AS k FROM ${q(scope.table)} WHERE (
+${scope.where}
+) AND ${q(scope.key)} IS NOT NULL`;
+  return `SELECT (SELECT count(*) FROM (
+${sql}
+) s WHERE s.${q(scope.own)} IS NULL OR s.${q(scope.own)} NOT IN (${inScope})), (SELECT count(*) FROM (${inScope}) i WHERE i.k NOT IN (SELECT ${q(scope.own)} FROM (
+${sql}
+) WHERE ${q(scope.own)} IS NOT NULL)), (SELECT count(*) FROM (${inScope}))`;
+}
+
+/**
+ * Dependency rules' counts (ADR 0014 §4), one a rule: the rows matching `when` whose `then` doesn't hold (a blank
+ * never holds); with a table and key, `when` is read on that table's row with the same key.
+ */
+export function emitNeedsCounts(sql: string, needs: readonly { table: string | null; key: string | null; when: readonly (readonly [string, readonly string[]])[]; then: readonly (readonly [string, readonly string[]])[] }[]): string {
+  const lit = (v: string) => `'${v.replace(/'/g, "''")}'`;
+  const holds = (alias: string, m: readonly (readonly [string, readonly string[]])[]) => m.map(([c, vs]) => `${alias}.${q(c)} IN (${vs.map(lit).join(', ')})`).join(' AND ');
+  const fails = (alias: string, m: readonly (readonly [string, readonly string[]])[]) => m.map(([c, vs]) => `(${alias}.${q(c)} IS NULL OR ${alias}.${q(c)} NOT IN (${vs.map(lit).join(', ')}))`).join(' OR ');
+  const counts = needs.map((n) =>
+    n.table && n.key
+      ? `(SELECT count(*) FROM (
+${sql}
+) s JOIN ${q(n.table)} f ON s.${q(n.key)} = f.${q(n.key)} WHERE ${holds('f', n.when)} AND (${fails('s', n.then)}))`
+      : `(SELECT count(*) FROM (
+${sql}
+) s WHERE ${holds('s', n.when)} AND (${fails('s', n.then)}))`);
+  return `SELECT ${counts.join(', ')}`;
+}
+
 /** Relations' rows together, one after another. */
 export function emitUnionAll(relations: readonly string[]): string {
   return relations.map((r) => `SELECT * FROM (\n${r}\n)`).join('\nUNION ALL\n');

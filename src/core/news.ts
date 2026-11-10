@@ -14,7 +14,7 @@
  */
 import { daysBetween, namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
-import { gated, gateChecksOf, type CheckName, type GateChecks } from './gates.js';
+import { gated, gateChecksOf, type CheckName, type GateChecks, type NeedsRule } from './gates.js';
 import { HistoryRanges, lateAt, lateUsual, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
 import { marksOn, nounOf, partNamed, propertyOf } from './ontology.js';
@@ -29,7 +29,7 @@ export type Act = 'expected' | 'incident' | 'notify' | 'rule' | 'quarantine' | '
 
 export interface Finding {
   key: string;
-  kind: 'volume' | 'hours' | 'gone' | 'share' | 'band' | 'due' | 'new' | 'pair' | 'combo' | 'unlike' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
+  kind: 'volume' | 'hours' | 'gone' | 'share' | 'band' | 'due' | 'scope' | 'needs' | 'new' | 'pair' | 'combo' | 'unlike' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
   severity: Severity;
   /** How far out, in typical misses (capped): what ranks findings of a severity. */
   score: number;
@@ -117,10 +117,12 @@ export interface JudgeSettings {
   expect: ReadonlyMap<string, [number, number]>;
   /** The ontology's due marks (ADR 0014 §3). */
   due: readonly { column: string; status: string; miss: string; within: number }[];
+  /** The gate's dependency rules (ADR 0014 §4), in the gate's order, for saying a contradiction in words. */
+  needs: readonly NeedsRule[];
 }
 
 /** The legacy form's settings: what every flow was judged by before ADR 0010. */
-export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly', relearn: false, checks: null, expect: new Map(), due: [] }) as JudgeSettings;
+export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly', relearn: false, checks: null, expect: new Map(), due: [], needs: [] }) as JudgeSettings;
 
 /**
  * How a document judges a watched source (ADR 0010 §10, §11): its watch's settings and the marks its ontology puts on the
@@ -145,6 +147,7 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
     checks: gateChecksOf(doc, source),
     expect: new Map(m.expect.map(([column, value, low, high]) => [`${column.toLowerCase()}|${value}`, [low, high] as [number, number]])),
     due: m.due.map(([column, status, miss, within]) => ({ column, status, miss, within })),
+    needs: Object.entries(doc.gates ?? {}).find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1].needs ?? [],
   };
 }
 
@@ -512,6 +515,27 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       out.push({ ...base, severity: 'note', score: Math.max(0, z) / 10, title: `Late: ${counts} (usually ${pct(usual.share)})`, detail: `${pct(share)} of what was due yesterday is still ${miss}, as usual (${pct(usual.share)} over ${fmtInt(usual.due)} due). ${window}`, acts: ['notify'] });
     }
   }
+  // The gate's written rules (ADR 0014 §4): the scope's rows out of scope and keys in scope with no row, and each
+  // dependency's contradictions, against their usual counts (a few out of scope every day is the inventory's lag, not
+  // news): something wrong at five or more and past twice the usual high (or with no history), a note otherwise.
+  const ruleCount = (key: string, kind: 'scope' | 'needs', metric: Metric, n: number, title: string, detail: string) => {
+    if (n <= 0) return;
+    const j = judged(metric);
+    const wrong = n >= 5 && (!j || n > 2 * j.range.high);
+    out.push({ key, kind, severity: wrong ? 'alert' : 'note', score: wrong ? Math.min(99, n) : 1, title, detail: j ? `${detail} A day like it has ${fmtInt(Math.round(j.range.low))}–${fmtInt(Math.round(j.range.high))}.` : detail, look: 'rows', metric, value: n, ...(j ? { range: j.range } : {}), rows: n, acts: ['incident', 'notify', 'expected'] });
+  };
+  if (file.gate?.scope) {
+    const sc = file.gate.scope;
+    const inScope = sc.inScope[k] ?? 0;
+    ruleCount('scope:out', 'scope', { of: 'scopeOut' }, sc.out[k] ?? 0, `${fmtInt(sc.out[k] ?? 0)} ${noun(sc.out[k] ?? 0)} out of scope`, `Rows whose key the inventory doesn’t list in scope, beside ${fmtInt(inScope)} keys in scope.`);
+    ruleCount('scope:missing', 'scope', { of: 'scopeMissing' }, sc.missing[k] ?? 0, `${fmtInt(sc.missing[k] ?? 0)} in scope with no ${noun(1)}`, `Keys the inventory lists in scope that have no row here, of ${fmtInt(inScope)} in scope.`);
+  }
+  (file.gate?.needs?.[k] ?? []).forEach((n, i) => {
+    const rule = judge.needs[i];
+    const said = (m: Record<string, string | string[]> | undefined) => (m ? Object.entries(m).map(([c, v]) => `${names.column(c)} ${(Array.isArray(v) ? v : [v]).join('/')}`).join(' and ') : `rule ${i + 1}`);
+    ruleCount(`needs:${i}`, 'needs', { of: 'needs', rule: i }, n, `${fmtInt(n)} ${noun(n)}: ${said(rule?.when)} needs ${said(rule?.then)}`, `${rule?.from ? `Read against ${rule.from} by ${rule.key}: ` : ''}rows matching the rule's condition whose required value isn't there.`);
+  });
+
   /** Whether a column's value is the miss a judged due mark tells: its rise is the due check's, not a bad value's. */
   const dueMiss = (column: string, key: string): boolean => judge.due.some((d) => d.status.toLowerCase() === column.toLowerCase() && d.miss === String(parse(key)) && dueJudged.has(d.column.toLowerCase()));
   const dueColumn = (column: string): boolean => judge.due.some((d) => d.column.toLowerCase() === column.toLowerCase());

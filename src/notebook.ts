@@ -73,6 +73,25 @@ export function fill<T>(input: T, options: FillOptions): T {
 export interface GateOptions {
   layer?: Layer;
   checks?: Partial<Record<CheckName, CheckMode>>;
+  /**
+   * The scope rule (ADR 0014 §4): the inventory (a source of the flow, by its name in the notebook), its key column,
+   * the condition a key in scope meets (a SQL expression over the inventory), and the node's own key column when it
+   * isn't `key`. The check counts the rows for keys out of scope and the keys in scope with no row.
+   */
+  scope?: { of: unknown; key: string; where: string; own?: string };
+  /**
+   * Dependency rules (ADR 0014 §4): a row matching `when` must match `then` (a value may be a list); within the row,
+   * or, with `from` (a source, by its name) and `key`, `when` read on that source's row with the same key. A row that
+   * doesn't is a contradiction, counted.
+   */
+  needs?: NeedsOption | NeedsOption[];
+}
+
+export interface NeedsOption {
+  from?: unknown;
+  key?: string;
+  when: Record<string, string | string[]>;
+  then: Record<string, string | string[]>;
 }
 
 /**

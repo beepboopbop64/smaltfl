@@ -69,8 +69,13 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   them), the `band` finding, due counts in measures and the history, the `due` finding from yesterday's cohort against
   the pooled cohort share, Accept the new band. The estate: the WAF collapse and the backup outage hold on their
   bands; the vulnerability and access-review clusters publish as unusual; the pentest cluster and the DR day still
-  hold by the bad or new value in the test's short base (the app's year judges them). Slices 3 to 7 follow ADR
-  0014's order; each moves the test's "still wrong" assertions as a decision.
+  hold by the bad or new value in the test's short base (the app's year judges them).
+- **Gates, slice 3** (ADR 0014 §"As built", 2026-11-10): `scope` and `needs` rules in the gate cell, counted in the
+  engine beside every other measure and kept in the history, said in words and holding at five rows past the usual;
+  upstream attribution: a step's finding about a source's column follows the source, and a wrong source explains the
+  step's day. The estate: the contradiction holds on the posture's dependency, the scope days on the WAF's and TLS's
+  scope, and the posture no longer repeats the controls. Slices 4 to 7 follow ADR 0014's order; each moves the test's
+  "still wrong" assertions as a decision.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

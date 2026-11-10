@@ -29,10 +29,10 @@ export const posture = sql`
   LEFT JOIN ${privileged_access_checked} p11 ON p11.app_id = a.app_id`;
 
 cell('about_gate', { lang: 'md' });
-md`The silver gate: what the join introduces (a pair across controls, a dependency broken, scope) is its own; a blank that a control's file explains is that control's`;
+md`The silver gate: what the join introduces (a pair across controls, a dependency broken) is its own; a blank or a share that a control's file explains is that control's. Key rotation needs encryption at rest: an application passing key rotation while failing encryption is a contradiction, counted`;
 
 cell('posture_gate');
-export const posture_gate = gate(posture, { layer: 'silver' });
+export const posture_gate = gate(posture, { layer: 'silver', needs: { when: { key_rotation: 'pass' }, then: { encryption: ['pass', 'exception', 'not_assessed'] } } });
 
 cell('published');
 publish(posture, { description: 'Every application’s standing on every control that applies to it' });

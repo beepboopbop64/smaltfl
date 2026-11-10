@@ -3416,7 +3416,7 @@ function storyFor(day: string): Story | null {
   const own = loaded && gate && !state.failed ? onScreen() : undefined;
   const held = loaded && gate && ((state.failed && !state.failed.file && state.failed.origin === gate.step) || own?.result.holds.some((x) => x.by === 'checks' && x.origin === gate.step)) ? true : undefined;
   const refused = loaded && !!state.failed?.file;
-  const key = `${day}|${checksAsCounted()}|${dataLog.version}|${[...hidden].sort().join(',')}|${held ?? ''}|${refused}|${byHour ? byHour.column : ''}`;
+  const key = `${day}|${checksAsCounted()}|${dataLog.version}|${[...hidden].sort().join(',')}|${held ?? ''}|${refused}|${byHour ? byHour.column : ''}|${upstreamFor(day).map((u) => `${u.source}=${u.state}`).join(',')}`;
   let told = storyCache.get(key);
   if (!told) {
     // Judged as the document says (ADR 0010 §10): the watch's settings and the marks on its source; a legacy watch's are
@@ -3424,7 +3424,10 @@ function storyFor(day: string): Story | null {
     const judge = judgeOf(state.doc, loadSource() ?? '');
     const found = newsOf(history, day, NEWS_NAMES, { checks: checksAsCounted(), judge });
     const acknowledged = new Set(found.filter((f) => logOf(day, f.key).some((e) => e.act === 'expected')).map((f) => f.key));
-    told = storyOf(history, day, found, { names: NEWS_NAMES, step: gate?.step, limit: gate?.limit ?? null, held, refused, acknowledged, hidden, judge, ...(byHour ? { byHour } : {}) });
+    // What the other watched loads said of the day (ADR 0014 §2): a finding of the judged step that repeats a source's
+    // follows from it.
+    const upstream = upstreamFor(day);
+    told = storyOf(history, day, found, { names: NEWS_NAMES, step: gate?.step, limit: gate?.limit ?? null, held, refused, acknowledged, hidden, judge, ...(byHour ? { byHour } : {}), ...(upstream.length ? { upstream } : {}) });
     storyCache.set(key, told);
     for (const old of [...storyCache.keys()].slice(0, Math.max(0, storyCache.size - 60))) storyCache.delete(old);
   }
@@ -3432,6 +3435,19 @@ function storyFor(day: string): Story | null {
   // day told again with them (run() counts them before it first says the day, so this is for a viewer changed since).
   if (!byHour && wantsByHour(told) && !hourValues.known.has(`${day}|${state.previewAs ?? state.viewer}`)) void byHourFor(day).then((changed) => changed && retellDay());
   return told;
+}
+
+/** What each other watched source's claim said of a day (ADR 0014 §2), from the claims told for its runs, for the
+ * judged step's story; none when the judged dataset is a source. */
+function upstreamFor(day: string): { source: string; state: string; head: string }[] {
+  const own = loadSource();
+  if (!own || sourceIds().has(own)) return [];
+  const out: { source: string; state: string; head: string }[] = [];
+  for (const [key, c] of claims) {
+    if (!key.startsWith(`${day}|`) || !c || c.source === own || out.some((x) => x.source === c.source)) continue;
+    out.push({ source: c.source, state: c.state, head: c.head });
+  }
+  return out;
 }
 
 /**
@@ -5933,6 +5949,9 @@ function metricName(m: Metric): string {
       return `${col(a)} ${NEWS_NAMES.label(a, x)} with ${col(b)} ${NEWS_NAMES.label(b, y)}, beyond the columns`;
     }
     case 'late': return `${col(m.column)} late share`;
+    case 'scopeOut': return 'Rows out of scope';
+    case 'scopeMissing': return 'In scope with no row';
+    case 'needs': return `Rule ${m.rule + 1}: contradictions`;
   }
 }
 

@@ -87,7 +87,7 @@ export const late = sql\`SELECT count(*) AS n FROM \${auth_gate}\`;
     expect(await issues("cell('g');\nexport const g = gate(auth, { checks: { smell: 'hold' } });\n")).toEqual(["gate(auth, …): smell isn't a check (schema, amount, blanks, values, rules, scope, needs, due, reconcile, shares, shape, hours, pairs, forest, classifier)"]);
     expect(await issues("cell('g');\nexport const g = gate(auth, { checks: { shares: 'loud' } });\n")).toEqual(['gate(auth, …): checks.shares is one of hold, warn, off']);
     expect(await issues("cell('g');\nexport const g = gate(auth, { layer: 'platinum' });\n")).toEqual(['gate(auth, …): layer is one of bronze, silver, gold']);
-    expect(await issues("cell('g');\nexport const g = gate(auth, { strict: true });\n")).toEqual(["gate(auth, …): strict isn't a gate's setting (layer, checks): refused rather than ignored"]);
+    expect(await issues("cell('g');\nexport const g = gate(auth, { strict: true });\n")).toEqual(["gate(auth, …): strict isn't a gate's setting (layer, checks, scope, needs): refused rather than ignored"]);
     expect(await issues("cell('g');\nexport const g = gate(auth);\ncell('g2');\nexport const g2 = gate(auth);\n")).toEqual(['auth has two gates']);
     expect(await issues("cell('g');\nexport const g = gate(auth, 'bronze');\n")).toEqual(['gate() takes its settings as an object literal: { layer, checks }']);
   });

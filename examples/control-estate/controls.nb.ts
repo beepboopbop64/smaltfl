@@ -47,10 +47,13 @@ cell('privileged_access');
 export const privileged_access = source('privileged_access');
 
 cell('about_gates', { lang: 'md' });
-md`The bronze gate (ADR 0014): each control's file judged as it arrives. Written checks hold the day, learned ones warn; TLS says so in full, the others take the layer's defaults`;
+md`The bronze gate (ADR 0014): each control's file judged as it arrives. Written checks hold the day, learned ones warn; TLS says so in full, the others take the layer's defaults. TLS and the WAF cover internet-facing applications: their scope is the inventory's, so a row for any other application, or an internet-facing application with no row, is counted`;
 
 cell('tls_gate');
-export const tls_gate = gate(tls, { layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' } });
+export const tls_gate = gate(tls, { layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' }, scope: { of: apps, key: 'app_id', where: "internet_facing = 'yes'" } });
+
+cell('waf_gate');
+export const waf_gate = gate(waf, { scope: { of: apps, key: 'app_id', where: "internet_facing = 'yes'" } });
 
 cell('about_checks', { lang: 'md' });
 md`Each control's rows, kept when the status is one we know (pass, fail, exception, not_assessed) and the application is named`;

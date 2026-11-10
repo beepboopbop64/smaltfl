@@ -7,7 +7,8 @@
  * values and paired, the time column and zone, and the files, each with its slot.
  *
  *   node scripts/data/history.mjs --flow DOC --watch SOURCE --files LIST.json [--bind DATA.json]
- *        [--count a,b] [--follow c,d] [--pair a,b] [--time COLUMN] [--zone ZONE] [--param name={slot}|{slot:7}|value] OUT.json
+ *        [--count a,b] [--follow c,d] [--pair a,b] [--time COLUMN] [--zone ZONE] [--param name={slot}|{slot:7}|value]
+ *        [--fixed source=path …] OUT.json                 a fixed source's file (an inventory a gate's scope reads, ADR 0014 §4)
  *   node scripts/data/history.mjs DAYS_DIR OUT.json      the taxi example, as before: its trips, its legacy columns
  *
  * LIST.json is `[{ "file": path, "slot": "2024-01-31" }, …]`. DATA.json is the flow's bindings (default
@@ -29,8 +30,7 @@ import smaltfl from '../../src/plugin/index.js';
 import { measureLoad, pinFile, runFlow, translate, type FlowDocument, type WatchDef } from '../../src/index.js';
 import { bindingsPath, readFlow } from '../flow.js';
 import { type DayError, type HistoryFile } from '../../src/core/history.js';
-import { appendPeriods, checksOf, emptyHistory, SAMPLE, watchColumns, type MeasureSettings, type Measures } from '../../src/core/measures.js';
-import { marksOn } from '../../src/core/ontology.js';
+import { appendPeriods, checksOf, emptyHistory, SAMPLE, settingsFor, watchColumns, type MeasureSettings, type Measures } from '../../src/core/measures.js';
 import { pinnedDdl, type Binding, type DataBindings } from '../../examples/sources.js';
 import type { Kind } from '../../src/core/quality.js';
 
@@ -67,6 +67,9 @@ interface Job {
   settings: Omit<MeasureSettings, 'slot' | 'checks' | 'counting'>;
   params: Record<string, string>;
   files: LoadFiles[];
+  /** Fixed sources' files (`--fixed id=path`): the inventory a gate's scope rule reads (ADR 0014 §4), pinned beside
+   * each load in source mode. */
+  fixed: Record<string, string>;
 }
 
 /** A parameter's value for a load: `{slot}`, `{slot:N}` (its first N characters), or as written. */
@@ -78,21 +81,40 @@ const valueFor = (template: string, slot: string) => template.replace(/\{slot(?:
  * publish block (nothing to hold while its history is being built), and the dataset it built measured as a run
  * measures it: the same numbers, so the history's period and the run's own measures agree.
  */
+/** The flow's parameter values for a load: the job's, with the watch's period set to the slot. */
+function valuesFor(job: Job, slot: string): Record<string, string> {
+  const watch = job.doc.publish?.watch?.[job.source];
+  const period = (typeof watch === 'object' ? (watch as WatchDef).period : undefined) ?? job.doc.publish?.period;
+  const values: Record<string, string> = Object.fromEntries(Object.entries(job.params).map(([k, t]) => [k, valueFor(t, slot)]));
+  if (period) values[period] = slot;
+  return values;
+}
+
+/** The marks and the gate's rules a watch's loads are measured with (ADR 0014): as the plan's watch carries them. */
+function rulesFor(plan: Awaited<ReturnType<typeof translate>>, node: number, steps: FlowDocument['steps']): Pick<MeasureSettings, 'due' | 'scope' | 'needs'> {
+  const st = node >= 0 ? settingsFor(plan, node, null, steps) : null;
+  return { ...(st?.due ? { due: st.due } : {}), ...(st?.scope ? { scope: st.scope } : {}), ...(st?.needs?.length ? { needs: st.needs } : {}) };
+}
+
 async function measure(job: Job, load: LoadFiles): Promise<Measures> {
   const db = Database.openMemory({ plugins: [io, external, parquet, smaltfl] });
   try {
-    const watch = job.doc.publish?.watch?.[job.source];
-    const period = (typeof watch === 'object' ? (watch as WatchDef).period : undefined) ?? job.doc.publish?.period;
-    const values: Record<string, string> = Object.fromEntries(Object.entries(job.params).map(([k, t]) => [k, valueFor(t, load.slot)]));
-    if (period) values[period] = load.slot;
+    const values = valuesFor(job, load.slot);
     const plan = await translate(job.doc, values);
     if (job.binding) {
       if (!load.file) throw new Error(`${load.slot}: a load of ${job.source} names its file`);
       await pinFile(db, job.binding.file, new Uint8Array(readFileSync(load.file)));
       await db.execAsync(pinnedDdl(job.binding));
+      // The fixed sources a gate's rule reads (the inventory), pinned under their own bindings.
+      for (const [id, path] of Object.entries(job.fixed)) {
+        const b = job.bindings[id];
+        if (!b) throw new Error(`--fixed ${id}: ${id} isn't a source the data list binds`);
+        await pinFile(db, b.file, new Uint8Array(readFileSync(path)));
+        await db.execAsync(pinnedDdl(b));
+      }
       const node = plan.nodes.findIndex((n) => n.op === 'table' && n.origin === job.source);
       const c = checksOf(plan, node, job.doc.steps);
-      return await measureLoad(db, job.binding.table, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null });
+      return await measureLoad(db, job.binding.table, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null, ...rulesFor(plan, node, job.doc.steps) });
     }
     for (const [source, b] of Object.entries(job.bindings)) {
       const path = load.files?.[source];
@@ -106,7 +128,7 @@ async function measure(job: Job, load: LoadFiles): Promise<Measures> {
     if (!r.published.includes(job.source)) throw new Error(`${load.slot}: the run didn't publish ${job.source}`);
     const node = plan.nodes.findIndex((n) => n.origin === job.source);
     const c = checksOf(plan, node, job.doc.steps);
-    return await measureLoad(db, job.source, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null });
+    return await measureLoad(db, job.source, { ...job.settings, slot: load.slot, checks: c?.checks ?? null, counting: c?.counting ?? null, ...rulesFor(plan, node, job.doc.steps) });
   } finally {
     db.close();
   }
@@ -172,9 +194,12 @@ async function jobOf(args: string[]): Promise<{ job: Job; out: string }> {
   }));
   const out = rest[0];
   if (!out) throw new Error('name the history file to write');
-  // The ontology's due marks on the source (ADR 0014 §3), counted day by day where there are any.
-  const due = marksOn(doc.ontology, source).due;
-  return { job: { doc, source, binding, bindings: data.sources, settings: { source, every: 'day', counted: [...new Set(count)], followed: [...new Set(follow)], paired: [...new Set(pair)], time: one('time') ?? w?.time ?? null, zone: one('zone') ?? w?.zone ?? null, sample: SAMPLE, ...(due.length ? { due } : {}) }, params, files }, out };
+  const fixed = Object.fromEntries((flags.get('fixed') ?? []).map((f) => {
+    const at = f.indexOf('=');
+    if (at <= 0) throw new Error(`--fixed names a source and its file: --fixed apps=path/to/apps.csv (got ${f})`);
+    return [f.slice(0, at), f.slice(at + 1)];
+  }));
+  return { job: { doc, source, binding, bindings: data.sources, settings: { source, every: 'day', counted: [...new Set(count)], followed: [...new Set(follow)], paired: [...new Set(pair)], time: one('time') ?? w?.time ?? null, zone: one('zone') ?? w?.zone ?? null, sample: SAMPLE }, params, files, fixed }, out };
 }
 
 async function main(): Promise<void> {
@@ -214,7 +239,10 @@ async function main(): Promise<void> {
     return [...count.entries()].sort((a, b) => b[1] - a[1])[0]![0];
   });
   const s = job.settings;
-  const start = emptyHistory({ flow: job.doc.id, source: job.source, settings: { ...s, checks: first.checks }, columns: first.columns, types: first.types, kinds, warmup: WARMUP, built: new Date().toISOString().slice(0, 19) + 'Z' });
+  // The marks and the gate's rules (ADR 0014) the history keeps counts for: as the plan's watch carries them.
+  const plan = await translate(job.doc, valuesFor(job, first.slot));
+  const rules = rulesFor(plan, plan.nodes.findIndex((n) => n.origin === job.source), job.doc.steps);
+  const start = emptyHistory({ flow: job.doc.id, source: job.source, settings: { ...s, ...rules, checks: first.checks }, columns: first.columns, types: first.types, kinds, warmup: WARMUP, built: new Date().toISOString().slice(0, 19) + 'Z' });
   const history: HistoryFile = { ...appendPeriods(start, results), kinds, missing: failures };
   // The columns asked for that the files don't have: said, not left out quietly.
   const have = new Set(first.columns);

@@ -114,7 +114,11 @@ match smaltdb's `CLAUDE.md`.
   bands and `due` marks (`ontology.ts`, plan/4's watch `expect`/`due`), the `band` finding (a value with a band is
   judged by it alone), the due counts in measures and the history (`Measures.due`, `HistoryFile.due`, only with a
   mark), the `due` finding from yesterday's cohort against the pooled cohort share (`lateAt`, `lateUsual`), Accept
-  the new band (`levelOf`'s `band`, `applyBand` in the app). Slices 3 to 7 are ADR 0014's order.
+  the new band (`levelOf`'s `band`, `applyBand` in the app). Slice 3: a gate's `scope` and `needs` rules (`ScopeRule`,
+  `NeedsRule`; the notebook resolves the datasets they name), counted in the engine (`emitScopeCounts`,
+  `emitNeedsCounts`, `Measures.gate`, `HistoryFile.gate`), the `scope` and `needs` findings, and upstream attribution
+  (`StoryOptions.upstream`: a step's finding about a source's column follows the source; a wrong source explains the
+  step's day). Slices 4 to 7 are ADR 0014's order.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
@@ -127,7 +131,7 @@ match smaltdb's `CLAUDE.md`.
   the controls example; its Q-104 to Q-109 are the maintainers' to confirm. **Now:** [ADR 0014](docs/adr/0014-gates.md),
   gates (bronze, silver, gold checks as a `gate()` cell in the notebook, written bands and due marks in the ontology,
   scope and dependency rules, the classifier on a kept sample, a sealed gold), in its seven slices, judged against the
-  control estate's answer key (its §"The answer key"); slices 1 and 2 are built (its §"As built"), slices 3 to 7 follow
+  control estate's answer key (its §"The answer key"); slices 1 to 3 are built (its §"As built"), slices 4 to 7 follow
   in order.
 
 ## Rules for this repository
