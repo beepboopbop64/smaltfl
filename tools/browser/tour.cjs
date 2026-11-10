@@ -1,6 +1,7 @@
 // Drive the built smaltfl app at phone size and capture what each view shows.
 //
 //   node tour.cjs <appDir> <outDir> <stops.json>
+//   TOUR_SCALE=2 node tour.cjs …           the same at twice the pixels, for screenshots a person will look at
 //
 // stops.json: an array of stops, visited in order in one page:
 //   { "name": "sep22-trips-news",        file name for the screenshot and the metrics
@@ -18,6 +19,9 @@
 //     "viewFirst": true,                  optional: show the view before the clicks, not after
 //     "select": ["#viewer", "ana"],       optional: choose a value in a select (after the card opens)
 //     "download": "sel",                  optional: tap this and save the download into outDir
+//     "unfold": ["nb-posture"],           optional: notebook boxes to unfold first, so their steps are cards on the canvas
+//     "box": "nb-summary",                optional: the notebook box whose sheet to open and capture
+//     "what": "Tue Mar 12, the brief",    optional: what the stop shows, copied into metrics.json for a judge to read
 //     "expect": { ... } }                 optional: checks, each failure a problem (below)
 //
 // expect (each optional; text is the captured scope's innerText, whitespace folded):
@@ -96,7 +100,7 @@ const WEEKDAY = { Mon: 'Mon', Tue: 'Tue', Wed: 'Wed', Thu: 'Thu', Fri: 'Fri', Sa
     if (ctx) await ctx.close();
     scheme = wanted;
     episode = null;
-    ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, colorScheme: wanted, acceptDownloads: true });
+    ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: Number(process.env.TOUR_SCALE || 1), colorScheme: wanted, acceptDownloads: true });
     p = await ctx.newPage();
     p.on('pageerror', (e) => problems.push(`PAGEERROR ${e.message}`));
     p.on('console', (m) => m.type() === 'error' && problems.push(`console ${m.text()}`));
@@ -147,6 +151,23 @@ const WEEKDAY = { Mon: 'Mon', Tue: 'Tue', Wed: 'Wed', Thu: 'Thu', Fri: 'Fri', Sa
           problems.push(`no day button "${stop.day}" (${(await p.locator('#loads button').allTextContents()).slice(0, 12).join(' | ')})`);
         }
       }
+      // A notebook is a box on the canvas (ADR 0011 §6): its steps are cards only once it is unfolded.
+      for (const box of stop.unfold ?? []) {
+        const el = p.locator(`g.card[data-card="${box}"]`);
+        if (!(await el.count())) continue;
+        await el.first().focus();
+        await p.keyboard.press('Enter');
+        await p.waitForSelector('#sheet:not([hidden]) .nb-actions button', { timeout: 20000 });
+        const show = p.locator('#sheet .nb-actions button', { hasText: 'Show its steps' });
+        if (await show.count()) await show.first().click();
+        await p.locator('#sheet button.close').first().click().catch(() => {});
+        await p.waitForSelector('#sheet', { state: 'hidden', timeout: 20000 }).catch(() => {});
+      }
+      if (stop.box) {
+        await p.locator(`g.card[data-card="${stop.box}"]`).first().focus();
+        await p.keyboard.press('Enter');
+        await p.waitForSelector('#sheet:not([hidden]) .nb', { timeout: 20000 });
+      }
       if (stop.select) {
         await p.selectOption(stop.select[0], stop.select[1]);
         await p.waitForTimeout(1500);
@@ -196,7 +217,7 @@ const WEEKDAY = { Mon: 'Mon', Tue: 'Tue', Wed: 'Wed', Thu: 'Thu', Fri: 'Fri', Sa
         await dl.saveAs(to);
         console.log(`${stop.name}: saved ${to}`);
       }
-      const scope = (stop.click || stop.clicks) && (await p.locator('.vf-detail').count()) ? '.vf-detail' : stop.card ? '#sheet' : 'body';
+      const scope = (stop.click || stop.clicks) && (await p.locator('.vf-detail').count()) ? '.vf-detail' : stop.card || stop.box ? '#sheet' : 'body';
       const m = await p.evaluate((sel) => {
         const el = document.querySelector(sel);
         const text = (el?.innerText ?? '').replace(/\s+/g, ' ').trim();
@@ -216,6 +237,7 @@ const WEEKDAY = { Mon: 'Mon', Tue: 'Tue', Wed: 'Wed', Thu: 'Thu', Fri: 'Fri', Sa
         return { text, words: words(text), longParagraphs: long, charts: charts.length, wordsBeforeFirstChart: charts[0] ? before : null, height };
       }, scope);
       m.name = stop.name;
+      if (stop.what) m.what = stop.what;
       m.status = (await status()).split('|').slice(2).join('|');
       m.state = (await status()).split('|')[1];
       m.title = await p.title();

@@ -8,11 +8,66 @@ answers and what is still open).
 
 | What | Where |
 |---|---|
-| The code | `beepboopbop64/smaltfl`, branch `claude/elegant-knuth-r8364a` (the repository's default branch), all pushed. No PR is open. |
+| The code | `beepboopbop64/smaltfl_fork` (a fork of `stenhoor/smaltfl`): `main` is the handoff (`5bdb1b4`); ADRs 0011 to 0014 are on `claude/gallant-mendel-uckiwr` (tip `b37762a`, handed over mid-check); the review of 2026-11-10 is on `claude/jolly-archimedes-og91mn`, on top of it. No PR is open. `beepboopbop64/smaltfl` (`claude/elegant-knuth-r8364a`) is the repository the work moved from |
 | stenhoor's initial commit | merged in (remote `stenhoor/main`); the move to `stenhoor/smaltfl` (ADR 0007) was blocked by GitHub access, see "Moving the repository" |
-| The data | the `data` branch: tip `0ca4dd1` (history format `smaltfl-history/3`, 31 days of January 2024, three incident episodes, 11 donor days), on top of `6e387dd`; built by `.github/workflows/data.yml` |
+| The data | the fork's `data` branch: tip `618e81a` on 2026-11-10 (history format `smaltfl-history/3`, 31 days of January 2024, three incident episodes, 11 donor days, with the pairs' cells and a kept sample), rebuilt by `.github/workflows/data.yml` on every push that touches `scripts/data/**`. The taxi hold vector does not hold on it (Q-133) |
 | The app, published | a private claude.ai artifact (version 22, built from `6be5755`): it doesn't have the last three commits (round 3 below). The notebook form (ADR 0011, slice 4) is published separately: https://claude.ai/artifact/3xkiHJnRGK4viZkT4y5k6u, built from the fork's `claude/gallant-mendel-uckiwr` on the data branch's loads; the sign-ins with the demo's three days (ADR 0012) as a second artifact (https://claude.ai/artifact/YNfh3yNapW9pv4HCtoWdCu), built with `--flow examples/security-signins/flow.json --out dist/app-signins`; the controls posture (ADR 0013) as a third, https://claude.ai/artifact/EaLvZcxsnu5ZNP5kNNCahH, built with `--flow examples/controls/flow.json --out dist/app-controls`; the control estate (ADR 0013 §8) as a fourth, https://claude.ai/artifact/NonRDwrC3eNjLmhfRwEgvP, built with `--flow examples/control-estate/flow.json --out dist/app-estate` |
 | Browser checks and judging tools | [tools/](../tools/README.md) (added for this handoff; they lived in a session scratch folder before) |
+
+## The review of 2026-11-10
+
+A new session took the tip (`b37762a`) and reviewed it before the next phase. It built the estate, taxi and sign-ins
+apps, captured their screens at phone and desktop size, ran a panel of judges on the estate's screens and had ADR 0014
+audited as built, each audit checked by a second reader. The maintainer's answers that followed are Q-120 to Q-131
+(docs/OPEN_QUESTIONS.md). The next ADR (0015) is to be written from them.
+
+**What it found**, most important first:
+
+1. **The estate's brief is wrong on a held day.** On Tue Mar 12 the WAF file fails 59.6% against its band of 0–15% and
+   holds the day. The brief on the posture card is headed "A normal Tuesday", draws "600 apps, usual 600–600", gives
+   the TLS file as the cause and proposes "Publish as is". The head and `fixOf` read the judged dataset's own story,
+   which is calm when another load holds the day, and `causeOf` has no fact for a gate finding. The two-minute test on
+   the estate scored 29 of 35 (seven days, one reader, graded against ADR 0014's key); the taxi app had scored 40 of 40.
+2. **Gate findings have no drawing, and the card that holds the day leads nowhere.** `viz.ts` did not change in ADRs
+   0011 to 0014: a band, due, scope, needs, reconcile, pair or classifier finding is a title and a sentence. A bronze
+   load that holds shows its verdict over "Nothing out of the ordinary" from its own rows, with no Decide and no brief.
+3. **The layers don't read.** The layer is the last word of a card's label, cut to "S…" and "G…" on silver and gold
+   cards. A phone shows three of sixteen cards, all bronze; silver and gold sit folded in notebook boxes off screen.
+   Nothing says, for the day, where the gates stopped.
+4. **Nothing answers a question.** Results is written for the taxi example; for the estate it lists four outputs with
+   their hashes. A reader given ten leadership questions answered three in full: a trend, "which applications" and
+   anything nobody prepared had no screen.
+5. **Options state no gain and no cost.** Each is one line ("readers get the day as it came, marked"), and "Expected
+   once" publishes a held day in one tap.
+6. **The gates promise more than is enforced.**
+   - The seal is the page's state: the same word for a clean pass and for a day published over a failed check, not
+     kept across a reload, not checked offline.
+   - A watched source's verdict is still told by the page.
+   - Gold's reconcile compares keys, not totals: the doubled TLS day passes all three gold gates.
+   - The `schema` and `rules` modes don't decide their holds: a refused file holds whatever the mode says, and a
+     `check()` step's limit holds by `publish.hold`.
+   - A toggle and an accepted band are lost on reload.
+   - plan/4 and sample/0 have no pinned vectors, and the kept sample ships rows for every watch.
+7. **The base is not green.** CI failed on the last five pushes: `test/fill-general.test.ts` passes vitest's
+   five-second default. With `dist/app/data/history.json` from the fork's data, `hold-real` and `story-real` fail six
+   tests, and the taxi example holds 41 days under `wrong`, not 25 (Q-133). CI skips those tests.
+8. **The family has moved.** smaltdb's head has the public plan API, exact percentiles, pivot and typed dates, and
+   runs SQL only with smaltql registered; smaltfl pins the engine of Nov 3 (Q-130). The fork of smalt-brand is behind
+   upstream, which a reader reports now gives smaltfl the user tools' cerulean in place of teal: to confirm with
+   stenhoor.
+
+**The order of work the maintainer chose:**
+
+1. **Make it right** (Q-126): CI green and Q-133; a brief that follows what holds the day; a drawing for each gate
+   finding; options with a computed gain, cost and undo (Q-124), a proposal only with what it rests on named (Q-128,
+   Q-132); the stage rail (Q-125); the seal as passed or decided (Q-127); then a judging round on the estate.
+2. **The engine pin** (Q-130).
+3. **Questions** (Q-122, Q-123): question cells in notebooks, shown as cards on the gold datasets, then the builder.
+4. **The other examples** gain their gates one by one (Q-131).
+
+**How to repeat the review:** `tools/browser/stops/estate.json` captures the estate's screens (`tour.cjs` gained
+`unfold`, `box` and `what`), and `tools/judges/estate-panel.workflow.js` is the panel that read them
+([tools/](../tools/README.md)).
 
 ## What is built
 

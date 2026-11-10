@@ -1,0 +1,243 @@
+[
+ {
+  "name": "mar06-flow",
+  "what": "Control estate, calm Wed Mar 6: the Flow view as a phone opens it (notebook boxes folded)",
+  "day": "Wed 6"
+ },
+ {
+  "name": "mar06-results",
+  "what": "Control estate, calm Wed Mar 6: the Results view",
+  "day": "Wed 6",
+  "view": "results"
+ },
+ {
+  "name": "mar06-runs",
+  "what": "Control estate, calm Wed Mar 6: the Runs view (the record)",
+  "day": "Wed 6",
+  "view": "runs"
+ },
+ {
+  "name": "mar06-nb-summary",
+  "what": "Control estate, calm Wed Mar 6: the Summary notebook's sheet",
+  "day": "Wed 6",
+  "box": "nb-summary",
+  "full": true
+ },
+ {
+  "name": "mar06-flow-unfolded",
+  "what": "Control estate, calm Wed Mar 6: the Flow view with the Posture and Summary boxes unfolded",
+  "day": "Wed 6",
+  "unfold": [
+   "nb-posture",
+   "nb-summary"
+  ]
+ },
+ {
+  "name": "mar06-posture-news",
+  "what": "Control estate, calm Wed Mar 6: silver posture, News",
+  "day": "Wed 6",
+  "card": "posture",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "mar06-posture-checks",
+  "what": "Control estate, calm Wed Mar 6: silver posture, Checks",
+  "day": "Wed 6",
+  "card": "posture",
+  "tab": "Checks",
+  "full": true
+ },
+ {
+  "name": "mar06-tls-checks",
+  "what": "Control estate, calm Wed Mar 6: bronze tls, Checks",
+  "day": "Wed 6",
+  "card": "tls",
+  "tab": "Checks",
+  "full": true
+ },
+ {
+  "name": "mar06-byunit-news",
+  "what": "Control estate, calm Wed Mar 6: gold by_unit, News",
+  "day": "Wed 6",
+  "card": "by_unit",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "mar06-byunit-checks",
+  "what": "Control estate, calm Wed Mar 6: gold by_unit, Checks with the seal",
+  "day": "Wed 6",
+  "card": "by_unit",
+  "tab": "Checks",
+  "full": true
+ },
+ {
+  "name": "mar06-byunit-data",
+  "what": "Control estate, calm Wed Mar 6: gold by_unit, Data (what leadership reads)",
+  "day": "Wed 6",
+  "card": "by_unit",
+  "tab": "Data",
+  "full": true
+ },
+ {
+  "name": "mar06-bycontrol-data",
+  "what": "Control estate, calm Wed Mar 6: gold by_control, Data",
+  "day": "Wed 6",
+  "card": "by_control",
+  "tab": "Data",
+  "full": true
+ },
+ {
+  "name": "mar07-flow",
+  "what": "Control estate, Thu Mar 7 (the logging file lacks a column: refused): the Flow view",
+  "day": "Thu 7"
+ },
+ {
+  "name": "mar08-flow",
+  "what": "Control estate, Fri Mar 8 (key rotation passes where encryption fails, silver): the Flow view",
+  "day": "Fri 8"
+ },
+ {
+  "name": "mar08-posture-news",
+  "what": "Control estate, Fri Mar 8: silver posture, News (the brief)",
+  "day": "Fri 8",
+  "card": "posture",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "mar08-posture-checks",
+  "what": "Control estate, Fri Mar 8: silver posture, Checks",
+  "day": "Fri 8",
+  "card": "posture",
+  "tab": "Checks",
+  "full": true
+ },
+ {
+  "name": "mar12-flow",
+  "what": "Control estate, Tue Mar 12 (the WAF pass rate collapses, bronze): the Flow view",
+  "day": "Tue 12"
+ },
+ {
+  "name": "mar12-waf-news",
+  "what": "Control estate, Tue Mar 12: bronze waf, News (the card that holds the day)",
+  "day": "Tue 12",
+  "card": "waf",
+  "tab": "News"
+ },
+ {
+  "name": "mar12-waf-checks",
+  "what": "Control estate, Tue Mar 12: bronze waf, Checks",
+  "day": "Tue 12",
+  "card": "waf",
+  "tab": "Checks",
+  "full": true
+ },
+ {
+  "name": "mar12-posture-news",
+  "what": "Control estate, Tue Mar 12: silver posture, News (the brief of the held day)",
+  "day": "Tue 12",
+  "card": "posture",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "mar12-posture-checks",
+  "what": "Control estate, Tue Mar 12: silver posture, Checks",
+  "day": "Tue 12",
+  "card": "posture",
+  "tab": "Checks",
+  "full": true
+ },
+ {
+  "name": "mar12-bycontrol-news",
+  "what": "Control estate, Tue Mar 12: gold by_control, News on a held day",
+  "day": "Tue 12",
+  "card": "by_control",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "mar12-bycontrol-checks",
+  "what": "Control estate, Tue Mar 12: gold by_control, Checks on a held day",
+  "day": "Tue 12",
+  "card": "by_control",
+  "tab": "Checks",
+  "full": true
+ },
+ {
+  "name": "mar12-results",
+  "what": "Control estate, Tue Mar 12 (held): the Results view",
+  "day": "Tue 12",
+  "view": "results"
+ },
+ {
+  "name": "mar12-reader-results",
+  "what": "Control estate, Tue Mar 12 (held): the Results view as Dana, a reader",
+  "day": "Tue 12",
+  "select": [
+   "#viewer",
+   "ciso"
+  ],
+  "view": "results"
+ },
+ {
+  "name": "mar14-vuln-news",
+  "what": "Control estate, Thu Mar 14 (vulnerability due dates cluster: a look-alike that publishes): bronze vuln_sla, News",
+  "day": "Thu 14",
+  "select": [
+   "#viewer",
+   "owner"
+  ],
+  "card": "vuln_sla",
+  "tab": "News",
+  "full": true
+ },
+ {
+  "name": "mar21-flow",
+  "what": "Control estate, Thu Mar 21 (the TLS file's rows twice): the Flow view",
+  "day": "Thu 21"
+ },
+ {
+  "name": "mar21-tls-news",
+  "what": "Control estate, Thu Mar 21: bronze tls, News",
+  "day": "Thu 21",
+  "card": "tls",
+  "tab": "News"
+ },
+ {
+  "name": "mar21-posture-checks",
+  "what": "Control estate, Thu Mar 21: silver posture, Checks (the reconcile)",
+  "day": "Thu 21",
+  "card": "posture",
+  "tab": "Checks",
+  "full": true
+ },
+ {
+  "name": "mar21-byunit-checks",
+  "what": "Control estate, Thu Mar 21: gold by_unit, Checks",
+  "day": "Thu 21",
+  "card": "by_unit",
+  "tab": "Checks",
+  "full": true
+ },
+ {
+  "name": "mar23-flow",
+  "what": "Control estate, Sat Mar 23 (six in ten DR exercises late): the Flow view",
+  "day": "Sat 23"
+ },
+ {
+  "name": "mar23-dr-news",
+  "what": "Control estate, Sat Mar 23: bronze dr_exercise, News",
+  "day": "Sat 23",
+  "card": "dr_exercise",
+  "tab": "News"
+ },
+ {
+  "name": "mar12-flow-dark",
+  "what": "Control estate, Tue Mar 12: the Flow view, dark",
+  "day": "Tue 12",
+  "scheme": "dark"
+ }
+]
