@@ -16,6 +16,8 @@ export default defineConfig({
     ],
   },
   server: { deps: { inline: [/node_modules\/smaltdb\//] } },
-  // `npm run bench` runs the scenario benchmarks in bench/ instead of the tests.
-  test: { include: process.env.SMALTFL_BENCH ? ['bench/**/*.bench.ts'] : ['test/**/*.test.ts'] },
+  // `npm run bench` runs the scenario benchmarks in bench/ instead of the tests. A test that runs a flow through the
+  // engine takes seconds on a busy runner (test/fill-general.test.ts passed vitest's five-second default on CI and
+  // failed five pushes in a row): thirty seconds a test, the time docs/HANDOFF.md has always run them with.
+  test: { include: process.env.SMALTFL_BENCH ? ['bench/**/*.bench.ts'] : ['test/**/*.test.ts'], testTimeout: 30000 },
 });
