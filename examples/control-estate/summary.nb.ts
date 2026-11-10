@@ -68,13 +68,13 @@ cell('about_gates', { lang: 'md' });
 md`The gold gate on what leadership reads: the columns as declared, the rules, and the rows reconciled with the posture; sealed when every gate passed`;
 
 cell('by_unit_gate');
-export const by_unit_gate = gate(by_unit, { layer: 'gold' });
+export const by_unit_gate = gate(by_unit, { layer: 'gold', reconcile: { key: 'business_unit', of: posture } });
 
 cell('by_control_gate');
-export const by_control_gate = gate(by_control, { layer: 'gold' });
+export const by_control_gate = gate(by_control, { layer: 'gold', reconcile: { key: 'control' } });
 
 cell('by_type_gate');
-export const by_type_gate = gate(by_type, { layer: 'gold' });
+export const by_type_gate = gate(by_type, { layer: 'gold', reconcile: { key: 'app_type' } });
 
 cell('published');
 publish(by_unit, { description: 'Failing applications by business unit' });

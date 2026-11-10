@@ -368,6 +368,26 @@ ${sql}
   return `SELECT ${counts.join(', ')}`;
 }
 
+/**
+ * A reconciliation's counts (ADR 0014 §6), in one row: the rows, the distinct keys (blank ones left out), the rows with
+ * a blank key, and with the other relation, its keys with no row here and the keys here not there.
+ */
+export function emitReconcileCounts(sql: string, key: readonly string[], of: string | null): string {
+  const k = (alias: string) => key.map((c) => `${alias}.${q(c)}`).join(' || \'\\u0001\' || ');
+  const blank = (alias: string) => key.map((c) => `${alias}.${q(c)} IS NULL`).join(' OR ');
+  const keysHere = `SELECT DISTINCT ${k('s')} AS k FROM (\n${sql}\n) s WHERE NOT (${blank('s')})`;
+  const counts = [
+    `(SELECT count(*) FROM (\n${sql}\n))`,
+    `(SELECT count(*) FROM (${keysHere}))`,
+    `(SELECT count(*) FROM (\n${sql}\n) s WHERE ${blank('s')})`,
+  ];
+  if (of) {
+    const keysThere = `SELECT DISTINCT ${k('o')} AS k FROM (\n${of}\n) o WHERE NOT (${blank('o')})`;
+    counts.push(`(SELECT count(*) FROM (${keysThere}) t WHERE t.k NOT IN (${keysHere}))`, `(SELECT count(*) FROM (${keysHere}) h WHERE h.k NOT IN (${keysThere}))`);
+  } else counts.push('0', '0');
+  return `SELECT ${counts.join(', ')}`;
+}
+
 /** Relations' rows together, one after another. */
 export function emitUnionAll(relations: readonly string[]): string {
   return relations.map((r) => `SELECT * FROM (\n${r}\n)`).join('\nUNION ALL\n');

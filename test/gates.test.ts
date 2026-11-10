@@ -87,7 +87,7 @@ export const late = sql\`SELECT count(*) AS n FROM \${auth_gate}\`;
     expect(await issues("cell('g');\nexport const g = gate(auth, { checks: { smell: 'hold' } });\n")).toEqual(["gate(auth, …): smell isn't a check (schema, amount, blanks, values, rules, scope, needs, due, reconcile, shares, shape, hours, pairs, forest, classifier)"]);
     expect(await issues("cell('g');\nexport const g = gate(auth, { checks: { shares: 'loud' } });\n")).toEqual(['gate(auth, …): checks.shares is one of hold, warn, off']);
     expect(await issues("cell('g');\nexport const g = gate(auth, { layer: 'platinum' });\n")).toEqual(['gate(auth, …): layer is one of bronze, silver, gold']);
-    expect(await issues("cell('g');\nexport const g = gate(auth, { strict: true });\n")).toEqual(["gate(auth, …): strict isn't a gate's setting (layer, checks, scope, needs): refused rather than ignored"]);
+    expect(await issues("cell('g');\nexport const g = gate(auth, { strict: true });\n")).toEqual(["gate(auth, …): strict isn't a gate's setting (layer, checks, scope, needs, reconcile): refused rather than ignored"]);
     expect(await issues("cell('g');\nexport const g = gate(auth);\ncell('g2');\nexport const g2 = gate(auth);\n")).toEqual(['auth has two gates']);
     expect(await issues("cell('g');\nexport const g = gate(auth, 'bronze');\n")).toEqual(['gate() takes its settings as an object literal: { layer, checks }']);
   });
@@ -132,8 +132,11 @@ export const auth_gate = gate(auth, { checks: { shares: 'hold', forest: 'off' } 
     expect(() => validatePlan(without)).toThrow(/a watch has exactly .*checks/);
     const odd = { ...plan, publish: { ...pub, watch: pub.watch.map(([n, w]) => [n, { ...w, checks: { ...(w.checks as object), shares: 'loud' } }]) } } as unknown as typeof plan;
     expect(() => validatePlan(odd)).toThrow(/checks is every check/);
-    const three = { ...plan, smaltflPlan: 3 } as typeof plan;
+    const { gates: _gates, ...rest } = plan.publish as unknown as Record<string, unknown>;
+    const three = { ...plan, smaltflPlan: 3, publish: rest } as unknown as typeof plan;
     expect(() => validatePlan(three)).toThrow(/a watch has exactly/);
+    // A plan/3 publish block carries no gates: with them, it is refused as such.
+    expect(() => validatePlan({ ...plan, smaltflPlan: 3 })).toThrow(/publish.gates is plan\/4/);
   });
 });
 

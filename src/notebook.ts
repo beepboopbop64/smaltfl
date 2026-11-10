@@ -85,6 +85,11 @@ export interface GateOptions {
    * doesn't is a contradiction, counted.
    */
   needs?: NeedsOption | NeedsOption[];
+  /**
+   * The reconciliation rule (ADR 0014 §6): the node's key (a column or a list), on one row each and never blank; with
+   * `of` (a node, by its name), the node whose keys these must equal. Gold's own check.
+   */
+  reconcile?: { key: string | string[]; of?: unknown };
 }
 
 export interface NeedsOption {

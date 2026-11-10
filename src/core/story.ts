@@ -205,7 +205,7 @@ export const ACT_VERB: Record<Act, string> = {
 };
 
 /** The health row's cells (ADR 0008 §6), in order, each with the kinds of finding it holds and its name on screen. */
-export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'band', 'due', 'scope', 'needs', 'new', 'pair', 'combo', 'unlike', 'apart', 'missing'], shape: ['shape'] };
+export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'band', 'due', 'scope', 'needs', 'reconcile', 'new', 'pair', 'combo', 'unlike', 'apart', 'missing'], shape: ['shape'] };
 export const CELL_NAMES: Record<Cell, string> = { file: 'File', amount: 'Amount', hours: 'Hours', values: 'Values', shape: 'Shape' };
 /** The health row's heading: what the five cells are, said once and counted at a glance. */
 export const HEALTH_HEAD = 'Health';
@@ -216,7 +216,9 @@ export const SETTLE_LINE = 'Total in range · nothing to do';
 
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const VALUE_KINDS = new Set<Finding['kind']>(['gone', 'share', 'missing']);
-const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'combo', 'unlike', 'apart', 'band', 'due', 'scope', 'needs', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
+const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'combo', 'unlike', 'apart', 'band', 'due', 'scope', 'needs', 'reconcile', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
+/** The written rules (ADR 0014 §4, §6): a step's own whatever its sources said. */
+const WRITTEN_RULES = new Set<Finding['kind']>(['scope', 'needs', 'reconcile']);
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const worst = (xs: readonly Severity[]): Severity => xs.reduce<Severity>((a, b) => (RANK[b] < RANK[a] ? b : a), 'ok');
 const weekdayOf = (day: string) => WEEKDAYS[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
@@ -655,7 +657,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   // Explained upstream (ADR 0014 §2): a finding about a column carrying a watched source's name on a day that source's
   // own story wasn't calm is never loud here; it follows from the source.
   const upstream = o.judge?.checks ? o.upstream : undefined;
-  const explained = (f: Finding): boolean => !!upstream?.length && f.kind !== 'needs' && f.kind !== 'scope'
+  const explained = (f: Finding): boolean => !!upstream?.length && !WRITTEN_RULES.has(f.kind)
     && upstream.some((x) => [...(f.columns ?? []), ...(f.members ?? []).map((m) => m.column)].some((c) => c.toLowerCase() === x.source.toLowerCase() || c.toLowerCase().startsWith(`${x.source.toLowerCase()}_`)));
   const loudRaw = (f: Finding) => (f.severity === 'alert' || f.severity === 'warn') && !ack.has(f.key);
   const loud = (f: Finding) => loudRaw(f) && !explained(f);
@@ -675,7 +677,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   // A due mark's late share beyond its usual (ADR 0014 §3) leads too: the lateness is the cause of the misses.
   const dueLead = live.filter((f) => f.kind === 'due' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
   // A written rule broken (ADR 0014 §4) leads too: rows out of scope, or a contradiction, say more than the amount.
-  const ruleLead = live.filter((f) => (f.kind === 'scope' || f.kind === 'needs') && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  const ruleLead = live.filter((f) => WRITTEN_RULES.has(f.kind) && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
   const lead = (badLead && badLead.kind !== 'band' ? badLead : null) ?? bandLead ?? dueLead ?? ruleLead ?? newLead ?? blankLead;
   const splitFound = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden, judge) : null;
   const split = splitFound && (!lead || (splitFound.bad && splitFound.kind !== 'held' && !blankLead)) ? splitFound : null;
@@ -701,7 +703,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const wrongUpstream = upstream?.find((u) => u.state === 'wrong' || u.state === 'refused') ?? null;
   const viaRows = (f: Finding): string | null => {
     if (!wrongUpstream || !volume || !loudRaw(volume)) return null;
-    if (f.kind === 'needs' || f.kind === 'scope') return null;
+    if (WRITTEN_RULES.has(f.kind)) return null;
     return `upstream:${wrongUpstream.source}`;
   };
   const hero: Hero = o.refused ? 'refused' : hoursF ? 'hours' : split ? 'split' : lead ? 'finding' : volume && loud(volume) && !viaRows(volume) ? 'amount' : gate?.held ? 'gate' : 'finding';
@@ -740,7 +742,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   // What an upstream source's own day explains (ADR 0014 §2): a finding about a column named for it, when its story
   // said something that day. Its key is the finding's `because`.
   const upstreamOf = (f: Finding): string | null => {
-    if (!upstream?.length || f.kind === 'needs' || f.kind === 'scope') return null;
+    if (!upstream?.length || WRITTEN_RULES.has(f.kind)) return null;
     const columns = [...(f.columns ?? []), ...(f.members ?? []).map((m) => m.column)].map((c) => c.toLowerCase());
     const u = upstream.find((x) => columns.some((c) => c === x.source.toLowerCase() || c.startsWith(`${x.source.toLowerCase()}_`)));
     return u ? `upstream:${u.source}` : null;

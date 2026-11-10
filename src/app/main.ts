@@ -25,10 +25,10 @@ import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, timeOf, type 
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { flowNames, isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { CHECK_NAMES, CHECK_SAID, gateChecksOf, gateLayerOf, JUDGED, LAYER_SAID, WRITTEN, type GateChecks } from '../core/gates.js';
+import { CHECK_NAMES, CHECK_SAID, gateChecksOf, gateLayerOf, hasGates, JUDGED, LAYER_SAID, WRITTEN, type CheckName, type GateChecks } from '../core/gates.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, guessWords, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type KeptMark, type PauseState, type RemedyMark } from '../core/days.js';
 import { UNTIL, afterLine, betweenLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, failLine, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, checksSeen, filesSeen, findingOf, type RunSight, type AfterPart, type KeptLacks, type RemedySaid, type SheetIn, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
-import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Hold, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
+import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, reconcileSaid, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Hold, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { dayVersions, donorIdOf, fillCounts, levelOf as acceptedLevel, levelWays, partLabel as remedyPart, type Offer, type Repair, type Version } from '../core/fill.js';
 import { derivedAbout, derivedFails, derivedKeys, derivedWhy, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
 import { followsCause as followsFrom, ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, axisShare, recentSpan, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type HourValues, type Story, type Told } from '../core/story.js';
@@ -79,6 +79,8 @@ interface RunRecord {
   verified?: VerifyResult;
   signed?: SignedManifest;
   signatureOk?: boolean;
+  /** When it was signed here (ADR 0014 §6: the seal says who signed, and when). */
+  signedAt?: Date;
 }
 
 /**
@@ -662,7 +664,10 @@ function kindLabel(id: string): string {
 /** The gate's layer on a card's label (ADR 0014 §7): the gate mark, in a flow with gates. */
 const layerMark = (id: string): string => {
   const layer = gateLayerOf(state.doc, id);
-  return layer ? ` · ${layer.toUpperCase()}` : '';
+  if (!layer) return '';
+  // A published node's seal (ADR 0014 §6): the run on screen, or the latest, sealed.
+  const r = isOutput(id) ? (onScreen() ?? latest()) : undefined;
+  return ` · ${layer.toUpperCase()}${r && sealOfRun(r)?.state === 'sealed' ? ' · SEALED' : ''}`;
 };
 
 /** The notebook cell a step came from, in a format-4 flow (ADR 0011). */
@@ -2997,8 +3002,35 @@ async function checksTab(card: string, id: string): Promise<HTMLElement> {
   const day = newsDay() ?? viewedDay();
   const findings = day ? loadFindings(id, day) : [];
   const judged = !!day && (id === loadSource() ? !!history : !!rangesForLoad(id)?.file.days.includes(day));
+  // A published node nothing watches (gold, ADR 0014 §6): its checks are the run's, counted over the dataset it built
+  // and kept in the manifest, not a judge's over a history.
+  const watched = Object.keys(state.doc.publish?.watch ?? {}).some((w) => w.toLowerCase() === id.toLowerCase());
+  const run = isOutput(id) && !watched ? (onScreen() ?? latest()) : undefined;
+  const built = run?.result.manifest.nodes.find((n) => n.origin.toLowerCase() === id.toLowerCase());
+  const rule = state.doc.gates?.[id]?.reconcile ?? Object.entries(state.doc.gates ?? {}).find(([k]) => k.toLowerCase() === id.toLowerCase())?.[1].reconcile ?? null;
   const box = h('div', { class: 'checks-tab' });
   box.append(h('p', { class: 'lede' }, `${layer[0]!.toUpperCase()}${layer.slice(1)} gate: ${LAYER_SAID[layer]}. Written checks hold the day; learned ones warn, unless the ontology marks the value bad.`));
+  if (run) box.append(sealPart(run));
+  /** A gold check's result from the run (ADR 0014 §6): the reconciliation's counts, the columns as declared, a rule's counts. */
+  const goldToday = (name: CheckName): Child | null => {
+    if (!run) return h('span', { class: 'ch-quiet' }, 'no run yet');
+    if (name === 'reconcile') {
+      if (!rule) return h('span', { class: 'ch-quiet' }, 'no key written: reconcile: { key, of } in the gate cell names one');
+      const rc = built?.gate?.reconcile;
+      if (!rc) return h('span', { class: 'ch-quiet' }, 'not counted by this run');
+      const said = reconcileSaid(rc, rule.key, rule.of ?? null);
+      return said ? h('span', { class: 'ch-found' }, h('span', { class: `ch-today ${checks.reconcile === 'hold' ? 'alert' : 'warn'}` }, glyphEl(checks.reconcile === 'hold' ? 'alert' : 'warn', 14), ` ${said.replace(/^rows don't reconcile: /, '')}`))
+        : h('span', { class: 'ch-ok' }, glyphEl('publish', 14), ` rows reconcile: ${fmtInt(rc.rows)} rows, ${fmtInt(rc.keys)} ${rule.key.join(' and ')} values${rule.of ? `, every one in ${rule.of}` : ''}`);
+    }
+    if (name === 'schema') return built ? h('span', { class: 'ch-ok' }, glyphEl('publish', 14), ' columns as declared') : h('span', { class: 'ch-quiet' }, 'not in this run');
+    if (name === 'rules') {
+      const e = built?.expectations;
+      if (!e) return h('span', { class: 'ch-quiet' }, 'no rule on it');
+      const failed = e.rules.filter((x) => x.failed > 0);
+      return failed.length ? h('span', { class: 'ch-found' }, ...failed.map((x) => h('span', { class: 'ch-today alert' }, glyphEl('alert', 14), ` ${x.name}: ${fmtInt(x.failed)} rows`))) : h('span', { class: 'ch-ok' }, glyphEl('publish', 14), ` ${e.rules.length} rules, every row passes`);
+    }
+    return h('span', { class: 'ch-quiet' }, 'nothing watched here: a learned check needs a watch and its history');
+  };
   const grid = h('div', { class: 'checks-grid', role: 'table', 'aria-label': `The ${layer} gate’s checks on ${id}` });
   const head = (t: string) => h('span', { class: 'ch-head', role: 'columnheader' }, t);
   grid.append(h('div', { class: 'ch-row', role: 'row' }, head('Check'), head('Kind'), head('Does'), head(day ? `Today · ${dayShort(day)}` : 'Today')));
@@ -3007,6 +3039,7 @@ async function checksTab(card: string, id: string): Promise<HTMLElement> {
     const mine = findings.filter((f) => f.check === name && f.severity !== 'ok').sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || b.score - a.score);
     const worst = mine[0];
     const today: Child = mode === 'off' ? h('span', { class: 'ch-quiet' }, 'off')
+      : run ? goldToday(name)!
       : !JUDGED.has(name) ? h('span', { class: 'ch-quiet' }, 'not judged in this build')
       : name === 'classifier' && !samples.has(id) ? h('span', { class: 'ch-quiet' }, 'no kept sample for it: nothing to learn from')
       : !judged ? h('span', { class: 'ch-quiet' }, 'no day to judge')
@@ -3032,6 +3065,36 @@ async function checksTab(card: string, id: string): Promise<HTMLElement> {
       h('p', { class: 'foot' }, 'The gate is written here, and the plan carries it: to change a check, change the cell.')));
   } else box.append(h('p', { class: 'foot' }, `No gate cell yet: ${id} has the ${layer} layer’s defaults. A gate(${id}, { checks }) cell beside it sets them.`));
   return box;
+}
+
+/**
+ * The seal and its evidence (ADR 0014 §6): sealed or not, and why; what each gold gate counted on the run, each hold
+ * and what was decided of it; who signed, when, and the manifest's hash.
+ */
+function sealPart(r: RunRecord): HTMLElement {
+  const seal = sealOfRun(r);
+  const m = r.result.manifest;
+  const gold = m.nodes.filter((n) => n.gate);
+  const lines: Child[] = [];
+  for (const n of gold) {
+    const g = Object.entries(state.doc.gates ?? {}).find(([k]) => k.toLowerCase() === n.origin.toLowerCase())?.[1];
+    const rc = n.gate!.reconcile;
+    const said = g?.reconcile ? reconcileSaid(rc, g.reconcile.key, g.reconcile.of ?? null) : null;
+    lines.push(h('li', { class: said ? 'bad' : '' }, h('span', { class: said ? 'bad' : 'ok' }, said ? 'failed' : 'ok'), h('span', {}, `${n.origin} · reconcile by ${g?.reconcile?.key.join(' and ') ?? 'key'}${g?.reconcile?.of ? ` with ${g.reconcile.of}` : ''}: ${said ? said.replace(/^rows don't reconcile: /, '') : `${fmtInt(rc.rows)} rows, ${fmtInt(rc.keys)} keys`}`)));
+  }
+  const now = pauseOf(r);
+  for (const x of r.result.holds) lines.push(h('li', { class: now && now.state !== 'waiting' ? '' : 'bad' }, h('span', { class: now && now.state !== 'waiting' ? 'ok' : 'bad' }, now && now.state !== 'waiting' ? PAUSE_PILL[now.state] : 'held'), h('span', {}, `${x.origin}: ${x.said}`)));
+  for (const n of m.nodes) {
+    if (!n.expectations) continue;
+    const failed = n.expectations.rules.filter((x) => x.failed > 0 && x.onFail === 'fail');
+    lines.push(h('li', { class: failed.length ? 'bad' : '' }, h('span', { class: failed.length ? 'bad' : 'ok' }, failed.length ? 'failed' : 'ok'), h('span', {}, `${n.origin} · ${n.expectations.rules.length} rules${failed.length ? `: ${failed.map((x) => `${x.name} (${fmtInt(x.failed)} rows)`).join(', ')}` : ''}`)));
+  }
+  return h('div', { class: `part seal-part ${seal?.state ?? 'none'}` },
+    h('p', { class: 'eyebrow' }, `The seal · run ${runName(r)}`),
+    h('p', { class: 'seal-head' }, seal?.state === 'sealed' ? glyphEl('seal', 16) : null, seal?.state === 'sealed' ? 'Sealed: every gate passed, or its holds were decided and published; the signed manifest is the seal.' : seal ? `Not sealed: ${seal.why}.` : 'No gates: nothing to seal.'),
+    seal?.state === 'sealed' ? h('p', { class: 'foot' }, `Signed by ${seal.signed.signer.name} (${short(seal.signed.signer.fingerprint)})${seal.at ? ` · ${seal.at.toLocaleString()}` : ''} · manifest `, hash4(r.result.hash, 'manifest hash')) : null,
+    lines.length ? h('ul', { class: 'checks seal-checks' }, ...lines) : h('p', { class: 'foot' }, 'No gate counted on this run.'),
+    h('p', { class: 'foot' }, 'A re-run or a later decision makes a new seal; verify counts each gate again, and the audit bag carries the manifest with them.'));
 }
 
 // ------------------------------------------------------------------ tabs: data, with each column's distribution on top
@@ -5956,6 +6019,7 @@ function metricName(m: Metric): string {
     case 'scopeOut': return 'Rows out of scope';
     case 'scopeMissing': return 'In scope with no row';
     case 'needs': return `Rule ${m.rule + 1}: contradictions`;
+    case 'reconcile': return m.count === 'repeats' ? 'Rows repeating a key' : m.count === 'blank' ? 'Rows with a blank key' : m.count === 'missing' ? 'Keys with no row' : 'Keys not in the other node';
   }
 }
 
@@ -8780,8 +8844,9 @@ function renderRuns(): void {
         h('button', { class: 'btn', type: 'button', onclick: () => void verify(r, 'rerun') }, 'Verify'),
         h('button', { class: 'btn quiet', type: 'button', onclick: () => void verify(r, 'rederive') }, 'Re-derive from the files'),
         owner ? h('button', { class: 'btn quiet', type: 'button', onclick: () => void sign(r) }, r.signed ? 'Signed' : 'Sign') : null));
+    const seal = sealOfRun(r);
     li.append(
-      h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Run ${runName(r)}`), r.load !== undefined && loads.list[r.load] ? h('span', { class: 'pill load-pill' }, dayLabel(loads.list[r.load]!.day)) : null, badge ? h('span', { class: `pill${badge.mark ? ' held-pill' : ''}` }, badge.mark ? glyphEl(badge.mark, 13) : '', badge.text) : null, h('span', { class: 'pill' }, `${count('built')} built`), h('span', { class: 'pill' }, `${count('reused')} reused`), h('span', { class: 'pill', title: 'Steps worked out inside the ones that read them, with no copy of their own' }, `${count('folded')} not stored`), h('span', { class: 'foot num' }, `${fmtMs(r.ms)} · ${r.at.toLocaleTimeString()}`)),
+      h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, `Run ${runName(r)}`), r.load !== undefined && loads.list[r.load] ? h('span', { class: 'pill load-pill' }, dayLabel(loads.list[r.load]!.day)) : null, badge ? h('span', { class: `pill${badge.mark ? ' held-pill' : ''}` }, badge.mark ? glyphEl(badge.mark, 13) : '', badge.text) : null, seal ? h('span', { class: `pill ${seal.state === 'sealed' ? 'ok sealed-pill' : ''}`, title: seal.state === 'sealed' ? 'Every gate passed, or its holds were decided; the signed manifest is the seal' : seal.why }, seal.state === 'sealed' ? glyphEl('seal', 13) : '', seal.state === 'sealed' ? 'sealed' : 'not sealed') : null, h('span', { class: 'pill' }, `${count('built')} built`), h('span', { class: 'pill' }, `${count('reused')} reused`), h('span', { class: 'pill', title: 'Steps worked out inside the ones that read them, with no copy of their own' }, `${count('folded')} not stored`), h('span', { class: 'foot num' }, `${fmtMs(r.ms)} · ${r.at.toLocaleTimeString()}`)),
       body,
     );
     if (r.verified) {
@@ -8956,8 +9021,35 @@ async function sign(r: RunRecord): Promise<void> {
   state.identity ??= ledger?.identity ?? (await createIdentity('This browser'));
   r.signed = await signManifest(r.result.manifest, state.identity);
   r.signatureOk = (await verifyManifest(r.signed, state.identity.card)).ok;
+  r.signedAt = new Date();
   if (ledger) await ledger.append('sign', state.viewer, { run: r.result.run, manifest: r.result.hash, signature: r.signed.signature });
   renderRuns();
+  requestCanvas();
+}
+
+/**
+ * The gold seal (ADR 0014 §6): a run of a flow with gates whose gates all passed, or whose holds were all decided and
+ * published, signed; the signed manifest is the seal. Open, with why, until then: held and undecided, decided not to
+ * publish, not signed, or the flow changed since. Null for a flow with no gates.
+ */
+type Seal = { state: 'sealed'; signed: SignedManifest; at: Date | undefined } | { state: 'open'; why: string; ready: boolean };
+function sealOfRun(r: RunRecord): Seal | null {
+  if (!hasGates(state.doc)) return null;
+  if (flowChanged(r)) return { state: 'open', why: 'the flow changed since this run', ready: false };
+  if (r.result.holds.length) {
+    const now = pauseOf(r);
+    if (!now || now.state === 'waiting') return { state: 'open', why: `held, undecided: ${r.result.holds.map((x) => `${x.origin} (${x.said})`).join('; ')}`, ready: false };
+    if (now.state === 'dont') return { state: 'open', why: 'decided: not published', ready: false };
+    if (r.release?.outcome !== 'applied') return { state: 'open', why: `decided (${PAUSE_PILL[now.state]}), not released in this engine`, ready: false };
+  }
+  if (!r.signed || !r.signatureOk) return { state: 'open', why: 'not signed yet', ready: true };
+  return { state: 'sealed', signed: r.signed, at: r.signedAt };
+}
+
+/** Seal a run that is ready for it (ADR 0014 §6, Q-115: sealed automatically): the owner's signature, recorded. */
+async function sealIfReady(r: RunRecord): Promise<void> {
+  if (!ledger || !isOwner() || sealOfRun(r)?.state !== 'open' || !(sealOfRun(r) as { ready: boolean }).ready) return;
+  await sign(r);
 }
 
 // ------------------------------------------------------------------ running
@@ -9035,6 +9127,8 @@ async function run(): Promise<void> {
     refreshRanges();
     // A day decided before (in this visit, or an earlier one) is decided again by the same keys (ADR 0009 §10).
     if (result.holds.length) await applyDecided(rec);
+    // A run whose gates all passed, or whose holds a standing decision published, is sealed (ADR 0014 §6).
+    await sealIfReady(rec);
     await learnColumns();
     void computeChanges();
     await refreshEdits();
@@ -9142,6 +9236,8 @@ async function release(r: RunRecord, decision: RecordEntry, keys: Record<string,
   noteShown(r, out.published);
   const about: ReleaseAbout = { run: r.result.run, manifest: r.result.hash, outputs: keys, decision: decision.seq, leaf, outcome: out.outcome, why: out.why };
   await ledger.append('release', decision.by.as, about as unknown as JSONValue);
+  // Its holds decided and published: sealed, signed again after the decision (ADR 0014 §6).
+  if (out.outcome === 'applied') await sealIfReady(r);
   return out;
 }
 

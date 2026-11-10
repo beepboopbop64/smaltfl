@@ -635,6 +635,11 @@ th.hit, td.hit { background: var(--warn-wash); }
 .chip.hold { background: var(--bad-wash); color: var(--bad); }
 .chip.warn { background: var(--warn-wash); color: var(--warn); }
 .chip.off { background: var(--sunk); color: var(--muted); }
+/* The seal (ADR 0014 §6): the run's gates and their evidence on a gold card's Checks tab, and a pill on the run. */
+.seal-part .seal-head { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 600; }
+.seal-part.sealed .seal-head { color: var(--ink); } .seal-part.open .seal-head { color: var(--warn); }
+.seal-part .seal-checks li.bad span:first-child { color: var(--bad); }
+.pill.sealed-pill { display: inline-flex; align-items: center; gap: 4px; }
 .ch-found { display: grid; gap: 3px; }
 .ch-today { border: 0; background: none; font: inherit; color: var(--ink); text-align: left; padding: 0; display: inline-flex; align-items: center; gap: 4px; overflow-wrap: anywhere; }
 .ch-today.alert { color: var(--bad); } .ch-today.warn { color: var(--warn); }

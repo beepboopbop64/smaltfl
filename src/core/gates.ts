@@ -29,7 +29,7 @@ export type CheckMode = (typeof CHECK_MODES)[number];
 export const WRITTEN: ReadonlySet<CheckName> = new Set<CheckName>(['schema', 'amount', 'blanks', 'values', 'rules', 'scope', 'needs', 'due', 'reconcile']);
 
 /** The checks this build judges: the others are named, switchable and not yet told (ADR 0014's slices 2 to 5). */
-export const JUDGED: ReadonlySet<CheckName> = new Set<CheckName>(['schema', 'amount', 'blanks', 'values', 'rules', 'scope', 'needs', 'due', 'shares', 'shape', 'hours', 'pairs', 'forest', 'classifier']);
+export const JUDGED: ReadonlySet<CheckName> = new Set<CheckName>(['schema', 'amount', 'blanks', 'values', 'rules', 'scope', 'needs', 'due', 'reconcile', 'shares', 'shape', 'hours', 'pairs', 'forest', 'classifier']);
 
 /** What each check says, in a few words, for the Checks tab. */
 export const CHECK_SAID: Record<CheckName, string> = {
@@ -64,6 +64,17 @@ export interface GateDef {
   checks: Partial<Record<CheckName, CheckMode>>;
   scope?: ScopeRule;
   needs?: NeedsRule[];
+  reconcile?: ReconcileRule;
+}
+
+/**
+ * The reconciliation rule (ADR 0014 §6): the node's key (one column or several), which must be on one row each and
+ * never blank; and, with `of` (a source, or for an output that isn't watched a step), the node whose keys these must
+ * equal: a key here not there, or there not here, is counted.
+ */
+export interface ReconcileRule {
+  key: string[];
+  of?: string;
 }
 
 /**
@@ -166,6 +177,7 @@ export function checkOf(kind: Finding['kind']): CheckName | null {
     case 'scope': return 'scope';
     case 'needs': return 'needs';
     case 'apart': return 'classifier';
+    case 'reconcile': return 'reconcile';
     case 'missing': return 'blanks';
     case 'shape': return 'shape';
     case 'dropped': return 'rules';
@@ -199,7 +211,14 @@ export function gateProblems(g: unknown): string[] {
   const out: string[] = [];
   if (typeof g !== 'object' || g === null || Array.isArray(g)) return [`a gate is { layer: ${LAYERS.join(' | ')}, checks: { name: ${CHECK_MODES.join(' | ')} } }`];
   const r = g as Record<string, unknown>;
-  for (const k of Object.keys(r)) if (!['layer', 'checks', 'scope', 'needs'].includes(k)) out.push(`${k} isn't a gate's setting (layer, checks, scope, needs): refused rather than ignored`);
+  for (const k of Object.keys(r)) if (!['layer', 'checks', 'scope', 'needs', 'reconcile'].includes(k)) out.push(`${k} isn't a gate's setting (layer, checks, scope, needs, reconcile): refused rather than ignored`);
+  if (r.reconcile !== undefined) {
+    const rc = r.reconcile as Record<string, unknown> | null;
+    const key = rc && typeof rc === 'object' && !Array.isArray(rc) ? rc.key : undefined;
+    const keys = typeof key === 'string' ? [key] : Array.isArray(key) ? key : null;
+    if (!rc || typeof rc !== 'object' || Array.isArray(rc) || !keys || keys.length === 0 || keys.some((k) => typeof k !== 'string' || k === '') || (rc.of !== undefined && typeof rc.of !== 'string') || Object.keys(rc).some((k) => !['key', 'of'].includes(k)))
+      out.push('reconcile is { key: a column or a list of columns, of?: the node whose keys these must equal }');
+  }
   const values = (v: unknown) => typeof v === 'string' || (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string'));
   const match = (m: unknown) => typeof m === 'object' && m !== null && !Array.isArray(m) && Object.keys(m).length > 0 && Object.values(m).every(values);
   if (r.scope !== undefined) {

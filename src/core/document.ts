@@ -587,6 +587,14 @@ function validateGates(doc: Record<string, unknown>, add: (path: string, message
       const sc = gate.scope;
       if (isRecord(sc) && typeof sc.of === 'string' && !sources.has(sc.of.toLowerCase())) add(`${at}.scope.of`, `${sc.of} isn't a source: the scope's inventory is a source of the flow`);
       for (const n of Array.isArray(gate.needs) ? gate.needs : gate.needs !== undefined ? [gate.needs] : []) if (isRecord(n) && typeof n.from === 'string' && !sources.has(n.from.toLowerCase())) add(`${at}.needs.from`, `${n.from} isn't a source: a dependency is read from a source of the flow`);
+      // A reconciliation's other node (ADR 0014 §6): a source for a watched node (measured before the run), any node for
+      // an output the run alone counts.
+      const rc = gate.reconcile;
+      if (isRecord(rc) && typeof rc.of === 'string') {
+        const of = rc.of.toLowerCase();
+        if (!sources.has(of) && !stepIds.has(of)) add(`${at}.reconcile.of`, `no source or step ${rc.of}`);
+        else if (watched.has(lower) && !sources.has(of)) add(`${at}.reconcile.of`, `${rc.of} is a step: a watched node reconciles against a source, which is there before the run`);
+      }
     }
   }
 }

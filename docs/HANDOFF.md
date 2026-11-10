@@ -77,8 +77,13 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   scope, and the posture no longer repeats the controls.
 - **Gates, slice 4** (ADR 0014 §"As built", 2026-11-10): the kept sample beside each history (two hundred rows a day,
   stratified, eight weeks, `sample.<watch>.json`, pinned and appended by each run) and the classifier (boosted stumps,
-  held-out AUC against chance and random labels, explained by permutation), an `apart` finding that warns. Slices 5
-  to 7 follow ADR 0014's order; each moves the test's "still wrong" assertions as a decision.
+  held-out AUC against chance and random labels, explained by permutation), an `apart` finding that warns.
+- **Gates, slice 5** (ADR 0014 §"As built", 2026-11-10): the `reconcile` rule in the gate cell, counted in the engine
+  (a measure on a watched node; on a gold node the run counts it over what it built, `ManifestNode.gate`, a hold where
+  the gate says hold, verify's `gate` check), and the seal in the app (`sealOfRun`: gates passed or holds decided and
+  published, signed by the owner without asking; the Checks tab's seal part, the card label's SEALED). The estate's
+  posture reconciles with the inventory, each summary by its key; Thu 21 now holds the posture on its rule as the key
+  has it. Slices 6 and 7 follow ADR 0014's order; each moves the test's "still wrong" assertions as a decision.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

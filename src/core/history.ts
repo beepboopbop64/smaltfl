@@ -104,7 +104,7 @@ export interface HistoryFile {
   due?: Record<string, { status: string; miss: string; within: number; on: number[]; late: [date: string, rows: number][][] }>;
   /** The gate's rules' counts (ADR 0014 §4), day by day, only where the gate writes a rule: the scope's rows out of
    * scope, keys in scope with no row and keys in scope; each dependency rule's contradictions. */
-  gate?: { scope?: { out: number[]; missing: number[]; inScope: number[] }; needs?: number[][] };
+  gate?: { scope?: { out: number[]; missing: number[]; inScope: number[] }; needs?: number[][]; reconcile?: { rows: number; keys: number; blank: number; missing: number; extra: number }[] };
   /** The trips file's own columns, month by month, before they were cast to the month's (scripts/data/build.py). */
   schemas?: { month: string; columns: [string, string][] }[];
   /** Each day's weather in the city (scripts/data/build.py): hours on record per borough, rain and snow, the temperatures;
@@ -141,7 +141,10 @@ export type Metric =
    * rule's contradictions (by its place in the gate's list). */
   | { of: 'scopeOut' }
   | { of: 'scopeMissing' }
-  | { of: 'needs'; rule: number };
+  | { of: 'needs'; rule: number }
+  /** The reconciliation's counts (ADR 0014 §6): rows past the keys (repeats), blank keys, the other node's keys with
+   * no row, the keys not in the other node. */
+  | { of: 'reconcile'; count: 'repeats' | 'blank' | 'missing' | 'extra' };
 
 /** The quantiles the history keeps of a measure or a time, in order. */
 export const QUANTILES = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
@@ -155,11 +158,12 @@ export const metricKey = (m: Metric) =>
   : m.of === 'quantile' ? `quantile:${m.column}@${m.q}`
   : m.of === 'late' ? `late:${m.column}`
   : m.of === 'needs' ? `needs:${m.rule}`
+  : m.of === 'reconcile' ? `reconcile:${m.count}`
   : m.of === 'scopeOut' || m.of === 'scopeMissing' ? m.of
   : m.of === 'combo' ? `combo:${m.pair}=${m.value}`
   : `${m.of}:${m.column}`;
 
-const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level', value: 'share', quantile: 'level', count: 'count', droppedRows: 'count', ruleRows: 'count', combo: 'level', late: 'share', scopeOut: 'count', scopeMissing: 'count', needs: 'count' };
+const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level', value: 'share', quantile: 'level', count: 'count', droppedRows: 'count', ruleRows: 'count', combo: 'level', late: 'share', scopeOut: 'count', scopeMissing: 'count', needs: 'count', reconcile: 'count' };
 
 /** Whether a metric counts the checks: its periods are comparable only while they were counted with the same rules. */
 const ofChecks = (m: Metric) => m.of === 'dropped' || m.of === 'rule' || m.of === 'droppedRows' || m.of === 'ruleRows';
@@ -196,6 +200,7 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
   if (m.of === 'late' && !h.due?.[m.column]) return null;
   if ((m.of === 'scopeOut' || m.of === 'scopeMissing') && !h.gate?.scope) return null;
   if (m.of === 'needs' && !h.gate?.needs) return null;
+  if (m.of === 'reconcile' && !h.gate?.reconcile) return null;
   const start = ofChecks(m) ? checksStart(h) : 0;
   const values = new Array<number | null>(daysBetween(from, h.days.at(-1)!) + 1).fill(null);
   h.days.forEach((day, k) => {
@@ -216,6 +221,7 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
       : m.of === 'scopeOut' ? (h.gate!.scope!.out[k] ?? null)
       : m.of === 'scopeMissing' ? (h.gate!.scope!.missing[k] ?? null)
       : m.of === 'needs' ? (h.gate!.needs![k]?.[m.rule] ?? null)
+      : m.of === 'reconcile' ? (h.gate!.reconcile![k] ? (m.count === 'repeats' ? h.gate!.reconcile![k]!.rows - h.gate!.reconcile![k]!.keys - h.gate!.reconcile![k]!.blank : h.gate!.reconcile![k]![m.count]) : null)
       : h.p50[k]![column]!;
     values[daysBetween(from, day)] = v;
   });

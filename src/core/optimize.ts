@@ -2,7 +2,7 @@
  * smaltfl's optimizer: across steps (ADR 0004 §5). The engine optimizes within each statement; this decides which
  * nodes a run computes at all, and which it stores rather than folds into the statement of the node that reads them.
  */
-import type { FlowPlan } from './plan.js';
+import { isPublish2, type FlowPlan } from './plan.js';
 
 export interface RunShape {
   /** The nodes a run computes: every output and expectation, and what they read. Ascending. */
@@ -22,6 +22,8 @@ export interface RunShape {
 export function shapeOf(plan: FlowPlan): RunShape {
   const roots = new Set<number>(plan.outputs.map((o) => o.node));
   plan.nodes.forEach((n, i) => n.op === 'expect' && roots.add(i));
+  // A gold gate's reconciliation reads the node it names (ADR 0014 §6): the run reads it too, a source snapshotted.
+  if (plan.publish && isPublish2(plan.publish)) for (const [, g] of plan.publish.gates ?? []) if (g.reconcile && g.reconcile.of !== null) roots.add(g.reconcile.of);
   const needed = new Set<number>();
   const visit = (i: number) => {
     if (needed.has(i)) return;

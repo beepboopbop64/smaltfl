@@ -120,8 +120,12 @@ match smaltdb's `CLAUDE.md`.
   (`StoryOptions.upstream`: a step's finding about a source's column follows the source; a wrong source explains the
   step's day). Slice 4: the kept sample (`src/core/apart.ts` `SampleFile`, `keepSample`, `appendSample`; the plugin's
   `sample` op and `sampleLoad`; the builder's `--sample`, loads.json `samples`, the app's `samples`/`keptRows`;
-  `RunResult.kept`) and the classifier (`tellApart`, `likeDays`, the `apart` finding, check `classifier`). Slices 5 to
-  7 are ADR 0014's order.
+  `RunResult.kept`) and the classifier (`tellApart`, `likeDays`, the `apart` finding, check `classifier`). Slice 5:
+  the `reconcile` rule (`ReconcileRule`, `emitReconcileCounts`; a measure on a watched node, `Measures.gate.reconcile`;
+  on a gold node plan/4's `publish.gates`, counted by the run into `ManifestNode.gate`, held by `holdsOf` with
+  `reconcileSaid`, counted again by verify's `gate` check) and the seal (the app's `sealOfRun`/`sealIfReady`: the
+  owner's signature on a run whose gates passed or whose holds were decided and published; `sealPart` on a gold
+  card's Checks tab). Slices 6 and 7 are ADR 0014's order.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).

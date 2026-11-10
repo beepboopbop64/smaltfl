@@ -22,18 +22,25 @@
  * - every watch has a sample of its last eight weeks beside its history; the classifier holds nothing, is quiet on the
  *   look-alike days and the calm days, and speaks as unusual where a day's rows are unlike the like days' (the
  *   vulnerability file on Patch Tuesday, when the month's findings land).
+ * Slice 5 (gold's reconciliation and the seal):
+ * - the posture reconciles with the inventory (one row an application): the doubled TLS file holds the posture on its
+ *   own rule beside TLS's amount, as the key has it, and nothing upstream explains a written rule away;
+ * - each gold summary is reconciled by its key (by unit with the posture's units) on every run, kept in the manifest,
+ *   clean on every day, and verify counts it again.
  * - still wrong against the key: the pentest cluster holds by the bad value and the DR problem by the new value,
  *   since with two and a half months of history neither control has had twenty due dates for the due check to
  *   learn from (the app's year of history judges both; the test's base is short for speed); the refused file is a
- *   failed run (slice 7); nothing is sealed (slice 5).
+ *   failed run (slice 7). The seal itself is the app's: the owner's signature on a run whose gates passed.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { validateDocument } from '../src/core/document.js';
 import { LAYER_DEFAULTS } from '../src/core/gates.js';
 import { planKind } from '../src/core/manifest.js';
-import { translate } from '../src/index.js';
+import { reconcileSaid } from '../src/core/hold.js';
+import { translate, verifyRun } from '../src/index.js';
 import { ESTATE_PLANTED } from './fixtures/estate.js';
+import { SMALTDB } from './helpers/engine.js';
 import { ESTATE_WATCHES, estateHolds, estateWorld, type EstateWorld } from './helpers/estate-world.js';
 
 let w: EstateWorld;
@@ -52,14 +59,15 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(Object.keys(w.doc.gates!)).toEqual(['tls', 'waf', 'posture', 'by_unit', 'by_control', 'by_type']);
     expect(w.doc.gates!.tls).toEqual({ layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' }, scope: { of: 'apps', key: 'app_id', where: "internet_facing = 'yes'" } });
     expect(w.doc.gates!.waf).toEqual({ layer: 'bronze', checks: {}, scope: { of: 'apps', key: 'app_id', where: "internet_facing = 'yes'" } });
-    expect(w.doc.gates!.posture).toEqual({ layer: 'silver', checks: {}, needs: [{ when: { key_rotation: 'pass' }, then: { encryption: ['pass', 'exception', 'not_assessed'] } }] });
-    expect(w.doc.gates!.by_unit).toEqual({ layer: 'gold', checks: {} });
+    expect(w.doc.gates!.posture).toEqual({ layer: 'silver', checks: { reconcile: 'hold' }, needs: [{ when: { key_rotation: 'pass' }, then: { encryption: ['pass', 'exception', 'not_assessed'] } }], reconcile: { key: ['app_id'], of: 'apps' } });
+    expect(w.doc.gates!.by_unit).toEqual({ layer: 'gold', checks: {}, reconcile: { key: ['business_unit'], of: 'posture' } });
+    expect(w.doc.gates!.by_control).toEqual({ layer: 'gold', checks: {}, reconcile: { key: ['control'] } });
     const plan = await translate(w.doc, { day: '2024-03-04' });
     expect(planKind(plan)).toBe('plan/4');
     const checks = Object.fromEntries((plan.publish as { watch: [number, { checks: Record<string, string> }][] }).watch.map(([n, x]) => [plan.nodes[n]!.origin, x.checks]));
     expect(checks.tls).toEqual({ ...LAYER_DEFAULTS.bronze, classifier: 'off' });
     expect(checks.mfa).toEqual(LAYER_DEFAULTS.bronze);
-    expect(checks.posture).toEqual(LAYER_DEFAULTS.silver);
+    expect(checks.posture).toEqual({ ...LAYER_DEFAULTS.silver, reconcile: 'hold' });
   });
 
   it('publishes the calm days, every watch judged', () => {
@@ -90,10 +98,33 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(said(ESTATE_PLANTED.vulnCluster, 'vuln_sla')).toBeNull();
   });
 
-  it('holds the doubled TLS file on the amount, and the TLS file alone: the posture’s fan-out follows from it (slice 3)', () => {
-    expect(estateHolds(result(ESTATE_PLANTED.double))).toEqual(['story:tls']);
+  it('holds the doubled TLS file on the amount, and the posture on its reconciliation with the inventory (slices 3, 5)', () => {
+    expect(estateHolds(result(ESTATE_PLANTED.double))).toEqual(['story:posture', 'story:tls']);
     expect(said(ESTATE_PLANTED.double, 'tls')).toMatch(/^More apps: 406 \(\+100%\)$/);
+    // The fan-out is the TLS file's doing, and the posture's own written rule says so too: a rule a wrong source can't explain away.
+    expect(said(ESTATE_PLANTED.double, 'posture')).toBe('203 apps repeat a key');
+    expect(claim(ESTATE_PLANTED.double, 'posture')).toBeNull();
+    expect(estateHolds(result(plusDays(ESTATE_PLANTED.double, 1)))).toEqual([]);
   });
+
+  it('reconciles each gold summary by its key on every run, kept in the manifest, clean every day; verify counts it again (slice 5)', async () => {
+    for (let day = '2024-03-01'; day <= '2024-03-31'; day = plusDays(day, 1)) {
+      const r = w.results.get(day);
+      if (!r || r instanceof Error) continue;
+      const gold = r.manifest.nodes.filter((n) => n.gate);
+      expect(gold.map((n) => n.origin).sort(), day).toEqual(['by_control', 'by_type', 'by_unit']);
+      for (const n of gold) {
+        const g = w.doc.gates![n.origin]!.reconcile!;
+        expect(reconcileSaid(n.gate!.reconcile, g.key, g.of ?? null), `${day} ${n.origin}`).toBeNull();
+        expect(n.gate!.reconcile.rows, `${day} ${n.origin}`).toBeGreaterThan(0);
+      }
+      expect(r.holds.some((h) => h.by === 'checks'), day).toBe(false);
+    }
+    const calm = result('2024-03-06');
+    const v = await verifyRun(w.db, calm.run, { smaltdb: SMALTDB, level: 'rerun', manifest: calm.hash });
+    expect(v.ok).toBe(true);
+    expect(v.checks.filter((c) => c.check === 'gate').map((c) => [c.origin, c.ok])).toEqual([['by_unit', true], ['by_control', true], ['by_type', true]]);
+  }, 120_000);
 
   it('holds both scope days on the scope rule, said with the rows and the keys (slice 3)', () => {
     expect(estateHolds(result(ESTATE_PLANTED.scopeCreep))).toEqual(['story:waf']);

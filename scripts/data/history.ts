@@ -102,9 +102,9 @@ function valuesFor(job: Job, slot: string): Record<string, string> {
 }
 
 /** The marks and the gate's rules a watch's loads are measured with (ADR 0014): as the plan's watch carries them. */
-function rulesFor(plan: Awaited<ReturnType<typeof translate>>, node: number, steps: FlowDocument['steps']): Pick<MeasureSettings, 'due' | 'scope' | 'needs'> {
+function rulesFor(plan: Awaited<ReturnType<typeof translate>>, node: number, steps: FlowDocument['steps']): Pick<MeasureSettings, 'due' | 'scope' | 'needs' | 'reconcile'> {
   const st = node >= 0 ? settingsFor(plan, node, null, steps) : null;
-  return { ...(st?.due ? { due: st.due } : {}), ...(st?.scope ? { scope: st.scope } : {}), ...(st?.needs?.length ? { needs: st.needs } : {}) };
+  return { ...(st?.due ? { due: st.due } : {}), ...(st?.scope ? { scope: st.scope } : {}), ...(st?.needs?.length ? { needs: st.needs } : {}), ...(st?.reconcile ? { reconcile: st.reconcile } : {}) };
 }
 
 async function measure(job: Job, load: LoadFiles): Promise<Measured> {

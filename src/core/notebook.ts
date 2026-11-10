@@ -377,6 +377,18 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
       return v.$name;
     };
     const rules: Record<string, unknown> = {};
+    if (g.options.reconcile !== undefined) {
+      const rc = g.options.reconcile;
+      const anyNode = (v: unknown): unknown => {
+        if (!isNameRef(v)) return v;
+        const target = idOf(g.parsed, v.$name);
+        if (target !== null) return target;
+        if (resolve(g.parsed, v.$name)?.kind !== 'broken') add(g.where, `gate(${g.input}, …): reconcile.of names a source or step of the flow; ${v.$name} isn't one`);
+        broken = true;
+        return v.$name;
+      };
+      rules.reconcile = isRecord(rc) ? { ...rc, ...(typeof rc.key === 'string' ? { key: [rc.key] } : {}), ...(rc.of !== undefined ? { of: anyNode(rc.of) } : {}) } : rc;
+    }
     if (g.options.scope !== undefined) {
       const sc = g.options.scope;
       rules.scope = isRecord(sc) ? { ...sc, ...(sc.of !== undefined ? { of: named(sc.of, 'scope.of') } : {}) } : sc;
@@ -386,7 +398,7 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
       rules.needs = list.map((n) => (isRecord(n) && n.from !== undefined ? { ...n, from: named(n.from, 'needs.from') } : n));
     }
     if (broken) continue;
-    const def = { layer, checks: g.options.checks ?? {}, ...rules, ...Object.fromEntries(Object.entries(g.options).filter(([k]) => !['layer', 'checks', 'scope', 'needs'].includes(k))) } as GateDef;
+    const def = { layer, checks: g.options.checks ?? {}, ...rules, ...Object.fromEntries(Object.entries(g.options).filter(([k]) => !['layer', 'checks', 'scope', 'needs', 'reconcile'].includes(k))) } as GateDef;
     const problems = gateProblems(def);
     if (problems.length) {
       for (const m of problems) add(g.where, `gate(${g.input}, …): ${m}`);
@@ -398,7 +410,7 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
       add(g.where, `${id} has two gates`);
       continue;
     }
-    gates[id] = { layer: def.layer, checks: def.checks, ...(def.scope ? { scope: def.scope } : {}), ...(def.needs ? { needs: def.needs } : {}) };
+    gates[id] = { layer: def.layer, checks: def.checks, ...(def.scope ? { scope: def.scope } : {}), ...(def.needs ? { needs: def.needs } : {}), ...(def.reconcile ? { reconcile: def.reconcile } : {}) };
     gateCells[id] = { notebook: g.parsed.def.path, cell: g.cell.id, lang: g.cell.lang, line: g.cell.span.line, endLine: g.cell.span.endLine };
   }
   return { steps, cells, gates, gateCells, groups: groups.filter((g) => g.steps.length > 0), outline, issues };

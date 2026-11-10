@@ -66,7 +66,7 @@ tests, isolation forests and how tools show checks. The ADR that records them is
 | Q-115 | What seals a gold dataset, and how does the seal show? | Automatic when every gate passed or every hold was decided: the signed manifest is the seal; a badge on the card, with what was checked, who signed, when and the hash behind a tap; unsealed by a re-run or a later decision (ADR 0014 §6) | decided |
 | Q-116 | How do the layers read on the canvas, and where do the checks live? | The maintainer: "keep the free layout; gate marks only": each card carries its gate's worst state and reason; the checks on a Checks tab of the card's sheet (ADR 0014 §7) | decided |
 | Q-117 | What does "sample smartly" mean for the kept rows? | Stratified by the dataset's typed columns and status, plus every row a judge flagged (ADR 0014 §5) | decided |
-| Q-118 | The gold reconcile check's key: declared in the gate, or the ontology's `lookup`? | Not asked yet | open |
+| Q-118 | The gold reconcile check's key: declared in the gate, or the ontology's `lookup`? | Not asked yet; built as declared in the gate (`reconcile: { key, of }`, ADR 0014 §"As built" slice 5) until decided | open |
 | Q-119 | Should a silver `needs` rule be derivable from the ontology rather than written per gate? | Not asked yet | open |
 
 ## Checks nobody wrote: the maintainer's request, and what is open (ADR 0013)

@@ -1,6 +1,6 @@
 # ADR 0014: Gates: bronze, silver and gold checks in the notebook, written bands and due dates in the ontology, a sealed gold
 
-- **Status:** accepted, 2026-11-09; slices 1 to 4 built 2026-11-10 (§"As built"), slices 5 to 7 in order. It records the
+- **Status:** accepted, 2026-11-09; slices 1 to 5 built 2026-11-10 (§"As built"), slices 6 and 7 in order. It records the
   maintainer's plan and answers of 2026-11-09 (Q-110 to Q-117, docs/OPEN_QUESTIONS.md), given after a survey of how
   layered data-quality checks are built and shown (§Sources). The control estate (ADR 0013 §8) is its answer key.
 - **Date:** 2026-11-09
@@ -360,6 +360,42 @@ and that no silver finding repeats a bronze cause.
 - **Against the key** (`test/estate-flow.test.ts`): every watch has its sample; the classifier holds nothing, is quiet
   on the look-alike and calm days, and warns on Patch Tuesday for the vulnerability file, as the key allows ("told as
   unusual where they speak").
+
+### Slice 5 (2026-11-10): gold's reconciliation and the seal
+
+- **The rule** (`reconcile: { key, of? }` in the gate cell, `ReconcileRule`): the node's rows by `key` (a column or a
+  list) are each one key, no key blank, and, with `of` (a source or a step the notebook names; a watched node names a
+  source, which is there before the run), the same set of keys as that node's. Q-118 is built as "declared in the
+  gate": the ontology's `lookup` isn't read for it, and the maintainers may still decide otherwise.
+- **Counted in the engine** (`emitReconcileCounts`: the rows, the distinct keys, the rows with a blank key, the other
+  node's keys with no row here, the keys here it lacks). On a watched node it is a measure beside the others
+  (`Measures.gate.reconcile`, `HistoryFile.gate.reconcile`, the `reconcile` metric), and the judge says any count as
+  something wrong ("203 apps repeat a key"; "3 apps with no app_id"; "5 keys of apps with no app"; "2 apps not in
+  apps"), exact, under check `reconcile`: a written rule, so a wrong source upstream never explains it away
+  (`WRITTEN_RULES`). On a published node nothing watches (gold), plan/4 carries the gate itself (`publish.gates`,
+  `GatePlan`: its checks and its reconciliation, the other node by its place in the plan, which the run reads and
+  snapshots like an input, `shapeOf`); the run counts it over the dataset it just built and keeps the counts with the
+  node in the manifest (`ManifestNode.gate`, `GateResult`), a hold reads them where the gate says hold (`holdsOf`,
+  `reconcileSaid`: "rows don't reconcile: 2 rows repeat a key (6 rows, 4 app_id values)"), and verify counts them
+  again over the recomputed dataset (check `gate`). The audit bag carries the manifest, so it carries the gates'
+  results, and its hold check (`holdsOf` from the manifest) covers a gold hold. A manifest without a gold gate is
+  byte for byte the manifest it was: run/1 keeps its hash.
+- **The seal** (the app, `sealOfRun`): a run of a flow with gates whose gates all passed, or whose holds were all
+  decided and published, signed by the owner; the signed manifest is the seal, made without asking (Q-115) once the
+  run returns or a decision releases it (`sealIfReady`, a `sign` entry in the record). A held run undecided, a day
+  decided not to publish, a run not signed or a flow changed since are open, with why. The card's label reads
+  "GOLD · SEALED", the run's card carries a sealed pill, and a gold card's **Checks** tab opens with the seal and its
+  evidence: each gold gate's counts on the run, each hold and what was decided of it, each step's rules, who signed,
+  when, and the manifest's hash; the tab's rows read the run for a gold node (reconcile's counts, the columns as
+  declared, the rules), since nothing watches it. A re-run or a later decision makes a new seal.
+- **The estate**: the posture reconciles with the inventory by `app_id` (one row an application, every application
+  once; silver, so the check is switched on in its gate), each summary by its own key (by unit with the posture's
+  units, by control and by type alone).
+- **Against the key** (`test/estate-flow.test.ts`): the doubled TLS file holds TLS on its amount and the posture on
+  its reconciliation ("203 apps repeat a key"), as the key's Thu 21 has it, since the fan-out is a written rule's to
+  say whatever upstream explains; the summaries reconcile on every day and verify counts them again; nothing else
+  moved. **Still wrong against the key:** the pentest cluster and the DR day (the short base, as in slice 2) and the
+  refused file (slice 7).
 
 ## Sources (the survey of 2026-11-09)
 

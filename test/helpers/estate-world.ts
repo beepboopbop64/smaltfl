@@ -133,7 +133,7 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     const c = watchColumns(doc, w);
     // The marks and the gate's rules the history keeps counts for (ADR 0014): as the plan's watch carries them.
     const rules = (await settingsOf(o.baseTo, w)).s;
-    bases[w] = appendPeriods(emptyHistory({ flow: doc.id, source: w, settings: { checks: m0.checks, counted: c.count, followed: c.follow, paired: c.pair, time: null, zone: null, sample: 2000, ...(rules.due ? { due: rules.due } : {}), ...(rules.scope ? { scope: rules.scope } : {}), ...(rules.needs ? { needs: rules.needs } : {}) }, columns: m0.columns, types: m0.types, kinds: m0.kinds, warmup: o.warmup ?? 14 }), ms);
+    bases[w] = appendPeriods(emptyHistory({ flow: doc.id, source: w, settings: { checks: m0.checks, counted: c.count, followed: c.follow, paired: c.pair, time: null, zone: null, sample: 2000, ...(rules.due ? { due: rules.due } : {}), ...(rules.scope ? { scope: rules.scope } : {}), ...(rules.needs ? { needs: rules.needs } : {}), ...(rules.reconcile ? { reconcile: rules.reconcile } : {}) }, columns: m0.columns, types: m0.types, kinds: m0.kinds, warmup: o.warmup ?? 14 }), ms);
     const path = `history.${w}.json`;
     const bytes = utf8(JSON.stringify(bases[w]));
     refs[w] = { path, sha256: await sha256Hex(bytes), bytes: bytes.byteLength };

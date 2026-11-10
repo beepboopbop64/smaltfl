@@ -13,7 +13,7 @@
 import type { Database } from 'smaltdb/engine';
 import { isEvery, isSlotOf } from '../core/calendar.js';
 import { canonicalJSON } from '../core/canonical.js';
-import { createTable, emitColumnFacts, emitNeedsCounts, emitRuleCounts, emitSample, emitScopeCounts } from '../core/emit.js';
+import { createTable, emitColumnFacts, emitNeedsCounts, emitReconcileCounts, emitRuleCounts, emitSample, emitScopeCounts } from '../core/emit.js';
 import { hex } from '../core/hash.js';
 import { isHistory, type HistoryFile } from '../core/history.js';
 import { measuresLeaf, measuresOf, measuresProblem, scanColumns, type HistoryHeader, type MeasureSettings, type Measures } from '../core/measures.js';
@@ -50,11 +50,12 @@ export function settingsOf(v: unknown): MeasureSettings {
     || !(s.checks === null || (typeof s.checks === 'object' && typeof s.checks.step === 'string' && Array.isArray(s.checks.rules) && s.checks.rules.every((r) => typeof r?.name === 'string' && typeof r.check === 'string' && typeof r.onFail === 'string')))
     || !(s.due === undefined || (Array.isArray(s.due) && s.due.every((d) => Array.isArray(d) && d.length === 4 && typeof d[0] === 'string' && typeof d[1] === 'string' && typeof d[2] === 'string' && Number.isInteger(d[3]) && d[3] >= 1)))
     || !(s.scope === undefined || (typeof s.scope === 'object' && s.scope !== null && typeof s.scope.table === 'string' && typeof s.scope.key === 'string' && typeof s.scope.own === 'string' && typeof s.scope.where === 'string'))
-    || !(s.needs === undefined || (Array.isArray(s.needs) && s.needs.every((n) => typeof n === 'object' && n !== null && (n.table === null || typeof n.table === 'string') && (n.key === null || typeof n.key === 'string') && Array.isArray(n.when) && Array.isArray(n.then))))) {
-    throw new MeasureError('measure needs its settings: { source, slot, every (day, or a slot of it: 12h … 1h), checks, counting, counted, followed, paired, time, zone, sample, due?, scope?, needs? }, its slot one of that length');
+    || !(s.needs === undefined || (Array.isArray(s.needs) && s.needs.every((n) => typeof n === 'object' && n !== null && (n.table === null || typeof n.table === 'string') && (n.key === null || typeof n.key === 'string') && Array.isArray(n.when) && Array.isArray(n.then))))
+    || !(s.reconcile === undefined || (typeof s.reconcile === 'object' && s.reconcile !== null && Array.isArray(s.reconcile.key) && s.reconcile.key.every((k) => typeof k === 'string') && (s.reconcile.table === null || typeof s.reconcile.table === 'string')))) {
+    throw new MeasureError('measure needs its settings: { source, slot, every (day, or a slot of it: 12h … 1h), checks, counting, counted, followed, paired, time, zone, sample, due?, scope?, needs?, reconcile? }, its slot one of that length');
   }
   if (s.every !== 'day' && s.time === null) throw new MeasureError(`a load of ${s.every} is counted by its time column: its settings name none`);
-  return { source: s.source, slot: s.slot, every: s.every, checks: s.checks ? { step: s.checks.step, rules: s.checks.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })) } : null, counting: s.counting ? [...s.counting] : null, counted: [...s.counted], followed: [...s.followed], paired: [...s.paired], time: s.time, zone: s.zone, sample: s.sample, ...(s.due?.length ? { due: s.due.map(([c, st, miss, within]): [string, string, string, number] => [c, st, miss, within]) } : {}), ...(s.scope ? { scope: { table: s.scope.table, key: s.scope.key, own: s.scope.own, where: s.scope.where } } : {}), ...(s.needs?.length ? { needs: s.needs.map((n) => ({ table: n.table, key: n.key, when: n.when.map(([c, v]: [string, readonly string[]]): [string, string[]] => [c, [...v]]), then: n.then.map(([c, v]: [string, readonly string[]]): [string, string[]] => [c, [...v]]) })) } : {}) };
+  return { source: s.source, slot: s.slot, every: s.every, checks: s.checks ? { step: s.checks.step, rules: s.checks.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })) } : null, counting: s.counting ? [...s.counting] : null, counted: [...s.counted], followed: [...s.followed], paired: [...s.paired], time: s.time, zone: s.zone, sample: s.sample, ...(s.due?.length ? { due: s.due.map(([c, st, miss, within]): [string, string, string, number] => [c, st, miss, within]) } : {}), ...(s.scope ? { scope: { table: s.scope.table, key: s.scope.key, own: s.scope.own, where: s.scope.where } } : {}), ...(s.needs?.length ? { needs: s.needs.map((n) => ({ table: n.table, key: n.key, when: n.when.map(([c, v]: [string, readonly string[]]): [string, string[]] => [c, [...v]]), then: n.then.map(([c, v]: [string, readonly string[]]): [string, string[]] => [c, [...v]]) })) } : {}), ...(s.reconcile ? { reconcile: { key: [...s.reconcile.key], table: s.reconcile.table } } : {}) };
 }
 
 /** A snapshot's measures: its rows counted where a count is kept, an even sample for the medians and quantiles. */
@@ -73,7 +74,8 @@ export async function measureTable(db: Database, table: string, s: MeasureSettin
   // The gate's rules (ADR 0014 §4): the scope's counts against the inventory's table, each dependency's contradictions.
   const scope = s.scope ? (await db.queryAsync(emitScopeCounts(read, s.scope))).rows[0]! : null;
   const needs = s.needs?.length ? (await db.queryAsync(emitNeedsCounts(read, s.needs))).rows[0]! : null;
-  return measuresOf(s, { file, snapshot, schema, facts, sample, scan, checks, scope, needs });
+  const reconcile = s.reconcile ? (await db.queryAsync(emitReconcileCounts(read, s.reconcile.key, s.reconcile.table ? `SELECT * FROM ${q(s.reconcile.table)}` : null))).rows[0]! : null;
+  return measuresOf(s, { file, snapshot, schema, facts, sample, scan, checks, scope, needs, reconcile });
 }
 
 /**

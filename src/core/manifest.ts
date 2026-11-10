@@ -8,6 +8,7 @@
 import { canonicalJSON } from './canonical.js';
 import { hashOf, hex, unhex, utf8 } from './hash.js';
 import type { KeyEnv } from './keys.js';
+import type { ReconcileCounts } from './measures.js';
 import type { FailAction, FlowPlan, PlanNode } from './plan.js';
 
 /** run/1 (ADR 0006): run/0 and the source files read, the flow's policies and ontology, the build, the data and the record. */
@@ -34,6 +35,15 @@ export interface ManifestNode {
   expectations?: ExpectationResult;
   /** A source read from a pinned file: the file, as the engine observed it (run/1). */
   file?: SourceFile;
+  /** plan/4 (ADR 0014 §6): a gold gate's checks, counted by the run over the dataset it built: its reconciliation. */
+  gate?: GateResult;
+}
+
+/** What a run counted for a gate on a published node it doesn't watch (ADR 0014 §6): the reconciliation's counts, the
+ * rows, the distinct keys, the rows with a blank key, the other node's keys with no row here and the keys here it
+ * lacks. A hold reads them (core/hold.ts `reconcileSaid`), and verify counts them again. */
+export interface GateResult {
+  reconcile: ReconcileCounts;
 }
 
 /** A file a source read (E1): its location, and the SHA-256 and size of the exact bytes the engine decoded. */

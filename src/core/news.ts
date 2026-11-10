@@ -15,7 +15,7 @@
 import { daysBetween, namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
 import { clockColumns, likeDays, sampleRows, tellApart, type Apart, type SampleFile } from './apart.js';
-import { gated, gateChecksOf, type CheckName, type GateChecks, type NeedsRule } from './gates.js';
+import { gated, gateChecksOf, type CheckName, type GateChecks, type NeedsRule, type ReconcileRule } from './gates.js';
 import { HistoryRanges, lateAt, lateUsual, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
 import { marksOn, nounOf, partNamed, propertyOf } from './ontology.js';
@@ -30,7 +30,7 @@ export type Act = 'expected' | 'incident' | 'notify' | 'rule' | 'quarantine' | '
 
 export interface Finding {
   key: string;
-  kind: 'volume' | 'hours' | 'gone' | 'share' | 'band' | 'due' | 'scope' | 'needs' | 'apart' | 'new' | 'pair' | 'combo' | 'unlike' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
+  kind: 'volume' | 'hours' | 'gone' | 'share' | 'band' | 'due' | 'scope' | 'needs' | 'reconcile' | 'apart' | 'new' | 'pair' | 'combo' | 'unlike' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
   severity: Severity;
   /** How far out, in typical misses (capped): what ranks findings of a severity. */
   score: number;
@@ -122,10 +122,12 @@ export interface JudgeSettings {
   due: readonly { column: string; status: string; miss: string; within: number }[];
   /** The gate's dependency rules (ADR 0014 §4), in the gate's order, for saying a contradiction in words. */
   needs: readonly NeedsRule[];
+  /** The gate's reconciliation (ADR 0014 §6), for saying its counts in words. */
+  reconcile: ReconcileRule | null;
 }
 
 /** The legacy form's settings: what every flow was judged by before ADR 0010. */
-export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly', relearn: false, checks: null, expect: new Map(), due: [], needs: [] }) as JudgeSettings;
+export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly', relearn: false, checks: null, expect: new Map(), due: [], needs: [], reconcile: null }) as JudgeSettings;
 
 /**
  * How a document judges a watched source (ADR 0010 §10, §11): its watch's settings and the marks its ontology puts on the
@@ -151,6 +153,7 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
     expect: new Map(m.expect.map(([column, value, low, high]) => [`${column.toLowerCase()}|${value}`, [low, high] as [number, number]])),
     due: m.due.map(([column, status, miss, within]) => ({ column, status, miss, within })),
     needs: Object.entries(doc.gates ?? {}).find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1].needs ?? [],
+    reconcile: Object.entries(doc.gates ?? {}).find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1].reconcile ?? null,
   };
 }
 
@@ -532,6 +535,22 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     const inScope = sc.inScope[k] ?? 0;
     ruleCount('scope:out', 'scope', { of: 'scopeOut' }, sc.out[k] ?? 0, `${fmtInt(sc.out[k] ?? 0)} ${noun(sc.out[k] ?? 0)} out of scope`, `Rows whose key the inventory doesn’t list in scope, beside ${fmtInt(inScope)} keys in scope.`);
     ruleCount('scope:missing', 'scope', { of: 'scopeMissing' }, sc.missing[k] ?? 0, `${fmtInt(sc.missing[k] ?? 0)} in scope with no ${noun(1)}`, `Keys the inventory lists in scope that have no row here, of ${fmtInt(inScope)} in scope.`);
+  }
+  // The reconciliation (ADR 0014 §6): exact, so any count is something wrong: a key on two rows, a blank key, a key
+  // of the other node with no row here, a key here the other node lacks.
+  const rc = file.gate?.reconcile?.[k];
+  if (rc) {
+    const keyName = judge.reconcile?.key.map((c) => names.column(c)).join(' and ') ?? 'key';
+    const other = judge.reconcile?.of ?? 'the other node';
+    const exact = (count: 'repeats' | 'blank' | 'missing' | 'extra', n: number, title: string, detail: string) => {
+      if (n <= 0) return;
+      out.push({ key: `reconcile:${count}`, kind: 'reconcile', severity: 'alert', score: Math.min(99, n), title, detail, look: 'rows', metric: { of: 'reconcile', count }, value: n, rows: n, acts: ['incident', 'notify'] });
+    };
+    const repeats = rc.rows - rc.keys - rc.blank;
+    exact('repeats', repeats, `${fmtInt(repeats)} ${noun(repeats)} repeat a key`, `${fmtInt(rc.rows)} rows for ${fmtInt(rc.keys)} ${keyName} values: ${(rc.rows / Math.max(1, rc.keys)).toFixed(1).replace(/\.0$/, '')} rows a key, where one is expected.`);
+    exact('blank', rc.blank, `${fmtInt(rc.blank)} ${noun(rc.blank)} with no ${keyName}`, `Rows whose ${keyName} is blank: a row no key names is never found.`);
+    exact('missing', rc.missing, `${fmtInt(rc.missing)} keys of ${other} with no ${noun(1)}`, `${sentence(other)} has ${fmtInt(rc.missing)} ${keyName} values with no row here: the rows don't reconcile.`);
+    exact('extra', rc.extra, `${fmtInt(rc.extra)} ${noun(rc.extra)} not in ${other}`, `Keys here that ${other} doesn't have: rows from nowhere the flow reads.`);
   }
   (file.gate?.needs?.[k] ?? []).forEach((n, i) => {
     const rule = judge.needs[i];

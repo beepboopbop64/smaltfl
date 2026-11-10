@@ -121,7 +121,7 @@ describe('the counts in the history, and the judge', () => {
     ms.push(ruled(plusDays(creep, 1), { out: 1, missing: 41, inScope: 198, needs: [0] }));
     ms.push(ruled(plusDays(creep, 2), { out: 1, missing: 0, inScope: 198, needs: [41] }));
     const h = new HistoryRanges(appendPeriods(start, ms), { pattern: 'none' });
-    const judge = { ...LEGACY_JUDGE, checks: LAYER_DEFAULTS.bronze, pattern: 'none' as const, legacy: false, needs: [{ when: { key_rotation: 'pass' }, then: { encryption: 'pass' } }] };
+    const judge = { ...LEGACY_JUDGE, checks: LAYER_DEFAULTS.bronze, pattern: 'none' as const, legacy: false, needs: [{ when: { key_rotation: 'pass' }, then: { encryption: 'pass' } }], reconcile: null };
     const names = { ...vendorNames, noun: (n?: number) => (n === 1 ? 'app' : 'apps') };
     const calm = newsOf(h, plusDays('2024-01-01', 39), names, { judge });
     expect(calm.find((f) => f.kind === 'scope')).toMatchObject({ severity: 'note', title: '2 apps out of scope', check: 'scope' });

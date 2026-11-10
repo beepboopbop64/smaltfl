@@ -158,9 +158,11 @@ export interface VerifyCheck {
    * flow hash and translates to the plan; file: the source file the run read still has its hash and decodes to the
    * snapshot; held: what held the run computes again from its manifest and its stored claims, and every held output a
    * name shows was released by a decision (ADR 0009 §11); repair: a derived run released with a repair is that repair
-   * of its held run, read the donor's file the repair names, and read the held run's snapshot (amendment 1 S11).
+   * of its held run, read the donor's file the repair names, and read the held run's snapshot (amendment 1 S11);
+   * gate: a gold gate's reconciliation counted again over the recomputed dataset gives the counts the run recorded
+   * (ADR 0014 §6).
    */
-  check: 'stored' | 'rerun' | 'expectations' | 'coherent' | 'key' | 'published' | 'previous' | 'accounting' | 'flow' | 'file' | 'held' | 'repair';
+  check: 'stored' | 'rerun' | 'expectations' | 'coherent' | 'key' | 'published' | 'previous' | 'accounting' | 'flow' | 'file' | 'held' | 'repair' | 'gate';
   ok: boolean;
   expected?: string;
   actual?: string | null;

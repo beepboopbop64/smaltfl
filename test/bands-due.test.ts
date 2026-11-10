@@ -160,7 +160,7 @@ describe('the judges (Q-114, ADR 0014 §3)', () => {
   });
 
   it('tells a cluster of due dates with the usual share late as a note, and more than usual late as something wrong, in place of the bad value', () => {
-    const judge = { ...LEGACY_JUDGE, checks: LAYER_DEFAULTS.bronze, bad: new Map([['status', new Set(['fail'])]]), pattern: 'none' as const, legacy: false, due: [{ column: 'next_due', status: 'status', miss: 'fail', within: 7 }], needs: [] };
+    const judge = { ...LEGACY_JUDGE, checks: LAYER_DEFAULTS.bronze, bad: new Map([['status', new Set(['fail'])]]), pattern: 'none' as const, legacy: false, due: [{ column: 'next_due', status: 'status', miss: 'fail', within: 7 }], needs: [], reconcile: null };
     const first = slaMeasures('2024-01-01', { due: 10, late: 0 });
     const start = emptyHistory({ flow: 'sla', source: 'sla', settings: { checks: null, counted: ['status'], followed: [], paired: [], time: null, zone: null, sample: 2000, due: [['next_due', 'status', 'fail', 7]] }, columns: first.columns, types: first.types, kinds: first.kinds, warmup: 3 });
     // Sixty days of ten due a day, one in ten late; then a day with a hundred due, and the day after it with ten of

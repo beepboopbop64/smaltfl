@@ -19,7 +19,7 @@ import { isGeneralWatch, sourceOf, type FlowDocument, type HoldKind, type WatchD
 import type { Repair } from './fill.js';
 import { dayOfSlot, isEvery, type Every } from './calendar.js';
 import { HistoryRanges, rangeSettings, slotSeries, type HistoryFile, type Level, type RangeOptions } from './history.js';
-import { appendPeriods, emptyHistory, measuresHash, samePeriod, tailBefore, tailRef, type MeasureSettings, type Measures, type TailRef } from './measures.js';
+import { appendPeriods, emptyHistory, measuresHash, samePeriod, tailBefore, tailRef, type MeasureSettings, type Measures, type ReconcileCounts, type TailRef } from './measures.js';
 import { rootOf } from './log.js';
 import type { JSONValue, LogEntry } from './log.js';
 import type { ExpectationResult, RunManifest } from './manifest.js';
@@ -650,6 +650,23 @@ export function tripped(n: Pick<ExpectNode, 'maxDropped'>, r: ExpectationResult)
 }
 
 /**
+ * What a reconciliation's counts say (ADR 0014 §6), or null when the rows reconcile. Exact: a key on two rows, a blank
+ * key, a key of the other node with no row here or a key here the other node lacks is each something wrong, said with
+ * its count ("203 rows repeat a key (406 rows, 203 app_id values)"; "3 rows with a blank app_id"; "5 keys of posture
+ * with no row"; "2 rows not in posture").
+ */
+export function reconcileSaid(r: ReconcileCounts, key: readonly string[], of: string | null): string | null {
+  const keyName = key.join(' and ');
+  const parts: string[] = [];
+  const repeats = r.rows - r.keys - r.blank;
+  if (repeats > 0) parts.push(`${count(repeats)} row${repeats === 1 ? '' : 's'} repeat a key (${count(r.rows)} rows, ${count(r.keys)} ${keyName} values)`);
+  if (r.blank > 0) parts.push(`${count(r.blank)} row${r.blank === 1 ? '' : 's'} with a blank ${keyName}`);
+  if (r.missing > 0) parts.push(`${count(r.missing)} key${r.missing === 1 ? '' : 's'} of ${of ?? 'the other node'} with no row`);
+  if (r.extra > 0) parts.push(`${count(r.extra)} row${r.extra === 1 ? '' : 's'} not in ${of ?? 'the other node'}`);
+  return parts.length ? `rows don't reconcile: ${parts.join('; ')}` : null;
+}
+
+/**
  * What a run was asked to be, beside its plan (ADR 0009 amendment 1 S4): a derived run (`stage`), held whatever else
  * holds until a decision releases it, with its donors as judged.
  */
@@ -691,6 +708,16 @@ export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, m
       const said = counts ? tripped(n, counts) : 'its checks were not counted';
       if (said) out.push({ by: 'checks', node: i, origin: n.origin, said, reaches: reachOf(plan, i) });
     });
+  // A gold gate's reconciliation (ADR 0014 §6, plan/4): exact, so a count the run recorded holds, where the gate says
+  // hold; a gate not counted holds too, since the run was asked to count it.
+  for (const [node, g] of (isPublish2(pub) ? pub.gates : undefined) ?? []) {
+    if (!g.reconcile || g.checks.reconcile !== 'hold') continue;
+    const n = plan.nodes[node]!;
+    const counts = manifest.nodes.find((m) => m.node === node)?.gate?.reconcile;
+    const of = g.reconcile.of === null ? null : (plan.nodes[g.reconcile.of]?.origin ?? String(g.reconcile.of));
+    const said = counts ? reconcileSaid(counts, g.reconcile.key, of) : 'its reconciliation was not counted';
+    if (said) out.push({ by: 'checks', node, origin: n.origin, said, reaches: reachOf(plan, node) });
+  }
   for (const { node, holds } of watchesOf(pub)) {
     const origin = plan.nodes[node]!.origin;
     const mine = judged.filter((j) => j.node === node);

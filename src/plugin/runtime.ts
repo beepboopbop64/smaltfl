@@ -16,19 +16,19 @@
 import type { Database } from 'smaltdb/engine';
 import { canonicalJSON } from '../core/canonical.js';
 import type { EmitContext } from '../core/emit.js';
-import { createTable, emitExpectCounts, emitSelect } from '../core/emit.js';
+import { createTable, emitExpectCounts, emitRead, emitReconcileCounts, emitSelect } from '../core/emit.js';
 import { hex, sha256Hex } from '../core/hash.js';
 import type { KeyEnv } from '../core/keys.js';
 import { nodeKey } from '../core/keys.js';
 import { FILLED_FROM, withoutDisplay, type FlowDocument } from '../core/document.js';
-import type { DatasetRecord, ExpectationResult, ManifestNode, RunManifest, SourceFile } from '../core/manifest.js';
+import type { DatasetRecord, ExpectationResult, GateResult, ManifestNode, RunManifest, SourceFile } from '../core/manifest.js';
 import { MANIFEST_FORMAT, manifestHash, ontologyHash, planHash, policiesHash } from '../core/manifest.js';
 import { flowHash, translate } from '../core/plan.js';
 import { shapeOf } from '../core/optimize.js';
 import type { Column, ColumnType, ExpectNode, FillNode, FlowPlan, PlanNode, TableNode } from '../core/plan.js';
 import { isPublish2, validatePlan, watchesOf } from '../core/plan.js';
 import { carry, heldOutputs, spare, holdsOf, judgeClaims, judgeDonors, tailPath, tripped, waitingOf, type ClaimFacts, type FillHold, type Hold, type Judged, type RunRef, type StoryClaim2 } from '../core/hold.js';
-import { measuresHash, settingsFor, type MeasureSettings, type Measures } from '../core/measures.js';
+import { measuresHash, reconcileOf, settingsFor, type MeasureSettings, type Measures } from '../core/measures.js';
 import { tellClaim } from './tell.js';
 import { sampleTable } from './sample.js';
 import { SAMPLE_KEEP, samplePath } from '../core/apart.js';
@@ -173,6 +173,17 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     recordVersion(db, { key, table, content: h.content, rows: h.rows });
     tables.set(i, table);
     record(i, 'built', { content: h.content, rows: h.rows, ...checked });
+  }
+
+  // 4b. The gold gates (ADR 0014 §6, plan/4): each gate on a published node the plan doesn't watch is counted over the
+  // dataset just built (or reused: the counts are of the content), and kept with the node in the manifest; a hold
+  // reads them (core/hold.ts), and verify counts them again.
+  for (const [node, g] of (plan.publish && isPublish2(plan.publish) ? plan.publish.gates : undefined) ?? []) {
+    const rec = records.get(node);
+    if (!g.reconcile || !rec) continue;
+    aborted(signal);
+    const counted = countGate(db, plan, node, ctx);
+    if (counted) rec.gate = counted;
   }
 
   // 5. The manifest.
@@ -573,6 +584,19 @@ export function countExpectations(db: Database, plan: FlowPlan, node: number, ct
     dropped: Number(row[n.rules.length + 1]),
     rules: n.rules.map(([name, , onFail], k) => ({ name, onFail, failed: Number(row[k + 1]) })),
   };
+}
+
+/**
+ * A gold gate's counts over a node (ADR 0014 §6): its reconciliation by the gate's key, against the other node where the
+ * gate names one. Null for a node with no gate, or a gate with no reconciliation.
+ */
+export function countGate(db: Database, plan: FlowPlan, node: number, ctx: EmitContext): GateResult | null {
+  const g = plan.publish && isPublish2(plan.publish) ? plan.publish.gates?.find(([n]) => n === node)?.[1] : undefined;
+  if (!g?.reconcile) return null;
+  const rc = g.reconcile;
+  const of = rc.of === null ? null : emitRead(plan, rc.of, ctx);
+  const row = engine(plan.nodes[node]!.origin, () => db.query(emitReconcileCounts(emitRead(plan, node, ctx), rc.key, of)).rows[0]!);
+  return { reconcile: reconcileOf(row) };
 }
 
 /**

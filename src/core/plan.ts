@@ -171,6 +171,20 @@ export interface WatchPlan {
    * `when` and `then` as `[column, values]` sorted by column, `from` by its table (null within the row). */
   scope?: ScopePlan | null;
   needs?: NeedsPlan[];
+  /** plan/4 only (ADR 0014 §6): the gate's reconciliation, the other node by its table (a source), or null. */
+  reconcile?: ReconcilePlan | null;
+}
+
+export interface ReconcilePlan {
+  key: string[];
+  table: string | null;
+}
+
+/** plan/4 (ADR 0014 §6): a gate on a published node the plan doesn't watch (gold): its checks and its reconciliation,
+ * the other node by its place in the plan. The run counts it over the dataset it built. */
+export interface GatePlan {
+  checks: GateChecks;
+  reconcile: { key: string[]; of: number | null } | null;
 }
 
 export interface ScopePlan {
@@ -200,6 +214,8 @@ export interface PlanPublish2 {
   watch: [node: number, watch: WatchPlan][];
   meanwhile: Meanwhile;
   until: Until;
+  /** plan/4 only (ADR 0014 §6): the gates on published nodes the plan doesn't watch, sorted by node. */
+  gates?: [node: number, gate: GatePlan][];
 }
 
 /** A watched source as either plan format says it: its node, its history's file, its period, whether it holds, and in
@@ -348,16 +364,26 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
     if (!n || n.op !== 'table') throw new PlanError(`${id} isn't a source: a gate's rule reads a source of the flow`, [{ path: `$.gates.${id}`, message: 'not a source' }]);
     return n.table;
   };
-  const rulesOf = (id: string): Pick<WatchPlan, 'scope' | 'needs'> => {
+  const rulesOf = (id: string): Pick<WatchPlan, 'scope' | 'needs' | 'reconcile'> => {
     const g = Object.entries(doc.gates ?? {}).find(([k]) => k.toLowerCase() === id.toLowerCase())?.[1];
     const sorted = (m: Record<string, string | string[]>): [string, string[]][] => Object.entries(m).map(([c, v]): [string, string[]] => [c, [...(Array.isArray(v) ? v : [v])].sort()]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     return {
       scope: g?.scope ? { table: tableOf(g.scope.of), key: g.scope.key, own: g.scope.own ?? g.scope.key, where: bind(g.scope.where, `$.gates.${id}.scope.where`) } : null,
       needs: (g?.needs ?? []).map((n): NeedsPlan => ({ table: n.from ? tableOf(n.from) : null, key: n.key ?? null, when: sorted(n.when), then: sorted(n.then) })),
+      reconcile: g?.reconcile ? { key: [...g.reconcile.key], table: g.reconcile.of ? tableOf(g.reconcile.of) : null } : null,
     };
   };
   const watch = entries.map((e): [number, WatchPlan] => [e.node, { ...watchPlan(e.w, e.id, p.period ?? null, doc.ontology, gates), ...(gates ? { checks: gateChecksOf(doc, e.id)!, ...rulesOf(e.id) } : {}) }]);
-  return { ...plan, smaltflPlan: gates ? 4 : notebooks ? 3 : 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: p.meanwhile ?? 'last', until: p.until ?? 'decision' } };
+  // The gates on published nodes the plan doesn't watch (ADR 0014 §6): the run counts their reconciliation itself.
+  const watchedNodes = new Set(entries.map((e) => e.node));
+  const goldGates = gates
+    ? outputs.filter((o) => !watchedNodes.has(o.node) && gateChecksOf(doc, o.name)).map((o): [number, GatePlan] => {
+      const g = Object.entries(doc.gates ?? {}).find(([k]) => k.toLowerCase() === o.name.toLowerCase())?.[1];
+      const of = g?.reconcile?.of ? index.get(g.reconcile.of.toLowerCase()) : undefined;
+      return [o.node, { checks: gateChecksOf(doc, o.name)!, reconcile: g?.reconcile ? { key: [...g.reconcile.key], of: of ?? null } : null }];
+    }).sort((a, b) => a[0] - b[0])
+    : [];
+  return { ...plan, smaltflPlan: gates ? 4 : notebooks ? 3 : 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: p.meanwhile ?? 'last', until: p.until ?? 'decision', ...(gates ? { gates: goldGates } : {}) } };
 }
 
 /** Whether a document judges its watched sources other than every flow did before ADR 0010: a plan/2. */
@@ -514,14 +540,29 @@ export function validatePlan(plan: unknown): asserts plan is FlowPlan {
 }
 
 const WATCH_PLAN_FIELDS = ['after', 'bad', 'calendar', 'count', 'donor', 'every', 'follow', 'history', 'holds', 'newValues', 'pattern', 'period', 'relearn', 'scale', 'time', 'zone'];
-const WATCH_PLAN_FIELDS_4 = [...WATCH_PLAN_FIELDS, 'checks', 'due', 'expect', 'needs', 'scope'].sort();
+const WATCH_PLAN_FIELDS_4 = [...WATCH_PLAN_FIELDS, 'checks', 'due', 'expect', 'needs', 'reconcile', 'scope'].sort();
 
 /** plan/2's publish block: every field there, each one this version reads, each value one it can judge. */
 function validatePublish2(p: FlowPlan, fail: (message: string) => never, gated = false): void {
   const pub = p.publish as unknown;
   if (typeof pub !== 'object' || pub === null || Array.isArray(pub)) return fail('a format-2 plan says what holds it: publish { hold, period, together, calendar, watch, meanwhile, until }');
-  const { hold, period, together, calendar, watch, meanwhile, until, ...rest } = pub as Record<string, unknown>;
+  const { hold, period, together, calendar, watch, meanwhile, until, gates: goldGates, ...rest } = pub as Record<string, unknown>;
   if (Object.keys(rest).length) fail(`publish has ${Object.keys(rest).join(', ')}, which this version doesn't read`);
+  if (goldGates !== undefined && !gated) fail('publish.gates is plan/4’s: a plan/3 publish block has none');
+  if (gated) {
+    if (!Array.isArray(goldGates)) fail('publish.gates is a list of [node, gate]');
+    (goldGates as unknown[]).forEach((x, i) => {
+      if (!Array.isArray(x) || x.length !== 2 || !Number.isInteger(x[0]) || typeof x[1] !== 'object' || x[1] === null) fail(`publish.gates[${i}] is [node, gate]`);
+      const [node, g] = x as [number, Record<string, unknown>];
+      if (!p.outputs.some((o) => o.node === node)) fail(`publish.gates[${i}] is on node ${node}, which isn't a published node`);
+      if (i > 0 && !(((goldGates as unknown[])[i - 1] as [number, unknown])[0] < node)) fail('publish.gates is sorted by node, each node once');
+      const c = g.checks as Record<string, unknown> | null;
+      if (typeof c !== 'object' || c === null || Object.keys(c).sort().join() !== [...CHECK_NAMES].sort().join() || Object.values(c).some((m) => m !== 'hold' && m !== 'warn' && m !== 'off')) fail(`publish.gates[${i}].checks is every check, each hold, warn or off`);
+      const rc = g.reconcile as Record<string, unknown> | null;
+      if (rc !== null && (typeof rc !== 'object' || !Array.isArray(rc.key) || (rc.key as unknown[]).length === 0 || (rc.key as unknown[]).some((k) => typeof k !== 'string') || !(rc.of === null || (Number.isInteger(rc.of) && p.nodes[rc.of as number])) || Object.keys(rc).sort().join() !== 'key,of')) fail(`publish.gates[${i}].reconcile is null or { key, of }`);
+      if (Object.keys(g).sort().join() !== 'checks,reconcile') fail(`publish.gates[${i}] is { checks, reconcile }`);
+    });
+  }
   checkHold(hold, fail);
   const kinds = hold as string[];
   const text = (name: unknown) => typeof name === 'string' && Object.hasOwn(p.parameters ?? {}, name) && (typeof p.parameters[name] === 'string' || p.parameters[name] === null);
@@ -570,13 +611,15 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never, gated =
     // plan/4 (ADR 0014 §1): every check of the vocabulary, each hold, warn or off, in the vocabulary's order.
     if (gated) {
       const c = w.checks as Record<string, unknown> | null;
-      if (typeof c !== 'object' || c === null || Object.keys(c).join() !== CHECK_NAMES.join() || Object.values(c).some((m) => m !== 'hold' && m !== 'warn' && m !== 'off')) fail(`${at}.checks is every check (${CHECK_NAMES.join(', ')}), each hold, warn or off`);
+      if (typeof c !== 'object' || c === null || Object.keys(c).sort().join() !== [...CHECK_NAMES].sort().join() || Object.values(c).some((m) => m !== 'hold' && m !== 'warn' && m !== 'off')) fail(`${at}.checks is every check (${CHECK_NAMES.join(', ')}), each hold, warn or off`);
       rows('expect', (r) => r.length === 4 && typeof r[1] === 'string' && typeof r[2] === 'number' && typeof r[3] === 'number' && (r[2] as number) >= 0 && (r[2] as number) <= (r[3] as number) && (r[3] as number) <= 1);
       rows('due', (r) => r.length === 4 && typeof r[1] === 'string' && typeof r[2] === 'string' && Number.isInteger(r[3]) && (r[3] as number) >= 1);
       const sc = w.scope as Record<string, unknown> | null;
       if (sc !== null && (typeof sc !== 'object' || typeof sc.table !== 'string' || typeof sc.key !== 'string' || typeof sc.own !== 'string' || typeof sc.where !== 'string' || Object.keys(sc).sort().join() !== 'key,own,table,where')) fail(`${at}.scope is null or { table, key, own, where }`);
       const match = (m: unknown) => Array.isArray(m) && m.length > 0 && m.every((x) => Array.isArray(x) && x.length === 2 && typeof x[0] === 'string' && Array.isArray(x[1]) && (x[1] as unknown[]).length > 0 && (x[1] as unknown[]).every((v) => typeof v === 'string'));
       if (!Array.isArray(w.needs) || (w.needs as unknown[]).some((n) => typeof n !== 'object' || n === null || !('table' in n) || !match((n as NeedsPlan).when) || !match((n as NeedsPlan).then) || Object.keys(n).sort().join() !== 'key,table,then,when')) fail(`${at}.needs is a list of { table, key, when, then }`);
+      const rc = w.reconcile as Record<string, unknown> | null;
+      if (rc !== null && (typeof rc !== 'object' || !Array.isArray(rc.key) || (rc.key as unknown[]).length === 0 || (rc.key as unknown[]).some((k) => typeof k !== 'string') || !(rc.table === null || typeof rc.table === 'string') || Object.keys(rc).sort().join() !== 'key,table')) fail(`${at}.reconcile is null or { key, table }`);
     }
     if (w.holds) holding++;
   });
