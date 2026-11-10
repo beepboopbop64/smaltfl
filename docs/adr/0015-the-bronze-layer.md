@@ -338,10 +338,11 @@ Nothing is edited and nothing is judged differently: no document, plan, hash, ve
   no others"; no condition is "Covers every application, and no others"), `key` ("No Application blank or
   repeated"), and from a gate cell's own rules `same` ("The same Application values as apps: none missing, none
   extra") and `needs` ("Where Status is Passing, Code must be A or B"). A column's from `marksOn` for that file, so a
-  band is the one the plan carries there: `values` ("Holds Passing, Failing, Exception or Not assessed: a value
-  never seen before is flagged as wrong"), `bad` ("Failing is a bad value: a jump above its usual share is flagged
-  as wrong"), `band` ("Failing between 0% and 15% of apps"), `due` ("A due date: late when Status is still Failing
-  the day after, checked against the usual late share"), `after` ("About 30 minutes after Opened"). A sentence uses
+  band is the one the plan carries there: `values` ("A value never seen in this file before is flagged as wrong"),
+  `bad` ("Failing is a bad value: a jump above its usual share is flagged as wrong"), `band` ("Failing between 0%
+  and 15% of apps"), `due` ("A due date: a row is late if its Status is still Failing the day after; flagged as
+  wrong when more are late than usual"), `after` ("About 30 minutes after Opened"). (The `values` and `due`
+  sentences are as reworded after the review, below.) A sentence uses
   the ontology's titles and the words for its values; only a condition its author wrote for the engine in a gate
   cell is quoted as written. Nothing is shared in what is shown: the band on `not_assessed` that the ontology gives
   wherever `status` appears is listed in each of the twelve control files as that file's rule, and the WAF's band on
@@ -407,3 +408,73 @@ Nothing is edited and nothing is judged differently: no document, plan, hash, ve
 - **Left for pieces (b) and (c):** nothing is edited here; the rules are still the ontology's marks, which a
   column's files share in the document, though the page lists them file by file; `discovered` is empty; a rule
   doesn't say whether it holds or warns, has no switch, and isn't drawn against today's number (§5).
+
+### Amendment 1, piece (a), after its review (2026-11-10)
+
+Still nothing edited: no document, plan, hash, verdict or test vector moved. What the page says changed.
+
+- **A file's rule about a column is on that column's card too.** The maintainer's first example of a rule under a
+  column was "the application value has to exist", and the Application card of each of the twelve control files
+  said "No rules yet." under the two rules of the file that name it. A file's own rule now says which of the
+  file's columns it is about (`Rule.columns`: the key's columns for `key` and `same`, the file's own key column
+  for `covers`, for a dependency the columns that must hold and the condition's where it is read in this file),
+  and a card lists them before its own (`ColumnCard.fileRules`, each `{ rule, said }`): "Must be one of the
+  applications this file covers" and "No Application blank or repeated", each marked "one of this file's rules".
+  It is the file's rule itself, listed twice and counted once: a row's "9 rules" is what it was. No card says it
+  has no rule under a rule that names its column.
+- **A bad value a due date tells says its jump isn't checked.** Once a due date is judged, its miss value's rise is
+  told through the due check and not as a bad value (`dueMiss`, `news.ts`; ADR 0014 §3): on Fri Mar 15 the
+  vulnerability file's Failing is 15.5% against 5.4% the week before and the day is a normal Friday. The page
+  said that jump would be flagged, in the five files with a due date. `bad=fail` there now reads "Not checked:
+  this file's due date is checked instead", as a band's does; so does a band on such a value (the judge skips it
+  the same way). A due mark counts for a file only when the file has its column: the ontology gives `next_due`
+  wherever it appears, and TLS has none. `ontologyPage` takes every column a file has beside the ones the viewer
+  reads (`every`), so the line is right for a viewer the due date is hidden from. It is read from the document:
+  in a flow's first weeks, before twenty rows have been due, the jump is still judged.
+- **A `values` rule says what is checked.** "Holds Signed in, Failed or Locked out: a value never seen before is
+  flagged as wrong" read as a closed list above a bar that showed a fourth value, unflagged. The check is against
+  what the file has held before: "A value never seen in this file before is flagged as wrong". The values the
+  ontology describes stay the column's meaning (the card's codes, the rule's `values`).
+- **Words.** A due date: "a row is late if its Status is still Failing the day after; flagged as wrong when more
+  are late than usual" (it said "checked against the usual late share", the judge's term). The inventory a scope
+  reads is "the list of applications (apps)" (`Rule.againstSaid`; it said "checked against apps").
+- **A refused file keeps its columns and rules.** On Thu Mar 7 the logging file's row said "file refused · 3
+  rules" (8 on any other day) and its section had no card: a refused source's stored plan says no columns. A file
+  the run read nothing of (refused that day, or no run yet) now has the columns its data list declares, through
+  the viewer's policies (`fileColumns`, `fileView`, `src/app/main.ts`): the row counts its eight rules, the
+  section says the day's file was refused and that these are the columns the flow expects, and each card says
+  there is nothing to draw. A file whose columns nothing declares (a Parquet file before a run) has none, as
+  before.
+- **An open row drops its line.** The row said the description's opening and the section said it again under it.
+  Open, the row keeps its name and counts, and the section says the whole description once.
+- **A bar is named by what its value means** on this page (`columnShape`'s `lead`): "Failing" with `fail` small
+  beside it, as the rules under it speak; the Columns tab still leads with the code, read beside the rows. Neither
+  prints a meaning that differs from its code only in case ("yes", "Yes"). Meanings that are sentences (the taxi
+  zones' service zone) sit over their bars.
+- **Columns of a file closed to the viewer.** As Ana, whose trips file is closed, "Columns the flow makes" counted
+  41, 19 of them the trips file's own, with no line saying where they come from and without their references.
+  Whose a column is is now decided by the files' own columns, not by what the viewer may open: the steps' 22 are
+  under "Columns the flow makes" for Ana as for the owner, and the 19 are in a fold of their own, "Columns from
+  trips": "19 columns Ana reads in the flow's steps. The file itself is closed to Ana.", each with its references.
+- **Targets and type.** A reference on a card is a row to tap, 44 px high (it was 16 to 33); on the Objects part
+  kept from before, an object row, an action's input and its button are 44 px (40, 36, 40). "Rules" and "Set by
+  hand" are 12 px (10.5, 11.5).
+- **Not changed.** The estate's source descriptions end "One row an application it applies to (every
+  application).", which the file's rules then say again. The description is the document's, and this piece edits
+  no document: it goes when piece (b) makes the rules the file's own.
+- **Tests:** `test/ontologypage.test.ts` gains a file's rules on its columns' cards (the estate's every file; a
+  gate cell's key, `same` and both dependencies), the due date's stand-in in the five files and not the seven, a
+  band on a value a due date tells, a due date hidden from the viewer, and the new sentences.
+  `tools/browser/stops/estate.json`: the WAF stop counts the Application card's two lines and no "No rules yet."
+  on it; two stops are new, `mar07-ontology-refused` (the logging file on the day it is refused: eight rules,
+  five cards, nothing drawn) and `mar14-ontology-due` (the vulnerability file: the due date's rule, and Failing's
+  jump said as not checked). The taxi example and the sign-in log were driven again on their earlier builds'
+  data with the new bundle: no page error, every target on the page 44 px or more as each of the taxi example's
+  five people, an action typed, applied and recorded.
+- **Left, and a question for the maintainers before piece (b) (Q-144):** the page is by file, so the rules of a
+  dataset the flow makes are nowhere on it: the estate's one combination rule (where Key rotation is Passing,
+  Encryption at rest must be Passing, Exception or Not assessed), the posture's key against the inventory, and
+  the bad value on each of its twelve status columns. They are on the posture card's Checks tab; the fold of
+  made columns gives meanings only. The maintainer named "this combination has to mean something else" as a rule
+  they expect to see. Where they go (a section of its own after the files for a dataset with rules, or a line
+  under each file it reads) is theirs to say.

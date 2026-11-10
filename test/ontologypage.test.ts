@@ -3,7 +3,7 @@
  * and each column's in plain words, from what the ontology and the gate cells say today. The control estate's
  * sections are asserted as the page shows them; the other examples and small documents cover what the estate
  * doesn't write (a gate cell's own rules, a check switched off, a file nothing watches, a column the viewer can't
- * read, a time that runs behind another).
+ * read, a time that runs behind another, a band on a value a due date tells).
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -48,7 +48,9 @@ describe('the control estate, file by file', () => {
       ['tls/key', 'key', 'No Application blank or repeated'],
     ]);
     expect(tls.rules.map((r) => r.origin)).toEqual([{ how: 'set', in: 'ontology' }, { how: 'set', in: 'ontology' }, { how: 'set', in: 'ontology' }]);
-    expect(tls.rules.map((r) => r.against)).toEqual([undefined, 'apps', undefined]);
+    expect(tls.rules.map((r) => [r.against, r.againstSaid])).toEqual([[undefined, undefined], ['apps', 'the list of applications (apps)'], [undefined, undefined]]);
+    // The columns of the file a rule is about: the key, and the column held to the objects the file covers.
+    expect(tls.rules.map((r) => r.columns)).toEqual([undefined, ['app_id'], ['app_id']]);
     expect(tls.rules.every((r) => r.unchecked === undefined)).toBe(true);
     // A condition of several columns, in the ontology's titles and the words for its values; no condition is every object.
     expect(said(file(files, 'pentest').rules)[1]).toBe('Covers the applications where Criticality is Critical or High and Internet-facing is Yes, and no others');
@@ -65,22 +67,58 @@ describe('the control estate, file by file', () => {
     expect((await page()).files.filter((f) => f.inventory).map((f) => f.id)).toEqual(['apps']);
   });
 
-  it('gives each column its rules from the ontology’s marks: known values, a bad value, a band, a due date', async () => {
+  it('lists a file’s rule about a column on that column’s card too, said for the column and counted once', async () => {
+    const { files } = await page();
+    const tls = file(files, 'tls');
+    const key = column(tls, 'app_id');
+    // "The application has to be there" is the first rule anyone looks for under the column: the card has no rule
+    // of its own, and says the file's two that name it.
+    expect(key.rules).toEqual([]);
+    expect(key.fileRules.map((x) => [x.rule.id, x.said])).toEqual([['tls/covers', 'Must be one of the applications this file covers'], ['tls/key', 'No Application blank or repeated']]);
+    // The file's rule itself, not a copy: how it came to be and whether it is judged are said once.
+    expect(key.fileRules.map((x) => x.rule)).toEqual([tls.rules[1], tls.rules[2]]);
+    expect(key.fileRules[0]!.rule).toBe(tls.rules[1]);
+    expect(tls.count).toBe(7);
+    expect(tls.columns!.filter((c) => c.fileRules.length).map((c) => c.name)).toEqual(['app_id']);
+    // In every file: a column a file's rule names lists that rule, so none of them says it has no rule.
+    for (const f of files)
+      for (const r of f.rules)
+        for (const c of r.columns ?? []) expect(column(f, c).fileRules.map((x) => x.rule)).toContain(r);
+    expect(files.filter((f) => f.id !== 'apps').every((f) => column(f, 'app_id').fileRules.length === 2)).toBe(true);
+    expect(file(files, 'apps').columns!.every((c) => c.fileRules.length === 0)).toBe(true);
+  });
+
+  it('gives each column its rules from the ontology’s marks: a new value, a bad value, a band, a due date', async () => {
     const { files } = await page();
     const tls = file(files, 'tls');
     expect(tls.columns!.map((c) => c.name)).toEqual(['app_id', 'hostname', 'protocol', 'cert_days_left', 'status']);
     expect(column(tls, 'status').rules).toEqual([
-      { id: 'tls/status/values', kind: 'values', said: 'Holds Passing, Failing, Exception or Not assessed: a value never seen before is flagged as wrong', values: ['pass', 'fail', 'exception', 'not_assessed'], origin: { how: 'set', in: 'ontology' } },
+      // What is checked is said: a value the file never held, not a closed list. The values described are the column's meaning.
+      { id: 'tls/status/values', kind: 'values', said: 'A value never seen in this file before is flagged as wrong', values: ['pass', 'fail', 'exception', 'not_assessed'], origin: { how: 'set', in: 'ontology' } },
       { id: 'tls/status/bad=fail', kind: 'bad', said: 'Failing is a bad value: a jump above its usual share is flagged as wrong', values: ['fail'], origin: { how: 'set', in: 'ontology' } },
       { id: 'tls/status/band=not_assessed', kind: 'band', said: 'Not assessed between 0% and 5% of apps', numbers: { low: 0, high: 0.05 }, values: ['not_assessed'], origin: { how: 'set', in: 'ontology' } },
     ]);
-    expect(said(column(tls, 'protocol').rules)).toEqual(['Holds TLS 1.0, TLS 1.2 or TLS 1.3: a value never seen before is flagged as wrong']);
+    expect(said(column(tls, 'protocol').rules)).toEqual(['A value never seen in this file before is flagged as wrong']);
+    expect(column(tls, 'protocol').values.map(([, meaning]) => meaning)).toEqual(['TLS 1.0', 'TLS 1.2', 'TLS 1.3']);
     expect(column(tls, 'cert_days_left')).toMatchObject({ title: 'Certificate days left', rules: [], property: { unit: 'days' } });
     expect(tls.count).toBe(7);
     // A due date, with its window: the status column and the value that is a miss by their title and meaning.
-    expect(column(file(files, 'pentest'), 'next_due').rules).toEqual([{ id: 'pentest/next_due/due', kind: 'due', said: 'A due date: late when Status is still Failing the day after, checked against the usual late share', numbers: { days: 28 }, values: ['fail'], origin: { how: 'set', in: 'ontology' } }]);
+    expect(column(file(files, 'pentest'), 'next_due').rules).toEqual([{ id: 'pentest/next_due/due', kind: 'due', said: 'A due date: a row is late if its Status is still Failing the day after; flagged as wrong when more are late than usual', numbers: { days: 28 }, values: ['fail'], origin: { how: 'set', in: 'ontology' } }]);
     expect(files.filter((f) => f.columns!.some((c) => c.rules.some((r) => r.kind === 'due'))).map((f) => f.id)).toEqual(['pentest', 'key_rotation', 'dr_exercise', 'vuln_sla', 'access_review']);
-    expect(said(column(file(files, 'waf'), 'mode').rules)).toEqual(['Holds Blocking, Monitor only or Off: a value never seen before is flagged as wrong', 'Off is a bad value: a jump above its usual share is flagged as wrong']);
+    expect(said(column(file(files, 'waf'), 'mode').rules)).toEqual(['A value never seen in this file before is flagged as wrong', 'Off is a bad value: a jump above its usual share is flagged as wrong']);
+  });
+
+  it('says a bad value’s jump isn’t judged where the file’s due date tells it instead', async () => {
+    const { files } = await page();
+    // Once a due date is judged, its miss value's rise is told through it (news.ts `dueMiss`): on Fri Mar 15 the
+    // vulnerability file's Failing is three times its usual share and the day is a normal Friday.
+    const bad = (id: string) => column(file(files, id), 'status').rules.find((r) => r.id === `${id}/status/bad=fail`)!;
+    for (const id of ['pentest', 'key_rotation', 'dr_exercise', 'vuln_sla', 'access_review']) expect(bad(id)).toMatchObject({ said: 'Failing is a bad value: a jump above its usual share is flagged as wrong', unchecked: 'this file’s due date is checked instead' });
+    for (const id of ['tls', 'encryption', 'backup', 'mfa', 'logging', 'privileged_access']) expect(bad(id).unchecked).toBeUndefined();
+    // The due date itself is judged, and so is every other rule of the column.
+    const pentest = file(files, 'pentest');
+    expect(column(pentest, 'next_due').rules[0]!.unchecked).toBeUndefined();
+    expect(column(pentest, 'status').rules.filter((r) => r.unchecked).map((r) => r.id)).toEqual(['pentest/status/bad=fail']);
   });
 
   it('lists a band in each file it applies to as that file’s own, and one file’s band nowhere else', async () => {
@@ -133,11 +171,13 @@ describe('the other examples', () => {
     const auth = file(page.files, 'auth');
     expect(auth).toMatchObject({ noun: { one: 'sign-in', many: 'sign-ins' }, rules: [], watched: true, count: 5 });
     expect(said(column(auth, 'result').rules)).toEqual([
-      'Holds Signed in, Failed or Locked out: a value never seen before is flagged as wrong',
+      'A value never seen in this file before is flagged as wrong',
       'Failed is a bad value: a jump above its usual share is flagged as wrong',
       'Locked out is a bad value: a jump above its usual share is flagged as wrong',
     ]);
-    expect(said(column(auth, 'country').rules)).toEqual(['A value never seen before is flagged as wrong']);
+    expect(said(column(auth, 'country').rules)).toEqual(['A value never seen in this file before is flagged as wrong']);
+    // No file rule in a flow with no gate: no card lists one.
+    expect(auth.columns!.every((c) => c.fileRules.length === 0)).toBe(true);
     expect(column(auth, 'method').rules).toEqual([]);
     expect(auth.columns!.flatMap((c) => c.rules).every((r) => r.unchecked === undefined)).toBe(true);
   });
@@ -159,6 +199,7 @@ describe('what the examples don’t write', () => {
       { column: 'code', title: 'Code', description: 'One of many', values: Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((v) => [v, v.toUpperCase()])), newValues: 'alert' },
       { column: 'closed_at', title: 'Closed', description: 'When it was closed', after: { of: 'opened_at', minutes: 30 } },
       { column: 'opened_at', title: 'Opened', description: 'When it was opened' },
+      { column: 'due_on', title: 'Due', description: 'The day it is due', datasets: ['tickets'], due: { status: 'status', miss: 'fail', within: 14 } },
     ],
     rows: [{ dataset: 'tls', of: 'application', where: { internet_facing: 'yes' } }, { dataset: 'desks', of: 'seat' }, { dataset: 'units', of: 'unit' }],
   };
@@ -170,12 +211,13 @@ describe('what the examples don’t write', () => {
       gates: o.gates ?? { tls: { layer: 'bronze', checks: {} } },
       publish: { hold: ['wrong'], watch: Object.fromEntries((o.watch ?? ['tls', 'desks', 'tickets']).map((w) => [w, { history: `${w}.json`, pattern: 'none' }])) },
     }) as unknown as FlowDocument;
-  const COLUMNS: Record<string, string[]> = { apps: ['app_id', 'internet_facing'], tls: ['APP_ID', 'status', 'code'], tickets: ['opened_at', 'closed_at', 'status', 'ref'] };
+  const COLUMNS: Record<string, string[]> = { apps: ['app_id', 'internet_facing'], tls: ['APP_ID', 'status', 'code'], tickets: ['opened_at', 'closed_at', 'status', 'ref', 'due_on'] };
   const columns = (f: string) => COLUMNS[f];
 
   it('says a gate cell’s own rules, quoting a condition written for the engine, and names the notebook as where they are set', () => {
     const page = ontologyPage(doc({ gates: { tls: { layer: 'bronze', checks: {}, scope: { of: 'apps', key: 'app_id', where: "internet_facing = 'yes'" }, reconcile: { key: ['app_id'], of: 'apps' }, needs: [{ when: { status: 'pass' }, then: { code: ['a', 'b'] } }, { from: 'apps', key: 'app_id', when: { internet_facing: 'no' }, then: { status: 'pass' } }] } } }), columns);
-    expect(file(page.files, 'tls').rules.map((r) => [r.id, r.said, r.origin, r.against])).toEqual([
+    const tls = file(page.files, 'tls');
+    expect(tls.rules.map((r) => [r.id, r.said, r.origin, r.against])).toEqual([
       ['tls/rows', 'One row an application', { how: 'set', in: 'ontology' }, undefined],
       ['tls/covers', "Covers the applications where internet_facing = 'yes', and no others", { how: 'set', in: 'notebook' }, 'apps'],
       ['tls/key', 'No Application blank or repeated', { how: 'set', in: 'notebook' }, undefined],
@@ -183,6 +225,16 @@ describe('what the examples don’t write', () => {
       ['tls/needs#1', 'Where Status is Passing, Code must be A or B', { how: 'set', in: 'notebook' }, undefined],
       ['tls/needs#2', 'Where Internet-facing is No in apps, Status must be Passing', { how: 'set', in: 'notebook' }, 'apps'],
     ]);
+    // The inventory a scope reads is said as a list of its objects; any other dataset by its name.
+    expect(tls.rules.map((r) => r.againstSaid)).toEqual([undefined, 'the list of applications (apps)', undefined, 'apps', undefined, 'apps']);
+    // Each rule on the cards of the file's columns it names, whatever their case in the load: the key's three on the
+    // key; a combination on the column that must hold and on the condition's, where the condition is read in this file.
+    expect(tls.rules.map((r) => r.columns)).toEqual([undefined, ['app_id'], ['app_id'], ['app_id'], ['status', 'code'], ['status']]);
+    expect(tls.columns!.map((c) => [c.name, c.fileRules.map((x) => x.rule.id)])).toEqual([['APP_ID', ['tls/covers', 'tls/key', 'tls/same']], ['status', ['tls/needs#1', 'tls/needs#2']], ['code', ['tls/needs#1']]]);
+    expect(column(tls, 'APP_ID').fileRules.map((x) => x.said)).toEqual(['Must be one of the applications this file covers', 'No Application blank or repeated', 'The same Application values as apps: none missing, none extra']);
+    expect(column(tls, 'code').fileRules[0]!.said).toBe('Where Status is Passing, Code must be A or B');
+    // Listed twice, counted once: six of the file's, four of its columns' own.
+    expect(tls.count).toBe(10);
   });
 
   it('says why a rule isn’t judged: a check switched off, a file nothing watches, a key of several columns', () => {
@@ -204,14 +256,25 @@ describe('what the examples don’t write', () => {
     const tls = file(page.files, 'tls');
     // The column as the load writes it; the rule's id in lower case, so it stands whatever a load's case.
     expect(column(tls, 'APP_ID')).toMatchObject({ name: 'APP_ID', title: 'Application', rules: [] });
+    expect(column(tls, 'APP_ID').fileRules.map((x) => x.rule.id)).toEqual(['tls/covers', 'tls/key']);
     expect(column(tls, 'status').rules[2]).toMatchObject({ said: 'Failing between 0% and 12.5% of rows', numbers: { low: 0, high: 0.125 } });
-    expect(column(tls, 'code').rules).toEqual([{ id: 'tls/code/values', kind: 'values', said: 'Holds one of 7 known values: a value never seen before is flagged as wrong', values: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], origin: { how: 'set', in: 'ontology' } }]);
+    expect(column(tls, 'code').rules).toEqual([{ id: 'tls/code/values', kind: 'values', said: 'A value never seen in this file before is flagged as wrong', values: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], origin: { how: 'set', in: 'ontology' } }]);
     expect(column(file(page.files, 'tickets'), 'closed_at').rules).toEqual([{ id: 'tickets/closed_at/after', kind: 'after', said: 'About 30 minutes after Opened', numbers: { minutes: 30 }, origin: { how: 'set', in: 'ontology' } }]);
     // A column the ontology doesn't describe keeps its own name, and has no rule.
-    expect(column(file(page.files, 'tickets'), 'ref')).toEqual({ name: 'ref', title: 'ref', values: [], rules: [] });
+    expect(column(file(page.files, 'tickets'), 'ref')).toEqual({ name: 'ref', title: 'ref', values: [], rules: [], fileRules: [] });
     // One file checked against the inventory; a file with no load read has no cards.
     expect(file(page.files, 'apps').inventory?.said).toBe('The list of applications: 1 other file is checked against it');
     expect(file(page.files, 'desks').columns).toBeNull();
+  });
+
+  it('says a value a due date tells isn’t judged by its jump or by a band, in the file with the due date alone', () => {
+    const page = ontologyPage(doc(), columns);
+    const rules = (f: string) => column(file(page.files, f), 'status').rules.map((r) => [r.id, r.unchecked]);
+    // The tickets' Failing is the miss of their due date: the due check tells its rise, and neither rule on it is judged.
+    expect(rules('tickets')).toEqual([['tickets/status/values', undefined], ['tickets/status/bad=fail', 'this file’s due date is checked instead'], ['tickets/status/band=fail', 'this file’s due date is checked instead']]);
+    expect(column(file(page.files, 'tickets'), 'due_on').rules).toEqual([{ id: 'tickets/due_on/due', kind: 'due', said: 'A due date: a row is late if its Status is still Failing the day after; flagged as wrong when more are late than usual', numbers: { days: 14 }, values: ['fail'], origin: { how: 'set', in: 'ontology' } }]);
+    // The same column in a file with no due date: its band is judged, and stands in for the jump.
+    expect(rules('tls')).toEqual([['tls/status/values', undefined], ['tls/status/bad=fail', 'this file’s band on Failing is checked instead'], ['tls/status/band=fail', undefined]]);
   });
 
   it('lists a column only where the viewer’s load has it: a hidden column has no card and its rules aren’t counted', () => {
@@ -219,6 +282,13 @@ describe('what the examples don’t write', () => {
     const hidden = file(ontologyPage(doc(), (f) => COLUMNS[f]?.filter((c) => c !== 'status')).files, 'tls');
     expect(hidden.columns!.map((c) => c.name)).toEqual(['APP_ID', 'code']);
     expect([all.count, hidden.count]).toEqual([7, 4]);
+    // A due date the viewer can't read still tells its miss value: the card they do read says its jump isn't judged,
+    // from all the file's columns (`every`); without them, from the cards' own.
+    const shown = (f: string) => COLUMNS[f]?.filter((c) => c !== 'due_on');
+    const bad = (page: ReturnType<typeof ontologyPage>) => column(file(page.files, 'tickets'), 'status').rules.find((r) => r.kind === 'bad')!.unchecked;
+    expect(file(ontologyPage(doc(), shown, columns).files, 'tickets').columns!.map((c) => c.name)).toEqual(['opened_at', 'closed_at', 'status', 'ref']);
+    expect(bad(ontologyPage(doc(), shown, columns))).toBe('this file’s due date is checked instead');
+    expect(bad(ontologyPage(doc(), shown))).toBe('this file’s band on Failing is checked instead');
   });
 
   it('keeps a type with a link, an action, or no file tied to it, and drops one that only says what rows are', () => {

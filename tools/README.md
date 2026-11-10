@@ -28,8 +28,8 @@ Build the app first (`npm run build:app`) and copy `dist/app` somewhere, because
   dist/app-estate`): a calm day, the held days of ADR 0014's answer key, and bronze, silver and gold cards with their
   News, Checks and Data, each stop with a `what` a judge reads. Its days run in order, since a day's due check reads
   the day before. Its first expectations are on the Ontology stops (ADR 0015 amendment 1: the files listed, a
-  control's section and the inventory's opened, a held day's rows beside the rules, light and dark); the rest come
-  with the fixes of docs/HANDOFF.md's review.
+  control's section and the inventory's opened, a file on the day it is refused, a due date's file, a held day's rows
+  beside the rules, light and dark); the rest come with the fixes of docs/HANDOFF.md's review.
 - `fills.json` and `fills-nov.json`: the fill flows, as designed. Some selectors may have moved since; update them
   when a stop reports "nothing to click".
 

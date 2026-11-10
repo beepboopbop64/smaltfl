@@ -145,7 +145,9 @@ match smaltdb's `CLAUDE.md`.
   (`src/core/ontologypage.ts` `ontologyPage`: a section a source with its own rules, a card a column with its rules
   in words, each rule with an id, a kind and how it came to be, `discovered` empty; the app's `renderFiles` and
   `fileSection` draw a column with the Columns tab's `columnShape`; `test/ontologypage.test.ts`; `estate.json`'s
-  ontology stops).
+  ontology stops). A file's rule about a column is listed on that column's card too (`Rule.columns`,
+  `ColumnCard.fileRules`), a rule nothing judges says why (`Rule.unchecked`: its check off, a band or a due date
+  checked in its place), and a file the run read nothing of has the columns its data list declares (`fileView`).
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).

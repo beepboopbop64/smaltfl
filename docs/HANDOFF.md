@@ -150,6 +150,18 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   against the key only the pentest cluster and the DR day read otherwise, both the short test base's doing. **Next:**
   the maintainer's reactions to the estate app, Q-118 and Q-119, and ADR 0009's remaining pause work (a corrected file
   replacing a fill on its own, Q-62).
+- **The bronze layer** (ADR 0015 §"As built", 2026-11-10), on `claude/jolly-archimedes-og91mn`. Slice 1: the
+  ontology's `rows` says what a dataset's rows are, and a watched node is held to the objects it covers and to its
+  key from it (`writtenRules`); bronze holds on its key by default. Amendment 1 (the maintainer on the published
+  app: the Ontology page should be the files, their columns drawn, their rules under them, Q-140 to Q-143), piece
+  (a): the Ontology page is laid out by file and shows the rules the ontology has today, with nothing edited and no
+  hash moved (`src/core/ontologypage.ts`, `renderFiles` and `fileSection` in `src/app/main.ts`,
+  `test/ontologypage.test.ts`, the ontology stops of `tools/browser/stops/estate.json`): a row a file, its section
+  opened in place with what the file is, this file's rules, a card a column (its values drawn, its meaning, its
+  rules in words, the file's rules about it among them) and Discovered, empty. **Next:** the maintainer looks at
+  it in the app; then piece (b), rules as each file's own with their forms and the two ways a range is kept, and
+  piece (c), the import card's toggles from those rules. Q-144 (where a joined dataset's rules go on a page laid
+  out by file) is open and wants an answer before (b).
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

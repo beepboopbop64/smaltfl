@@ -2184,9 +2184,11 @@ function histogram(p: Profile): HTMLElement | null {
 /**
  * A column's values drawn, as its card in the Columns tab and its card on the Ontology page show them: a measure's or
  * a time's histogram with its numbers under it, else its most common values as bars, each with what its code stands
- * for. Nothing for a column with neither.
+ * for. Nothing for a column with neither. `lead` says which names a bar: the code as the file writes it, with its
+ * meaning small under it (the Columns tab, read beside the rows), or the meaning, with the code small beside it (the
+ * Ontology page, whose rules below speak in meanings).
  */
-function columnShape(p: Profile, meaning?: PropertyType): HTMLElement[] {
+function columnShape(p: Profile, meaning?: PropertyType, lead: 'code' | 'meaning' = 'code'): HTMLElement[] {
   const f = p.facts;
   const plain = fmtOf(p);
   // A measure in its unit; a time as it is.
@@ -2204,11 +2206,16 @@ function columnShape(p: Profile, meaning?: PropertyType): HTMLElement[] {
       ...stat('middle half', `${fmt(q.p25)} – ${fmt(q.p75)}`))];
   }
   if (!p.top?.length) return [];
-  const tops = h('div', { class: 'tops' },
+  // A meaning that is a sentence ("Manhattan south of E 96th St…: only yellow cabs take street hails") has no room
+  // beside a bar: where one leads, each name sits over its bar.
+  const over = lead === 'meaning' && p.top.some((t) => (meaningFor(meaning, t.value) ?? '').length > 28);
+  const tops = h('div', { class: `tops${over ? ' over' : ''}` },
     ...p.top.map((t) => {
-      // What the code stands for, where that says more than the code does ("Retail" is Retail).
+      // What the code stands for, where that says more than the code does ("Retail" is Retail, and "yes" is Yes).
       const means = meaningFor(meaning, t.value);
-      return h('div', { class: 'top' }, h('span', { class: 'v' }, t.value, means && means !== t.value ? h('span', { class: 'means' }, means) : null), h('span', { class: 'bar' }, h('span', { style: `width:${Math.max(1, t.share * 100).toFixed(1)}%` })), h('span', { class: 'n' }, pct(t.share)));
+      const both = !!means && means.toLowerCase() !== t.value.toLowerCase();
+      const name = lead === 'meaning' && means ? [means, both ? h('code', { class: 'as-written' }, t.value) : null] : [t.value, both ? h('span', { class: 'means' }, means) : null];
+      return h('div', { class: 'top' }, h('span', { class: 'v' }, ...name), h('span', { class: 'bar' }, h('span', { style: `width:${Math.max(1, t.share * 100).toFixed(1)}%` })), h('span', { class: 'n' }, pct(t.share)));
     }));
   return f.distinct > p.top.length ? [tops, h('p', { class: 'foot', style: 'margin:0' }, `and ${plural(f.distinct - p.top.length, 'more value', 'more values')}`)] : [tops];
 }
@@ -7711,16 +7718,39 @@ function makes(st: StepDef, column: string): Child[] | null {
   }
 }
 
+/** Where a column's meaning comes from: its references, each a row to tap. */
+function citedLine(p: PropertyType | undefined): HTMLElement | null {
+  const refs = new Map((state.doc.ontology?.references ?? []).map((r) => [r.id, r]));
+  const cited = (p?.sources ?? []).map((r) => refs.get(r)).filter((r) => r !== undefined);
+  return cited.length ? h('p', { class: 'of-from of-refs' }, h('span', {}, 'From'), ...cited.map((r) => h('a', { href: r.url, target: '_blank', rel: 'noopener' }, r.title))) : null;
+}
+
+/** A file's columns whatever the viewer may open: the run's; where the run has none (no run yet; a file refused, whose
+ * stored plan says no columns), the ones its data list declares. */
+const fileColumns = (id: string): string[] | undefined => {
+  const read = state.columns.get(id);
+  return read?.length ? read : (bindingOf(id)?.columns?.map(([c]) => c) ?? read);
+};
+/** What the viewer may read of a file, as the Ontology page lists it: of the run's file; of the columns its data list
+ * declares where the run read none of it (a file refused that day, a flow not run yet), through the same policies:
+ * what its columns mean and its rules don't wait for a day that reads it. Null where neither is known. */
+const fileView = (id: string): ReadView | null => {
+  const cols = fileColumns(id);
+  return cols ? readView(policies(), state.viewer, cols) : null;
+};
+
 /**
- * The columns the flow's steps make, with what each means: the ontology's dictionary for what no file holds, in one
- * fold after the files (a file's own columns are in its section, `fileSection`). Each says where it is made and
- * where it is. Only columns the viewer can read somewhere are listed.
+ * The columns that are in no file's section, with what each means: the ontology's dictionary for what the flow's
+ * steps make, in one fold after the files (a file's own columns are in its section, `fileSection`), each saying
+ * where it is made and where it is. Whose a column is is decided by the files' own columns, not by what the viewer
+ * may open: a column of a file closed to them that they read further on (the steps carry it) is not one the steps
+ * make, and is listed in a fold of its file's name that says so. Only columns the viewer can read somewhere are
+ * listed.
  */
 function madePanel(): HTMLElement | null {
   const o = state.doc.ontology;
   const props = o?.properties ?? [];
   if (!o || !props.length) return null;
-  const files = new Set(state.doc.sources.map((x) => x.id));
   const ids = [...state.doc.sources.map((x) => x.id), ...state.doc.steps.map((x) => x.id)];
   const where = new Map<PropertyType, string[]>();
   const order = new Map<PropertyType, number>();
@@ -7734,14 +7764,30 @@ function madePanel(): HTMLElement | null {
       if (!order.has(p)) order.set(p, n * 1000 + k);
     });
   });
-  // A column a file holds is described in that file's section: here, only what the steps add.
-  const made = props.filter((p) => where.has(p) && !where.get(p)!.some((d) => files.has(d))).sort((a, b) => order.get(a)! - order.get(b)!);
-  if (!made.length) return null;
+  const fileOf = new Map<PropertyType, string>();
+  const inSection = new Set<PropertyType>();
+  for (const src of state.doc.sources) {
+    for (const c of fileColumns(src.id) ?? []) {
+      const p = propertyOf(o, src.id, c);
+      if (p && !fileOf.has(p)) fileOf.set(p, src.id);
+    }
+    const view = fileView(src.id);
+    for (const c of view?.open ? view.columns : []) {
+      const p = propertyOf(o, src.id, c);
+      if (p) inSection.add(p);
+    }
+  }
+  // A column the viewer reads in a file is described in that file's section: here, what they read only further on.
+  const rest = props.filter((p) => where.has(p) && !inSection.has(p)).sort((a, b) => order.get(a)! - order.get(b)!);
+  const made = rest.filter((p) => !fileOf.has(p));
+  const carried = new Map<string, PropertyType[]>();
+  for (const p of rest) if (fileOf.has(p)) carried.set(fileOf.get(p)!, [...(carried.get(fileOf.get(p)!) ?? []), p]);
+  if (!rest.length) return null;
   const few = (list: readonly string[]) => (list.length <= 4 ? list.join(', ') : `${list.slice(0, 3).join(', ')} and ${list.length - 3} more`);
   const card = (p: PropertyType) => {
     const codes = Object.entries(p.values ?? {});
     const list = codes.length ? h('dl', { class: 'codes' }, ...codes.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])) : null;
-    const maker = where.get(p)!.map((d) => steps().get(d)).find((st) => st && makes(st, p.column));
+    const maker = fileOf.has(p) ? undefined : where.get(p)!.map((d) => steps().get(d)).find((st) => st && makes(st, p.column));
     return h('article', { class: 'prop' },
       h('div', { class: 'prop-head' }, h('h3', {}, p.title), h('code', {}, p.column), p.unit ? h('span', { class: 'unit' }, p.unit) : null),
       h('p', {}, p.description),
@@ -7749,9 +7795,14 @@ function madePanel(): HTMLElement | null {
       p.note ? h('p', { class: 'note' }, p.note) : null,
       maker ? h('p', { class: 'made' }, 'Made in ', h('b', {}, maker.id), ': ', ...makes(maker, p.column)!) : null,
       p.lookup && visible(p.lookup.dataset) ? h('p', { class: 'made' }, 'Reads as its ', h('b', {}, p.lookup.label), ' in ', h('b', {}, p.lookup.dataset)) : null,
+      citedLine(p),
       h('p', { class: 'where' }, `In ${few(where.get(p)!)}`));
   };
-  return fold('props:made', [h('span', { class: 'made-h' }, 'Columns the flow makes'), h('span', { class: 'fold-sum' }, `${plural(made.length, 'column')} its steps add, and what each means`)], h('div', { class: 'props' }, ...made.map(card)));
+  const who = personName(state.viewer);
+  return h('div', { class: 'made-folds' },
+    made.length ? fold('props:made', [h('span', { class: 'made-h' }, 'Columns the flow makes'), h('span', { class: 'fold-sum' }, `${plural(made.length, 'column')} its steps add, and what each means`)], h('div', { class: 'props' }, ...made.map(card))) : null,
+    ...[...carried].map(([file, list]) =>
+      fold(`props:from:${file}`, [h('span', { class: 'made-h' }, 'Columns from ', ...breakable(file)), h('span', { class: 'fold-sum' }, `${plural(list.length, 'column')} ${who} reads in the flow’s steps. ${fileView(file)?.open === false ? `The file itself is closed to ${who}` : `${who} doesn’t read them in the file itself`}.`)], h('div', { class: 'props' }, ...list.map(card)))));
 }
 
 // The Ontology page's files (ADR 0015 amendment 1, piece a): a row a file the flow reads, its section opened in place.
@@ -7763,14 +7814,16 @@ function madePanel(): HTMLElement | null {
  * down the page draws the page again, and a section rebuilt under the reader would move what they are looking at). */
 const ontologyFiles = { open: null as string | null, doc: null as FlowDocument | null, from: '' };
 
-/** A rule as a line: its sentence, how it came to be and what it is checked against, and why nothing judges it. */
-function ruleLine(r: Rule): HTMLElement {
-  return h('li', { class: `of-rule${r.unchecked ? ' unchecked' : ''}`, 'data-rule': r.id },
-    h('span', { class: 'of-said' }, r.said),
-    h('span', { class: 'of-how' }, `${originSaid(r.origin)}${r.against ? ` · checked against ${r.against}` : ''}`),
+/** A rule as a line: its sentence, how it came to be and what it is checked against, and why nothing judges it. On a
+ * column's card a file's own rule is said for the column (`here`) and says whose it is: one rule, listed twice. */
+function ruleLine(r: Rule, here?: string): HTMLElement {
+  const how = [originSaid(r.origin), here !== undefined ? 'one of this file’s rules' : r.against ? `checked against ${r.againstSaid ?? r.against}` : ''].filter(Boolean).join(' · ');
+  return h('li', { class: `of-rule${r.unchecked ? ' unchecked' : ''}${here !== undefined ? ' of-files' : ''}`, 'data-rule': r.id },
+    h('span', { class: 'of-said' }, here ?? r.said),
+    h('span', { class: 'of-how' }, how),
     r.unchecked ? h('span', { class: 'of-off' }, `Not checked: ${r.unchecked}`) : null);
 }
-const ruleList = (rules: readonly Rule[], none: string): HTMLElement => (rules.length ? h('ul', { class: 'of-rules' }, ...rules.map(ruleLine)) : h('p', { class: 'of-none' }, none));
+const ruleList = (rules: readonly Rule[], none: string): HTMLElement => (rules.length ? h('ul', { class: 'of-rules' }, ...rules.map((r) => ruleLine(r))) : h('p', { class: 'of-none' }, none));
 
 /** A column's values in the load on screen, at the top of its card: the drawing its file's Columns tab has for it
  * (`columnShape`), and how full it is. A key (every value different) and free text (names, hosts: no value on more
@@ -7780,19 +7833,21 @@ function drawColumn(slot: HTMLElement, p: Profile, meaning: PropertyType | undef
   const gaps = f.rows - f.present;
   const different = f.distinct >= f.present && f.present > 20;
   const filled = f.present === 0 ? 'Empty in this load' : `${gaps ? `${pct(f.present / Math.max(1, f.rows))} filled · ${fmtInt(gaps)} empty` : 'All filled'} · ${different ? 'every value different' : plural(f.distinct, p.kind === 'text' ? 'different value' : 'value')}`;
-  slot.replaceChildren(...(different || p.kind === 'text' ? [] : columnShape(p, meaning)), h('p', { class: 'colline' }, filled));
+  slot.replaceChildren(...(different || p.kind === 'text' ? [] : columnShape(p, meaning, 'meaning')), h('p', { class: 'colline' }, filled));
 }
 
 /** A file's section: what it is, its own rules, a card a column (drawn once the load has been looked into), and what
- * was discovered. `refused` says the load's file wasn't read (ADR 0014 §2), so it has no columns to show. */
-function fileSection(f: FileSection, refused: boolean): HTMLElement {
-  const refs = new Map((state.doc.ontology?.references ?? []).map((r) => [r.id, r]));
+ * was discovered. `refused` says the load's file wasn't read (ADR 0014 §2): its cards are the columns the data list
+ * declares, with their meanings and rules, which don't depend on the day, and nothing drawn. */
+function fileSection(f: FileSection, refused: boolean, day: string | null): HTMLElement {
   const slots = new Map<string, { slot: HTMLElement; meaning: PropertyType | undefined }>();
   const cards = (f.columns ?? []).map((c) => {
     const p = c.property;
-    const slot = h('div', { class: 'of-draw' }, h('span', { class: 'mini-wait' }));
-    slots.set(c.name, { slot, meaning: p });
-    const cited = (p?.sources ?? []).map((r) => refs.get(r)).filter((r) => r !== undefined);
+    const slot = h('div', { class: 'of-draw' }, refused ? h('p', { class: 'colline' }, 'Nothing to draw: the file wasn’t read.') : h('span', { class: 'mini-wait' }));
+    if (!refused) slots.set(c.name, { slot, meaning: p });
+    // The file's own rules about this column first (its key has to be there, it must be an object the file covers),
+    // then the column's own: no card says it has no rule under a rule that names its column.
+    const lines = [...c.fileRules.map((x) => ruleLine(x.rule, x.said)), ...c.rules.map((r) => ruleLine(r))];
     return h('article', { class: 'of-col', 'data-column': c.name },
       h('div', { class: 'of-col-head' }, h('h4', {}, c.title), c.title !== c.name ? h('code', {}, ...breakable(c.name)) : null, p?.unit ? h('span', { class: 'unit' }, p.unit) : null),
       slot,
@@ -7800,18 +7855,18 @@ function fileSection(f: FileSection, refused: boolean): HTMLElement {
       c.values.length ? h('details', { class: 'whole' }, h('summary', {}, c.values.length === 1 ? 'What its value stands for' : `What its ${c.values.length} values stand for`), h('dl', { class: 'codes' }, ...c.values.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))) : null,
       p?.note ? h('p', { class: 'note' }, p.note) : null,
       p?.lookup && visible(p.lookup.dataset) ? h('p', { class: 'of-from' }, 'Reads as its ', h('b', {}, p.lookup.label), ' in ', h('b', {}, p.lookup.dataset)) : null,
-      cited.length ? h('p', { class: 'of-from' }, 'From ', ...cited.flatMap((r, k) => [k ? ', ' : '', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, r.title)])) : null,
-      h('div', { class: 'of-col-rules' }, h('p', { class: 'of-h2' }, 'Rules'), ruleList(c.rules, 'No rules yet.')));
+      citedLine(p),
+      h('div', { class: 'of-col-rules' }, h('p', { class: 'of-h2' }, 'Rules'), lines.length ? h('ul', { class: 'of-rules' }, ...lines) : h('p', { class: 'of-none' }, 'No rules yet.')));
   });
-  const wait = h('p', { class: 'of-none' }, cards.length ? '' : refused ? 'This load’s file was refused: its columns weren’t read.' : f.columns ? 'No columns in this load.' : 'Run the flow to see this file’s columns.');
-  wait.hidden = cards.length > 0;
-  // The row above says the description's opening: the whole of it here, where it says more.
-  const about = [
-    !f.description ? h('p', { class: 'of-none' }, 'Not described yet.') : f.description.replace(/\.$/, '') === f.summary ? null : h('p', { class: 'of-desc' }, f.description),
-    f.inventory ? h('p', { class: 'of-inv' }, `${f.inventory.said}.`) : null,
-  ].filter((x) => x !== null);
+  const wait = h('p', { class: 'of-none' },
+    refused ? (cards.length ? `${day ? `${dayLabel(day)}’s` : 'This load’s'} file was refused, so none of it was read. These are the columns the flow expects, with their rules.` : 'This load’s file was refused: its columns weren’t read.')
+      : cards.length ? '' : f.columns ? 'No columns in this load.' : 'Run the flow to see this file’s columns.');
+  wait.hidden = cards.length > 0 && !refused;
+  // The row above drops its line while the section is open: the whole description is here, said once.
   const sec = h('div', { class: 'of-sec', id: `of-sec-${f.id}`, role: 'region', 'aria-label': `${f.id}: what it is, its rules and its columns` },
-    about.length ? h('div', { class: 'of-about' }, ...about) : null,
+    h('div', { class: 'of-about' },
+      f.description ? h('p', { class: 'of-desc' }, f.description) : h('p', { class: 'of-none' }, 'Not described yet.'),
+      f.inventory ? h('p', { class: 'of-inv' }, `${f.inventory.said}.`) : null),
     h('section', { class: 'of-part of-own' }, h('h3', { class: 'of-h' }, 'This file’s rules'), ruleList(f.rules, 'No rules of its own yet.')),
     h('section', { class: 'of-part' }, h('h3', { class: 'of-h' }, cards.length ? `Columns · ${cards.length}` : 'Columns'), wait, cards.length ? h('div', { class: 'of-cols' }, ...cards) : null),
     h('section', { class: 'of-part of-disc' }, h('h3', { class: 'of-h' }, 'Discovered'),
@@ -7842,10 +7897,10 @@ function fileSection(f: FileSection, refused: boolean): HTMLElement {
 /**
  * The Files panel: a short row a file (its name, what it is, the rows the load on screen has, its rules), each
  * opening its section in place; one is open at a time. A file closed to the viewer isn't listed, and a column closed
- * to them has no card.
+ * to them has no card. A file the run read nothing of has the columns its data list declares (`fileView`).
  */
 async function renderFiles(stale: () => boolean): Promise<void> {
-  const page = ontologyPage({ ...state.doc, sources: state.doc.sources.filter((x) => visible(x.id)) }, (id) => access(id)?.columns);
+  const page = ontologyPage({ ...state.doc, sources: state.doc.sources.filter((x) => fileView(x.id)?.open !== false) }, (id) => fileView(id)?.columns, fileColumns);
   const run = latest();
   const day = shownDay();
   const from = JSON.stringify([run?.result.run ?? null, run?.result.hash ?? null, day ?? null, state.viewer, page.files.map((f) => [f.id, f.columns?.map((c) => c.name) ?? null])]);
@@ -7871,7 +7926,7 @@ async function renderFiles(stale: () => boolean): Promise<void> {
       x.row.setAttribute('aria-expanded', String(on));
       x.el.classList.toggle('open', on);
       const sec = x.el.querySelector('.of-sec');
-      if (on && !sec) x.el.append(fileSection(x.f, refused.has(k)));
+      if (on && !sec) x.el.append(fileSection(x.f, refused.has(k), day ?? null));
       else if (!on && sec) sec.remove();
     }
     // The file tapped stays under the finger's eye: the section above it may just have closed.

@@ -115,7 +115,7 @@
  },
  {
   "name": "mar06-ontology-control",
-  "what": "Control estate, calm Wed Mar 6: the Ontology view with a control's file (the WAF's) opened in place: what the file is, this file's rules (one row an application, the applications it covers, its key), a card a column with its values in the day's load drawn at the top, its meaning and its rules (the known values, the bad value, the bands), then Discovered, empty",
+  "what": "Control estate, calm Wed Mar 6: the Ontology view with a control's file (the WAF's) opened in place: what the file is (said once: the open row drops its line), this file's rules (one row an application, the applications it covers, its key), a card a column with its values in the day's load drawn at the top (each bar named by what its value means), its meaning and its rules (on the Application card the file's two rules about it, so no \"No rules yet.\" under the key; then a new value, the bad value, the bands), then Discovered, empty",
   "day": "Wed 6",
   "view": "ontology",
   "viewFirst": true,
@@ -127,8 +127,10 @@
     "One row an application",
     "Covers the applications where Internet-facing is Yes, and no others",
     "No Application blank or repeated",
-    "Set by hand · checked against apps",
-    "Holds Blocking, Monitor only or Off: a value never seen before is flagged as wrong",
+    "Set by hand · checked against the list of applications (apps)",
+    "Must be one of the applications this file covers",
+    "Set by hand · one of this file’s rules",
+    "A value never seen in this file before is flagged as wrong",
     "Off is a bad value: a jump above its usual share is flagged as wrong",
     "Not checked: this file’s band on Failing is checked instead",
     "Failing between 0% and 15% of apps",
@@ -138,7 +140,9 @@
    ],
    "noText": [
     "What the columns mean",
-    "OBJECT TYPE"
+    "OBJECT TYPE",
+    "Holds Blocking",
+    "checked against apps"
    ],
    "minCharts": 1,
    "count": {
@@ -146,8 +150,13 @@
     "#ontology-files .of-sec": 1,
     "#ontology-files .of-col": 5,
     "#ontology-files .of-own .of-rule": 3,
-    "#ontology-files .of-col .of-rule": 6,
+    "#ontology-files .of-col .of-rule": 8,
+    "#ontology-files .of-col[data-column=\"app_id\"] .of-rule": 2,
+    "#ontology-files .of-col .of-rule.of-files": 2,
+    "#ontology-files .of-col[data-column=\"app_id\"] .of-none": 0,
+    "#ontology-files .of-col .of-rule.unchecked": 1,
     "#ontology-files .of-draw .tops": 3,
+    "#ontology-files .of-item.open .of-what": 0,
     "#ontology-map .type": 0
    }
   }
@@ -183,6 +192,38 @@
   "name": "mar07-flow",
   "what": "Control estate, Thu Mar 7 (the logging file lacks a column: refused): the Flow view",
   "day": "Thu 7"
+ },
+ {
+  "name": "mar07-ontology-refused",
+  "what": "Control estate, Thu Mar 7 (the logging file lacks a column: refused): the Ontology view with the logging file opened: its row says the file was refused and still counts its eight rules, and its section has the five columns the flow expects, each with its meaning and its rules and nothing drawn, since none of the day's file was read",
+  "day": "Thu 7",
+  "view": "ontology",
+  "viewFirst": true,
+  "click": ".of-item[data-file=\"logging\"] .of-row",
+  "waitFor": ".of-item.open .of-col",
+  "full": true,
+  "expect": {
+   "text": [
+    "file refused · 8 rules",
+    "Thu Mar 7’s file was refused, so none of it was read. These are the columns the flow expects, with their rules.",
+    "Nothing to draw: the file wasn’t read.",
+    "No Application blank or repeated",
+    "None is a bad value: a jump above its usual share is flagged as wrong",
+    "DISCOVERED"
+   ],
+   "noText": [
+    "Not run yet",
+    "Run the flow"
+   ],
+   "count": {
+    "#ontology-files .of-row": 13,
+    "#ontology-files .of-sec": 1,
+    "#ontology-files .of-col": 5,
+    "#ontology-files .of-own .of-rule": 3,
+    "#ontology-files .of-col .of-rule": 7,
+    "#ontology-files .of-draw .tops": 0
+   }
+  }
  },
  {
   "name": "mar08-flow",
@@ -312,6 +353,30 @@
   "card": "vuln_sla",
   "tab": "News",
   "full": true
+ },
+ {
+  "name": "mar14-ontology-due",
+  "what": "Control estate, Thu Mar 14 (vulnerability due dates cluster: Failing up, the day published): the Ontology view with the vulnerability file opened: the due date's rule on Next due, and on Status the bad value's jump said as not checked, since this file's due date tells it instead",
+  "day": "Thu 14",
+  "view": "ontology",
+  "viewFirst": true,
+  "click": ".of-item[data-file=\"vuln_sla\"] .of-row",
+  "waitFor": ".of-item.open .of-draw .colline",
+  "full": true,
+  "expect": {
+   "text": [
+    "A due date: a row is late if its Status is still Failing the day after; flagged as wrong when more are late than usual",
+    "Failing is a bad value: a jump above its usual share is flagged as wrong",
+    "Not checked: this file’s due date is checked instead",
+    "Not assessed between 0% and 5% of apps"
+   ],
+   "count": {
+    "#ontology-files .of-sec": 1,
+    "#ontology-files .of-col": 7,
+    "#ontology-files .of-col .of-rule.unchecked": 1,
+    "#ontology-files .of-col[data-column=\"next_due\"] .of-rule": 1
+   }
+  }
  },
  {
   "name": "mar21-flow",

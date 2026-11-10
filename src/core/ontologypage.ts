@@ -8,7 +8,8 @@
  * file's rule. Pure: no DOM, no engine. The page puts the drawings and the load's counts beside it.
  *
  * A rule's sentence uses the ontology's titles and the words for its values, never a raw column or code where a
- * title exists. A condition its author wrote for the engine in a gate cell is quoted as written.
+ * title exists. A condition its author wrote for the engine in a gate cell is quoted as written. A file's rule that
+ * is about a column (its key, the objects it covers) is listed on that column's card as well, counted once.
  */
 import { sourceOf, type FlowDocument } from './document.js';
 import { gateChecksOf, writtenRules, type CheckName } from './gates.js';
@@ -27,8 +28,9 @@ export type RuleOrigin =
 /**
  * What a rule is about. A file's own: `rows` (what a row is), `covers` (the objects it has rows for), `key` (its key
  * on one row each, never blank), `same` (its keys equal another dataset's), `needs` (a value another value forbids).
- * A column's: `values` (a value never seen is wrong), `bad` (a value that means something went wrong), `band` (a
- * value's share of the rows), `due` (a due date and what makes a row late), `after` (a time that runs behind another).
+ * A column's: `values` (a value the file never held before is wrong), `bad` (a value that means something went
+ * wrong), `band` (a value's share of the rows), `due` (a due date and what makes a row late), `after` (a time that
+ * runs behind another).
  */
 export type RuleKind = 'rows' | 'covers' | 'key' | 'same' | 'needs' | 'values' | 'bad' | 'band' | 'due' | 'after';
 
@@ -42,10 +44,16 @@ export interface Rule {
   said: string;
   /** The numbers behind it, where it has any: a band's ends as shares (0 to 1), a window in days, a lag in minutes. */
   numbers?: { low?: number; high?: number; days?: number; minutes?: number };
-  /** The values it is about, as the file writes them: the banded or bad value, the values a column is known to hold. */
+  /** The values it is about, as the file writes them: the banded or bad value; for a `values` rule the ones the
+   * ontology describes (not a closed list: the check is against what the file has held before). */
   values?: string[];
   /** The dataset it is checked against (the inventory a scope reads, the dataset whose keys these must equal). */
   against?: string;
+  /** That dataset in words: "the list of applications (apps)" for the inventory a scope reads, else its name. */
+  againstSaid?: string;
+  /** On a file's own rule, the file's columns it is about, as the rule writes them (its key, the column held to the
+   * objects it covers, the columns a dependency names): the rule is listed on each of their cards too. */
+  columns?: string[];
   origin: RuleOrigin;
   /** Why nothing judges it as the flow stands, in a few words; absent while it is judged. */
   unchecked?: string;
@@ -63,7 +71,12 @@ export interface ColumnCard {
   values: [code: string, meaning: string][];
   /** The ontology's entry for it in this file (`propertyOf`): its unit, its note, where its meaning comes from. */
   property?: PropertyType;
+  /** The column's own rules, from its marks in this file. */
   rules: Rule[];
+  /** The file's own rules that are about this column (`Rule.columns`), each as the column's card says it: listed
+   * there with the column's own, so the key says under its column that it has to be there, and counted once, as the
+   * file's. */
+  fileRules: { rule: Rule; said: string }[];
 }
 
 /** A file the flow reads. */
@@ -126,9 +139,10 @@ export function typesShown(ontology: Ontology | undefined): ObjectType[] {
 /**
  * The page for a document. `columns` gives each file's columns as its load has them, in the file's order (the app
  * gives the ones the viewer may read, so a hidden column has no card and its rules aren't listed); a file it returns
- * nothing for has no cards yet.
+ * nothing for has no cards yet. `every` gives all the columns a file has, where that is more than the cards (a rule
+ * on one column may stand aside for a mark on another the viewer can't read); the cards' columns without it.
  */
-export function ontologyPage(doc: PageDoc, columns: (file: string) => readonly string[] | undefined = () => undefined): OntologyPage {
+export function ontologyPage(doc: PageDoc, columns: (file: string) => readonly string[] | undefined = () => undefined, every: (file: string) => readonly string[] | undefined = columns): OntologyPage {
   const o = doc.ontology;
   const steps = doc.steps ?? [];
   const title = (dataset: string, column: string) => propertyOf(o, dataset, column)?.title ?? column;
@@ -157,30 +171,41 @@ export function ontologyPage(doc: PageDoc, columns: (file: string) => readonly s
       const one = lower(tied.type.name);
       rules.push({ id: `${id}/rows`, kind: 'rows', said: `One row ${withArticle(one)}`, origin: { how: 'set', in: 'ontology' }, ...quiet(null, tied.key === null ? 'a key of several columns isn’t checked yet' : undefined) });
     }
+    // Each rule that is about columns of this file names them (`columns`), and says how it reads on a column's card
+    // where that isn't its own sentence (`onCard`).
+    const onCard = new Map<Rule, string>();
     if (written.scope) {
       const sc = written.scope;
       const many = nounFor(sc.of).many;
       const said = sc.from === 'gate' ? `Covers the ${many} where ${sc.where}, and no others`
         : sc.match.length ? `Covers the ${many} where ${where(sc.of, sc.match)}, and no others`
         : `Covers every ${nounFor(sc.of).one}, and no others`;
-      rules.push({ id: `${id}/covers`, kind: 'covers', said, against: sc.of, origin: { how: 'set', in: sc.from === 'gate' ? 'notebook' : 'ontology' }, ...quiet('scope') });
+      const rule: Rule = { id: `${id}/covers`, kind: 'covers', said, against: sc.of, againstSaid: `the list of ${many} (${sc.of})`, columns: [sc.own], origin: { how: 'set', in: sc.from === 'gate' ? 'notebook' : 'ontology' }, ...quiet('scope') };
+      onCard.set(rule, `Must be one of the ${many} this file covers`);
+      rules.push(rule);
     }
     if (written.reconcile) {
       const rc = written.reconcile;
       const keys = either(rc.key.map((c) => title(id, c)), 'and');
       const origin: RuleOrigin = { how: 'set', in: rc.from === 'gate' ? 'notebook' : 'ontology' };
-      rules.push({ id: `${id}/key`, kind: 'key', said: `No ${keys} blank or repeated`, origin, ...quiet('reconcile') });
-      if (rc.of !== undefined) rules.push({ id: `${id}/same`, kind: 'same', said: `The same ${keys} values as ${rc.of}: none missing, none extra`, against: rc.of, origin, ...quiet('reconcile') });
+      rules.push({ id: `${id}/key`, kind: 'key', said: `No ${keys} blank or repeated`, columns: [...rc.key], origin, ...quiet('reconcile') });
+      if (rc.of !== undefined) rules.push({ id: `${id}/same`, kind: 'same', said: `The same ${keys} values as ${rc.of}: none missing, none extra`, against: rc.of, againstSaid: rc.of, columns: [...rc.key], origin, ...quiet('reconcile') });
     }
     written.needs.forEach((n, k) => {
       const from = n.from ?? id;
       const then = listed(n.then).map(([c, vs]) => `${title(id, c)} must be ${either(vs.map((v) => word(id, c, v)))}`).join(' and ');
-      rules.push({ id: `${id}/needs#${k + 1}`, kind: 'needs', said: `Where ${where(from, listed(n.when))}${n.from ? ` in ${n.from}` : ''}, ${then}`, ...(n.from ? { against: n.from } : {}), origin: { how: 'set', in: 'notebook' }, ...quiet('needs') });
+      // The columns of this file it names: what must hold, and the condition's where that is read here.
+      const about = [...new Set([...(n.from ? [] : Object.keys(n.when)), ...Object.keys(n.then)])];
+      rules.push({ id: `${id}/needs#${k + 1}`, kind: 'needs', said: `Where ${where(from, listed(n.when))}${n.from ? ` in ${n.from}` : ''}, ${then}`, ...(n.from ? { against: n.from, againstSaid: n.from } : {}), columns: about, origin: { how: 'set', in: 'notebook' }, ...quiet('needs') });
     });
 
     // A card a column the load has, each with the rules its marks give in this file (`marksOn`, as the plan reads them).
     const has = columns(id);
     const marks = marksOn(o, id);
+    // The due dates this file has: a mark on a column the ontology describes wherever it appears says nothing of a
+    // file without the column.
+    const all = (every(id) ?? has ?? []).map(lower);
+    const dues = marks.due.filter(([column]) => all.includes(lower(column)));
     const cards = has
       ? has.map((name): ColumnCard => {
           const p = propertyOf(o, id, name);
@@ -188,18 +213,24 @@ export function ontologyPage(doc: PageDoc, columns: (file: string) => readonly s
           const at = `${id}/${lower(name)}`;
           const origin: RuleOrigin = { how: 'set', in: 'ontology' };
           const own: Rule[] = [];
+          // The check is against what the file has held before, not against a list: the values the ontology describes
+          // are the column's meaning (its card lists them), and one of them never seen is as new as any other.
           if (mine(marks.newValues).length) {
-            const known = Object.entries(p?.values ?? {});
-            const holds = known.length === 0 ? '' : known.length <= 6 ? `Holds ${either(known.map(([, m]) => m))}: ` : `Holds one of ${known.length} known values: `;
-            own.push({ id: `${at}/values`, kind: 'values', said: `${holds}${holds ? 'a' : 'A'} value never seen before is flagged as wrong`, ...(known.length ? { values: known.map(([code]) => code) } : {}), origin, ...quiet('values') });
+            const known = Object.keys(p?.values ?? {});
+            own.push({ id: `${at}/values`, kind: 'values', said: 'A value never seen in this file before is flagged as wrong', ...(known.length ? { values: known } : {}), origin, ...quiet('values') });
           }
-          // A value with a band in this file is judged by the band alone (ADR 0014 §3): its jump isn't, and says so.
+          // A value that is the miss of a due date in this file is told through the due date (ADR 0014 §3, news.ts's
+          // `dueMiss`): neither its jump nor a band on it is judged. One with a band is judged by the band alone: its
+          // jump isn't. Each says so.
+          const missOf = new Set(dues.filter(([, status]) => lower(status) === lower(name)).map(([, , miss]) => miss));
           const banded = new Set(mine(marks.expect).map(([, value]) => value));
-          for (const [, ...codes] of mine(marks.bad)) for (const code of codes) own.push({ id: `${at}/bad=${code}`, kind: 'bad', said: `${word(id, name, code)} is a bad value: a jump above its usual share is flagged as wrong`, values: [code], origin, ...quiet('shares', banded.has(code) ? `this file’s band on ${word(id, name, code)} is checked instead` : undefined) });
-          for (const [, value, low, high] of mine(marks.expect)) own.push({ id: `${at}/band=${value}`, kind: 'band', said: `${word(id, name, value)} between ${percent(low)} and ${percent(high)} of ${noun.many}`, numbers: { low, high }, values: [value], origin, ...quiet('values') });
-          for (const [, status, miss, within] of mine(marks.due)) own.push({ id: `${at}/due`, kind: 'due', said: `A due date: late when ${title(id, status)} is still ${word(id, status, miss)} the day after, checked against the usual late share`, numbers: { days: within }, values: [miss], origin, ...quiet('due') });
+          const instead = (code: string, band: boolean) => (missOf.has(code) ? 'this file’s due date is checked instead' : band && banded.has(code) ? `this file’s band on ${word(id, name, code)} is checked instead` : undefined);
+          for (const [, ...codes] of mine(marks.bad)) for (const code of codes) own.push({ id: `${at}/bad=${code}`, kind: 'bad', said: `${word(id, name, code)} is a bad value: a jump above its usual share is flagged as wrong`, values: [code], origin, ...quiet('shares', instead(code, true)) });
+          for (const [, value, low, high] of mine(marks.expect)) own.push({ id: `${at}/band=${value}`, kind: 'band', said: `${word(id, name, value)} between ${percent(low)} and ${percent(high)} of ${noun.many}`, numbers: { low, high }, values: [value], origin, ...quiet('values', instead(value, false)) });
+          for (const [, status, miss, within] of mine(marks.due)) own.push({ id: `${at}/due`, kind: 'due', said: `A due date: a row is late if its ${title(id, status)} is still ${word(id, status, miss)} the day after; flagged as wrong when more are late than usual`, numbers: { days: within }, values: [miss], origin, ...quiet('due') });
           for (const [, of, minutes] of mine(marks.after)) own.push({ id: `${at}/after`, kind: 'after', said: `About ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} after ${title(id, of)}`, numbers: { minutes }, origin, ...quiet('shape') });
-          return { name, title: p?.title ?? name, ...(p?.description ? { description: p.description } : {}), values: Object.entries(p?.values ?? {}), ...(p ? { property: p } : {}), rules: own };
+          const fileRules = rules.filter((r) => r.columns?.some((c) => lower(c) === lower(name))).map((rule) => ({ rule, said: onCard.get(rule) ?? rule.said }));
+          return { name, title: p?.title ?? name, ...(p?.description ? { description: p.description } : {}), values: Object.entries(p?.values ?? {}), ...(p ? { property: p } : {}), rules: own, fileRules };
         })
       : null;
 

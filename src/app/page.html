@@ -446,11 +446,12 @@ textarea { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertic
 .type .meta { font-size: 12px; color: var(--ink-2); }
 .type .links { font-size: 12px; color: var(--muted); }
 .objects { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.object { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-align: left; width: 100%; }
+.object { display: flex; flex-wrap: wrap; align-items: baseline; align-content: center; gap: 4px 10px; min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-align: left; width: 100%; }
 .object[aria-pressed="true"] { border-color: var(--smalt); background: var(--smalt-wash); }
 .object .t { font-weight: 600; } .object .d { font-size: 12px; color: var(--muted); }
 .form { display: grid; gap: 8px; margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
-.form input { border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; background: var(--surface); font-size: 14px; }
+.form input { box-sizing: border-box; min-height: 44px; border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; background: var(--surface); font-size: 14px; }
+.form button.run { min-height: 44px; }
 .verdict { margin: 0; font-size: 13px; }
 .verdict.ok { color: var(--ok); } .verdict.bad { color: var(--bad); }
 .change { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
@@ -873,6 +874,7 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 /* The Ontology tab's columns. */
 #properties { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding-block: 4px; }
 #properties .fold > summary { min-height: 44px; }
+.made-folds { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .made-h { font-weight: 650; font-size: 15px; }
 /* The Ontology page's files (ADR 0015 amendment 1): a row a file, its section opened in place under it. Open is said
    by the chevron's turn, the row's weight and the section itself, not by colour. A section's parts: what the file
@@ -888,6 +890,8 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .of-name { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
 .of-item.open > .of-row .of-name { font-weight: 750; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
 .of-what { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+/* Open, the row drops its line: the section under it says the whole description, once. */
+.of-item.open > .of-row .of-what { display: none; }
 .of-nums { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .of-sec { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 2px 0 20px; min-width: 0; }
 .of-about { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
@@ -895,14 +899,14 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .of-inv { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .of-part { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
 .of-h { margin: 0; font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-2); }
-.of-h2 { margin: 0; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.of-h2 { margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .of-own { background: var(--sunk); border-radius: var(--radius); padding: 12px; }
 .of-disc { border: 1.5px dashed var(--edge); border-radius: var(--radius); padding: 12px; }
 .of-none { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .of-rules { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .of-rule { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-left: 10px; border-left: 3px solid var(--ink-2); }
 .of-said { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
-.of-how { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.of-how { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .of-rule.unchecked { border-left-style: dashed; border-left-color: var(--edge); }
 .of-rule.unchecked .of-said { color: var(--ink-2); font-weight: 400; }
 .of-off { font-size: 12px; font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
@@ -914,12 +918,20 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .of-draw { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--sunk); min-width: 0; }
 .of-draw .top .bar { background: var(--surface); }
 .of-draw .top .v { white-space: normal; overflow-wrap: anywhere; }
+/* A bar is named by what its value means, as the rules below speak; the value as the file writes it, small beside it. */
+.of-draw .tops.over { gap: 10px; }
+.of-draw .tops.over .top { grid-template-columns: minmax(0, 1fr) auto; row-gap: 3px; }
+.of-draw .tops.over .top .v { grid-column: 1 / -1; }
+.of-draw .top .v .as-written { display: inline-block; margin-left: 6px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 .of-draw .colline { font-size: 12px; }
 .of-draw dl.stats { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 14px; margin: 0; font-size: 13px; }
 .of-draw dl.stats dt { color: var(--muted); font-size: 12px; }
 .of-draw dl.stats dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .of-mean { margin: 0; font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
 .of-from { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+/* Where a meaning comes from: each reference a row to tap, 44 px high. */
+.of-refs { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; }
+.of-refs a { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; }
 .of-col .whole > summary { min-height: 44px; }
 .of-col-rules { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
 .ont-h { margin: 6px 0 4px; font-size: 16px; }
