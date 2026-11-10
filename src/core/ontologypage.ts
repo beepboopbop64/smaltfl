@@ -14,6 +14,7 @@
 import { sourceOf, type FlowDocument } from './document.js';
 import { gateChecksOf, writtenRules, type CheckName } from './gates.js';
 import { marksOn, meaningOf, nounOf, propertyOf, rowsOf, saysMore, type Noun, type ObjectType, type Ontology, type PropertyType } from './ontology.js';
+import { ACTION_SAID, checkStepOf, rulesOf, ruleSaid, type OntologyRule } from './rules.js';
 
 /**
  * How a rule came to be. Today every rule is set by hand, in the ontology or in the notebook's gate cell. The two
@@ -30,9 +31,10 @@ export type RuleOrigin =
  * on one row each, never blank), `same` (its keys equal another dataset's), `needs` (a value another value forbids).
  * A column's: `values` (a value the file never held before is wrong), `bad` (a value that means something went
  * wrong), `band` (a value's share of the rows), `due` (a due date and what makes a row late), `after` (a time that
- * runs behind another).
+ * runs behind another). `set`: a rule people set on the column (rules.ts), which the page edits and the import card
+ * switches.
  */
-export type RuleKind = 'rows' | 'covers' | 'key' | 'same' | 'needs' | 'values' | 'bad' | 'band' | 'due' | 'after';
+export type RuleKind = 'rows' | 'covers' | 'key' | 'same' | 'needs' | 'values' | 'bad' | 'band' | 'due' | 'after' | 'set';
 
 /** One rule of a file or of a column, as the page lists it. */
 export interface Rule {
@@ -57,6 +59,8 @@ export interface Rule {
   origin: RuleOrigin;
   /** Why nothing judges it as the flow stands, in a few words; absent while it is judged. */
   unchecked?: string;
+  /** A rule people set (`set`): the ontology's entry, which the form edits, and what a row that breaks it does. */
+  def?: OntologyRule;
 }
 
 /** A column of a file: what it is called, what it means, and its rules. */
@@ -205,6 +209,14 @@ export function ontologyPage(doc: PageDoc, columns: (file: string) => readonly s
       rules.push({ id: `${id}/needs#${k + 1}`, kind: 'needs', said: `Where ${where(from, listed(n.when))}${n.from ? ` in ${n.from}` : ''}, ${then}`, ...(n.from ? { against: n.from, againstSaid: n.from } : {}), columns: about, origin: { how: 'set', in: 'notebook' }, ...quiet('needs') });
     });
 
+    // The rules people set on this file's columns (rules.ts): enforced by the check step that reads the file, said as
+    // switched off when the import card has switched them off.
+    const setRules = rulesOf(o, id);
+    const enforcer = checkStepOf(doc as Parameters<typeof checkStepOf>[0], id);
+    const setRule = (r: OntologyRule): Rule => {
+      const why = r.off ? 'switched off on the import card' : !enforcer ? 'no check step reads this file directly' : undefined;
+      return { id: `${id}/${lower(r.column)}/set=${r.id}`, kind: 'set', said: `${ruleSaid(o, r)}: else ${ACTION_SAID[r.action]}`, ...(r.values ? { values: [...r.values] } : {}), ...(r.min !== undefined || r.max !== undefined ? { numbers: { ...(r.min !== undefined ? { low: r.min } : {}), ...(r.max !== undefined ? { high: r.max } : {}) } } : {}), origin: { how: 'set', in: 'ontology' }, def: r, ...(why ? { unchecked: why } : {}) };
+    };
     // A card a column the load has, each with the rules its marks give in this file (`marksOn`, as the plan reads them).
     const has = columns(id);
     const marks = marksOn(o, id);
@@ -235,6 +247,7 @@ export function ontologyPage(doc: PageDoc, columns: (file: string) => readonly s
           for (const [, value, low, high] of mine(marks.expect)) own.push({ id: `${at}/band=${value}`, kind: 'band', said: `${word(id, name, value)} between ${percent(low)} and ${percent(high)} of ${noun.many}`, numbers: { low, high }, values: [value], origin, ...quiet('values', instead(value, false)) });
           for (const [, status, miss, within] of mine(marks.due)) own.push({ id: `${at}/due`, kind: 'due', said: `A due date: a row is late if its ${title(id, status)} is still ${word(id, status, miss)} the day after; flagged as wrong when more are late than usual`, numbers: { days: within }, values: [miss], origin, ...quiet('due') });
           for (const [, of, minutes] of mine(marks.after)) own.push({ id: `${at}/after`, kind: 'after', said: `About ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} after ${title(id, of)}`, numbers: { minutes }, origin, ...quiet('shape') });
+          for (const r of setRules.filter((x) => lower(x.column) === lower(name))) own.push(setRule(r));
           const fileRules = rules.filter((r) => r.columns?.some((c) => lower(c) === lower(name))).map((rule) => ({ rule, said: onCard.get(rule) ?? rule.said }));
           const called = p?.title ?? name;
           const values = Object.entries(p?.values ?? {});
@@ -242,6 +255,10 @@ export function ontologyPage(doc: PageDoc, columns: (file: string) => readonly s
         })
       : null;
 
+    // A rule set on a column no card shows (the load doesn't have it, or no load was read yet) is listed with the
+    // file's own, so it is never out of sight.
+    const carded = new Set((cards ?? []).map((c) => lower(c.name)));
+    for (const r of setRules) if (!carded.has(lower(r.column))) rules.push({ ...setRule(r), columns: [r.column] });
     // The files whose scope reads this one: it is the list they are checked against.
     const against = doc.sources.filter((x) => lower(x.id) !== lower(id) && lower(writtenRules(doc, x.id).scope?.of ?? '') === lower(id)).map((x) => x.id);
     const first = /^(.*?)(?:: |\. |\.$|$)/s.exec(src.description ?? '')?.[1]?.trim();

@@ -576,3 +576,54 @@ the page says changed, and a document changes only when its owner edits it.
   note and references aren't in the form; a file's own description isn't edited (the estate's still end "One row
   an application it applies to…", which the rules under them say again); the edited notebook or document isn't
   offered as a file (§4).
+
+### Amendment 1, pieces (b) and (c), second stage (2026-11-10): rules people set, and the import card's switches
+
+The maintainer: *"add the ability to create rules for the ontology that data sets will enforce when a dataset is
+brought into a flow; on the flow side the bronze import cards need toggles for turning on or off the defined rules in
+the ontology. Let the user add rules if they want, and for the security test data some rules already exist that make
+sense."* The choices made here are Q-148 to Q-151.
+
+- **A rule is the ontology's, and its file's own** (`ontology.rules`, `OntologyRule`, `src/core/rules.ts`; Q-140):
+  `{ id, file, column, kind, values?, min?, max?, when?, action, off? }`. Kinds: `required` (never blank), `oneOf`
+  (one of some values), `range` (a number from `min` to `max`, either left out), `when` (one of some values where
+  another column has one of its own). `action` is what a row that breaks it does: `flag` (kept and counted), `drop`
+  (left out of what goes on), `hold` (the day holds). Validated by `rulesIssues` from `validateDocument`: every setting
+  by name, a source as the file, what each kind needs and nothing else, an id once in its file and never one of its
+  check step's own rule names. Said in the ontology's words by `ruleSaid` ("Method is Password, Single sign-on, MFA
+  push, Passkey or API key"; a range with the column's unit).
+- **Enforced by the file's check step** (Q-149). `translate` adds the rules switched on of the file a check step reads
+  directly (`checkStepOf`, `enforcedBy`) after the step's own rules, by id, written for the engine by `emitRuleCheck`
+  (`emit.ts`): a blank breaks only `required`; values compare as text, a range as a number. So the engine counts each
+  rule, the manifest keeps its count, verify counts it again, the measures and the history count it beside the step's
+  rules (a history segment starts where the rules change, as before), and a broken `hold` rule holds the day by
+  `checks` as a failed rule does (a run with no publish block stops on it). A flow with no rules, or with every rule
+  switched off, has the plan it had: no hash or vector moved.
+- **Rules are added, changed and removed on the Ontology page** (Q-143; `setRule`, `removeRule`, `flowedit.ts`;
+  `ruleForm`, `fileSection`, `main.ts`). A column's card has **Add a rule** for the owner: what the column must be,
+  the values (as the file writes them, with the load's values as a hint), the lowest and highest, the other column
+  and its values for `when`, and what a broken row does. A rule people set is listed with the column's other rules,
+  "…: else hold the day", with **Change** and **Remove** (asked twice). A rule the document can't keep is refused with
+  the reason. A rule on a column no card shows is listed with the file's own.
+- **The import card has a Rules tab with a switch a rule** (Q-141, Q-148; `rulesTab`, `switchRule`). Every source's
+  card has it, beside Columns: each rule in words, what a broken row does, a switch of 44 px, and what the run on
+  screen counted ("every row keeps it", "3 rows break it", "switched off: not enforced", "not in this run: the next one
+  enforces it"). Switched off, a rule is kept and said (struck through; on the Ontology page "Not checked: switched off
+  on the import card") and left out of the plan. A reader sees the switches and can't move them. The tab links to the
+  file's section on the Ontology page.
+- **Every change is a flow change** (`ruleEdited`): kept in this browser, recorded at once with its reason ("Added a
+  rule to auth: User is never blank, else flag the row and keep it", "Switched off a rule of auth: …"), listed above
+  the files, taken away by Back to the flow as shipped, and refused while a run is under way.
+- **The sign-in log ships three rules** (Q-151), in both its forms (`examples/security-signins/flow.json`,
+  `examples/security-signins.smaltfl.json`): Method one of its five values (hold), Latency from 0 to 30,000 ms (flag),
+  Country never blank (flag). Its history, built by `scripts/data/history.ts` from the plan, counts them.
+- **Tests:** `test/rules.test.ts` (the shipped rules and their words, the plan's rules and a switched-off rule left
+  out with the node as written, what the document refuses and why, the engine's reading of each kind, the edits and
+  their words, and three runs through the engine: a flagged row counted, kept and verified at `rerun`; a `hold` rule
+  that stops a run with no publish block and holds the day by `checks` where the flow publishes; the same row let
+  through once the rule is switched off, verified). `test/ontologypage.test.ts` gains the sign-in log's rules on their
+  cards. `tools/browser/stops/rules.json` drives the sign-ins app at phone size through the Ontology page, a rule
+  added, the Rules tab, a switch, a reload and dark: no problems, no page error.
+- **Not built yet:** a range derived from the last days and kept fixed or rolling (Q-142); a rule across files or on
+  a dataset the flow makes (Q-144 is still open); rules drawn against today's number with the last four weeks (§5);
+  the Discovered section's proposals.

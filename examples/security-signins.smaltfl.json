@@ -189,6 +189,38 @@
         "title": "Hour",
         "description": "The hour of the day (UTC)"
       }
+    ],
+    "rules": [
+      {
+        "id": "method_one_of",
+        "file": "auth",
+        "column": "method",
+        "kind": "oneOf",
+        "values": [
+          "password",
+          "sso",
+          "mfa_push",
+          "passkey",
+          "api_key"
+        ],
+        "action": "hold"
+      },
+      {
+        "id": "latency_ms_range",
+        "file": "auth",
+        "column": "latency_ms",
+        "kind": "range",
+        "min": 0,
+        "max": 30000,
+        "action": "flag"
+      },
+      {
+        "id": "country_required",
+        "file": "auth",
+        "column": "country",
+        "kind": "required",
+        "action": "flag"
+      }
     ]
   },
   "policies": {

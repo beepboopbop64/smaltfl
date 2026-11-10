@@ -966,6 +966,25 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .of-hint code { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
 .of-err { margin: 0; font-size: 13px; font-weight: 600; color: var(--bad); overflow-wrap: anywhere; }
 .of-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Rules set on a column (rules.ts): their actions on the line, the form's ranges side by side, the Rules tab's switches. */
+.of-rule-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.of-act { min-width: 44px; min-height: 44px; padding: 0 8px; border: 0; background: none; color: var(--smalt); font: inherit; font-size: 13.5px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.of-act[data-sure="1"] { color: var(--bad); }
+.of-add { margin-top: 8px; min-height: 44px; }
+.of-add[hidden], .of-rule[hidden], .of-rule-form [hidden] { display: none; }
+.of-rule-form select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--muted); border-radius: 8px; padding: 9px 10px; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 16px; }
+.of-range, .of-when { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; min-width: 0; }
+.rules-tab .lede { margin-bottom: 12px; }
+.rl-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.rl-item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--edge); }
+.rl-item:first-child { border-top: 0; }
+.rl-switch { min-height: 44px; min-width: 44px; }
+.rl-switch[disabled] { cursor: default; opacity: 0.7; }
+.rl-state { font-size: 13px; font-weight: 600; color: var(--ink-2); min-width: 2.2em; }
+.rl-body { display: grid; gap: 2px; min-width: 0; padding-top: 10px; }
+.rl-said { font-weight: 600; overflow-wrap: anywhere; }
+.rl-does, .rl-today { font-size: 13px; color: var(--ink-2); }
+.rl-item.off .rl-said { color: var(--ink-2); font-weight: 400; text-decoration: line-through; text-decoration-thickness: 1px; }
 .of-acts .btn { min-width: 88px; min-height: 44px; }
 .of-save { background: var(--smalt); border-color: var(--smalt); color: var(--surface); font-weight: 600; }
 .of-col { scroll-margin-top: calc(var(--head, 170px) + 8px); }

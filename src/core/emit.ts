@@ -348,6 +348,36 @@ export function emitMatch(match: readonly (readonly [column: string, values: rea
 }
 
 /**
+ * An ontology rule (rules.ts) as a check step's rule reads it: true for a row that keeps it. A blank breaks only a
+ * `required` rule: the other kinds say what a value must be where there is one, and a `when` rule's rows are the ones
+ * whose other column holds one of its values. Values compare as text, as a file writes them, so a code read as a number
+ * still matches; a range compares as a number.
+ */
+export function emitRuleCheck(rule: { column: string; kind: 'required' | 'oneOf' | 'range' | 'when'; values?: readonly string[]; min?: number; max?: number; when?: { column: string; values: readonly string[] } }): string {
+  const c = q(rule.column);
+  const text = (col: string) => `CAST(${col} AS TEXT)`;
+  const among = (col: string, vs: readonly string[] = []) => `${text(col)} IN (${vs.map(lit).join(', ')})`;
+  const number = (x: number) => {
+    if (!Number.isFinite(x)) throw new Error(`a rule's range is a finite number, not ${x}`);
+    return String(x);
+  };
+  switch (rule.kind) {
+    case 'required':
+      return `${c} IS NOT NULL AND trim(${text(c)}) <> ''`;
+    case 'oneOf':
+      return `${c} IS NULL OR ${among(c, rule.values)}`;
+    case 'range': {
+      const ends = [...(rule.min !== undefined ? [`CAST(${c} AS REAL) >= ${number(rule.min)}`] : []), ...(rule.max !== undefined ? [`CAST(${c} AS REAL) <= ${number(rule.max)}`] : [])];
+      return `${c} IS NULL OR (${ends.join(' AND ') || '1 = 1'})`;
+    }
+    case 'when': {
+      const w = q(rule.when!.column);
+      return `${w} IS NULL OR NOT (${among(w, rule.when!.values)}) OR (${c} IS NOT NULL AND ${among(c, rule.values)})`;
+    }
+  }
+}
+
+/**
  * A scope rule's counts (ADR 0014 §4), in one row: the rows whose key is not among the inventory's keys in scope (a
  * blank key among them), the keys in scope with no row, and the keys in scope.
  */

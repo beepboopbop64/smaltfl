@@ -169,16 +169,19 @@ describe('the other examples', () => {
     const page = ontologyPage(await loadFlowDir(signinsDir), columnsIn(signinsDir));
     expect(page.types).toEqual([]);
     const auth = file(page.files, 'auth');
-    expect(auth).toMatchObject({ noun: { one: 'sign-in', many: 'sign-ins' }, rules: [], watched: true, count: 5 });
+    // Five marks, and the three rules set on its columns (rules.ts): enforced by auth_valid, the check step that reads it.
+    expect(auth).toMatchObject({ noun: { one: 'sign-in', many: 'sign-ins' }, rules: [], watched: true, count: 8 });
     expect(said(column(auth, 'result').rules)).toEqual([
       'A value never seen in this file before is flagged as wrong',
       'Failed is a bad value: a jump above its usual share is flagged as wrong',
       'Locked out is a bad value: a jump above its usual share is flagged as wrong',
     ]);
-    expect(said(column(auth, 'country').rules)).toEqual(['A value never seen in this file before is flagged as wrong']);
+    expect(said(column(auth, 'country').rules)).toEqual(['A value never seen in this file before is flagged as wrong', 'Country is never blank: else flag the row and keep it']);
     // No file rule in a flow with no gate: no card lists one.
     expect(auth.columns!.every((c) => c.fileRules.length === 0)).toBe(true);
-    expect(column(auth, 'method').rules).toEqual([]);
+    expect(said(column(auth, 'method').rules)).toEqual(['Method is Password, Single sign-on, MFA push, Passkey or API key: else hold the day']);
+    expect(said(column(auth, 'latency_ms').rules)).toEqual(['Latency is from 0 to 30,000 ms: else flag the row and keep it']);
+    expect(column(auth, 'method').rules[0]).toMatchObject({ id: 'auth/method/set=method_one_of', kind: 'set', origin: { how: 'set', in: 'ontology' }, def: { id: 'method_one_of', action: 'hold' } });
     expect(auth.columns!.flatMap((c) => c.rules).every((r) => r.unchecked === undefined)).toBe(true);
   });
 });

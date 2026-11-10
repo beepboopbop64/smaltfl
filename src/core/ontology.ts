@@ -3,6 +3,7 @@
  * types that edit them. An object is its backing row with its edits applied. Edits are recorded by the runtime in a
  * hash chain, refusals included, after the action rule (policy.ts) allows them.
  */
+import type { OntologyRule } from './rules.js';
 import type { ParamType } from './sqltext.js';
 
 export interface ObjectType {
@@ -166,6 +167,9 @@ export interface Ontology {
   nouns?: Record<string, Noun>;
   /** What each dataset's rows are (ADR 0015 §1): one row an object of a type, for the objects a condition selects. */
   rows?: RowsDef[];
+  /** Rules people set on a file's columns (rules.ts, ADR 0015 amendment 1): each one file's own, enforced by the check
+   * step that reads the file. */
+  rules?: OntologyRule[];
 }
 
 /** A condition in one order however it was written, the order the emitter writes it in: `[column, values]`, by column,

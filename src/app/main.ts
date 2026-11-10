@@ -37,7 +37,8 @@ import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, con
 import { sha256Hex } from '../core/hash.js';
 import { counted, glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, saysMore, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
 import { ontologyPage, originSaid, typesShown, type ColumnCard, type FileSection, type Rule } from '../core/ontologypage.js';
-import { applyBand, asShipped, keptOf as keptFlow, nameColumn, restoreKept, type FlowEdit } from '../core/flowedit.js';
+import { applyBand, asShipped, keptOf as keptFlow, nameColumn, removeRule, restoreKept, setRule, switchRule, type FlowEdit, type RuleInput } from '../core/flowedit.js';
+import { ACTION_SAID, checkStepOf, RULE_ACTIONS, rulesOf, ruleSaid, type OntologyRule, type OntologyRuleKind, type RuleAction } from '../core/rules.js';
 import { DECIDE, DECIDE_OPTIONS, checkDecision, checkRun, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
 import { shapeOf } from '../core/optimize.js';
@@ -1674,7 +1675,7 @@ function notebookElements(o: NotebookOutline): HTMLElement[] {
     const st = steps().get(id);
     if (!e || st?.kind !== 'expectations') return null;
     return h('div', { class: 'nb-check', role: 'list', 'aria-label': 'The checks and what they caught' },
-      ...e.rules.flatMap((r) => [h('span', { class: 'k' }, r.name), h('span', {}, st.rules.find((x) => x.name === r.name)?.onFail === 'drop' ? 'drops' : 'warns'), h('span', { class: `n ${r.failed && r.onFail === 'drop' ? 'drop' : ''}` }, r.failed ? `${fmtInt(r.failed)} rows` : 'none')]),
+      ...e.rules.flatMap((r) => [h('span', { class: 'k' }, r.name), h('span', {}, r.onFail === 'drop' ? 'drops' : r.onFail === 'fail' ? 'holds' : 'warns'), h('span', { class: `n ${r.failed && r.onFail === 'drop' ? 'drop' : ''}` }, r.failed ? `${fmtInt(r.failed)} rows` : 'none')]),
       h('span', { class: 'k' }, 'in'), h('span', {}, ''), h('span', { class: 'n' }, `${fmtInt(e.rows)} rows`),
       h('span', { class: 'k' }, 'dropped'), h('span', {}, ''), h('span', { class: `n ${e.dropped ? 'drop' : ''}` }, `${fmtInt(e.dropped)} rows`));
   };
@@ -2782,8 +2783,8 @@ function renderFlowEdits(): void {
 // runs). Above the tabs: what it reads and what reads it, a tap away, and the day's load, to step through without
 // closing it. A card keeps its tab and its place in each tab.
 
-type Tab = 'news' | 'data' | 'columns' | 'dropped' | 'odd' | 'history' | 'checks' | 'integrity' | 'about';
-const TAB_LABEL: Record<Tab, string> = { news: 'News', data: 'Data', columns: 'Columns', dropped: 'Dropped', odd: 'Odd rows', history: 'History', checks: 'Checks', integrity: 'Integrity', about: 'About' };
+type Tab = 'news' | 'data' | 'columns' | 'dropped' | 'odd' | 'history' | 'checks' | 'rules' | 'integrity' | 'about';
+const TAB_LABEL: Record<Tab, string> = { news: 'News', data: 'Data', columns: 'Columns', dropped: 'Dropped', odd: 'Odd rows', history: 'History', checks: 'Checks', rules: 'Rules', integrity: 'Integrity', about: 'About' };
 const drill = {
   tab: new Map<string, Tab>(),
   scroll: new Map<string, number>(),
@@ -2808,6 +2809,8 @@ function tabsOf(card: string): Tab[] {
   const st = steps().get(id);
   const c = state.changes.get(id);
   const out: Tab[] = ['news', 'data', 'columns'];
+  // The rules set on a file's columns (rules.ts), each with its switch: on every file's import card, beside its columns.
+  if (!profileOf(card) && state.doc.sources.some((x) => x.id === id)) out.push('rules');
   const removes = c !== undefined && c.same && c.rowsIn != null && c.rowsOut != null && c.rowsIn > c.rowsOut;
   if (st && (st.kind === 'expectations' || st.kind === 'filter' || removes || (st.kind === 'join' && !!c?.unmatched))) out.push('dropped');
   // Odd rows where there are enough rows to stand out from: not in a small lookup or a summary.
@@ -2828,6 +2831,7 @@ const TABS: Record<Tab, (card: string, id: string, who: string) => Promise<HTMLE
   odd: oddTab,
   history: historyTab,
   checks: checksTab,
+  rules: rulesTab,
   integrity: integrityTab,
   about: aboutTab,
 };
@@ -3251,6 +3255,84 @@ async function setCheck(card: string, id: string, name: CheckName, mode: CheckMo
   syncTitle();
   if (state.selected) void renderSheet().then(() => openTab(card, 'checks'));
   return true;
+}
+
+/**
+ * A rule set on a file's columns added, changed, taken away or switched (rules.ts): the document edited, the change
+ * kept in this browser and recorded with its reason at once, and everything that reads the flow drawn again. The
+ * owner's alone, and never while a run is under way (the run was started on the flow as it was).
+ */
+async function ruleEdited(r: { doc: FlowDocument; said: string } | null): Promise<boolean> {
+  if (!r) return false;
+  if (!isOwner()) {
+    setStatus('Rules are the owner’s to set: they are part of the flow.', true);
+    return false;
+  }
+  if (state.running) {
+    setStatus('The flow is running. Change the rule again when the run has ended.', true);
+    return false;
+  }
+  state.doc = r.doc;
+  setStatus(`${r.said}. Recorded; the next run enforces it.`, false);
+  await flowEdited(r.said);
+  requestCanvas();
+  syncTitle();
+  if (state.selected) void renderSheet();
+  if (location.hash === '#ontology') void renderOntology();
+  return true;
+}
+
+/** Open the Ontology page at a file's section, where its rules are added and changed. */
+function openFileRules(file: string): void {
+  ontologyFiles.open = file;
+  ontologyFiles.from = '';
+  if (location.hash === '#ontology') void renderOntology().then(() => requestAnimationFrame(() => document.querySelector<HTMLElement>(`.of-item[data-file="${CSS.escape(file)}"]`)?.scrollIntoView({ block: 'start' })));
+  else location.hash = '#ontology';
+}
+
+/**
+ * A file's rules on its import card (ADR 0015 amendment 1, Q-141): each rule set on its columns in the ontology, with
+ * a switch. A rule runs once it is set; switched off it is kept and said, and not enforced, from the next run. Beside
+ * each, what the run on screen counted: the rows that broke it, as the check step that enforces it counted them.
+ */
+async function rulesTab(card: string, id: string): Promise<HTMLElement> {
+  const rules = rulesOf(state.doc.ontology, id);
+  const step = checkStepOf(state.doc, id);
+  const owner = isOwner();
+  const run = onScreen() ?? latest();
+  const counted = new Map((run?.result.manifest.nodes.find((n) => n.origin === step?.id)?.expectations?.rules ?? []).map((x) => [x.name, x.failed]));
+  const box = h('div', { class: 'rules-tab' });
+  box.append(h('p', { class: 'lede' }, `The rules set on ${id}’s columns. Each one runs as the file comes into the flow; switched off, it is kept but not enforced.`));
+  if (!step) box.append(h('p', { class: 'status warn' }, `No check step reads ${id} directly, so its rules are said and not enforced. A check(${id}, …) cell enforces them.`));
+  if (!rules.length) box.append(h('p', { class: 'of-none' }, `${id} has no rules yet.`));
+  else {
+    const list = h('ul', { class: 'rl-list', 'aria-label': `${id}’s rules` });
+    for (const r of rules) {
+      const on = !r.off;
+      const n = counted.get(r.id);
+      const today: Child = !on ? h('span', { class: 'ch-quiet' }, 'switched off: not enforced')
+        : !step ? h('span', { class: 'ch-quiet' }, 'not enforced: no check step')
+        : !run ? h('span', { class: 'ch-quiet' }, 'no run yet')
+        : n === undefined ? h('span', { class: 'ch-quiet' }, 'not in this run: the next one enforces it')
+        : n === 0 ? h('span', { class: 'ch-ok' }, glyphEl('publish', 14), ' every row keeps it')
+        : h('span', { class: `ch-today ${r.action === 'hold' ? 'alert' : 'warn'}` }, glyphEl(r.action === 'hold' ? 'alert' : 'warn', 14), ` ${fmtInt(n)} ${n === 1 ? 'row breaks' : 'rows break'} it`);
+      const label = `${ruleSaid(state.doc.ontology, r)}: ${on ? 'on' : 'off'}`;
+      const sw = h('button', { type: 'button', class: 'vf-switch rl-switch', role: 'switch', 'aria-checked': String(on), 'aria-label': label, ...(owner ? {} : { disabled: 'disabled', title: 'The owner switches rules' }) },
+        h('span', { class: 'vf-switch-k', 'aria-hidden': 'true' }), h('span', { class: 'rl-state' }, on ? 'On' : 'Off'));
+      sw.addEventListener('click', () => void ruleEdited(switchRule(state.doc, id, r.id, !on)));
+      list.append(h('li', { class: `rl-item${on ? '' : ' off'}`, 'data-rule': r.id },
+        sw,
+        h('div', { class: 'rl-body' },
+          h('span', { class: 'rl-said' }, ruleSaid(state.doc.ontology, r)),
+          h('span', { class: 'rl-does' }, `Else: ${ACTION_SAID[r.action]}`),
+          h('span', { class: 'rl-today' }, today))));
+    }
+    box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, `${rules.filter((r) => !r.off).length} of ${plural(rules.length, 'rule')} on${run ? ` · ${runName(run)}` : ''}`), list));
+  }
+  box.append(h('div', { class: 'part' },
+    h('button', { type: 'button', class: 'btn quiet', onclick: () => openFileRules(id) }, owner ? 'Add or change rules on the Ontology page' : 'See the rules on the Ontology page'),
+    h('p', { class: 'foot' }, `A change is recorded as a flow change, kept in this browser, and takes effect from the next run.${anyDayWaits() ? ` ${WAITS_AGAIN}` : ''}`)));
+  return box;
 }
 
 /**
@@ -7954,12 +8036,90 @@ const ontologyFiles = { open: null as string | null, doc: null as FlowDocument |
 
 /** A rule as a line: its sentence, how it came to be and what it is checked against, and why nothing judges it. On a
  * column's card a file's own rule is said for the column (`here`) and says whose it is: one rule, listed twice. */
-function ruleLine(r: Rule, here?: string): HTMLElement {
+function ruleLine(r: Rule, here?: string, acts?: HTMLElement | null): HTMLElement {
   const how = [originSaid(r.origin), here !== undefined ? 'one of this file’s rules' : r.against ? `checked against ${r.againstSaid ?? r.against}` : ''].filter(Boolean).join(' · ');
   return h('li', { class: `of-rule${r.unchecked ? ' unchecked' : ''}${here !== undefined ? ' of-files' : ''}`, 'data-rule': r.id },
     h('span', { class: 'of-said' }, here ?? r.said),
     h('span', { class: 'of-how' }, how),
-    r.unchecked ? h('span', { class: 'of-off' }, `Not checked: ${r.unchecked}`) : null);
+    r.unchecked ? h('span', { class: 'of-off' }, `Not checked: ${r.unchecked}`) : null,
+    acts ?? null);
+}
+
+let ruleForms = 0;
+const KIND_SAID: Record<OntologyRuleKind, string> = {
+  required: 'Never blank',
+  oneOf: 'One of some values',
+  range: 'A number in a range',
+  when: 'One of some values, where another column has one of its own',
+};
+/** Values typed as a list: by commas or new lines, each trimmed, each once. */
+const typedList = (text: string): string[] => [...new Set(text.split(/[,\n]/).map((v) => v.trim()).filter((v) => v !== ''))];
+
+/**
+ * A rule set on a column, added or changed in place (Q-143): what the column must hold (never blank, one of some
+ * values, a number in a range, or one of some values where another column has one of its own) and what a row that
+ * breaks it does. Save writes the file's own rule (`setRule`), on at once (Q-141); a rule the document can't keep is
+ * refused with the reason. Only the owner is offered it.
+ */
+function ruleForm(file: string, column: string, title: string, columns: readonly string[], known: readonly string[], was: OntologyRule | null, close: () => void): HTMLElement {
+  const uid = `of-rule-${++ruleForms}`;
+  const kind = h('select', { id: `${uid}-kind` }, ...(Object.keys(KIND_SAID) as OntologyRuleKind[]).map((k) => h('option', { value: k, ...(k === (was?.kind ?? 'required') ? { selected: 'selected' } : {}) }, KIND_SAID[k])));
+  const values = h('textarea', { id: `${uid}-values`, rows: '2', maxlength: '2000', placeholder: known.slice(0, 6).join(', ') || 'a, b, c' }, (was?.values ?? []).join(', '));
+  const min = h('input', { type: 'number', id: `${uid}-min`, step: 'any', inputmode: 'decimal', value: was?.min !== undefined ? String(was.min) : '' });
+  const max = h('input', { type: 'number', id: `${uid}-max`, step: 'any', inputmode: 'decimal', value: was?.max !== undefined ? String(was.max) : '' });
+  const others = columns.filter((c) => c.toLowerCase() !== column.toLowerCase());
+  const whenColumn = h('select', { id: `${uid}-wcol` }, ...others.map((c) => h('option', { value: c, ...(c === was?.when?.column ? { selected: 'selected' } : {}) }, propertyOf(state.doc.ontology, file, c)?.title ?? c)));
+  const whenValues = h('textarea', { id: `${uid}-wvals`, rows: '2', maxlength: '2000' }, (was?.when?.values ?? []).join(', '));
+  const action = h('select', { id: `${uid}-action` }, ...RULE_ACTIONS.map((a) => h('option', { value: a, ...(a === (was?.action ?? 'flag') ? { selected: 'selected' } : {}) }, `${ACTION_SAID[a][0]!.toUpperCase()}${ACTION_SAID[a].slice(1)}`)));
+  const field = (label: string, input: HTMLElement, hint?: string) => h('div', { class: 'of-field' }, h('label', { for: input.id }, label), input, hint ? h('p', { class: 'of-hint' }, hint) : null);
+  const valuesField = field(`Values ${title} may hold`, values, known.length ? `As the file writes them, by commas. This load has ${known.slice(0, 8).join(', ')}${known.length > 8 ? ', …' : ''}.` : 'As the file writes them, by commas.');
+  const rangeField = h('div', { class: 'of-range' }, field('Lowest', min), field('Highest', max));
+  const whenField = h('div', { class: 'of-when' }, field('Where', whenColumn), field('has one of', whenValues, 'By commas, as the file writes them.'));
+  const err = h('p', { class: 'of-err', role: 'alert', hidden: true });
+  const save = h('button', { type: 'submit', class: 'btn of-save' }, was ? 'Save' : 'Add the rule');
+  const fit = () => {
+    const k = kind.value as OntologyRuleKind;
+    valuesField.hidden = k !== 'oneOf' && k !== 'when';
+    rangeField.hidden = k !== 'range';
+    whenField.hidden = k !== 'when';
+  };
+  kind.addEventListener('change', fit);
+  const form = h('form', { class: 'of-form of-rule-form', 'aria-label': `${was ? 'Change a rule' : 'Add a rule'} on ${title} in ${file}`, novalidate: true },
+    field(`${title} must be`, kind),
+    whenField, valuesField, rangeField,
+    field('A row that breaks it', action, 'Flagged rows are kept and counted; left out, they don’t go on to the next step; a held day waits for a decision.'),
+    h('p', { class: 'of-hint' }, `For ${file} only. On once saved: it is recorded, and enforced from the next run.${anyDayWaits() ? ` ${WAITS_AGAIN}` : ''}`),
+    err,
+    h('div', { class: 'of-acts' }, save, h('button', { type: 'button', class: 'btn quiet', onclick: close }, 'Cancel')));
+  fit();
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!isOwner()) return;
+    if (state.running) {
+      err.textContent = 'The flow is running. Save again when the run has ended.';
+      err.hidden = false;
+      return;
+    }
+    const k = kind.value as OntologyRuleKind;
+    const number = (x: HTMLInputElement) => (x.value.trim() === '' ? undefined : Number(x.value));
+    const input: RuleInput = {
+      ...(was ? { id: was.id } : {}),
+      file, column, kind: k, action: action.value as RuleAction,
+      ...(k === 'oneOf' || k === 'when' ? { values: typedList(values.value) } : {}),
+      ...(k === 'range' ? { ...(number(min) !== undefined ? { min: number(min)! } : {}), ...(number(max) !== undefined ? { max: number(max)! } : {}) } : {}),
+      ...(k === 'when' ? { when: { column: whenColumn.value, values: typedList(whenValues.value) } } : {}),
+    };
+    const r = setRule(state.doc, input);
+    if ('problem' in r) {
+      err.textContent = `That rule can’t be kept: ${r.problem}.`;
+      err.hidden = false;
+      return;
+    }
+    save.disabled = true;
+    form.remove();
+    void ruleEdited(r);
+  });
+  return form;
 }
 const ruleList = (rules: readonly Rule[], none: string): HTMLElement => (rules.length ? h('ul', { class: 'of-rules' }, ...rules.map((r) => ruleLine(r))) : h('p', { class: 'of-none' }, none));
 
@@ -8043,6 +8203,38 @@ function columnForm(f: FileSection, c: ColumnCard, seen: readonly string[], clos
 function fileSection(f: FileSection, refused: boolean, day: string | null): HTMLElement {
   const slots = new Map<string, { slot: HTMLElement; meaning: PropertyType | undefined; seen: string[] }>();
   const owner = isOwner();
+  const columnNames = (f.columns ?? []).map((c) => c.name);
+  /** The rule form opened in place of what was tapped (the Add button, or a rule's line), which comes back on Cancel. */
+  const openRuleForm = (c: ColumnCard, was: OntologyRule | null, at: HTMLElement) => {
+    if (at.closest('.of-col')?.querySelector('.of-rule-form')) return;
+    const known = [...new Set([...c.values.map(([v]) => v), ...(slots.get(c.name)?.seen ?? [])])];
+    const close = () => {
+      form.remove();
+      at.hidden = false;
+      at.querySelector<HTMLElement>('button')?.focus();
+      if (at.tagName === 'BUTTON') at.focus();
+      void renderOntology();
+    };
+    const form = ruleForm(f.id, c.name, c.title, columnNames, known, was, close);
+    at.hidden = true;
+    at.after(form);
+    form.querySelector<HTMLElement>('select')?.focus();
+  };
+  /** A rule people set, on its line: change it in place, or take it away (asked twice). */
+  const setActs = (c: ColumnCard, r: OntologyRule): HTMLElement => {
+    const remove = h('button', { type: 'button', class: 'of-act', 'aria-label': `Remove the rule: ${ruleSaid(state.doc.ontology, r)}` }, 'Remove');
+    remove.addEventListener('click', () => {
+      if (remove.dataset.sure !== '1') {
+        remove.dataset.sure = '1';
+        remove.textContent = 'Remove it?';
+        return;
+      }
+      void ruleEdited(removeRule(state.doc, f.id, r.id));
+    });
+    return h('span', { class: 'of-rule-acts' },
+      h('button', { type: 'button', class: 'of-act', 'aria-label': `Change the rule: ${ruleSaid(state.doc.ontology, r)}`, onclick: (e: Event) => openRuleForm(c, r, (e.currentTarget as HTMLElement).closest('li')!) }, 'Change'),
+      remove);
+  };
   const cards = (f.columns ?? []).map((c) => {
     const p = c.property;
     const slot = h('div', { class: 'of-draw' }, refused ? h('p', { class: 'colline' }, 'Nothing to draw: the file wasn’t read.') : h('span', { class: 'mini-wait' }));
@@ -8050,7 +8242,7 @@ function fileSection(f: FileSection, refused: boolean, day: string | null): HTML
     if (!refused) slots.set(c.name, drawn);
     // The file's own rules about this column first (its key has to be there, it must be an object the file covers),
     // then the column's own: no card says it has no rule under a rule that names its column.
-    const lines = [...c.fileRules.map((x) => ruleLine(x.rule, x.said)), ...c.rules.map((r) => ruleLine(r))];
+    const lines = [...c.fileRules.map((x) => ruleLine(x.rule, x.said)), ...c.rules.map((r) => ruleLine(r, undefined, owner && r.def ? setActs(c, r.def) : null))];
     // Only the values whose meaning says more than the value does (`standFor`): no list of "yes: Yes".
     const codes = c.standFor;
     // Its names are the owner's to change, in place (`columnForm`): a reader sees no Edit.
@@ -8064,7 +8256,8 @@ function fileSection(f: FileSection, refused: boolean, day: string | null): HTML
       p?.note ? h('p', { class: 'note' }, p.note) : null,
       p?.lookup && visible(p.lookup.dataset) ? h('p', { class: 'of-from' }, 'Reads as its ', h('b', {}, p.lookup.label), ' in ', h('b', {}, p.lookup.dataset)) : null,
       citedLine(p),
-      h('div', { class: 'of-col-rules' }, h('p', { class: 'of-h2' }, 'Rules'), lines.length ? h('ul', { class: 'of-rules' }, ...lines) : h('p', { class: 'of-none' }, 'No rules yet.')));
+      h('div', { class: 'of-col-rules' }, h('p', { class: 'of-h2' }, 'Rules'), lines.length ? h('ul', { class: 'of-rules' }, ...lines) : h('p', { class: 'of-none' }, 'No rules yet.'),
+        owner ? h('button', { type: 'button', class: 'btn quiet of-add', 'aria-label': `Add a rule on ${c.title}`, onclick: (e: Event) => openRuleForm(c, null, e.currentTarget as HTMLElement) }, 'Add a rule') : null));
     edit?.addEventListener('click', () => {
       if (card.querySelector('.of-form')) return;
       const close = () => {

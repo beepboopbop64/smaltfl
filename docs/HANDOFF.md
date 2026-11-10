@@ -162,6 +162,12 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   it in the app; then piece (b), rules as each file's own with their forms and the two ways a range is kept, and
   piece (c), the import card's toggles from those rules. Q-144 (where a joined dataset's rules go on a page laid
   out by file) is open and wants an answer before (b).
+- **Rules people set, and the import card's switches** (ADR 0015 amendment 1, pieces b and c, second stage,
+  2026-11-10, on `claude/trusting-euler-ogz88y`): `ontology.rules` (`src/core/rules.ts`), each a file's own, enforced by
+  the check step that reads the file; added, changed and removed on the Ontology page; switched on each source's
+  **Rules** tab; the sign-in log ships three. Open: Q-148 to Q-151 (where a switch writes, how a rule is enforced, the
+  kinds, the sign-in log's rules) and still Q-144. **Next:** a range derived from the last days, fixed or rolling
+  (Q-142); rules on a dataset the flow makes (Q-144); a rule drawn against today's number (§5).
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.
@@ -172,7 +178,8 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
 ```sh
 npm ci && npm run deps                      # then the smaltdb build pinned in packed.json
 git fetch origin data --depth 1             # the real data; without it the app builds on the XS fixtures
-npm run check                               # typecheck + 813 tests (1 skipped)
+npm run check                               # typecheck + about 900 tests, under a minute on four cores
+npm run test:slow                           # the estate's month and the real-history tests (CI runs it beside)
 npm run build                               # declarations; NOTE: wipes dist/, so build the app again after it
 npm run build:app                           # dist/app from the data branch; the bundles are named by content (app.<hash>.js), so a
                                             # browser never serves a stale build under the old name (bundles.json says which)

@@ -9,10 +9,11 @@
 import { calendarListProblems, calendarProblems, EVERIES, isEvery, isSlotOf, resolveCalendar, type Calendar, type Every } from './calendar.js';
 import type { DonorRule, FlowDocument, HoldKind, Meanwhile, Missing, ParameterDef, StepDef, Until, WatchDef } from './document.js';
 import { DONOR_RULES, HOLD_KINDS, isGeneralWatch, MEANWHILES, missingProblem, periodOf, UNTILS, validateDocument, withoutDisplay } from './document.js';
-import { emitMatch } from './emit.js';
+import { emitMatch, emitRuleCheck } from './emit.js';
 import { hashOf } from './hash.js';
 import { CHECK_NAMES, gateChecksOf, hasGates, writtenRules, type GateChecks } from './gates.js';
 import { conditionOf, marksOn, type Ontology } from './ontology.js';
+import { enforcedBy, ON_FAIL, type OntologyRule } from './rules.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { bindParameters, quoteIdent, SqlTextError, withoutTrailingSemicolons } from './sqltext.js';
 
@@ -327,7 +328,7 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
       const message = `a fill from ${step.from} moves its rows to the run's day, and ${period} is ${day === null || day === undefined ? 'not given' : `'${String(day)}', not a day${step.from.length > 10 ? ` with that slot (${step.from.slice(11)})` : ''}`}`;
       throw new PlanError(`${at}: ${message}`, [{ path: at, message }]);
     }
-    nodes.push(translateStep(step, base, at, bind, typeof day === 'string' ? day : null));
+    nodes.push(translateStep(step, base, at, bind, typeof day === 'string' ? day : null, enforcedBy(doc, step)));
     index.set(step.id.toLowerCase(), nodes.length - 1);
     if (step.dataset) outputs.push({ name: step.id, node: nodes.length - 1 });
   }
@@ -427,7 +428,7 @@ function watchPlan(w: string | WatchDef, source: string, period: string | null, 
 
 type Base = Pick<NodeBase, 'origin' | 'inputs' | 'storage'>;
 
-function translateStep(step: StepDef, base: Base, at: string, bind: (sql: string, path: string) => string, day: string | null): PlanNode {
+function translateStep(step: StepDef, base: Base, at: string, bind: (sql: string, path: string) => string, day: string | null, ontologyRules: readonly OntologyRule[] = []): PlanNode {
   const named = (c: string | { name: string; expr: string }, path: string): Named => (typeof c === 'string' ? [c, quoteIdent(c)] : [c.name, bind(c.expr, path)]);
   switch (step.kind) {
     case 'sql':
@@ -457,7 +458,12 @@ function translateStep(step: StepDef, base: Base, at: string, bind: (sql: string
       return {
         op: 'expect',
         ...base,
-        rules: step.rules.map((r, i) => [r.name, bind(r.check, `${at}.rules[${i}].check`), r.onFail]),
+        // The step's own rules, then the ontology's rules of the file it reads, if it is the step that enforces them
+        // (rules.ts): each by its name, written for the engine.
+        rules: [
+          ...step.rules.map((r, i): [string, string, FailAction] => [r.name, bind(r.check, `${at}.rules[${i}].check`), r.onFail]),
+          ...ontologyRules.map((r): [string, string, FailAction] => [r.id, emitRuleCheck(r), ON_FAIL[r.action]]),
+        ],
         maxDropped: step.maxDropped ?? null,
       };
     case 'fill': {

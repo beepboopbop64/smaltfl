@@ -30,6 +30,9 @@ Build the app first (`npm run build:app`) and copy `dist/app` somewhere, because
   the day before. Its first expectations are on the Ontology stops (ADR 0015 amendment 1: the files listed, a
   control's section and the inventory's opened, a file on the day it is refused, a due date's file, a held day's rows
   beside the rules, light and dark); the rest come with the fixes of docs/HANDOFF.md's review.
+- `rules.json`: rules set on a file's columns, on the sign-ins (`npm run build:app -- --flow
+  examples/security-signins/flow.json --out dist/app-signins`): the Ontology page's rules, a rule added, the import
+  card's Rules tab, a rule switched off, a reload and dark. It must report `problems: none`.
 - `fills.json` and `fills-nov.json`: the fill flows, as designed. Some selectors may have moved since; update them
   when a stop reports "nothing to click".
 
