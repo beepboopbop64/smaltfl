@@ -135,9 +135,12 @@ match smaltdb's `CLAUDE.md`.
   and key, the gate cell's own first and the ontology's otherwise, read by the plan (`rulesOf`) and the judge
   (`judgeOf`); `emitMatch` (`emit.ts`) writes the condition, so plan/4's scope keeps its four fields. Bronze holds on
   `reconcile` by default; the story leads an all but empty file with the amount (the scope's missing keys follow) and
-  a file with its rows twice with its key (the amount follows). The estate declares `application` and one `rows` entry
-  a control (`test/rows.test.ts`; `test/estate.test.ts` holds the entries to the generator; `test/estate-flow.test.ts`,
-  whose world keeps each day's `measures` and `ranges`).
+  a file with its rows twice with its key (the amount follows where the repeats account for the rise); rows with no
+  key lead by the key where the scope reads the same column (`JudgeSettings.scopeKey`). An entry on a dataset nothing
+  watches is taken and gives no rule. The estate declares `application` and one `rows` entry a control
+  (`test/rows.test.ts`, with a tied watched step run through the engine; `test/estate.test.ts` holds the entries to
+  the generator; `test/estate-flow.test.ts`, whose world keeps each day's `measures` and `ranges`); the Ontology page
+  reads a type whose objects are a source from the run's file (`renderOntology`; `estate.json`'s ontology stops).
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).

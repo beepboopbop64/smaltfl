@@ -7765,10 +7765,23 @@ async function renderOntology(): Promise<void> {
   const types = o.objectTypes.filter((t) => visible(t.dataset));
   const shownType = new Set(types.map((t) => t.id));
   if (state.ontologyType && !shownType.has(state.ontologyType)) state.ontologyType = null;
+  // A type's objects as the viewer may read them. A dataset the flow publishes is read as readers have it (ADR 0009).
+  // A source (an inventory, ADR 0015 §1) is the file the run on screen read, as its own card's Data shows it: it is
+  // there whether or not the day is published, and no day waits on it.
+  const fileOf = (dataset: string) => state.doc.sources.find((x) => x.id.toLowerCase() === dataset.toLowerCase())?.id;
+  const objectsOf = async (dataset: string): Promise<string | null> => {
+    const file = fileOf(dataset);
+    if (file === undefined) return readPublished(dataset);
+    const run = latest();
+    if (!run) return null;
+    const insp = await inspect(run);
+    const i = insp.index.get(file);
+    return i === undefined ? null : readIn(insp, i);
+  };
   const counts = new Map<string, number | null>();
   if (latest() && engine) {
     for (const t of types) {
-      const sql = readPublished(t.dataset);
+      const sql = await objectsOf(t.dataset);
       counts.set(t.id, sql ? Number((await engine.query(`SELECT count(*) FROM (${sql})`)).rows[0]![0]) : null);
     }
   }
@@ -7794,14 +7807,18 @@ async function renderOntology(): Promise<void> {
   if (!t || !engine || !latest()) {
     objects.replaceChildren(h('p', { class: 'foot' }, latest() ? 'Choose an object type to see its objects.' : 'Run the flow to see the objects.'));
   } else {
-    // Actions act on what readers get: the objects are the published version, said so on a held day (ADR 0009).
-    const sql = readPublished(t.dataset);
-    const note = asPublished();
+    // Actions act on what readers get: the objects are the published version, said so on a held day (ADR 0009). A
+    // source's objects are its file as the day's run read it: nothing of it is published or waits, so neither is said.
+    const file = fileOf(t.dataset) !== undefined;
+    const sql = await objectsOf(t.dataset);
+    if (stale()) return;
+    const note = file ? null : asPublished();
     const head = h('div', {}, h('h2', {}, t.name), h('p', { class: 'sub' }, `${t.description ?? ''} Read as ${personName(state.viewer)}${note ? ` · ${note.replace(/^A/, 'a')}` : ''}.`));
-    if (!sql && !state.names.has(t.dataset)) {
+    if (!sql && !file && !state.names.has(t.dataset)) {
       objects.replaceChildren(head, h('p', { class: 'foot' }, `Nothing is published from ${t.dataset} yet: a day waits for a decision.`));
     } else if (!sql) {
-      objects.replaceChildren(head, h('p', { class: 'status bad' }, `Closed to ${personName(state.viewer)}: ${access(t.dataset)?.reason}.`));
+      const view = access(fileOf(t.dataset) ?? t.dataset);
+      objects.replaceChildren(head, view && !view.open ? h('p', { class: 'status bad' }, `Closed to ${personName(state.viewer)}: ${view.reason ?? 'their rules don’t open it'}.`) : h('p', { class: 'foot' }, 'Run the flow to see the objects.'));
     } else {
       const cols = state.columns.get(t.dataset) ?? [];
       const order = cols.includes('trips') ? '"trips" DESC' : quoteIdent(t.title);

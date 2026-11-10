@@ -2,29 +2,31 @@
  * What a dataset's rows are (ADR 0015 §1): the ontology's `rows` says a dataset has one row an object of a type, for
  * the objects a condition selects. The declaration and its accessor; what the document refuses; the two written rules
  * a watched node with an entry is judged by (its scope and its key), the gate cell's own first, the same for the plan
- * that counts them and the judge that names them; the condition as the emitter writes it, counted in the engine; and
- * the story's lead where the amount and a rule say the same thing (the ADR's "What moves on the estate").
+ * that counts them and the judge that names them; the condition as the emitter writes it, counted in the engine; a
+ * tied watched step run through the engine, its claim told there; and the story's lead where the amount and a rule,
+ * or the two rules, say the same thing (the ADR's "What moves on the estate").
  */
 import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { validateDocument, type FlowDocument } from '../src/core/document.js';
 import { emitMatch, emitScopeCounts } from '../src/core/emit.js';
+import { acceptable } from '../src/core/fill.js';
 import { LAYER_DEFAULTS, writtenRules } from '../src/core/gates.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { appendPeriods, emptyHistory, measuresOf, settingsFor, type MeasureSettings, type Measures } from '../src/core/measures.js';
 import { expandNotebooks } from '../src/core/notebook.js';
 import { judgeOf, LEGACY_JUDGE, newsOf } from '../src/core/news.js';
-import { conditionOf, nounOf, rowsOf, type Ontology } from '../src/core/ontology.js';
+import { conditionOf, nounOf, rowsOf, type Ontology, type RowsDef } from '../src/core/ontology.js';
 import { translate, validatePlan } from '../src/core/plan.js';
 import { storyOf } from '../src/core/story.js';
-import { measureLoad } from '../src/index.js';
-import { openEngine } from './helpers/engine.js';
+import { measureLoad, runFlow } from '../src/index.js';
+import { openEngine, SMALTDB } from './helpers/engine.js';
 import { vendorNames } from './helpers/history.js';
 import { ts } from './helpers/notebooks.js';
 
 const SETUP = "import { cell, md, param, sql } from 'smaltnb';\nimport { check, fill, gate, publish, source } from 'smaltfl/notebook';\n";
 const TLS_GATE = "cell('tls_gate');\nexport const tls_gate = gate(tls, { layer: 'bronze' });\n";
-const nb = (gates = TLS_GATE) => `${SETUP}
+const nb = (gates = TLS_GATE, after = '') => `${SETUP}
 cell('params');
 export const params = param({ day: param.text('') });
 cell('apps');
@@ -36,9 +38,12 @@ export const mfa = source('mfa');
 ${gates}
 cell('posture', { lang: 'sql' });
 export const posture = sql\`SELECT a.app_id, t.status AS tls FROM \${apps} a LEFT JOIN \${tls} t ON t.app_id = a.app_id\`;
+${after}
 cell('published');
 publish(posture);
 `;
+/** A gate on the step that turns its key on: silver's default for it is off. */
+const POSTURE_GATE = "cell('posture_gate');\nexport const posture_gate = gate(posture, { layer: 'silver', checks: { reconcile: 'hold' } });\n";
 const APPLICATION = { id: 'application', name: 'Application', dataset: 'apps', key: ['app_id'], title: 'name' };
 const ONTOLOGY: Ontology = {
   objectTypes: [APPLICATION],
@@ -49,16 +54,17 @@ const ONTOLOGY: Ontology = {
     { dataset: 'mfa', of: 'application', key: 'application_id' },
   ],
 };
-const flow = (o: { nb?: string; ontology?: Ontology } = {}): FlowDocument =>
+const WATCH = { tls: { history: 'h.json', pattern: 'none' }, mfa: { history: 'm.json', pattern: 'none' }, posture: { history: 'p.json', pattern: 'none' } };
+const flow = (o: { nb?: string; ontology?: Ontology; watch?: Partial<typeof WATCH> } = {}): FlowDocument =>
   ({
     smaltfl: 4, id: 'tied', name: 'Tied', steps: [],
     parameters: [{ name: 'day', type: 'text', default: '2024-03-01' }],
     sources: [{ id: 'apps', table: 'apps_file' }, { id: 'tls', table: 'tls_file' }, { id: 'mfa', table: 'mfa_file' }],
     notebooks: [{ path: 'a.nb.ts', source: o.nb ?? nb() }],
     ontology: o.ontology ?? ONTOLOGY,
-    publish: { hold: ['wrong'], period: 'day', watch: { tls: { history: 'h.json', pattern: 'none' }, mfa: { history: 'm.json', pattern: 'none' }, posture: { history: 'p.json', pattern: 'none' } } },
+    publish: { hold: ['wrong'], period: 'day', watch: o.watch ?? WATCH },
   }) as FlowDocument;
-const doc = (o: { nb?: string; ontology?: Ontology } = {}) => expandNotebooks(flow(o), ts);
+const doc = (o: Parameters<typeof flow>[0] = {}) => expandNotebooks(flow(o), ts);
 const watches = async (d: FlowDocument) => {
   const plan = await translate(d, { day: '2024-03-01' });
   validatePlan(plan);
@@ -101,6 +107,19 @@ describe('what the document refuses', () => {
     expect(await problems(withRows([{ dataset: 'posture', of: 'application' }]))).toEqual([]);
   });
 
+  it('takes an entry on a dataset nothing watches, and gives it no rule: only a watched node’s reach the plan', async () => {
+    // The inventory itself, which no watch judges: what its rows are is said, and nothing counts them.
+    const rows = [...ONTOLOGY.rows!, { dataset: 'apps', of: 'application' }];
+    expect(await problems(withRows(rows))).toEqual([]);
+    const w = await watches(await doc({ ontology: { ...ONTOLOGY, rows } }));
+    expect(Object.keys(w).sort()).toEqual(['mfa', 'posture', 'tls']);
+    expect(w).toEqual(await watches(await doc()));
+    // A flow run with no publish block (as a step's history is built) keeps its entries, and is still a valid document.
+    const bare = await doc();
+    delete bare.publish;
+    expect(validateDocument(bare)).toEqual([]);
+  });
+
   it('refuses a dataset or a type that isn’t there, a dataset tied twice, and a type whose objects are a step', async () => {
     expect(await problems(withRows([{ dataset: 'dns', of: 'application' }]))).toEqual([{ path: '$.ontology.rows[0].dataset', message: 'no source or step dns' }]);
     expect(await problems(withRows([{ dataset: 'tls', of: 'server' }]))).toEqual([{ path: '$.ontology.rows[0].of', message: 'no object type server' }]);
@@ -119,6 +138,16 @@ describe('what the document refuses', () => {
     expect(await problems(withRows([{ dataset: 'tls', of: 'application', key: '' }]))).toEqual([{ path: '$.ontology.rows[0].key', message: 'this dataset’s own name for the type’s key column' }]);
     expect(await problems(withRows([{ dataset: 'tls' }]))).toEqual([{ path: '$.ontology.rows[0]', message: '{ dataset, of, key?, where? }: a source or step, the object type its rows are one each of, its own name for the type’s key, and the condition an object meets' }]);
     expect(await problems(withRows({ tls: { of: 'application' } }))).toEqual([{ path: '$.ontology.rows', message: 'a list of { dataset, of, key?, where? }: what each dataset’s rows are' }]);
+  });
+
+  it('refuses a type whose key isn’t column names, an own name for a key of several columns, and one column said twice', async () => {
+    // The plan would carry a key the engine can't read ([5]), or an empty name (['']).
+    for (const key of [[5], [''], [], ['app_id', 7]])
+      expect(await problems({ ...ONTOLOGY, objectTypes: [{ ...APPLICATION, key }], rows: [{ dataset: 'tls', of: 'application' }] }), JSON.stringify(key)).toEqual([{ path: '$.ontology.rows[0].of', message: 'application’s key isn’t a list of column names: a dataset’s rows are counted by the type’s key column' }]);
+    // A key of several columns gives no rule yet: the entry is taken, its own name for the key is not (it would go unused).
+    expect(await problems({ ...ONTOLOGY, objectTypes: [{ ...APPLICATION, key: ['app_id', 'region'] }] })).toEqual([{ path: '$.ontology.rows[1].key', message: 'application’s key is several columns (app_id, region), which gives no rule yet: a name for it here would go unused' }]);
+    // The engine reads a column's name without case, so these two ask one column to be yes and no: nothing would be in scope.
+    expect(await problems(withRows([{ dataset: 'tls', of: 'application', where: { Internet_Facing: 'yes', internet_facing: 'no' } }]))).toEqual([{ path: '$.ontology.rows[0].where', message: 'Internet_Facing and internet_facing are one column (columns are compared without case): a column’s values are said once' }]);
   });
 
   it('refuses it in a flow with no gate, as a band or a due mark is: it is a gate’s written check', async () => {
@@ -174,7 +203,9 @@ describe('the rules an entry gives a watched node', () => {
   });
 
   it('gives no rule for a type whose key is several columns', async () => {
-    const d = await doc({ ontology: { ...ONTOLOGY, objectTypes: [{ ...APPLICATION, key: ['app_id', 'region'] }] } });
+    // Moved on purpose with the review of slice 1: this document carried MFA's own name for the key
+    // (`key: 'application_id'`) and was valid; such a name is refused now (above), so the entries here have none.
+    const d = await doc({ ontology: { ...ONTOLOGY, objectTypes: [{ ...APPLICATION, key: ['app_id', 'region'] }], rows: [{ dataset: 'tls', of: 'application', where: { internet_facing: 'yes' } }, { dataset: 'mfa', of: 'application' }] } });
     expect(validateDocument(d)).toEqual([]);
     expect(writtenRules(d, 'tls')).toEqual({ scope: null, needs: [], reconcile: null });
     const w = await watches(d);
@@ -195,6 +226,33 @@ describe('the rules an entry gives a watched node', () => {
     expect(judgeOf(d, 'mfa').reconcile).toEqual({ key: ['application_id'] });
     expect(judgeOf(d, 'posture').reconcile).toBeNull();
     expect(judgeOf(d, 'tls').checks).toEqual(LAYER_DEFAULTS.bronze);
+    // The scope's own key column too: with the key's it says whether the two rules read one column.
+    expect(judgeOf(d, 'tls').scopeKey).toBe('app_id');
+    expect(judgeOf(d, 'mfa').scopeKey).toBe('application_id');
+    expect(judgeOf(d, 'posture').scopeKey).toBeNull();
+  });
+
+  it('gives a tied watched step the same two rules: its scope holds at silver, its key is counted and off unless its gate says', async () => {
+    const tied = { ...ONTOLOGY, rows: [...ONTOLOGY.rows!, { dataset: 'posture', of: 'application', where: { internet_facing: 'yes' } }] };
+    const d = await doc({ ontology: tied });
+    expect(writtenRules(d, 'posture')).toEqual({
+      scope: { from: 'ontology', of: 'apps', key: 'app_id', own: 'app_id', match: [['internet_facing', ['yes']]], type: 'application' },
+      needs: [],
+      reconcile: { key: ['app_id'], from: 'ontology' },
+    });
+    const w = await watches(d);
+    expect(w.posture!.scope).toEqual({ table: 'apps_file', key: 'app_id', own: 'app_id', where: `"internet_facing" IN ('yes')` });
+    expect(w.posture!.reconcile).toEqual({ key: ['app_id'], table: null });
+    expect(w.posture!.checks).toMatchObject({ scope: 'hold', reconcile: 'off' });
+    expect(judgeOf(d, 'posture')).toMatchObject({ reconcile: { key: ['app_id'] }, scopeKey: 'app_id' });
+    // Its gate cell turns the key on, as any check.
+    const keyed = await doc({ ontology: tied, nb: nb(TLS_GATE, POSTURE_GATE) });
+    expect((await watches(keyed)).posture!.checks).toMatchObject({ scope: 'hold', reconcile: 'hold' });
+  });
+
+  it('keeps a dependency’s conditions in the same one order: by column, each column’s values sorted, each once', async () => {
+    const needy = await doc({ nb: nb(TLS_GATE, "cell('posture_gate');\nexport const posture_gate = gate(posture, { layer: 'silver', needs: [{ when: { tls: ['pass', 'fail', 'pass'], app_id: 'a1' }, then: { tls: 'pass' } }] });\n") });
+    expect((await watches(needy)).posture!.needs).toEqual([{ table: null, key: null, when: [['app_id', ['a1']], ['tls', ['fail', 'pass']]], then: [['tls', ['pass']]] }]);
   });
 });
 
@@ -247,12 +305,54 @@ describe('the condition in the engine', () => {
   });
 });
 
-/** A day's measures of a two-column file: its rows, the scope's counts and the key's. */
-function load(day: string, o: { rows: number; keys?: number; out?: number; missing?: number; inScope?: number }): Measures {
+describe('a tied watched step, run in the engine', () => {
+  /** A run of the flow with the step alone watched and its key on by its gate cell, on a fresh engine. */
+  const run = async (rows: RowsDef[], tls: string) => {
+    const db = openEngine();
+    try {
+      db.exec("CREATE TABLE apps_file(app_id TEXT, internet_facing TEXT); INSERT INTO apps_file VALUES ('a1','yes'),('a2','yes'),('a3','no'),('a4','no'),('a5','no'),('a6','no'),('a7','no'),('a8','yes')");
+      db.exec(`CREATE TABLE tls_file(app_id TEXT, status TEXT); INSERT INTO tls_file VALUES ${tls}`);
+      db.exec('CREATE TABLE mfa_file(application_id TEXT, status TEXT)');
+      const d = await doc({ ontology: { ...ONTOLOGY, rows }, nb: nb(TLS_GATE, POSTURE_GATE), watch: { posture: WATCH.posture } });
+      expect(validateDocument(d)).toEqual([]);
+      // The step's load exists only once the run has built it: the run measures it by the plan's rules and tells its
+      // claim in the engine (src/plugin/tell.ts), from what the page says of the record.
+      return await runFlow(db, d, { smaltdb: SMALTDB, parameters: { day: '2024-03-01' }, tell: { posture: { skip: [], levels: [] } } });
+    } finally {
+      db.close();
+    }
+  };
+  const TLS = "('a1','pass'),('a2','fail'),('a8','pass')";
+
+  it('publishes where the step has one row for each object in scope, and no other', async () => {
+    const r = await run([{ dataset: 'posture', of: 'application' }], TLS);
+    expect(r.holds).toEqual([]);
+    expect(r.published).toEqual(['posture']);
+  });
+
+  it('holds on its rows out of scope, counted against the inventory over the dataset the run built', async () => {
+    // The step has a row for each of the eight applications; five aren't internet-facing.
+    const r = await run([{ dataset: 'posture', of: 'application', where: { internet_facing: 'yes' } }], TLS);
+    expect(r.holds).toHaveLength(1);
+    expect(r.holds[0]).toMatchObject({ by: 'story', origin: 'posture', said: '5 rows out of scope', reaches: ['posture'] });
+    expect(r.published).toEqual([]);
+    expect(r.waiting).toEqual(['posture']);
+  });
+
+  it('holds on its key where its gate cell turns the key on: a row of a source twice is an object on two rows', async () => {
+    const r = await run([{ dataset: 'posture', of: 'application' }], `${TLS},('a1','pass')`);
+    expect(r.holds).toHaveLength(1);
+    expect(r.holds[0]).toMatchObject({ by: 'story', origin: 'posture', said: '1 row repeats a key' });
+    expect(r.waiting).toEqual(['posture']);
+  });
+});
+
+/** A day's measures of a two-column file: its rows, the scope's counts and the key's (`blank`: rows with no key). */
+function load(day: string, o: { rows: number; keys?: number; blank?: number; out?: number; missing?: number; inScope?: number }): Measures {
   const s: MeasureSettings = { source: 'tls', slot: day, every: 'day', checks: null, counting: null, counted: ['status'], followed: [], paired: [], time: null, zone: null, sample: 2000, scope: { table: 'apps_file', key: 'app_id', own: 'app_id', where: `"internet_facing" IN ('yes')` }, reconcile: { key: ['app_id'], table: null } };
   const scan: unknown[][] = Array.from({ length: o.rows }, (_, i) => [i % 20 === 0 ? 'fail' : 'pass']);
   const facts: unknown[] = [o.rows, o.rows, o.keys ?? o.rows, null, null, null, o.rows, o.rows ? 2 : 0, null, null, null];
-  return measuresOf(s, { file: null, snapshot: 'x', schema: [['app_id', 'text'], ['status', 'text']], facts, sample: [], scan, checks: null, scope: [o.out ?? 0, o.missing ?? 0, o.inScope ?? 200], reconcile: [o.rows, o.keys ?? o.rows, 0, 0, 0] });
+  return measuresOf(s, { file: null, snapshot: 'x', schema: [['app_id', 'text'], ['status', 'text']], facts, sample: [], scan, checks: null, scope: [o.out ?? 0, o.missing ?? 0, o.inScope ?? 200], reconcile: [o.rows, o.keys ?? o.rows, o.blank ?? 0, 0, 0] });
 }
 
 describe('the story’s lead where the amount and a rule say the same thing', () => {
@@ -327,6 +427,54 @@ describe('the story’s lead where the amount and a rule say the same thing', ()
     expect(s.state).toBe('wrong');
     expect(s.findings.find((f) => f.key === 'reconcile:repeats')).toMatchObject({ tier: 'standalone', severity: 'alert' });
     expect(s.findings.find((f) => f.kind === 'volume')).toMatchObject({ tier: 'follows', because: 'reconcile:repeats', was: 'alert' });
+    // Moved with the lead, on purpose: a file with its rows twice is not a new level, so the day can't be accepted as
+    // one. It could while the amount led (the same day with the key off, below).
+    expect(acceptable(s, null, [{ by: 'story' }])).toBe(false);
+    const off = { ...judge, checks: { ...judge.checks, reconcile: 'off' as const } };
+    expect(acceptable(storyOf(h, day, newsOf(h, day, names, { judge: off }), { names, judge: off }), null, [{ by: 'story' }])).toBe(true);
+  });
+
+  it('lets a repeated key explain only the rise its rows are: a few in a file far over its range leave the amount as it was told', () => {
+    // A thousand rows where two hundred are usual, five of them a key again: the key still leads (it is exact), and
+    // the 795 rows it doesn't account for aren't told as following from it.
+    const big = history({ rows: 1000, keys: 995 });
+    const s = storyOf(big.h, big.day, newsOf(big.h, big.day, names, { judge }), { names, judge });
+    expect(s.head).toBe('5 apps repeat a key');
+    expect(s.findings.find((f) => f.kind === 'volume')).toMatchObject({ title: 'More apps: 1,000 (+400%)', tier: 'absorbed', because: 'volume', was: 'alert' });
+    // One repeated row doesn't explain twenty-eight more, and one row "repeats".
+    const one = history({ rows: 228, keys: 227 });
+    const t = storyOf(one.h, one.day, newsOf(one.h, one.day, names, { judge }), { names, judge });
+    expect(t.head).toBe('1 app repeats a key');
+    expect(t.findings.find((f) => f.kind === 'volume')).toMatchObject({ title: 'More apps: 228 (+14%)', tier: 'absorbed', because: 'volume' });
+    // Twenty-eight rows a second time, and nothing else: the rows left are the usual two hundred, so the key explains it.
+    const part = history({ rows: 228, keys: 200 });
+    const u = storyOf(part.h, part.day, newsOf(part.h, part.day, names, { judge }), { names, judge });
+    expect(u.head).toBe('28 apps repeat a key');
+    expect(u.findings.find((f) => f.kind === 'volume')).toMatchObject({ tier: 'follows', because: 'reconcile:repeats' });
+  });
+
+  it('leads rows with no key by the key, where the scope reads the same column: they are the rows out of scope, counted once', () => {
+    // Ten rows lost their key: out of scope (no key is in no inventory), with no key, and their ten objects have no row.
+    const tied = { ...judge, scopeKey: 'app_id' };
+    const { h, day } = history({ rows: 200, keys: 190, blank: 10, out: 10, missing: 10 });
+    const found = newsOf(h, day, names, { judge: tied });
+    expect(found.find((f) => f.key === 'scope:out')).toMatchObject({ severity: 'alert', title: '10 apps out of scope' });
+    expect(found.find((f) => f.key === 'reconcile:blank')).toMatchObject({ severity: 'alert', title: '10 apps with no app_id' });
+    const s = storyOf(h, day, found, { names, judge: tied });
+    expect(s.head).toBe('10 apps with no app_id');
+    expect(s.findings.find((f) => f.key === 'reconcile:blank')).toMatchObject({ tier: 'standalone', severity: 'alert' });
+    expect(s.findings.find((f) => f.key === 'scope:out')).toMatchObject({ tier: 'follows', because: 'reconcile:blank', was: 'alert' });
+    // The objects left with no row are still said, after the key: as many, and the key's count is the exact one.
+    expect(s.findings.find((f) => f.key === 'scope:missing')).toMatchObject({ tier: 'standalone', title: '10 in scope with no app' });
+    // Two more rows for objects out of scope: the scope's count is more than the rows with no key, and leads.
+    const more = history({ rows: 202, keys: 192, blank: 10, out: 12, missing: 10 });
+    const t = storyOf(more.h, more.day, newsOf(more.h, more.day, names, { judge: tied }), { names, judge: tied });
+    expect(t.head).toBe('12 apps out of scope');
+    expect(t.findings.find((f) => f.key === 'scope:out')).toMatchObject({ tier: 'standalone' });
+    // A scope that reads another column than the key (a gate cell's own): equal counts are two things, and both stand.
+    const other = { ...judge, scopeKey: 'hostname' };
+    const v = storyOf(h, day, newsOf(h, day, names, { judge: other }), { names, judge: other });
+    expect(v.findings.find((f) => f.key === 'scope:out')).toMatchObject({ tier: 'standalone', severity: 'alert' });
   });
 
   it('doesn’t let a repeated key explain an amount that fell, and says nothing of the key where the gate turns it off', () => {

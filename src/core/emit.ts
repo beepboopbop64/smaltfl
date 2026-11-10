@@ -334,6 +334,9 @@ export function emitSqlOver(sql: string, bindings: readonly (readonly [name: str
   return `SELECT * FROM (\nWITH ${bindings.map(([name, rel]) => `${q(name)} AS (\n${rel}\n)`).join(', ')}\n${inner}\n)`;
 }
 
+/** A text value as the engine's literal: what a condition given as data compares a column with. */
+const lit = (v: string): string => `'${v.replace(/'/g, "''")}'`;
+
 /**
  * A condition given as data (ADR 0015 §1: the ontology's `where`, as `[column, values]`), as the engine reads it: each
  * column one of its values, every column to hold, a blank never; with no column, every row. Values are text, written
@@ -341,7 +344,6 @@ export function emitSqlOver(sql: string, bindings: readonly (readonly [name: str
  */
 export function emitMatch(match: readonly (readonly [column: string, values: readonly string[]])[], alias?: string): string {
   if (match.length === 0) return '1 = 1';
-  const lit = (v: string) => `'${v.replace(/'/g, "''")}'`;
   return match.map(([c, vs]) => `${alias ? `${alias}.` : ''}${q(c)} IN (${vs.map(lit).join(', ')})`).join(' AND ');
 }
 
@@ -365,7 +367,6 @@ ${sql}
  * never holds); with a table and key, `when` is read on that table's row with the same key.
  */
 export function emitNeedsCounts(sql: string, needs: readonly { table: string | null; key: string | null; when: readonly (readonly [string, readonly string[]])[]; then: readonly (readonly [string, readonly string[]])[] }[]): string {
-  const lit = (v: string) => `'${v.replace(/'/g, "''")}'`;
   const holds = (alias: string, m: readonly (readonly [string, readonly string[]])[]) => emitMatch(m, alias);
   const fails = (alias: string, m: readonly (readonly [string, readonly string[]])[]) => m.map(([c, vs]) => `(${alias}.${q(c)} IS NULL OR ${alias}.${q(c)} NOT IN (${vs.map(lit).join(', ')}))`).join(' OR ');
   const counts = needs.map((n) =>

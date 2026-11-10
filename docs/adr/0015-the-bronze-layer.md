@@ -189,10 +189,10 @@ Two rows of ADR 0014's answer key change, on purpose:
   dataset's own name for it, and the condition in one order (`conditionOf`: by column, each column's values sorted,
   each once). `validateDocument` takes an entry that names a source or step of the flow and an object type that
   exists, whose objects are a source (the inventory is there before the run, as a gate's is). It refuses a dataset
-  with two entries, a `key` that isn't a column's name, a `where` that isn't `{ column: value | values }` with text
-  values (an empty one too: every object is said by leaving `where` out, so there is one way to write it), any other
-  key by name ("only isn't a rows entry's setting (dataset, of, key, where): refused rather than ignored"), and the
-  whole list in a flow with no gate.
+  with two entries, a `key` that isn't text (a source declares no columns, so that it names one can't be checked
+  before the run), a `where` that isn't `{ column: value | values }` with text values (an empty one too: every object
+  is said by leaving `where` out, so there is one way to write it), any other key by name ("only isn't a rows entry's
+  setting (dataset, of, key, where): refused rather than ignored"), and the whole list in a flow with no gate.
 - **One function for a node's written rules** (`writtenRules(doc, node)`, `gates.ts`): the gate cell's own first, each
   kind on its own (a cell that writes a scope still gets the ontology's key, and the other way round); else, from the
   ontology's entry, the scope (the type's dataset as the inventory, its key, the dataset's own key column, the
@@ -216,7 +216,8 @@ Two rows of ADR 0014's answer key change, on purpose:
   from the amount (`tier: follows`, `because: volume`). Rows out of scope on such a day still lead, a step whose
   amount follows from a source wrong upstream keeps its rule as its own, and an amount marked as expected hands the
   day back to the scope. Where a key on more than one row leads and the amount is above its range, the amount
-  follows from the key (`because: reconcile:repeats`); a repeated key explains no fall.
+  follows from the key (`because: reconcile:repeats`); a repeated key explains no fall. (Narrowed after the review,
+  below: only where the repeats account for the rise.)
 - **The estate** (`examples/control-estate/`): the object type `application` (the inventory `apps`, key `app_id`,
   title `name`) and one `rows` entry a control, each condition copied from the fixture's `appliesTo` and held to it by
   `test/estate.test.ts` on three inventories. TLS's and the WAF's gate cells write no scope now (the WAF's is its
@@ -244,3 +245,52 @@ Two rows of ADR 0014's answer key change, on purpose:
   reconciliation's own "keys of the other node with no row" still leads an empty file: only the scope's is folded
   under the amount, as the table above says. An app built before this slice has histories without the ten new
   scopes and the keys, and judges neither until it is rebuilt.
+
+### Slice 1, after its review (2026-11-10)
+
+- **The Ontology page reads a type whose objects are a source** (`renderOntology`, `src/app/main.ts`). The estate's
+  `application` is the first object type in any example on a source, and the page knew only published datasets: on
+  calm, published Wed Mar 6 it said "Nothing is published from apps yet: a day waits for a decision", and counted and
+  listed nothing. A source's objects are now its file as the run on screen read it, through the viewer's policies,
+  as its own card's Data tab reads it: 600 objects counted and listed, on a calm day and on a held one, with no "as
+  published" note, since nothing of a file waits. A dataset the flow publishes reads as before.
+  `tools/browser/stops/estate.json` has two stops with expectations for it (`mar06-ontology-type`,
+  `mar12-ontology-type`), its first.
+- **What validation refuses besides:** at an entry's `of`, a type whose key isn't a list of column names (`[5]`,
+  `['']`, `[]`: the plan would carry a key the engine can't read); at its `key`, a name for the key under a type
+  whose key is several columns (it gives no rule yet, so the name would go unused; the entry without it is taken);
+  at its `where`, one column said twice in different case (the engine reads a column's name without case, so the two
+  would ask one column for two things).
+- **An entry on a dataset nothing watches is taken, and gives no rule** (the review left the choice open: refuse
+  it, or say so on the page). Refusing it refuses the estate itself wherever a flow is run with no publish block,
+  as it is while a step's history is built (`scripts/data/history.ts`, the estate's and the controls' test worlds):
+  nothing is watched there. And the request is for every dataset's rows to be tied to the ontology, the inventory's
+  and a gold table's too. So the declaration says what the rows are, and the watch is what judges them. **Slice 4
+  owes the line:** a node with an entry and no watch says "not watched: nothing judges it", never a check that ran.
+- **The story's lead, narrowed and completed** (`storyOf`):
+  - A repeated key explains an amount above its range only when the rows left without the repeats are within the
+    range (in whole rows, as it is shown). It folded any rise: 1,000 rows against a usual 200 with five keys twice
+    was told as following from the key. Now the key still leads (its count is exact) and the amount is told as it
+    was before the slice (absorbed in the day's cause). A file with its rows twice folds as before.
+  - A row with no key is counted by both rules where they read one column (out of scope, and with no key). When
+    every row out of scope is such a row, the key's finding leads ("10 apps with no app_id") and the scope's count
+    follows from it (`because: reconcile:blank`). The judge carries the scope's own key column for this
+    (`JudgeSettings.scopeKey`, from `writtenRules`); a scope on another column is never folded.
+  - Among written rules that say as much (the same score, which is capped at 99), the key's finding leads: its
+    count is exact. Before, the first told led, which was the scope's.
+  - One row "repeats a key" (it read "1 app repeat a key"). `reconcileSaid`'s words for a gold node ("1 row repeat a
+    key") are left: `audit.ts` compares a recorded hold's words with what it tells again, so that string is a
+    recorded one and moves with a decision, not with a fix.
+- **One of each:** `rulesOf` keeps a dependency's `when` and `then` with `conditionOf`, as a scope's condition is
+  kept, so a value written twice in a list is in the plan once (it was kept twice; the counts are the same);
+  `emit.ts` has one function for a text literal.
+- **What moved, on purpose:**
+  - Thu 21, TLS: the decision no longer offers **Accept the new level**. `acceptable` (`fill.ts`) takes an amount
+    or a level as a cause, and the day's cause is now the key: a file with its rows twice is not a level. Pinned in
+    `test/rows.test.ts` beside the lead.
+  - `test/rows.test.ts`, "gives no rule for a type whose key is several columns": its document carried MFA's own
+    name for the key and was valid; that name is refused now, so the document there has none.
+- **Tests:** `test/rows.test.ts` gains the refusals above, an entry nothing watches, a tied watched step in the plan
+  and the judge, three runs of one through the engine (`runFlow`, its claim told by `src/plugin/tell.ts`: published
+  with one row an object, held on "5 rows out of scope", held on "1 row repeats a key" with its key turned on), and
+  the story's cases above. The estate app was built into a scratch folder and `estate.json` run on it: no problems.

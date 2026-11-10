@@ -818,12 +818,29 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
             for (const k of Object.keys(r)) if (!(ROWS_FIELDS as readonly string[]).includes(k)) add(`${at}.${k}`, `${k} isn't a rows entry's setting (${ROWS_FIELDS.join(', ')}): refused rather than ignored`);
             if (!known(r.dataset)) add(`${at}.dataset`, `no source or step ${r.dataset}`);
             else if (tied.has(r.dataset.toLowerCase())) add(`${at}.dataset`, `${r.dataset} has two entries (ids are compared without case): a dataset’s rows are one thing`);
+            // An entry on a dataset nothing watches is taken: it says what the rows are, and gives no rule until a watch
+            // judges the dataset (a flow is run with no publish block while a step's history is built). What reads the
+            // entry says so ("not watched"), never that it was checked.
             tied.add(r.dataset.toLowerCase());
             const type = objectTypes.find((t: unknown) => isRecord(t) && t.id === r.of) as Record<string, unknown> | undefined;
+            // The type's key is what both rules count by: column names, or the plan has nothing the engine can read.
+            const keyed = !!type && Array.isArray(type.key) && type.key.length > 0 && type.key.every((c: unknown) => typeof c === 'string' && c !== '');
             if (!type) add(`${at}.of`, `no object type ${r.of}`);
+            else if (!keyed) add(`${at}.of`, `${r.of}’s key isn’t a list of column names: a dataset’s rows are counted by the type’s key column`);
             else if (typeof type.dataset === 'string' && known(type.dataset) && !sources.has(type.dataset.toLowerCase())) add(`${at}.of`, `${r.of}'s objects are ${type.dataset}, a step: a dataset’s rows are counted against a type whose objects are a source, which is there before the run`);
             if (r.key !== undefined && (typeof r.key !== 'string' || r.key === '')) add(`${at}.key`, 'this dataset’s own name for the type’s key column');
+            // A key of several columns gives no rule yet (ADR 0015 §1), so a name for one of them here would go unused.
+            else if (r.key !== undefined && keyed && (type!.key as string[]).length > 1) add(`${at}.key`, `${r.of}’s key is several columns (${(type!.key as string[]).join(', ')}), which gives no rule yet: a name for it here would go unused`);
             if (r.where !== undefined && (!isRecord(r.where) || Object.keys(r.where).length === 0 || Object.keys(r.where).some((c) => c === '') || !Object.values(r.where).every(values))) add(`${at}.where`, '{ column: value | values } over the type’s dataset: every column to hold, a list any of its values (each once); left out, every object');
+            else if (isRecord(r.where)) {
+              // The engine reads a column's name without case: the same column twice asks for two things of one value.
+              const said = new Map<string, string>();
+              for (const c of Object.keys(r.where)) {
+                const first = said.get(c.toLowerCase());
+                if (first !== undefined) add(`${at}.where`, `${first} and ${c} are one column (columns are compared without case): a column’s values are said once`);
+                else said.set(c.toLowerCase(), c);
+              }
+            }
           });
           if (!(isRecord(doc.gates) && Object.keys(doc.gates).length > 0)) add('$.ontology.rows', 'what a dataset’s rows are is a gate’s written check (ADR 0015): the flow has no gate');
         }

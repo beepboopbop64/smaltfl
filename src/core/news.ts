@@ -125,6 +125,9 @@ export interface JudgeSettings {
   /** The node's reconciliation (ADR 0014 §6), for saying its counts in words: the gate cell's, else the key the
    * ontology's `rows` entry gives it (ADR 0015 §1), as the plan counts it (`writtenRules`). */
   reconcile: ReconcileRule | null;
+  /** The node's own key column as its scope counts it (`writtenRules`), where it has a scope: with the reconciliation's
+   * key it says whether the two rules read one column, and so count a row with no key twice (ADR 0015 §1). */
+  scopeKey?: string | null;
 }
 
 /** The legacy form's settings: what every flow was judged by before ADR 0010. */
@@ -157,6 +160,7 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
     due: m.due.map(([column, status, miss, within]) => ({ column, status, miss, within })),
     needs: rules.needs,
     reconcile: rules.reconcile ? { key: rules.reconcile.key, ...(rules.reconcile.of !== undefined ? { of: rules.reconcile.of } : {}) } : null,
+    scopeKey: rules.scope?.own ?? null,
   };
 }
 
@@ -550,7 +554,7 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       out.push({ key: `reconcile:${count}`, kind: 'reconcile', severity: 'alert', score: Math.min(99, n), title, detail, look: 'rows', metric: { of: 'reconcile', count }, value: n, rows: n, acts: ['incident', 'notify'] });
     };
     const repeats = rc.rows - rc.keys - rc.blank;
-    exact('repeats', repeats, `${fmtInt(repeats)} ${noun(repeats)} repeat a key`, `${fmtInt(rc.rows)} rows for ${fmtInt(rc.keys)} ${keyName} values: ${(rc.rows / Math.max(1, rc.keys)).toFixed(1).replace(/\.0$/, '')} rows a key, where one is expected.`);
+    exact('repeats', repeats, `${fmtInt(repeats)} ${noun(repeats)} ${repeats === 1 ? 'repeats' : 'repeat'} a key`, `${fmtInt(rc.rows)} rows for ${fmtInt(rc.keys)} ${keyName} values: ${(rc.rows / Math.max(1, rc.keys)).toFixed(1).replace(/\.0$/, '')} rows a key, where one is expected.`);
     exact('blank', rc.blank, `${fmtInt(rc.blank)} ${noun(rc.blank)} with no ${keyName}`, `Rows whose ${keyName} is blank: a row no key names is never found.`);
     exact('missing', rc.missing, `${fmtInt(rc.missing)} keys of ${other} with no ${noun(1)}`, `${sentence(other)} has ${fmtInt(rc.missing)} ${keyName} values with no row here: the rows don't reconcile.`);
     exact('extra', rc.extra, `${fmtInt(rc.extra)} ${noun(rc.extra)} not in ${other}`, `Keys here that ${other} doesn't have: rows from nowhere the flow reads.`);

@@ -12,7 +12,7 @@ import { DONOR_RULES, HOLD_KINDS, isGeneralWatch, MEANWHILES, missingProblem, pe
 import { emitMatch } from './emit.js';
 import { hashOf } from './hash.js';
 import { CHECK_NAMES, gateChecksOf, hasGates, writtenRules, type GateChecks } from './gates.js';
-import { marksOn, type Ontology } from './ontology.js';
+import { conditionOf, marksOn, type Ontology } from './ontology.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { bindParameters, quoteIdent, SqlTextError, withoutTrailingSemicolons } from './sqltext.js';
 
@@ -368,10 +368,11 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   };
   const rulesOf = (id: string): Pick<WatchPlan, 'scope' | 'needs' | 'reconcile'> => {
     const r = writtenRules(doc, id);
-    const sorted = (m: Record<string, string | string[]>): [string, string[]][] => Object.entries(m).map(([c, v]): [string, string[]] => [c, [...(Array.isArray(v) ? v : [v])].sort()]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    // A dependency's conditions are kept in one order as the ontology's is (`conditionOf`): by column, each column's
+    // values sorted, each once.
     return {
       scope: r.scope ? { table: tableOf(r.scope.of), key: r.scope.key, own: r.scope.own, where: r.scope.from === 'gate' ? bind(r.scope.where, `$.gates.${id}.scope.where`) : emitMatch(r.scope.match) } : null,
-      needs: r.needs.map((n): NeedsPlan => ({ table: n.from ? tableOf(n.from) : null, key: n.key ?? null, when: sorted(n.when), then: sorted(n.then) })),
+      needs: r.needs.map((n): NeedsPlan => ({ table: n.from ? tableOf(n.from) : null, key: n.key ?? null, when: conditionOf(n.when), then: conditionOf(n.then) })),
       reconcile: r.reconcile ? { key: [...r.reconcile.key], table: r.reconcile.of ? tableOf(r.reconcile.of) : null } : null,
     };
   };

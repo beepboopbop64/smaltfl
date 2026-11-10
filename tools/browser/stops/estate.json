@@ -89,6 +89,27 @@
   "full": true
  },
  {
+  "name": "mar06-ontology-type",
+  "what": "Control estate, calm Wed Mar 6: the Ontology view with the object type on the inventory tapped: its objects are the inventory file's rows, counted and listed",
+  "day": "Wed 6",
+  "view": "ontology",
+  "viewFirst": true,
+  "click": "#ontology-map .type",
+  "expect": {
+   "text": [
+    "600 objects",
+    "Read as Owner"
+   ],
+   "noText": [
+    "Nothing is published from",
+    "a day waits for a decision"
+   ],
+   "count": {
+    "#objects .object": 30
+   }
+  }
+ },
+ {
   "name": "mar07-flow",
   "what": "Control estate, Thu Mar 7 (the logging file lacks a column: refused): the Flow view",
   "day": "Thu 7"
@@ -165,6 +186,28 @@
   "card": "by_control",
   "tab": "Checks",
   "full": true
+ },
+ {
+  "name": "mar12-ontology-type",
+  "what": "Control estate, Tue Mar 12 (held): the same object type on a day that waits: the inventory is a file, so its objects are still counted and listed, and nothing says they wait",
+  "day": "Tue 12",
+  "view": "ontology",
+  "viewFirst": true,
+  "click": "#ontology-map .type",
+  "expect": {
+   "state": "held",
+   "text": [
+    "600 objects",
+    "Read as Owner."
+   ],
+   "noText": [
+    "Nothing is published from",
+    "a day waits for a decision"
+   ],
+   "count": {
+    "#objects .object": 30
+   }
+  }
  },
  {
   "name": "mar12-results",
