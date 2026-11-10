@@ -8,7 +8,8 @@ Decided questions are recorded in ADRs: round 1 in [adr/0001-initial-decisions.m
 a day that is off in [adr/0009-paused-not-published.md](adr/0009-paused-not-published.md) and filling one in its
 amendment 1, the news and the pause for any dataset in [adr/0010-any-dataset.md](adr/0010-any-dataset.md), notebooks as
 the step surface in [adr/0011-notebooks-as-the-step-surface.md](adr/0011-notebooks-as-the-step-surface.md), the brief, the
-incident page, the drill and the phone canvas in [adr/0012-visual-first-in-two-minutes.md](adr/0012-visual-first-in-two-minutes.md). The research
+incident page, the drill and the phone canvas in [adr/0012-visual-first-in-two-minutes.md](adr/0012-visual-first-in-two-minutes.md), the
+bronze layer in [adr/0015-the-bronze-layer.md](adr/0015-the-bronze-layer.md). The research
 behind the proposals is in [research/ecosystem-survey.md](research/ecosystem-survey.md).
 
 **Who decides:** the maintainers, together (ADR 0001 §1).
@@ -77,6 +78,24 @@ one (0015) is to be written from them. Nothing here is built.
 | Q-131 | Only the estate declares gates. Should every flow get bronze, silver and gold? | "Convert one by one": each example gains its gates as its own recorded decision, with its pinned hold days measured again | decided |
 | Q-132 | An overwhelming learned finding (Q-128): does it pause the day and carry a proposal, or publish with a recommendation beside it? What makes it overwhelming? | Not answered yet. The session's proposal: it pauses the day and proposes "Keep the last good day", naming the finding it rests on, and ordinary learned findings keep warning (Q-114) | open |
 | Q-133 | At the tip, on the fork's data (`618e81a`), `test/hold-real.test.ts` and `test/story-real.test.ts` fail six tests: the taxi example holds 41 days under `wrong` where its vector says 25 (the legacy form 43 for 28), and three word budgets are passed. CI skips these tests, which need `dist/app/data/history.json`. Bring the vector back to 25, or accept the days added? | Not asked yet: the days added, and the judge that holds them, are to be found first | open |
+
+## The bronze layer: the maintainer's request, and what is open (ADR 0015)
+
+The maintainer, 2026-11-10: *start with the bronze layer*: deterministic checks tied to the ontology (what is expected
+of a column, which types of application a dataset applies to, later which combinations are odd), a notebook that grabs
+the data and runs them, toggles on the card that switch each check on and off for each column and update the notebook,
+each step with its data explored (a distribution a column), its news and its output, then the classifier and the
+isolation forest as toggles with views of their own; "UI best practice", and for any dataset. ADR 0015 is the design.
+These are the choices made on the way, for the maintainers to confirm or change.
+
+| ID | Question | Default built | Status |
+| --- | --- | --- | --- |
+| Q-134 | plan/4's watch gains `columns` (a mode a column) after plan/4 was introduced. Keep the tag, or make it plan/5? | Keep plan/4: it is in no release and had no pinned vector; its first vector is pinned with the change (ADR 0015 §3, E15), as Q-82 kept plan/2 | default |
+| Q-135 | The maintainer's words were "comment or leave open the notebook to run those checks for each of those columns". Is a check switched off a commented line, or written as off? | Written as off, in the gate cell's `columns` (`protocol: { blanks: 'off' }`): a comment is in nothing the flow hashes or records, so the record could not tell off from never written. The notebook view draws it struck through, as a commented line reads (ADR 0015 §3) | default |
+| Q-136 | Where is "which objects a dataset applies to" written: the ontology, or each gate cell's SQL `where` (ADR 0014 §4)? | The ontology's `rows`: one row an object of a type, for the objects a condition selects, the condition as data (`{ internet_facing: 'yes' }`), written for the engine by `emit.ts`. A scope written in a gate cell still wins. A `needs` rule stays in the gate cell (Q-119 is not decided by this) (ADR 0015 §1) | default |
+| Q-137 | Should a bronze file be held to one row an object wherever the ontology ties its rows to a type? Two rows of ADR 0014's answer key change with it | Yes, by default (`reconcile` holds at bronze, by its key alone). Mon 4 keeps its head (an amount that is almost none leads; the scope's missing keys follow from it); Thu 21 is led by "203 apps repeat a key", and the amount follows (ADR 0015, "What moves on the estate") | default |
+| Q-138 | Where does a card's bronze reading live? | The card's Checks tab, rebuilt as the gate's page in the flow's order: the verdict, what loaded, the dataset's lines, a card a column with its distribution and its lines, the models, the news, what goes on, the cell. The tab keeps its name and News stays first (ADR 0015 §5) | default |
+| Q-139 | A dataset with nothing declared: should the page propose declarations from the data (a column's values, a band from its usual range, the key), and count a coded column without being told? | Not built: the next slice (ADR 0015 §7). Until then such a dataset has its columns explored, its history's lines and the classifier, and nothing for the forest and the pairs to read | open |
 
 ## Gates: the maintainer's answers (ADR 0014)
 
