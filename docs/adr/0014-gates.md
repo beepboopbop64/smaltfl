@@ -1,8 +1,8 @@
 # ADR 0014: Gates: bronze, silver and gold checks in the notebook, written bands and due dates in the ontology, a sealed gold
 
-- **Status:** proposed, 2026-11-09. It records the maintainer's plan and answers of 2026-11-09 (Q-110 to Q-117,
-  docs/OPEN_QUESTIONS.md), given after a survey of how layered data-quality checks are built and shown (§Sources).
-  Nothing in it is built; the control estate (ADR 0013 §8) is its answer key.
+- **Status:** accepted, 2026-11-09; slice 1 built 2026-11-10 (§"As built"), slices 2 to 7 in order. It records the
+  maintainer's plan and answers of 2026-11-09 (Q-110 to Q-117, docs/OPEN_QUESTIONS.md), given after a survey of how
+  layered data-quality checks are built and shown (§Sources). The control estate (ADR 0013 §8) is its answer key.
 - **Date:** 2026-11-09
 - **Builds on:** [ADR 0009](0009-paused-not-published.md) (holds, claims, decisions, releases), [ADR 0010](0010-any-dataset.md)
   (watches, measures, histories, several loads), [ADR 0011](0011-notebooks-as-the-step-surface.md) (notebooks are the
@@ -196,6 +196,55 @@ and that no silver finding repeats a bronze cause.
   flow change like any edit).
 - **Open:** Q-118 (the gold reconcile's key: declared in the gate, or taken from the ontology's `lookup`), Q-119
   (whether a silver `needs` rule should be derivable from the ontology rather than written per gate).
+
+## As built
+
+### Slice 1 (2026-11-10): the gate cell, plan/4, the defaults, the rule, the Checks tab
+
+- **The cell.** `gate(node, { layer?, checks? })` from `smaltfl/notebook` (`src/notebook.ts`), in a cell of its own
+  beside the node; the node passes through it, so a later cell may read either name. `src/core/notebook.ts` reads it
+  as it reads `check()`: the document gains `gates: { <node>: { layer, checks } }` (part of the flow hash, as the
+  steps are), the outline a cell of kind `gate`, and `cells["gate:<node>"]` where it is written (display only). A gate
+  names a source, or a step the flow publishes or watches; one a node; its layer written or the node's own (a source
+  bronze, a watched step silver, a published step gold); a check or a mode outside the vocabulary is refused, as is
+  a gate in a document without notebooks (`validateDocument`).
+- **The vocabulary** (`src/core/gates.ts`): `CHECK_NAMES` as §2's table, `WRITTEN` the deterministic ones, `JUDGED`
+  the ones this build tells (`schema`, `amount`, `blanks`, `values`, `rules`, `shares`, `shape`, `hours`, `pairs`,
+  `forest`; `due`, `scope`, `needs`, `reconcile` and `classifier` are named, switchable, and said to be not judged
+  yet), `LAYER_DEFAULTS` as the table. `checkOf` maps a finding's kind to its check: volume→amount, hours→hours,
+  share and gone→shares, new→values, missing→blanks, shape→shape, dropped and rule→rules, schema and integrity→schema,
+  pair and combo→pairs, unlike→forest; the calm day, a day not judged, the weather and a table's own facts belong to
+  none.
+- **plan/4.** A document with any gate translates to plan/4: plan/3's shape, each watch carrying `checks`, every check's
+  mode filled in from its gate or its layer (`gateChecksOf`), in the vocabulary's order; `validatePlan` refuses a plan/4
+  watch without them and a plan/3 watch with them. A document with no gate is judged and hashed as before (plan/0 to
+  plan/3): the taxi, the sign-ins and the controls example are untouched, and so are their vectors. The defaults of §2
+  reach only a flow that declares a gate, by that same rule.
+- **The rule** (Q-114), in `newsOf` before the findings are told together: `JudgeSettings.checks` (from `judgeOf`,
+  null without gates) and `gated(finding, checks)`: under `hold` the finding keeps its own severity; under `warn`
+  something wrong is told as unusual, unless the finding is about a value the ontology marks bad (`Finding.bad`), which
+  is always something wrong; under `off` it isn't told. Each finding carries its `check`. The story, the claim, the
+  hold and the release read the capped findings and change nothing of their own.
+- **On screen.** A gated node's card label ends with its layer (`INPUT · CSV · BRONZE`; `CELL · SQL · OUTPUT · GOLD`),
+  the gate mark of §7 in its first form. The card's sheet gains a **Checks** tab (`checksTab`): one row a check, its
+  name and what it says, written or learned, hold, warn or off, and today's result (the worst finding of that check, a
+  tap to it in News; "as usual"; "off"; "not judged in this build"); below it the gate cell as written, or "No gate
+  cell yet: the layer's defaults". Another watched source's own findings are told from its base and tail
+  (`loadFindings`, `rangesForLoad`), so every control's card has its Checks. Read-only: toggles are slice 6.
+- **The estate's notebooks** write TLS's gate in full (§1's example), the posture's silver, and a gold gate on each of
+  the three summaries; the other eleven controls take bronze's defaults.
+- **Against the answer key** (`test/estate-flow.test.ts`, the histories from mid-December, March's loads one a day):
+  the empty MFA file holds on the amount ("Almost no apps: 0"); the doubled TLS file ("More apps: 406 (+100%)") and
+  both scope days hold on the amount (slice 3 will name scope); the WAF collapse holds by the bad value's share
+  ("status fail 17× usual"), the rule's exception; the backup outage holds by the blanks its not-assessed rows leave,
+  told from the not-assessed share (slice 2's band will say it); the refused logging file is a failed run (slice 7); a
+  learned finding that isn't a bad value publishes as unusual (not assessed up on key rotation, a day unlike any on
+  privileged access). **Still wrong against the key**, as the next slices' vectors: the SLA look-alikes
+  (vulnerabilities Fri 15, pentests Sat 16 to Mon 18, access reviews Sat 30) hold by the bad value `fail` rising, and
+  the DR problem holds for the same reason, not by its late share (slice 2's due mark must absorb a bad value's rise
+  on a day with the usual late share, and say the DR day by its share); Patch Tuesday fills `next_due` in on almost
+  every row, so the blanks check holds the vulnerability file for three days ("Next_due blank: 6%, usually 43–89%";
+  a due-marked column's blanks are not a finding, slice 2); the contradiction day publishes (slice 3's `needs`).
 
 ## Sources (the survey of 2026-11-09)
 

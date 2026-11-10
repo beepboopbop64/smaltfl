@@ -54,10 +54,18 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   to, five on SLA dates with clustered due dates, four status words, one dependency rule, and three layers of planted
   days (obvious, contradictions and scope, look-alikes beside one real SLA problem). `examples/control-estate/`,
   built with `npm run build:app -- --flow examples/control-estate/flow.json --out dist/app-estate`. **What the flow
-  should say of each day is now decided**: ADR 0014 (gates), from the maintainer's answers Q-110 to Q-117, with the
-  estate's March as its answer key and seven slices in order. Nothing of it is built. Until it is, `test/estate.test.ts`
-  asserts the data, and the app shows what today's judges make of it: they hold the look-alike days (the pentest
-  cluster from Mar 16 on) and hide the real DR problem behind that standing hold, which is the gap ADR 0014 closes.
+  should say of each day is decided**: ADR 0014 (gates), from the maintainer's answers Q-110 to Q-117, with the
+  estate's March as its answer key and seven slices in order. `test/estate.test.ts` asserts the data;
+  `test/estate-flow.test.ts` runs March through the engine (`test/helpers/estate-world.ts`, about three minutes) and
+  asserts what each slice gets right and, explicitly, what it still gets wrong against the key.
+- **Gates, slice 1** (ADR 0014 §"As built", 2026-11-10): the `gate()` cell, `doc.gates`, plan/4 (a watch's `checks`),
+  the layer defaults, the rule (written checks hold, learned ones warn unless the value is bad, `off` says nothing),
+  the layer on the card's label and a read-only Checks tab. Only a flow that declares a gate is plan/4: every other
+  flow's hashes and vectors stand. The estate's March under it: the empty, doubled and scope days hold on the amount,
+  the WAF collapse by the bad value, the backup outage by its blanks; unusual days publish; the look-alikes and the DR
+  day still hold alike by `fail` rising, Patch Tuesday's `next_due` filling in holds the vulnerability file on its
+  blanks, and the contradiction publishes: slices 2 and 3's vectors, asserted as such. Slices 2 to 7 follow ADR 0014's
+  order; each moves those assertions as a decision.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

@@ -102,7 +102,15 @@ match smaltdb's `CLAUDE.md`.
   dist/app-controls` builds it; loads.json may list several daily sources (read as days) and name the dataset the
   views follow (`judged`). `examples/control-estate/` is the richer dataset (ADR 0013 §8: a typed inventory, twelve
   controls by applicability, five on SLA dates, three layers of planted days; `test/fixtures/estate.ts`,
-  `scripts/data/estate.ts`, `test/estate.test.ts` asserts the data's facts, no judge yet).
+  `scripts/data/estate.ts`, `test/estate.test.ts` asserts the data's facts; `test/estate-flow.test.ts` runs its March
+  through the engine, `test/helpers/estate-world.ts`, against ADR 0014's answer key).
+- Gates (ADR 0014): `src/core/gates.ts` is the vocabulary (`CHECK_NAMES`, written or learned, `LAYER_DEFAULTS`),
+  `gate()` in `src/notebook.ts` the cell (`notebook.ts` derives `doc.gates`, the cell kept as `cells["gate:<node>"]`,
+  outline kind `gate`), plan/4 a watch's `checks` (every check's mode, filled in from its layer; only a flow that
+  declares a gate is plan/4, every other plan hashes as before), `JudgeSettings.checks` what `newsOf` applies
+  (`checkOf` maps a finding's kind to its check, `gated` caps a learned check at warn, drops an off one, never softens
+  a bad value; `Finding.check`). The app: the layer on the card's label, a read-only **Checks** tab (`checksTab`,
+  `loadFindings` tells another watched load's own news from its base and tail). Slices 2 to 7 are ADR 0014's order.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
@@ -112,10 +120,11 @@ match smaltdb's `CLAUDE.md`.
   [ADR 0012](docs/adr/0012-visual-first-in-two-minutes.md): the brief and the incident page first, then the drill by
   the biggest driver, then the phone canvas read sideways, then the notebook as a page behind the visuals.
   [ADR 0013](docs/adr/0013-discovered-checks.md) adds the combination and forest judges and the watched step, built on
-  the controls example; its Q-104 to Q-109 are the maintainers' to confirm. **Next:** [ADR 0014](docs/adr/0014-gates.md),
+  the controls example; its Q-104 to Q-109 are the maintainers' to confirm. **Now:** [ADR 0014](docs/adr/0014-gates.md),
   gates (bronze, silver, gold checks as a `gate()` cell in the notebook, written bands and due marks in the ontology,
   scope and dependency rules, the classifier on a kept sample, a sealed gold), in its seven slices, judged against the
-  control estate's answer key (its §"The answer key").
+  control estate's answer key (its §"The answer key"); slice 1 is built (its §"As built"), slices 2 to 7 follow in
+  order.
 
 ## Rules for this repository
 

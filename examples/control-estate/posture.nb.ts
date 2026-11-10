@@ -4,7 +4,7 @@
 // application, or one whose file had no row for it that day: the two look alike here, and telling them apart is one of
 // the questions this dataset is for.
 import { cell, md, sql } from 'smaltnb';
-import { publish } from 'smaltfl/notebook';
+import { gate, publish } from 'smaltfl/notebook';
 import { access_review_checked, apps, backup_checked, dr_exercise_checked, encryption_checked, key_rotation_checked, logging_checked, mfa_checked, pentest_checked, privileged_access_checked, tls_checked, vuln_sla_checked, waf_checked } from './controls.nb.js';
 
 cell('about', { lang: 'md' });
@@ -27,6 +27,12 @@ export const posture = sql`
   LEFT JOIN ${access_review_checked} a9 ON a9.app_id = a.app_id
   LEFT JOIN ${logging_checked} l10 ON l10.app_id = a.app_id
   LEFT JOIN ${privileged_access_checked} p11 ON p11.app_id = a.app_id`;
+
+cell('about_gate', { lang: 'md' });
+md`The silver gate: what the join introduces (a pair across controls, a dependency broken, scope) is its own; a blank that a control's file explains is that control's`;
+
+cell('posture_gate');
+export const posture_gate = gate(posture, { layer: 'silver' });
 
 cell('published');
 publish(posture, { description: 'Every application’s standing on every control that applies to it' });

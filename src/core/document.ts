@@ -6,6 +6,7 @@
  * their inputs, and SQL steps to their inputs' data, by the inputs' ids.
  */
 import { calendarProblems, EVERIES, isEvery, type CalendarDef, type Every } from './calendar.js';
+import { gateProblems, type GateDef } from './gates.js';
 import { marksVerdicts, type Ontology } from './ontology.js';
 import { DECIDE, DECIDE_OPTIONS, type Policies } from './policy.js';
 import type { ParamType, ParamValue } from './sqltext.js';
@@ -162,6 +163,13 @@ export interface FlowDocument {
   /** The flow's calendar (ADR 0010 §2): a document with it is format 3. Without it, a flow whose watches are all legacy
    * keeps `us-nyc/1`, and any other has none (Q-58). */
   calendar?: CalendarDef;
+  /**
+   * The gates (ADR 0014 §1), by the source or step each judges: its layer and the checks it sets apart from the layer's
+   * defaults. Derived from the notebooks' `gate()` cells (`notebook.ts`) and kept here, as the steps are; part of the
+   * flow hash. A document with any gate judges every watched node by its gate or its layer's defaults (plan/4); one
+   * with none is judged as it always was.
+   */
+  gates?: Record<string, GateDef>;
   /** Display only: sections of the canvas, each holding sources and steps. Not part of any hash. */
   groups?: GroupDef[];
   /**
@@ -190,7 +198,7 @@ export interface OutlineCell {
   cell: string;
   /** heading: an md cell that opens a section; md: prose about the step after it; source: a source binding; step: a
    * step; params: the notebook's parameters; publish: what the notebook publishes; other: a cell the flow leaves out. */
-  kind: 'heading' | 'md' | 'source' | 'step' | 'params' | 'publish' | 'other';
+  kind: 'heading' | 'md' | 'source' | 'step' | 'params' | 'publish' | 'gate' | 'other';
   lang: 'ts' | 'sql' | 'df' | 'md';
   line: number;
   endLine: number;
@@ -200,6 +208,8 @@ export interface OutlineCell {
   step?: string;
   source?: string;
   publishes?: string[];
+  /** The source or step a gate cell judges. */
+  gate?: string;
 }
 
 /** Where a step is written: its notebook, its cell, the cell's language and its lines (1-based, inclusive). */
@@ -496,6 +506,7 @@ export function validateDocument(doc: unknown): Issue[] {
     else for (const [k, v] of Object.entries(doc.layout)) if (!(Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && Number.isFinite(n)))) add(`$.layout.${k}`, '[x, y]');
   }
   validateExtras(doc, ids, add);
+  validateGates(doc, add);
   validatePublish(doc, params, add);
   if (doc.calendar !== undefined) for (const [path, message] of calendarProblems(doc.calendar)) add(`$.calendar${path}`, message);
   validateFills(doc, steps, add);
@@ -542,6 +553,34 @@ function validateFills(doc: Record<string, unknown>, steps: readonly Record<stri
     for (const id of Object.keys(pub.watch)) if (donors.has(id.toLowerCase())) add(`$.publish.watch.${id}`, `${id} is a donor: a donor is judged by its own day's claim, not watched`);
     if (pub.meanwhile !== undefined && pub.meanwhile !== 'last')
       for (const id of Object.keys(pub.watch)) if (!filled.has(id.toLowerCase())) add('$.publish.meanwhile', `${String(pub.meanwhile)} needs a fill step on every watched source, and ${id} has none`);
+  }
+}
+
+/**
+ * The gates (ADR 0014 §1): each on a source, or on a step the flow publishes or watches, written in a notebook (a gate
+ * is a `gate()` cell, so a document without notebooks has none), its layer one of three, its checks from the
+ * vocabulary, each hold, warn or off.
+ */
+function validateGates(doc: Record<string, unknown>, add: (path: string, message: string) => void): void {
+  const g = doc.gates;
+  if (g === undefined) return;
+  if (!isRecord(g)) return add('$.gates', 'the gates by the source or step each judges: { id: { layer, checks } }');
+  if (doc.notebooks === undefined) add('$.gates', 'a gate is written in a notebook, as a gate() cell beside the node it judges: a document without notebooks has none');
+  const sources = new Set((Array.isArray(doc.sources) ? doc.sources : []).filter((s: unknown) => isRecord(s) && typeof s.id === 'string').map((s: Record<string, unknown>) => String(s.id).toLowerCase()));
+  const steps = (Array.isArray(doc.steps) ? doc.steps : []).filter((s: unknown): s is Record<string, unknown> => isRecord(s) && typeof s.id === 'string');
+  const published = new Set(steps.filter((s) => s.dataset !== undefined).map((s) => String(s.id).toLowerCase()));
+  const stepIds = new Set(steps.map((s) => String(s.id).toLowerCase()));
+  const pub = isRecord(doc.publish) ? doc.publish : null;
+  const watched = new Set(Object.keys(pub && isRecord(pub.watch) ? pub.watch : {}).map((k) => k.toLowerCase()));
+  const seen = new Set<string>();
+  for (const [id, gate] of Object.entries(g)) {
+    const at = `$.gates.${id}`;
+    const lower = id.toLowerCase();
+    if (seen.has(lower)) add(at, `${id} has two gates (ids are compared without case)`);
+    seen.add(lower);
+    if (!sources.has(lower) && !stepIds.has(lower)) add(at, `no source or step ${id}: a gate judges a source, or a step the flow publishes or watches`);
+    else if (stepIds.has(lower) && !published.has(lower) && !watched.has(lower)) add(at, `${id} is a step nothing publishes or watches: a gate judges what the flow judges or lets out`);
+    for (const m of gateProblems(gate)) add(at, m);
   }
 }
 

@@ -14,6 +14,7 @@
  */
 import { daysBetween, namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
+import { gated, gateChecksOf, type CheckName, type GateChecks } from './gates.js';
 import { HistoryRanges, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
 import { marksOn, nounOf, partNamed, propertyOf } from './ontology.js';
@@ -63,6 +64,8 @@ export interface Finding {
   /** A day unlike the days before (`unlike`, ADR 0013 §3): the forest's score for it, the highest a day before reached,
    * the days learned from, and the numbers that set it apart, each with today's value and the usual. */
   unlike?: { score: number; highest: number; days: number; numbers: string[] };
+  /** The gate's check it belongs to (ADR 0014 §2), set where the node has a gate. */
+  check?: CheckName;
 }
 
 /** How a column and a value are said: a column's title, and a code with what it stands for. */
@@ -102,16 +105,19 @@ export interface JudgeSettings {
   pattern: 'weekly' | 'none' | 'monthly';
   /** Whether a lasting change is re-learned on its own (ADR 0010 §5): only when the watch says so. */
   relearn: boolean;
+  /** The gate's checks (ADR 0014 §2), each hold, warn or off, for a node of a flow with gates; null where the flow has
+   * none, and the day is judged as it always was. */
+  checks: GateChecks | null;
 }
 
 /** The legacy form's settings: what every flow was judged by before ADR 0010. */
-export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly', relearn: false }) as JudgeSettings;
+export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly', relearn: false, checks: null }) as JudgeSettings;
 
 /**
  * How a document judges a watched source (ADR 0010 §10, §11): its watch's settings and the marks its ontology puts on the
  * source's columns. A source the flow doesn't watch is judged in the legacy form.
  */
-export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calendar'> & Partial<Pick<FlowDocument, 'smaltfl'>>, source: string): JudgeSettings {
+export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calendar'> & Partial<Pick<FlowDocument, 'smaltfl' | 'gates' | 'sources' | 'steps'>>, source: string): JudgeSettings {
   const watches = Object.entries(doc.publish?.watch ?? {});
   const w = watches.find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1];
   const general = isGeneralWatch(w) ? w : null;
@@ -127,6 +133,7 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
     after: new Map(m.after.map(([column, of, minutes]) => [column.toLowerCase(), { of, minutes }])),
     pattern: general?.pattern ?? 'weekly',
     relearn: general?.relearn ?? false,
+    checks: gateChecksOf(doc, source),
   };
 }
 
@@ -653,9 +660,12 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     if (gaps.length) out.push({ key: 'weather-gaps', kind: 'weather', severity: 'note', score: 1, title: `The weather has hours missing`, detail: `${listed(gaps)}: fewer than 24 hours on record.`, look: 'history', acts: ['notify'] });
   }
 
+  // The gate's rule on each finding (ADR 0014 §2, Q-114): under a check that warns, something wrong is unusual at most
+  // (a value marked bad excepted); under one that is off, nothing is told; a flow with no gate is judged as it was.
+  const passed = judge.checks ? out.map((f) => gated(f, judge.checks)).filter((f): f is Finding => f !== null) : out;
   // What follows from what (a feed that stopped skews the mix of values, the shapes, what the checks drop) is the
   // story's to tell: storyOf (story.ts) sorts these findings by what the day's cause explains.
-  const told = together(out, rows, names);
+  const told = together(passed, rows, names);
   told.sort((a, b) => RANK[a.severity] - RANK[b.severity] || b.score - a.score);
   if (!told.some((f) => f.severity === 'alert' || f.severity === 'warn')) {
     const note = namedOf(day, cal);

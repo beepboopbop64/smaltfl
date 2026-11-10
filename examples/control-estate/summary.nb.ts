@@ -1,6 +1,6 @@
 // The summaries: the posture counted by business unit, by control and by application type, what leadership reads.
 import { cell, md, sql } from 'smaltnb';
-import { publish } from 'smaltfl/notebook';
+import { gate, publish } from 'smaltfl/notebook';
 import { posture } from './posture.nb.js';
 
 cell('about_unit', { lang: 'md' });
@@ -63,6 +63,18 @@ export const by_type = sql`
          sum(CASE WHEN privileged_access = 'fail' THEN 1 ELSE 0 END) AS privileged_access_failing
   FROM ${posture}
   GROUP BY 1`;
+
+cell('about_gates', { lang: 'md' });
+md`The gold gate on what leadership reads: the columns as declared, the rules, and the rows reconciled with the posture; sealed when every gate passed`;
+
+cell('by_unit_gate');
+export const by_unit_gate = gate(by_unit, { layer: 'gold' });
+
+cell('by_control_gate');
+export const by_control_gate = gate(by_control, { layer: 'gold' });
+
+cell('by_type_gate');
+export const by_type_gate = gate(by_type, { layer: 'gold' });
 
 cell('published');
 publish(by_unit, { description: 'Failing applications by business unit' });

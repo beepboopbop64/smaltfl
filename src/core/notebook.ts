@@ -12,6 +12,8 @@
  * - `const name = check(x, { rules, maxDropped })` is the `expectations` step over `x` (§3: smaltnb's parser refuses
  *   options it doesn't know, so the rules are a call, not a cell option);
  * - `const name = fill(x, { time, shift })` is the `fill` step over the watched source `x` (ADR 0009 amendment 1);
+ * - `const name = gate(x, { layer, checks })` is the gate on the source or step `x` (ADR 0014 §1): no step, but the
+ *   document's `gates[x]`, what `x` is judged by;
  * - a `df` cell is a step whose statement smaltdf gives (§4): translated by the `df` hook the caller supplies, since
  *   the frame has to be evaluated to be compiled; without the hook such a cell is refused, named;
  * - an `md` cell describes the step after it; one that starts with a heading (`# Clean`) heads a part of the notebook
@@ -28,6 +30,7 @@
 import { buildGraph } from 'smaltnb/graph';
 import { importSpecifiers, moduleOf, parseNotebook, type Cell, type Notebook, type TypeScriptKit } from 'smaltnb/format';
 import { GROUP_COLORS, type CellRef, type ExpectationRule, type FlowDocument, type GroupDef, type Issue, type NotebookDef, type NotebookOutline, type OutlineCell, type StepDef } from './document.js';
+import { gateProblems, layerOf, type GateDef } from './gates.js';
 import { PlanError } from './plan.js';
 
 /** The module a flow's notebook imports its markers from. */
@@ -58,6 +61,9 @@ export interface ExpandOptions {
 export interface Expanded {
   steps: StepDef[];
   cells: CellStep[];
+  /** The gates (ADR 0014 §1), by the source or step each judges, with the cell each came from. */
+  gates: Record<string, GateDef>;
+  gateCells: Record<string, CellRef>;
   /** The canvas's sections: one a notebook, named by the file, folded into one box, holding its steps (its sources
    * stand on their own, as inputs do). Display only. */
   groups: GroupDef[];
@@ -86,11 +92,14 @@ export async function loadNotebooks<D extends { notebooks?: NotebookRef[] }>(doc
  * problem when a notebook isn't a flow's (its own diagnostics, a cell that isn't a step, a name nothing defines).
  */
 export async function expandNotebooks(doc: FlowDocument, ts: TypeScriptKit, options: ExpandOptions = {}): Promise<FlowDocument> {
-  const { steps, cells, groups, outline, issues } = await stepsOfNotebooks(doc, ts, options);
+  const { steps, cells, gates, gateCells, groups, outline, issues } = await stepsOfNotebooks(doc, ts, options);
   if (issues.length > 0) throw new PlanError(`the notebooks have ${issues.length} problem${issues.length === 1 ? '' : 's'}: ${issues[0]!.path}: ${issues[0]!.message}`, issues);
   const refs: Record<string, CellRef> = {};
   for (const c of cells) refs[c.step.id] = { notebook: c.notebook, cell: c.cell, lang: c.lang, line: c.span.line, endLine: c.span.endLine };
-  return { ...doc, steps, cells: refs, outline, ...(doc.groups === undefined ? { groups } : {}) };
+  // A gate's cell is kept under the node it judges, prefixed, beside the steps' (display only).
+  for (const [id, ref] of Object.entries(gateCells)) refs[`gate:${id}`] = ref;
+  const { gates: _old, ...rest } = doc;
+  return { ...rest, steps, ...(Object.keys(gates).length ? { gates } : {}), cells: refs, outline, ...(doc.groups === undefined ? { groups } : {}) };
 }
 
 /** A notebook's section on the canvas, named apart from any source or step (`weather.nb.ts` beside the source
@@ -130,7 +139,7 @@ interface Parsed {
 }
 
 /** The steps a document's notebooks say, with the cells they came from, and every problem found. */
-export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'sources' | 'parameters'>, ts: TypeScriptKit, options: ExpandOptions = {}): Promise<Expanded> {
+export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'sources' | 'parameters'> & Partial<Pick<FlowDocument, 'publish'>>, ts: TypeScriptKit, options: ExpandOptions = {}): Promise<Expanded> {
   const issues: Issue[] = [];
   const add = (path: string, message: string) => issues.push({ path, message });
   const notebooks = doc.notebooks ?? [];
@@ -176,6 +185,8 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
       kinds.set(cell.id, c);
       if (c.kind === 'source') parsed.names.set(cell.id, { kind: 'source', id: c.id });
       else if (c.kind === 'params') parsed.names.set(cell.id, { kind: 'params' });
+      // A gate's name stands for the node it judges (the node passes through it), once that is resolved (step 4).
+      else if (c.kind === 'gate') parsed.names.set(cell.id, { kind: 'import', path: parsed.def.path, name: c.input });
       else parsed.names.set(cell.id, { kind: 'step', id: cell.id });
     }
   }
@@ -187,6 +198,13 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
     const ref = parsed.names.get(name);
     if (ref?.kind !== 'import') return ref;
     const broken: Ref = { kind: 'broken' };
+    // A gate's name: what the node it judges stands for, in the same notebook.
+    if (ref.path === parsed.def.path) {
+      const target = ref.name === name ? undefined : resolve(parsed, ref.name);
+      const out: Ref = target && (target.kind === 'source' || target.kind === 'step') ? target : broken;
+      parsed.names.set(name, out);
+      return out;
+    }
     const other = byPath.get(ref.path);
     if (!other) {
       const key = `${parsed.def.path}→${ref.path}`;
@@ -217,6 +235,7 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
   const groups: GroupDef[] = [];
   const outline: NotebookOutline[] = [];
   const published: { parsed: Parsed; where: string; name: string; options: Record<string, unknown> }[] = [];
+  const gatesFound: { parsed: Parsed; where: string; cell: Cell; input: string; options: Record<string, unknown> }[] = [];
   for (const parsed of byPath.values()) {
     const kinds = classified.get(parsed)!;
     const list: OutlineCell[] = [];
@@ -262,6 +281,11 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
       }
       if (c?.kind === 'params') {
         list.push({ ...at(cell), kind: 'params' });
+        continue;
+      }
+      if (c?.kind === 'gate') {
+        gatesFound.push({ parsed, where, cell, input: c.input, options: c.options });
+        list.push({ ...at(cell), kind: 'gate', gate: c.input });
         continue;
       }
       if (!c) {
@@ -322,8 +346,44 @@ export async function stepsOfNotebooks(doc: Pick<FlowDocument, 'notebooks' | 'so
     if (step.dataset) add(p.where, `${p.name} is published twice`);
     step.dataset = { ...(typeof description === 'string' ? { description } : {}), ...(storage !== undefined ? { storage: storage as 'row' | 'columnar' } : {}) };
   }
-  return { steps, cells, groups: groups.filter((g) => g.steps.length > 0), outline, issues };
+  // The gates (ADR 0014 §1): each on a source, or a step the flow publishes or watches, one a node, its layer the
+  // node's own unless written; the outline names the node by its id.
+  const gates: Record<string, GateDef> = {};
+  const gateCells: Record<string, CellRef> = {};
+  const watched = new Set(Object.keys(doc.publish?.watch ?? {}).map((k) => k.toLowerCase()));
+  for (const g of gatesFound) {
+    const id = idOf(g.parsed, g.input);
+    if (id === null) {
+      if (resolve(g.parsed, g.input)?.kind !== 'broken') add(g.where, `gate() judges a source or step by its name; nothing defines ${g.input} as one`);
+      continue;
+    }
+    const source = sources.has(id.toLowerCase());
+    const step = source ? undefined : steps.find((s) => s.id.toLowerCase() === id.toLowerCase());
+    const published = !!step?.dataset;
+    const isWatched = watched.has(id.toLowerCase());
+    if (!source && !published && !isWatched) {
+      add(g.where, `gate(${g.input}, …): ${id} is a step nothing publishes or watches; a gate judges what the flow judges or lets out`);
+      continue;
+    }
+    const layer = g.options.layer ?? layerOf({ source, watched: isWatched, published });
+    const def = { layer, checks: g.options.checks ?? {}, ...Object.fromEntries(Object.entries(g.options).filter(([k]) => k !== 'layer' && k !== 'checks')) } as GateDef;
+    const problems = gateProblems(def);
+    if (problems.length) {
+      for (const m of problems) add(g.where, `gate(${g.input}, …): ${m}`);
+      continue;
+    }
+    const entry = outline.find((o) => o.path === g.parsed.def.path)?.cells.find((c) => c.cell === g.cell.id);
+    if (entry) entry.gate = id;
+    if (gates[id]) {
+      add(g.where, `${id} has two gates`);
+      continue;
+    }
+    gates[id] = { layer: def.layer, checks: def.checks };
+    gateCells[id] = { notebook: g.parsed.def.path, cell: g.cell.id, lang: g.cell.lang, line: g.cell.span.line, endLine: g.cell.span.endLine };
+  }
+  return { steps, cells, gates, gateCells, groups: groups.filter((g) => g.steps.length > 0), outline, issues };
 }
+
 
 type Classified =
   | { kind: 'publish'; names: { name: string; options: Record<string, unknown> }[] }
@@ -332,6 +392,7 @@ type Classified =
   | { kind: 'sql'; text: string }
   | { kind: 'check'; input: string; rules: ExpectationRule[]; maxDropped?: number }
   | { kind: 'fill'; input: string; time: string; shift: string[] }
+  | { kind: 'gate'; input: string; options: Record<string, unknown> }
   | { kind: 'df' };
 
 /** What a cell is, from its own code; null (with an issue) when it isn't anything a flow runs. */
@@ -360,6 +421,20 @@ function classify(parsed: Parsed, cell: Cell, ts: TypeScriptKit, sources: Map<st
     }
     return { kind: 'source', id: sources.get(id.toLowerCase())! };
   }
+  if (marker === 'gate') {
+    const [first, second] = decl!.args;
+    const input = first !== undefined && tree.kind[first] === ts.K.Identifier ? tree.textOf(first) : null;
+    const opts = second === undefined ? {} : literalValue(tree, ts, second);
+    if (!input) {
+      add(where, 'gate() judges a source or step by its name');
+      return null;
+    }
+    if (!isRecord(opts)) {
+      add(where, 'gate() takes its settings as an object literal: { layer, checks }');
+      return null;
+    }
+    return { kind: 'gate', input, options: opts };
+  }
   if (marker === 'check' || marker === 'fill') {
     const [first, second] = decl!.args;
     const input = first !== undefined && tree.kind[first] === ts.K.Identifier ? tree.textOf(first) : null;
@@ -382,7 +457,7 @@ function classify(parsed: Parsed, cell: Cell, ts: TypeScriptKit, sources: Map<st
     return { kind: 'fill', input, time: opts.time as string, shift: Array.isArray(opts.shift) ? (opts.shift as string[]) : [] };
   }
   if (cell.lang === 'df') return { kind: 'df' };
-  add(where, `not a step a flow runs: a sql cell (const ${cell.id} = sql\`…\`), a df cell, source(), check(), fill(), publish() or param()`);
+  add(where, `not a step a flow runs: a sql cell (const ${cell.id} = sql\`…\`), a df cell, source(), check(), fill(), gate(), publish() or param()`);
   return null;
 }
 

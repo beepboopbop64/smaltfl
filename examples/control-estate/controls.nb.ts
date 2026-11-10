@@ -2,7 +2,7 @@
 // one row an application it applies to, with its own columns; each is checked on its own, for a known status and an
 // application id. The flow reads this notebook's exported cells as its steps.
 import { cell, md, param } from 'smaltnb';
-import { check, source } from 'smaltfl/notebook';
+import { check, gate, source } from 'smaltfl/notebook';
 
 cell('params');
 export const params = param({ day: param.text('') });
@@ -45,6 +45,12 @@ export const logging = source('logging');
 
 cell('privileged_access');
 export const privileged_access = source('privileged_access');
+
+cell('about_gates', { lang: 'md' });
+md`The bronze gate (ADR 0014): each control's file judged as it arrives. Written checks hold the day, learned ones warn; TLS says so in full, the others take the layer's defaults`;
+
+cell('tls_gate');
+export const tls_gate = gate(tls, { layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' } });
 
 cell('about_checks', { lang: 'md' });
 md`Each control's rows, kept when the status is one we know (pass, fail, exception, not_assessed) and the application is named`;

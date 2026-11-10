@@ -125,7 +125,7 @@ describe('translating into the flow plan', () => {
 
   it('checks plans from elsewhere before trusting them', async () => {
     const plan = await translate(visualFlow());
-    expect(() => validatePlan({ ...plan, smaltflPlan: 4 } as unknown as FlowPlan)).toThrow('format 4, expected 0 or 1 or 2 or 3');
+    expect(() => validatePlan({ ...plan, smaltflPlan: 5 } as unknown as FlowPlan)).toThrow('format 5, expected 0 or 1 or 2 or 3 or 4');
     expect(() => validatePlan({ ...plan, smaltflPlan: 2 } as unknown as FlowPlan)).toThrow('a format-2 plan says what holds it');
     const forward = structuredClone(plan);
     forward.nodes[2]!.inputs = [5];

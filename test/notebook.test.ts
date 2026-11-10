@@ -212,7 +212,7 @@ await exec\`DELETE FROM t\`;
     expect(steps).toEqual([]);
     expect(issues).toEqual([
       { path: '$.notebooks[0]#auth', message: "source() names a source of the document, and users isn't one (sources: auth)" },
-      { path: '$.notebooks[0]#n', message: 'not a step a flow runs: a sql cell (const n = sql`…`), a df cell, source(), check(), fill(), publish() or param()' },
+      { path: '$.notebooks[0]#n', message: 'not a step a flow runs: a sql cell (const n = sql`…`), a df cell, source(), check(), fill(), gate(), publish() or param()' },
       { path: '$.notebooks[0]#rows', message: '${nothing}: nothing defines nothing' },
       { path: '$.notebooks[0]#frame', message: 'a df cell needs a frame compiler (expandNotebooks options.df): this build has none' },
     ]);

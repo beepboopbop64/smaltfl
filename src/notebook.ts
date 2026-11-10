@@ -5,8 +5,10 @@
  * the cells after them keep their types.
  */
 import type { ExpectationRule } from './core/document.js';
+import type { CheckMode, CheckName, Layer } from './core/gates.js';
 
 export type { ExpectationRule } from './core/document.js';
+export type { CheckMode, CheckName, Layer } from './core/gates.js';
 
 /** A source of the flow, by its id in the flow document: `const auth = source('auth')`. */
 export class Source {
@@ -61,4 +63,24 @@ export interface FillOptions {
 export function fill<T>(input: T, options: FillOptions): T {
   void options;
   return input;
+}
+
+/**
+ * A gate's settings (ADR 0014 §1): its layer (bronze for a source as it arrives, silver for a step after the joins, gold
+ * for an output people read; by default the node's own), and the checks it sets apart from the layer's defaults, each
+ * `hold` (something wrong holds the day), `warn` (unusual at most) or `off`.
+ */
+export interface GateOptions {
+  layer?: Layer;
+  checks?: Partial<Record<CheckName, CheckMode>>;
+}
+
+/**
+ * The gate on a source or a step (ADR 0014 §1): what it is judged by, and what holds. Written in a cell of its own
+ * beside the node: `export const tls_gate = gate(tls, { layer: 'bronze', checks: { shares: 'hold' } })`. The node
+ * passes through, so a cell after it may read either name.
+ */
+export function gate<T>(node: T, options: GateOptions = {}): T {
+  void options;
+  return node;
 }

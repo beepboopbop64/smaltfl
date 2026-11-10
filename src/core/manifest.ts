@@ -69,13 +69,14 @@ export interface RunManifest {
 }
 
 /**
- * A plan's hash kind, by its own format (ADR 0009 E10, ADR 0010 E13, ADR 0011 E14): plan/3 for the plan of a format-4
+ * A plan's hash kind, by its own format (ADR 0009 E10, ADR 0010 E13, ADR 0011 E14, ADR 0014): plan/4 for the plan of a
+ * document with gates (each watch carrying its checks), plan/3 for the plan of a format-4
  * document (its steps its notebooks' cells), plan/2 for a plan that says how its sources are judged, plan/1 for one
  * that says what holds it, else plan/0, so a plan without a publish block hashes byte for byte as
  * it always did. Q-47 is decided here and in `documentFormat`.
  */
-export const planKind = (plan: Pick<FlowPlan, 'smaltflPlan'>): 'plan/0' | 'plan/1' | 'plan/2' | 'plan/3' =>
-  plan.smaltflPlan === 3 ? 'plan/3' : plan.smaltflPlan === 2 ? 'plan/2' : plan.smaltflPlan === 1 ? 'plan/1' : 'plan/0';
+export const planKind = (plan: Pick<FlowPlan, 'smaltflPlan'>): 'plan/0' | 'plan/1' | 'plan/2' | 'plan/3' | 'plan/4' =>
+  plan.smaltflPlan === 4 ? 'plan/4' : plan.smaltflPlan === 3 ? 'plan/3' : plan.smaltflPlan === 2 ? 'plan/2' : plan.smaltflPlan === 1 ? 'plan/1' : 'plan/0';
 export const planHash = (plan: FlowPlan): Promise<string> => hashOf(planKind(plan), plan);
 /** A manifest's hash, by its own format: run/0 manifests made before run/1 still verify. */
 export const manifestKind = (manifest: RunManifest): string => (manifest.smaltflRun === 1 ? 'run/1' : 'run/0');

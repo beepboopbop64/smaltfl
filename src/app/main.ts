@@ -24,7 +24,8 @@ import { effectOf, type Effect } from '../core/effect.js';
 import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, timeOf, type HistoryFile, type Metric } from '../core/history.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
-import { isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
+import { flowNames, isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
+import { CHECK_NAMES, CHECK_SAID, gateChecksOf, gateLayerOf, JUDGED, LAYER_SAID, WRITTEN, type GateChecks } from '../core/gates.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, guessWords, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type KeptMark, type PauseState, type RemedyMark } from '../core/days.js';
 import { UNTIL, afterLine, betweenLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, failLine, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, checksSeen, filesSeen, findingOf, type RunSight, type AfterPart, type KeptLacks, type RemedySaid, type SheetIn, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Hold, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
@@ -648,14 +649,20 @@ function kindLabel(id: string): string {
   if (profileOf(id)) return 'PROFILE';
   if (sourceIds().has(id)) {
     const f = inputFile(id);
-    return f ? `INPUT · ${formatOf(f.file).toUpperCase()}` : 'INPUT';
+    return `${f ? `INPUT · ${formatOf(f.file).toUpperCase()}` : 'INPUT'}${layerMark(id)}`;
   }
   const st = steps().get(id)!;
   // Checks that only drop rows are a filter, with a reason for each rule.
   const kind = st.kind === 'expectations' && st.rules.every((r) => r.onFail === 'drop') ? 'FILTER' : (KIND[st.kind] ?? st.kind.toUpperCase());
   // A step written as a notebook cell says so (ADR 0011): the cell is what a person reads and edits.
-  return `${notebookCellOf(id) ? 'CELL · ' : ''}${kind}${st.dataset ? ' · OUTPUT' : ''}`;
+  return `${notebookCellOf(id) ? 'CELL · ' : ''}${kind}${st.dataset ? ' · OUTPUT' : ''}${layerMark(id)}`;
 }
+
+/** The gate's layer on a card's label (ADR 0014 §7): the gate mark, in a flow with gates. */
+const layerMark = (id: string): string => {
+  const layer = gateLayerOf(state.doc, id);
+  return layer ? ` · ${layer.toUpperCase()}` : '';
+};
 
 /** The notebook cell a step came from, in a format-4 flow (ADR 0011). */
 const notebookCellOf = (id: string): CellRef | undefined => state.doc.cells?.[id];
@@ -2619,8 +2626,8 @@ function loadFlow(): void {
 // runs). Above the tabs: what it reads and what reads it, a tap away, and the day's load, to step through without
 // closing it. A card keeps its tab and its place in each tab.
 
-type Tab = 'news' | 'data' | 'columns' | 'dropped' | 'odd' | 'history' | 'integrity' | 'about';
-const TAB_LABEL: Record<Tab, string> = { news: 'News', data: 'Data', columns: 'Columns', dropped: 'Dropped', odd: 'Odd rows', history: 'History', integrity: 'Integrity', about: 'About' };
+type Tab = 'news' | 'data' | 'columns' | 'dropped' | 'odd' | 'history' | 'checks' | 'integrity' | 'about';
+const TAB_LABEL: Record<Tab, string> = { news: 'News', data: 'Data', columns: 'Columns', dropped: 'Dropped', odd: 'Odd rows', history: 'History', checks: 'Checks', integrity: 'Integrity', about: 'About' };
 const drill = {
   tab: new Map<string, Tab>(),
   scroll: new Map<string, number>(),
@@ -2651,6 +2658,8 @@ function tabsOf(card: string): Tab[] {
   const rows = c?.rowsOut ?? nodeOf(id)?.rows ?? 0;
   if (rows >= 1000 && st?.kind !== 'aggregate') out.push('odd');
   if (historyOf(id)) out.push('history');
+  // The gate's checks (ADR 0014 §7), on a node a flow with gates judges or lets out.
+  if (!profileOf(card) && gateOn(id)) out.push('checks');
   out.push('integrity', 'about');
   return out;
 }
@@ -2662,6 +2671,7 @@ const TABS: Record<Tab, (card: string, id: string, who: string) => Promise<HTMLE
   dropped: droppedTab,
   odd: oddTab,
   history: historyTab,
+  checks: checksTab,
   integrity: integrityTab,
   about: aboutTab,
 };
@@ -2934,6 +2944,90 @@ async function aboutTab(card: string, id: string, who: string): Promise<HTMLElem
     const read = sql && view ? wrapRead(view, sql) : sql;
     explain.lastElementChild!.textContent = !sql ? 'Run the flow first.' : read && read !== sql ? `-- read as ${personName(who)}: ${view!.filters.join(', ') || 'no row rules'}${view!.removed.length ? `; removes ${view!.removed.map((r) => r.column).join(', ')}` : ''}\n${read}` : sql;
   })();
+  return box;
+}
+
+// ------------------------------------------------------------------ tabs: checks (ADR 0014 §7)
+
+/** The gate's checks on a node (ADR 0014 §1): its own gate's, or its layer's defaults, in a flow with gates. */
+const gateOn = (id: string): GateChecks | null => gateChecksOf(state.doc, id);
+
+/** Another watched source's ranges (ADR 0013 §5): its base with its tail folded in, by the flow's settings, so its own
+ * findings can be told on its card; the judged dataset's are `history`. */
+const otherRanges = new Map<string, { key: string; h: HistoryRanges }>();
+function rangesForLoad(id: string): HistoryRanges | null {
+  if (id === loadSource()) return history;
+  const b = bases.get(id);
+  if (!b) return null;
+  const tail = tailBefore(tails.get(id) ?? [], '\uffff');
+  const skips = recordedSkips();
+  const levels = levelsOf(ledger?.entries ?? [], id);
+  const key = JSON.stringify([tail.map((m) => m.slot), skips, levels]);
+  const known = otherRanges.get(id);
+  if (known && known.key === key) return known.h;
+  let h: HistoryRanges;
+  try {
+    h = new HistoryRanges(tail.length ? appendPeriods(b.file, tail) : b.file, { ...rangesFor(state.doc, id), recorded: new Set(skips), levels });
+  } catch {
+    return null;
+  }
+  otherRanges.set(id, { key, h });
+  return h;
+}
+
+/** A watched node's findings on a day, as the flow judges it: the judged dataset's story, or another load's own news. */
+function loadFindings(id: string, day: string): Finding[] {
+  if (id === loadSource()) return dayNews(day);
+  const h = rangesForLoad(id);
+  if (!h || !h.file.days.includes(day)) return [];
+  return newsOf(h, day, flowNames(state.doc, id), { checks: countedChecks(state.doc, h, id), judge: judgeOf(state.doc, id) });
+}
+
+/**
+ * The gate's checks, one a row (ADR 0014 §7): the check and what it says, written or learned, what it does (hold, warn,
+ * off), and today's result from the day's findings. Read-only in this slice: the gate is written in the notebook's
+ * gate cell, shown below; a check this build doesn't judge yet says so.
+ */
+async function checksTab(card: string, id: string): Promise<HTMLElement> {
+  const checks = gateOn(id)!;
+  const layer = gateLayerOf(state.doc, id)!;
+  const ref = state.doc.cells?.[`gate:${id}`];
+  const day = newsDay() ?? viewedDay();
+  const findings = day ? loadFindings(id, day) : [];
+  const judged = !!day && (id === loadSource() ? !!history : !!rangesForLoad(id)?.file.days.includes(day));
+  const box = h('div', { class: 'checks-tab' });
+  box.append(h('p', { class: 'lede' }, `${layer[0]!.toUpperCase()}${layer.slice(1)} gate: ${LAYER_SAID[layer]}. Written checks hold the day; learned ones warn, unless the ontology marks the value bad.`));
+  const grid = h('div', { class: 'checks-grid', role: 'table', 'aria-label': `The ${layer} gate’s checks on ${id}` });
+  const head = (t: string) => h('span', { class: 'ch-head', role: 'columnheader' }, t);
+  grid.append(h('div', { class: 'ch-row', role: 'row' }, head('Check'), head('Kind'), head('Does'), head(day ? `Today · ${dayShort(day)}` : 'Today')));
+  for (const name of CHECK_NAMES) {
+    const mode = checks[name];
+    const mine = findings.filter((f) => f.check === name && f.severity !== 'ok').sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || b.score - a.score);
+    const worst = mine[0];
+    const today: Child = mode === 'off' ? h('span', { class: 'ch-quiet' }, 'off')
+      : !JUDGED.has(name) ? h('span', { class: 'ch-quiet' }, 'not judged in this build')
+      : !judged ? h('span', { class: 'ch-quiet' }, 'no day to judge')
+      : worst ? h('span', { class: 'ch-found' },
+        ...mine.slice(0, 3).map((f) => h('button', { type: 'button', class: `ch-today ${f.severity}`, onclick: () => (openTab(card, 'news'), void Promise.resolve().then(() => document.getElementById(`finding-${f.key}`)?.scrollIntoView({ block: 'center' }))) }, glyphEl(f.severity === 'ok' ? 'publish' : f.severity, 14), ` ${f.title}`)),
+        mine.length > 3 ? h('span', { class: 'ch-quiet' }, `and ${mine.length - 3} more`) : null)
+      : h('span', { class: 'ch-ok' }, glyphEl('publish', 14), ' as usual');
+    grid.append(h('div', { class: `ch-row${mode === 'off' ? ' off' : ''}`, role: 'row' },
+      h('span', { class: 'ch-name', role: 'cell', title: CHECK_SAID[name] }, h('span', { class: 'mono' }, name), h('span', { class: 'ch-said' }, CHECK_SAID[name])),
+      h('span', { class: `chip ${WRITTEN.has(name) ? 'written' : 'learned'}`, role: 'cell' }, WRITTEN.has(name) ? 'written' : 'learned'),
+      h('span', { class: `chip ${mode}`, role: 'cell' }, mode),
+      h('span', { class: 'ch-cell', role: 'cell' }, today)));
+  }
+  box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, `${layer} gate · ${CHECK_NAMES.filter((c) => checks[c] !== 'off').length} of ${CHECK_NAMES.length} checks on`), grid));
+  // Where it is written: the gate cell, or the layer's defaults.
+  const nb = ref ? state.doc.notebooks?.find((n) => n.path === ref.notebook) : undefined;
+  if (ref && nb) {
+    const lines = nb.source.split('\n').slice(ref.line - 1, ref.endLine);
+    while (lines.length && lines[lines.length - 1]!.trim() === '') lines.pop();
+    box.append(h('div', { class: 'part cell-part' },
+      h('p', { class: 'eyebrow' }, `Gate cell · ${ref.notebook} · lines ${ref.line}–${ref.endLine}`),
+      h('pre', { class: 'cell-code', tabindex: '0', 'aria-label': `The gate cell ${ref.cell} in ${ref.notebook}` }, h('code', {}, lines.join('\n'))),
+      h('p', { class: 'foot' }, 'The gate is written here, and the plan carries it: to change a check, change the cell.')));
+  } else box.append(h('p', { class: 'foot' }, `No gate cell yet: ${id} has the ${layer} layer’s defaults. A gate(${id}, { checks }) cell beside it sets them.`));
   return box;
 }
 
