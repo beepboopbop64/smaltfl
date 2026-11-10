@@ -8,10 +8,11 @@ import { BaseSequencer, type TestSpecification } from 'vitest/node';
 const core = (path: string): string => fileURLToPath(new URL(`./node_modules/smaltdb/src/${path}`, import.meta.url));
 
 /**
- * The tests too long for `npm test` (under a minute on four cores), run by `npm run test:slow` and by CI beside it: each
- * runs a month through the engine a day at a time, and no part of it can start before the day before has run.
+ * The tests too long for `npm test` (under a minute on four cores), run by `npm run test:slow` and by CI beside it: the
+ * estate's month through the engine a day at a time (no day can start before the day before has run), and the tests on
+ * the real history, which run only where `dist/app/data/history.json` was built from the data branch (minutes each).
  */
-const SLOW = ['test/estate-flow.test.ts'];
+const SLOW = ['test/estate-flow.test.ts', 'test/*-real.test.ts'];
 
 /**
  * The files that take longest, started first in this order, so none of them is left to run alone at the end: a world of
@@ -47,11 +48,14 @@ export default defineConfig({
     include: process.env.SMALTFL_BENCH ? ['bench/**/*.bench.ts'] : process.env.SMALTFL_SLOW ? SLOW : ['test/**/*.test.ts'],
     exclude: process.env.SMALTFL_BENCH || process.env.SMALTFL_SLOW ? [] : SLOW,
     testTimeout: 30000,
+    // `npm test` gives each worker a larger young generation (NODE_OPTIONS=--max-semi-space-size=64, package.json): the
+    // judges allocate many short-lived arrays, and collecting them took a tenth of the time.
     // The test files share each worker's loaded modules (the engine's source above all, which every engine test would
     // otherwise load again): the core keeps no state between calls but caches of pure results, so a file can't see
     // another's. `npm run test:isolated` runs every file in a fresh module graph, to rule that out.
-    isolate: !!process.env.SMALTFL_ISOLATE,
-    pool: 'threads',
+    // The slow tests run as they always did: a process a file, each with its own heap (the real history is large).
+    isolate: !!process.env.SMALTFL_ISOLATE || !!process.env.SMALTFL_SLOW,
+    pool: process.env.SMALTFL_SLOW ? 'forks' : 'threads',
     sequence: { sequencer: LongestFirst },
   },
 });

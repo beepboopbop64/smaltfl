@@ -48,9 +48,9 @@
     "deps": "node scripts/fetch-packed.mjs",
     "build": "node scripts/build.mjs",
     "typecheck": "node scripts/fetch-packed.mjs --check && tsc -p tsconfig.json",
-    "test": "node scripts/fetch-packed.mjs --check && vitest run",
-    "test:slow": "node scripts/fetch-packed.mjs --check && SMALTFL_SLOW=1 vitest run",
-    "test:isolated": "node scripts/fetch-packed.mjs --check && SMALTFL_ISOLATE=1 vitest run",
+    "test": "node scripts/fetch-packed.mjs --check && NODE_OPTIONS=--max-semi-space-size=64 vitest run",
+    "test:slow": "node scripts/fetch-packed.mjs --check && NODE_OPTIONS=--max-semi-space-size=64 SMALTFL_SLOW=1 vitest run",
+    "test:isolated": "node scripts/fetch-packed.mjs --check && NODE_OPTIONS=--max-semi-space-size=64 SMALTFL_ISOLATE=1 vitest run",
     "check": "npm run typecheck && npm test",
     "bench": "node scripts/fetch-packed.mjs --check && SMALTFL_BENCH=1 vitest run",
     "build:app": "node scripts/fetch-packed.mjs --check && node scripts/build-app.mjs"
