@@ -25,3 +25,24 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # Beside `test`, so neither waits on the other: the month-long runs `npm test` leaves out (vitest.config.ts, SLOW),
+  # then every file again in a fresh module graph, which rules out a test leaning on another file's state.
+  slow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .cache/packed/*.tgz
+            .cache/packed/*-files
+          key: packed-${{ hashFiles('packed.json') }}
+      - run: node scripts/fetch-packed.mjs
+      - run: npm run test:slow
+      - run: npm run test:isolated

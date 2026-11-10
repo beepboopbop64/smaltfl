@@ -232,21 +232,30 @@ export function unlikeNews(h: HistoryRanges, day: string, o: UnlikeOptions): Fin
   const size = Math.ceil(train.length / 2);
   const forest = growForest(train, { trees: TREES, size, seed: 2008 });
   if (!forest) return [];
+  // Today is unlike the days before only past 0.5 and past every learned day's own score: asked in that order, so an
+  // ordinary day (most of them) needs no learned day scored, and the scoring stops at the first that reaches today's.
+  const score = scoreOf(forest, today);
+  if (score <= 0.5) return [];
   // Each learned day by the trees it was not grown on (half of them, on average).
   const yard = avgPath(size);
   let highest = 0;
-  learned.forEach((_, i) => {
+  // Each tree's members as a lookup table: the same test as `members.includes(i)`, without a scan for every day.
+  const grownOn = forest.trees.map((t) => {
+    const m = new Uint8Array(train.length);
+    for (const i of t.members) m[i] = 1;
+    return m;
+  });
+  for (let i = 0; i < learned.length; i++) {
     let total = 0;
     let n = 0;
-    for (const t of forest.trees) {
-      if (t.members.includes(i)) continue;
-      total += pathLength(t.root, train[i]!);
+    for (let ti = 0; ti < forest.trees.length; ti++) {
+      if (grownOn[ti]![i]) continue;
+      total += pathLength(forest.trees[ti]!.root, train[i]!);
       n++;
     }
     if (n) highest = Math.max(highest, 2 ** (-(total / n) / yard));
-  });
-  const score = scoreOf(forest, today);
-  if (score <= Math.max(0.5, highest)) return [];
+    if (score <= highest) return [];
+  }
   // What set it apart: the splits on its way down each tree, credited with the share of companions each cut away.
   const credit = new Array<number>(features.length).fill(0);
   forest.trees.forEach((t, ti) => {

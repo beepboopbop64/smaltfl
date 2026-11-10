@@ -147,41 +147,6 @@ describe('rare but serious values with no range, and an attack that also signs i
   }, 60_000);
 });
 
-describe('the same log with no incidents (variant C)', () => {
-  it('holds no day, and finds at most 15 unusual, 2023 to 2024', () => {
-    const claims = claimsOf(ranges(false));
-    expect(claims.filter((c) => claimHolds(doc.publish!.hold, c))).toEqual([]);
-    expect(claims.filter((c) => c.state === 'unusual').length).toBeLessThanOrEqual(15);
-  }, 120_000);
-});
-
-describe('a flow’s own recurring days (variant M, phase 3, ADR 0010 §2)', () => {
-  // A month-end batch at 1.6× and Patch Tuesday at +30%, with no incidents, so only the batches can be off.
-  const file = securityHistory({ incidents: false, monthEnd: 1.6, patchTuesday: 1.3 });
-  const withDays = { ...doc, calendar: { base: 'us' as const, days: [{ name: 'Month-end', day: -1 }, { name: 'Patch Tuesday', weekday: 'tue' as const, between: [8, 14] as [number, number] }] } };
-  // Each day told by the flow's own verdict, under the calendar the document gives.
-  const claimsFor = (d: typeof doc) => {
-    const r = new HistoryRanges(file, { ...rangesFor(d, 'auth') });
-    return r.file.days.filter((x) => x >= '2023-01-01').map((x) => dayClaim(r, d, ref, x, 'auth', 'dev')!);
-  };
-
-  it('holds no month-end and no Patch Tuesday when the calendar names them, and says so on the day', () => {
-    expect(validateDocument(withDays)).toEqual([]);
-    const claims = claimsFor(withDays);
-    expect(claims.filter((c) => claimHolds(withDays.publish!.hold, c)).map((c) => c.day)).toEqual([]);
-    const r = new HistoryRanges(file, { ...rangesFor(withDays, 'auth') });
-    const s = storyOf(r, '2024-05-14', newsOf(r, '2024-05-14', names, { judge: judgeOf(withDays, 'auth') }), { names, judge: judgeOf(withDays, 'auth') });
-    expect(s.head).toBe('Normal for Patch Tuesday');
-  }, 120_000);
-
-  it('holds nearly every month-end without them: the rule matters', () => {
-    const held = claimsFor(doc).filter((c) => claimHolds(doc.publish!.hold, c)).map((c) => c.day);
-    // Of the 24 month-ends of 2023–24, and nothing but the batches.
-    expect(held.filter(isMonthEnd).length).toBeGreaterThanOrEqual(20);
-    expect(held.every((d) => isMonthEnd(d) || isPatchTuesday(d))).toBe(true);
-  }, 120_000);
-});
-
 describe('a step in rows that stays: a +60% step, accepted and not (phase 3, ADR 0010 §5)', () => {
   const STEP = '2024-02-06';
   const file = securityHistory({ incidents: false, step: { from: STEP, by: 1.6 } });

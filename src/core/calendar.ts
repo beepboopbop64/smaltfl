@@ -198,14 +198,34 @@ const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d))
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const dateOf = (day: string) => new Date(`${day}T00:00:00Z`);
 
+// A day's time, kept: the judges ask for the same few hundred days millions of times. Cleared when it grows large.
+const times = new Map<string, number>();
+const timeOf = (day: string): number => {
+  let t = times.get(day);
+  if (t === undefined) {
+    if (times.size > 100_000) times.clear();
+    times.set(day, (t = dateOf(day).getTime()));
+  }
+  return t;
+};
+const days = new Map<number, string>();
+const dayAt = (t: number): string => {
+  let d = days.get(t);
+  if (d === undefined) {
+    if (days.size > 100_000) days.clear();
+    days.set(t, (d = iso(new Date(t))));
+  }
+  return d;
+};
+
 /** The day `n` days after `day` (before it, for a negative `n`). */
 export function plusDays(day: string, n: number): string {
-  return iso(new Date(dateOf(day).getTime() + n * 864e5));
+  return dayAt(timeOf(day) + n * 864e5);
 }
 
 /** Days from `a` to `b`. */
 export function daysBetween(a: string, b: string): number {
-  return Math.round((dateOf(b).getTime() - dateOf(a).getTime()) / 864e5);
+  return Math.round((timeOf(b) - timeOf(a)) / 864e5);
 }
 
 /** A month's `n`-th weekday (0 is Sunday), or its last for `n` = -1. */

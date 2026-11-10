@@ -55,8 +55,16 @@ export interface EstateWorld {
 export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo: string; loadsTo: string; warmup?: number }): Promise<EstateWorld> {
   const doc = await loadFlowDir(estateDir);
   const data = JSON.parse(readFileSync(new URL('data.json', estateDir), 'utf8')) as DataBindings;
-  const db = Database.openMemory({ plugins: [io, external, smaltfl] });
+  /** An engine with the inventory and every control's table declared. The base's days each run in one of their own,
+   * dropped after: each run stores its snapshots, and an engine whose catalog keeps growing slows every later run. */
   const apps = estateApps(o);
+  let db!: Database;
+  const open = async (): Promise<Database> => {
+    const d = Database.openMemory({ plugins: [io, external, smaltfl] });
+    await pinFile(d, 'apps.csv', utf8(appsCsv(apps)));
+    for (const b of Object.values(data.sources)) await d.execAsync(pinnedDdl(b));
+    return d;
+  };
   const bases: Record<string, HistoryFile> = {};
   const samples: Record<string, SampleFile> = {};
   const refs: Record<string, HistoryRef> = {};
@@ -66,15 +74,18 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
   const measuresTaken = new Map<string, Record<string, Measures>>();
   const rangesTold = new Map<string, Record<string, HistoryRanges>>();
 
-  const pinDay = async (day: string) => {
+  const pinDay = async (day: string, d: Database = db) => {
     for (const c of ESTATE_CONTROLS) {
       const { columns, rows } = estateRows(c, day, apps, o);
-      await pinFile(db, `${c}.csv`, utf8(csvOf(columns, rows)));
+      await pinFile(d, `${c}.csv`, utf8(csvOf(columns, rows)));
     }
   };
   /** A watch's measure settings for a day: from its base once there is one, else the builder's default columns. */
+  // The day's plan, translated once for every watch that asks for it.
+  const plans = new Map<string, ReturnType<typeof translate>>();
   const settingsOf = async (day: string, w: string) => {
-    const plan = await translate(doc, { day });
+    if (!plans.has(day)) plans.set(day, translate(doc, { day }));
+    const plan = await plans.get(day)!;
     const node = plan.nodes.findIndex((n) => n.origin === w);
     const s = settingsFor(plan, node, bases[w] ?? null, doc.steps)!;
     if (bases[w]) return { plan, s };
@@ -125,25 +136,26 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     return r;
   };
 
-  await pinFile(db, 'apps.csv', utf8(appsCsv(apps)));
-  for (const b of Object.values(data.sources)) await db.execAsync(pinnedDdl(b));
   const bare: FlowDocument = { ...doc };
   delete bare.publish;
   const periods: Record<string, Measures[]> = Object.fromEntries(ESTATE_WATCHES.map((w) => [w, []]));
   const keptDays: Record<string, [string, unknown[][]][]> = Object.fromEntries(ESTATE_WATCHES.map((w) => [w, []]));
   for (let day = o.baseFrom; day <= o.baseTo; day = plusDays(day, 1)) {
-    await pinDay(day);
+    const d = await open();
+    await pinDay(day, d);
     for (const c of ESTATE_CONTROLS) {
       const s = (await settingsOf(day, c)).s;
-      periods[c]!.push(await measureLoad(db, `${c}_file`, s));
-      keptDays[c]!.push([day, (await sampleLoad(db, `${c}_file`, { keep: SAMPLE_KEEP, strata: s.counted })).rows]);
+      periods[c]!.push(await measureLoad(d, `${c}_file`, s));
+      keptDays[c]!.push([day, (await sampleLoad(d, `${c}_file`, { keep: SAMPLE_KEEP, strata: s.counted })).rows]);
     }
-    const r = await runFlow(db, bare, { smaltdb: SMALTDB, parameters: { day } });
+    const r = await runFlow(d, bare, { smaltdb: SMALTDB, parameters: { day } });
     if (!r.published.includes('posture')) throw new Error(`${day}: the bare run didn't publish the posture`);
     const ps = (await settingsOf(day, 'posture')).s;
-    periods.posture!.push(await measureLoad(db, 'posture', ps));
-    keptDays.posture!.push([day, (await sampleLoad(db, 'posture', { keep: SAMPLE_KEEP, strata: ps.counted })).rows]);
+    periods.posture!.push(await measureLoad(d, 'posture', ps));
+    keptDays.posture!.push([day, (await sampleLoad(d, 'posture', { keep: SAMPLE_KEEP, strata: ps.counted })).rows]);
+    d.close();
   }
+  db = await open();
   for (const w of ESTATE_WATCHES) {
     const ms = periods[w]!;
     const m0 = ms[0]!;

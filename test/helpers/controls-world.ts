@@ -45,22 +45,33 @@ export interface ControlsWorld {
 export async function controlsWorld(o: ControlsOptions & { baseFrom: string; baseTo: string; loadsTo: string; warmup?: number }): Promise<ControlsWorld> {
   const doc = await loadFlowDir(controlsDir);
   const data = JSON.parse(readFileSync(new URL('data.json', controlsDir), 'utf8')) as DataBindings;
-  const db = Database.openMemory({ plugins: [io, external, smaltfl] });
   const apps = appRows(o);
+  /** An engine with the inventory and every control's table declared. The base's days each run in one of their own,
+   * dropped after: each run stores its snapshots, and an engine whose catalog keeps growing slows every later run. */
+  const open = async (): Promise<Database> => {
+    const d = Database.openMemory({ plugins: [io, external, smaltfl] });
+    await pinFile(d, 'apps.csv', utf8(appsCsv(apps)));
+    for (const b of Object.values(data.sources)) await d.execAsync(pinnedDdl(b));
+    return d;
+  };
+  let db!: Database;
   const bases: Record<string, HistoryFile> = {};
   const refs: Record<string, HistoryRef> = {};
   const tails: Record<string, Measures[]> = Object.fromEntries(WATCHES.map((w) => [w, []]));
   const results = new Map<string, RunResult | Error>();
 
-  const pinDay = async (day: string) => {
+  const pinDay = async (day: string, d: Database = db) => {
     for (const c of CONTROLS) {
       const { columns, rows } = controlRows(c, day, apps, o);
-      await pinFile(db, `${c}.csv`, utf8(csvOf(columns, rows)));
+      await pinFile(d, `${c}.csv`, utf8(csvOf(columns, rows)));
     }
   };
   /** A watch's measure settings for a day: from its base once there is one, else the builder's default columns. */
+  // The day's plan, translated once for every watch that asks for it.
+  const plans = new Map<string, ReturnType<typeof translate>>();
   const settingsOf = async (day: string, w: string) => {
-    const plan = await translate(doc, { day });
+    if (!plans.has(day)) plans.set(day, translate(doc, { day }));
+    const plan = await plans.get(day)!;
     const node = plan.nodes.findIndex((n) => n.origin === w);
     const s = settingsFor(plan, node, bases[w] ?? null, doc.steps)!;
     if (bases[w]) return { plan, s };
@@ -89,18 +100,19 @@ export async function controlsWorld(o: ControlsOptions & { baseFrom: string; bas
     return r;
   };
 
-  await pinFile(db, 'apps.csv', utf8(appsCsv(apps)));
-  for (const b of Object.values(data.sources)) await db.execAsync(pinnedDdl(b));
   const bare: FlowDocument = { ...doc };
   delete bare.publish;
   const periods: Record<string, Measures[]> = Object.fromEntries(WATCHES.map((w) => [w, []]));
   for (let day = o.baseFrom; day <= o.baseTo; day = plusDays(day, 1)) {
-    await pinDay(day);
-    for (const c of CONTROLS) periods[c]!.push(await measureLoad(db, `${c}_file`, (await settingsOf(day, c)).s));
-    const r = await runFlow(db, bare, { smaltdb: SMALTDB, parameters: { day } });
+    const d = await open();
+    await pinDay(day, d);
+    for (const c of CONTROLS) periods[c]!.push(await measureLoad(d, `${c}_file`, (await settingsOf(day, c)).s));
+    const r = await runFlow(d, bare, { smaltdb: SMALTDB, parameters: { day } });
     if (!r.published.includes('posture')) throw new Error(`${day}: the bare run didn't publish the posture`);
-    periods.posture!.push(await measureLoad(db, 'posture', (await settingsOf(day, 'posture')).s));
+    periods.posture!.push(await measureLoad(d, 'posture', (await settingsOf(day, 'posture')).s));
+    d.close();
   }
+  db = await open();
   for (const w of WATCHES) {
     const ms = periods[w]!;
     const m0 = ms[0]!;

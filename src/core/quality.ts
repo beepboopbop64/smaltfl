@@ -181,26 +181,45 @@ export function growForest(data: readonly (readonly number[])[], options: { tree
   const size = Math.min(options.size ?? 256, n);
   const limit = Math.ceil(Math.log2(size));
   const rnd = random(options.seed ?? 2008);
-  const grow = (idx: number[], depth: number): Tree => {
-    if (depth >= limit || idx.length <= 1) return { size: idx.length };
+  // The data by column, and each tree's rows as one buffer split in place: a node sees the same rows as a list of its
+  // own would hold (in another order, which neither a column's lowest and highest nor the split depends on), and the
+  // random draws come in the same order, so the trees are the same.
+  const cols = Array.from({ length: dims }, () => new Float64Array(n));
+  for (let i = 0; i < n; i++) {
+    const row = data[i]!;
+    for (let f = 0; f < dims; f++) cols[f]![i] = row[f]!;
+  }
+  const buf = new Int32Array(size);
+  const grow = (lo: number, hi: number, depth: number): Tree => {
+    const count = hi - lo;
+    if (depth >= limit || count <= 1) return { size: count };
     for (let tries = 0; tries < 2 * dims; tries++) {
       const f = Math.floor(rnd() * dims);
-      let lo = Infinity;
-      let hi = -Infinity;
-      for (const i of idx) {
-        const v = data[i]![f]!;
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
+      const col = cols[f]!;
+      let min = Infinity;
+      let max = -Infinity;
+      for (let j = lo; j < hi; j++) {
+        const v = col[buf[j]!]!;
+        if (v < min) min = v;
+        if (v > max) max = v;
       }
-      if (hi > lo) {
-        const split = lo + rnd() * (hi - lo);
-        const left: number[] = [];
-        const right: number[] = [];
-        for (const i of idx) (data[i]![f]! < split ? left : right).push(i);
-        return { f, split, left: grow(left, depth + 1), right: grow(right, depth + 1) };
+      if (max > min) {
+        const split = min + rnd() * (max - min);
+        let i = lo;
+        let j = hi - 1;
+        while (i <= j) {
+          if (col[buf[i]!]! < split) i++;
+          else {
+            const t = buf[i]!;
+            buf[i] = buf[j]!;
+            buf[j] = t;
+            j--;
+          }
+        }
+        return { f, split, left: grow(lo, i, depth + 1), right: grow(i, hi, depth + 1) };
       }
     }
-    return { size: idx.length };
+    return { size: count };
   };
   const forest: Forest = { trees: [], size };
   const all = Array.from({ length: n }, (_, i) => i);
@@ -211,7 +230,8 @@ export function growForest(data: readonly (readonly number[])[], options: { tree
       [all[i], all[j]] = [all[j]!, all[i]!];
     }
     const members = all.slice(0, size);
-    forest.trees.push({ root: grow(members, 0), members });
+    buf.set(members);
+    forest.trees.push({ root: grow(0, size, 0), members });
   }
   return forest;
 }

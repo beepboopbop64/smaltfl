@@ -12,7 +12,8 @@ match smaltdb's `CLAUDE.md`.
 | Command | What it does | When |
 |---|---|---|
 | `npm ci && npm run deps` | Installs dependencies, then the pinned smaltdb, smaltnb and smaltkit builds in `packed.json` | First, and again after every `npm ci` or `npm install` |
-| `npm run check` | `npm run typecheck` then `npm test` (vitest): what CI runs | Before every commit |
+| `npm run check` | `npm run typecheck` then `npm test` (vitest, under a minute on four cores) | Before every commit |
+| `npm run test:slow` | The month-long engine runs `npm test` leaves out (`SLOW` in `vitest.config.ts`: `test/estate-flow.test.ts`, about 90 s). CI runs it, and `npm run test:isolated` (every file in a fresh module graph), in a job beside `test` | Changes to the runtime, the gates or the estate |
 | `npm run build` | `dist/`: the core (`index.js`), the runtime plugin (`plugin/index.js`) and their declarations | Packaging checks |
 | `npm run bench` | The scenario benchmarks in `bench/`, written to `bench/results/node.json` | Changes that could affect speed |
 | `npm run build:app` | The app in `dist/app` on `examples/nyc-taxis-weather/` (its notebooks expanded, shipped as `data/flow.json`), with the `data` branch's daily loads if fetched (else the XS fixtures); `-- --flow examples/security-signins/flow.json --out dist/app-signins` for the sign-ins (its generator's `--demo` days from the data list's `generateArgs`). Bundles are named by content (`bundles.json`) | Changes to `src/app` |
