@@ -649,6 +649,13 @@ export function tripped(n: Pick<ExpectNode, 'maxDropped'>, r: ExpectationResult)
   return null;
 }
 
+/** What a refused file's hold says (ADR 0014 §2): the columns the file has against the columns declared, where the
+ * engine said so ("file has 4 of 5 columns"), else the engine's words. */
+export function refusedSaid(why: string): string {
+  const m = /the header has (\d+) fields? but (\d+) columns? (?:are|is) declared/.exec(why);
+  return m ? `file has ${m[1]} of ${m[2]} columns` : `file refused: ${why}`;
+}
+
 /**
  * What a reconciliation's counts say (ADR 0014 §6), or null when the rows reconcile. Exact: a key on two rows, a blank
  * key, a key of the other node with no row here or a key here the other node lacks is each something wrong, said with
@@ -701,7 +708,12 @@ export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, m
   const pub = plan.publish;
   if (!pub) return [];
   const out: RunHold[] = [];
-  if (pub.hold.includes('checks'))
+  // A source the engine couldn't read as declared (plan/4, ADR 0014 §2): the schema check's hold, said with the file's
+  // columns; nothing was built, so nothing else was judged.
+  const refused = manifest.nodes.filter((m) => m.status === 'refused');
+  for (const m of refused) out.push({ by: 'checks', node: m.node, origin: m.origin, said: refusedSaid(m.refused ?? 'the file was refused'), reaches: reachOf(plan, m.node) });
+  // Nothing was built after a refusal: no check was counted, and none is held for it.
+  if (pub.hold.includes('checks') && !refused.length)
     plan.nodes.forEach((n, i) => {
       if (n.op !== 'expect') return;
       const counts = manifest.nodes.find((m) => m.node === i)?.expectations;
@@ -710,7 +722,7 @@ export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, m
     });
   // A gold gate's reconciliation (ADR 0014 §6, plan/4): exact, so a count the run recorded holds, where the gate says
   // hold; a gate not counted holds too, since the run was asked to count it.
-  for (const [node, g] of (isPublish2(pub) ? pub.gates : undefined) ?? []) {
+  for (const [node, g] of (isPublish2(pub) && !refused.length ? pub.gates : undefined) ?? []) {
     if (!g.reconcile || g.checks.reconcile !== 'hold') continue;
     const n = plan.nodes[node]!;
     const counts = manifest.nodes.find((m) => m.node === node)?.gate?.reconcile;
@@ -725,6 +737,8 @@ export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, m
     // A watch that never holds (ADR 0010 §10, `holds: false`) is told and recorded, and holds nothing, its claim
     // missing or not.
     if (!holds) continue;
+    // With a file refused, no claim could be told of the day: the refusal is what holds it.
+    if ((!j || 'unjudged' in j) && refused.length) continue;
     if (!j || 'unjudged' in j) out.push({ by: 'unjudged', node, origin, said: j && 'unjudged' in j ? j.unjudged : mine.length ? `${mine.length} verdicts for ${origin}` : `no claim for ${origin}`, reaches: reachOf(plan, node) });
     else if (claimHolds(pub.hold, j.claim)) out.push({ by: 'story', node, origin, said: j.claim.head, reaches: reachOf(plan, node), claim: j.claim });
   }
@@ -744,7 +758,8 @@ export function holdsOf(plan: Pick<FlowPlan, 'nodes' | 'outputs' | 'publish'>, m
         if (l) h.load = { ...l };
       } else if (h.by === 'checks') {
         const read = [...upstream(plan, h.node)].filter((i) => watched.has(i));
-        if (read.length === 1) h.load = { ...loads.get(read[0]!)! };
+        const l = read.length === 1 ? loads.get(read[0]!) : undefined;
+        if (l) h.load = { ...l };
       }
     }
     // A check that reads several watched loads (a join of both sources) is held once for each of them, each reaching

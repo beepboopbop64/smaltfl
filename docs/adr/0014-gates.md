@@ -1,6 +1,6 @@
 # ADR 0014: Gates: bronze, silver and gold checks in the notebook, written bands and due dates in the ontology, a sealed gold
 
-- **Status:** accepted, 2026-11-09; slices 1 to 6 built 2026-11-10 (§"As built"), slice 7 next. It records the
+- **Status:** accepted, 2026-11-09; all seven slices built 2026-11-10 (§"As built"). It records the
   maintainer's plan and answers of 2026-11-09 (Q-110 to Q-117, docs/OPEN_QUESTIONS.md), given after a survey of how
   layered data-quality checks are built and shown (§Sources). The control estate (ADR 0013 §8) is its answer key.
 - **Date:** 2026-11-09
@@ -417,6 +417,28 @@ and that no silver finding repeats a bronze cause.
   reason as the flow entry's. A day that published offers the last alone.
 - **Against the key:** nothing moves; the key's days are judged as in slice 5. **Still wrong:** the pentest cluster
   and the DR day (the short base) and the refused file (slice 7).
+
+### Slice 7 (2026-11-10): a refused file as the schema check's hold
+
+- **The engine** (`runPlan`): in a flow with gates (plan/4), a source the engine can't read as declared (the io
+  plugin's refusal of a file whose header has fewer fields than the columns declared, or any failure to snapshot it)
+  is no longer a failed run. The source is recorded in the manifest as `refused` (status `refused`, `refused` saying
+  why, no key, no content), nothing downstream is typed, keyed or built, the manifest carries the snapshots alone and
+  no outputs, and the run is held (`holdsOf`: a `checks` hold on the source, `refusedSaid`: "file has 4 of 5
+  columns"; with a file refused no claim could be told of the day, so nothing is held as not judged). Every other
+  flow fails as it always did (ADR 0013's controls assert the thrown run). The watched sources that could be read are
+  measured and their claims judged as on any day; the refused one and the steps are not.
+- **Verify** finds such a run coherent (the nodes are the plan's sources, no outputs, the refused node says why) and
+  computes the hold again from the manifest; its keys and stored checks skip the refused node. **A release** of it is
+  refused: nothing was built, "the day waits for a corrected file"; the app's sheet offers no Publish as is for it,
+  so the day is decided not published, or runs again when the corrected file arrives (the same day, run again,
+  publishes, as any held day run again does). The record keeps it as a held run, not a failed one.
+- **The page** (`claimsForRun`): a load it can't measure tells no claim and is left to the engine, which holds on it
+  under a gate; the status line reads "Held: file has 4 of 5 columns".
+- **Against the key** (`test/estate-flow.test.ts`): Thu 7 holds the logging file under the schema check, "file has 4
+  of 5 columns", nothing built, verified, and Fri 8 publishes. **Still wrong against the key:** the pentest cluster
+  and the DR day alone, both the short base's doing (the app's year of history learns their due shares); every other
+  row of the key reads as the key has it.
 
 ## Sources (the survey of 2026-11-09)
 

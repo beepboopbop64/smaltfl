@@ -83,14 +83,18 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
   const problems: string[] = [];
   if (manifest.flow.id !== plan.flow.id || manifest.flow.hash !== plan.flow.hash) problems.push("the flow isn't the plan's");
   if (!same(manifest.parameters, plan.parameters)) problems.push("the parameters aren't the plan's");
-  if (!same(manifest.nodes.map((m) => m.node), needed)) problems.push("the nodes aren't the ones the plan needs, in its order");
+  // A run with a source refused (plan/4, ADR 0014 §2) built nothing: its nodes are the plan's sources alone, no outputs.
+  const refusedRun = manifest.nodes.some((m) => m.status === 'refused');
+  if (refusedRun && plan.smaltflPlan !== 4) problems.push('a source is refused, which only a flow with gates holds on');
+  if (!same(manifest.nodes.map((m) => m.node), refusedRun ? needed.filter((i) => plan.nodes[i]!.op === 'table') : needed)) problems.push("the nodes aren't the ones the plan needs, in its order");
   for (const m of manifest.nodes) {
     const n = plan.nodes[m.node];
     if (!n || n.op !== m.op || n.origin !== m.origin) problems.push(`node ${m.node} isn't the plan's`);
-    if (stored.has(m.node) && (m.content === undefined || m.rows === undefined)) problems.push(`${m.origin} is stored but has no content`);
+    if (m.status === 'refused' && (typeof m.refused !== 'string' || m.key !== '' || m.content !== undefined)) problems.push(`${m.origin} is refused and says why, with no key and no content`);
+    if (m.status !== 'refused' && stored.has(m.node) && (m.content === undefined || m.rows === undefined)) problems.push(`${m.origin} is stored but has no content`);
   }
-  if (!same(Object.keys(manifest.outputs).sort(), plan.outputs.map((o) => o.name))) problems.push("the outputs aren't the plan's");
-  for (const o of plan.outputs) {
+  if (!same(Object.keys(manifest.outputs).sort(), refusedRun ? [] : plan.outputs.map((o) => o.name))) problems.push("the outputs aren't the plan's");
+  for (const o of refusedRun ? [] : plan.outputs) {
     const r = byNode.get(o.node);
     const out = manifest.outputs[o.name];
     if (!r || !out || out.key !== r.key || out.content !== r.content || out.rows !== r.rows) problems.push(`output ${o.name} doesn't match its node`);
@@ -128,7 +132,7 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
   let badKeys = 0;
   for (const m of manifest.nodes) {
     const n = plan.nodes[m.node];
-    if (!n) continue;
+    if (!n || m.status === 'refused') continue;
     let key: string | null = null;
     try {
       key = n.op === 'table' ? (m.content ? await nodeKey(n, [], manifest.engine, m.content) : null) : await nodeKey(n, n.inputs.map((j) => byNode.get(j)?.key ?? ''), manifest.engine);
@@ -214,7 +218,10 @@ export async function verifyRun(db: Database, runId: number, options: VerifyOpti
     for (const o of plan.outputs) {
       if (!held.has(o.name)) continue;
       const named = currentOf(db, o.name);
-      const key = manifest.outputs[o.name]!.key;
+      // A run that built nothing (a file refused) staged nothing: there is no version of it a name could show.
+      const staged = manifest.outputs[o.name];
+      if (!staged) continue;
+      const key = staged.key;
       if (!named) continue; // still staged: nothing to check
       if (named.run !== runId) {
         if (named.key !== key) continue; // another version: still staged

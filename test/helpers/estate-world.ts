@@ -85,7 +85,14 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     const kept: Record<string, unknown[][]> = {};
     for (const c of ESTATE_CONTROLS) {
       const { plan, s } = await settingsOf(day, c);
-      const m = await measureLoad(db, `${c}_file`, s);
+      let m: Measures;
+      try {
+        m = await measureLoad(db, `${c}_file`, s);
+      } catch {
+        // The file can't be read as declared: no claim; the run holds on it (ADR 0014 §2, slice 7).
+        told[c] = null;
+        continue;
+      }
       measured[c] = m;
       await pinTail(c);
       // The load's kept rows (ADR 0014 §5): the classifier's today, against the sample's like days.
@@ -99,6 +106,7 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     await pinFile(db, samplePath('posture'), utf8(JSON.stringify(samples.posture)));
     const r = await runFlow(db, doc, { smaltdb: SMALTDB, parameters: { day }, claims, tell: { posture: { skip: [], levels: [] } } });
     for (const c of ESTATE_CONTROLS) {
+      if (!measured[c]) continue;
       tails[c]!.push(measured[c]!);
       samples[c] = appendSample(samples[c]!, day, kept[c]!);
     }

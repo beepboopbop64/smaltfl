@@ -8,7 +8,7 @@
  *
  * Slice 1 (the gate, the defaults, the rule that written checks hold and learned ones warn unless the value is bad):
  * - the empty MFA file holds on the amount; the doubled TLS file and both scope days hold on the amount too (slice 3
- *   names scope); the refused logging file is a failed run (slice 7 makes it the schema check's hold);
+ *   names scope); the refused logging file is a failed run until slice 7 makes it the schema check's hold;
  * - a learned finding that isn't a bad value publishes as unusual.
  * Slice 2 (bands and due marks):
  * - the WAF collapse and the backup outage hold on their bands, said with the band;
@@ -27,10 +27,13 @@
  *   own rule beside TLS's amount, as the key has it, and nothing upstream explains a written rule away;
  * - each gold summary is reconciled by its key (by unit with the posture's units) on every run, kept in the manifest,
  *   clean on every day, and verify counts it again.
+ * Slice 7 (a refused file as the schema check's hold):
+ * - the day the logging file lacks a column is a held run, not a failed one: the file is recorded as refused, nothing
+ *   is built, the hold says "file has 4 of 5 columns", verify finds the manifest coherent, and the next day publishes.
  * - still wrong against the key: the pentest cluster holds by the bad value and the DR problem by the new value,
  *   since with two and a half months of history neither control has had twenty due dates for the due check to
- *   learn from (the app's year of history judges both; the test's base is short for speed); the refused file is a
- *   failed run (slice 7). The seal itself is the app's: the owner's signature on a run whose gates passed.
+ *   learn from (the app's year of history judges both; the test's base is short for speed). The seal itself is the
+ *   app's: the owner's signature on a run whose gates passed.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
@@ -84,11 +87,23 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(estateHolds(result(plusDays(ESTATE_PLANTED.empty, 1)))).toEqual([]);
   });
 
-  it('refuses the day the logging file lacks a column (a failed run until slice 7)', () => {
-    const r = w.results.get(ESTATE_PLANTED.column);
-    expect(r).toBeInstanceOf(Error);
-    expect((r as Error).message).toMatch(/logging_file: the header has 4 fields but 5 columns are declared/);
-  });
+  it('holds the day the logging file lacks a column under the schema check, nothing built, and verifies it (slice 7)', async () => {
+    const r = result(ESTATE_PLANTED.column);
+    expect(estateHolds(r)).toEqual(['checks:logging']);
+    expect(said(ESTATE_PLANTED.column, 'logging')).toBe('file has 4 of 5 columns');
+    expect(r.published).toEqual([]);
+    expect(r.manifest.outputs).toEqual({});
+    expect(r.manifest.nodes.find((n) => n.origin === 'logging')).toMatchObject({ status: 'refused', key: '' });
+    expect(r.manifest.nodes.every((n) => n.op === 'table')).toBe(true);
+    // No claim could be told of the file, and the posture wasn't built: neither is "not judged"; the refusal holds alone.
+    expect(claim(ESTATE_PLANTED.column, 'logging')).toBeNull();
+    const v = await verifyRun(w.db, r.run, { smaltdb: SMALTDB, level: 'rerun', manifest: r.hash });
+    expect(v.ok).toBe(true);
+    expect(v.checks.find((c) => c.check === 'held')!.note).toBe('held by logging (its checks)');
+    // The next day reads the file again (it is the contradiction day, held by the posture's rule, not by the file).
+    expect(estateHolds(result(plusDays(ESTATE_PLANTED.column, 1)))).not.toContain('checks:logging');
+    expect(result(plusDays(ESTATE_PLANTED.column, 1)).manifest.nodes.find((n) => n.origin === 'logging')!.status).toBe('built');
+  }, 120_000);
 
   it('holds the WAF collapse on its written band, said with the band (slice 2)', () => {
     expect(said(ESTATE_PLANTED.collapse, 'waf')).toBe('Status fail: 59.6% (band 0%–15%)');
@@ -110,7 +125,8 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
   it('reconciles each gold summary by its key on every run, kept in the manifest, clean every day; verify counts it again (slice 5)', async () => {
     for (let day = '2024-03-01'; day <= '2024-03-31'; day = plusDays(day, 1)) {
       const r = w.results.get(day);
-      if (!r || r instanceof Error) continue;
+      // The day a file was refused built nothing: no gate to count (slice 7).
+      if (!r || r instanceof Error || r.manifest.nodes.some((n) => n.status === 'refused')) continue;
       const gold = r.manifest.nodes.filter((n) => n.gate);
       expect(gold.map((n) => n.origin).sort(), day).toEqual(['by_control', 'by_type', 'by_unit']);
       for (const n of gold) {

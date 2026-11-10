@@ -4750,7 +4750,8 @@ function briefInputs(day: string): BriefIn {
   if (r && p) {
     const later = readers && readers > day ? readers : null;
     const can = (o: DecisionOption) => checkDecision(policies(), state.viewer, o);
-    options.push({ option: 'asis', label: 'Publish as is', line: 'readers get the day as it came, marked', off: later ? `${dayShort(later)} is published` : can('asis').allowed ? null : `${deciders()} decides` });
+    const refusedFile = r.result.manifest.nodes.find((n) => n.status === 'refused');
+    options.push({ option: 'asis', label: 'Publish as is', line: 'readers get the day as it came, marked', off: refusedFile ? `nothing was built: ${refusedFile.origin}’s file was refused` : later ? `${dayShort(later)} is published` : can('asis').allowed ? null : `${deciders()} decides` });
     options.push({ option: 'dont', label: readers && readers < day ? `Keep ${dayShort(readers)}` : 'Don’t publish', line: readers && readers < day ? `readers keep ${dayShort(readers)} until a corrected file arrives` : 'readers get nothing for the day', off: can('dont').allowed ? null : `${deciders()} decides` });
     const rem = remediesFor(r);
     for (const o of rem?.offers ?? []) if (o.option === 'fill' || o.option === 'complete') options.push({ option: o.option, label: o.label, line: o.option === 'fill' ? 'a good day near it fills what is missing, marked' : 'the part that arrived goes out alone, marked', off: o.off ?? (can(o.option).allowed ? null : `${deciders()} decides`) });
@@ -8555,7 +8556,15 @@ async function claimsForRun(engine: Engine, day: string | undefined, parameters:
     if (!b) continue;
     const settings = settingsFor(plan, node, ref ? base : null, state.doc.steps);
     if (!settings) continue;
-    const m = await measureLoad(engine, b.table, settings);
+    let m: Measures;
+    try {
+      m = await measureLoad(engine, b.table, settings);
+    } catch (e) {
+      // The file can't be read as declared (ADR 0014 §2, slice 7): no claim; in a flow with gates the run holds on it
+      // under the schema check, and without gates the run fails as it always did.
+      console.warn(`smaltfl: ${source}'s load can't be measured: ${message(e)}`);
+      continue;
+    }
     measuring.push(m);
     // The load's kept rows (ADR 0014 §5), where the node keeps a sample: the classifier's today, told with the claim.
     let kept: unknown[][] | undefined;

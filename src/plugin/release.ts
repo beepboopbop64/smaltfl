@@ -249,6 +249,8 @@ export async function release(db: Database, input: unknown): Promise<ReleaseResu
   const policies = doc ? await policiesHash(doc.policies) : null;
   const derived = derivedOf(db, r.run);
   if (r.withdraws !== undefined) return withdraw(db, r, stored, policies);
+  const refusedFile = manifest.nodes.find((m) => m.status === 'refused');
+  if (refusedFile) return refuse(`run ${r.run} built nothing: ${refusedFile.origin}'s file was refused (${refusedFile.refused ?? 'as declared'}), so there is nothing to publish; the day waits for a corrected file`);
   if ((r.option === 'asis' || r.option === 'accept') && derived) return refuse(`run ${r.run} is a derived run: it is released as the fill or the part its decision names`);
   let held: Stored | null = null;
   if (r.option === 'fill' || r.option === 'complete') {

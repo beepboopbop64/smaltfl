@@ -27,8 +27,11 @@ export interface ManifestNode {
   origin: string;
   op: PlanNode['op'];
   key: string;
-  /** built: a new version was stored (for a source: a new snapshot); reused: its key was already stored; folded: computed inside a stored node's statement. */
-  status: 'built' | 'reused' | 'folded';
+  /** built: a new version was stored (for a source: a new snapshot); reused: its key was already stored; folded: computed
+   * inside a stored node's statement; refused (plan/4, ADR 0014 §2): the engine couldn't read the source as declared,
+   * so nothing was built and the run is held under the schema check, `refused` saying why. */
+  status: 'built' | 'reused' | 'folded' | 'refused';
+  refused?: string;
   /** Stored nodes: the content hash and row count of their version. */
   content?: string;
   rows?: number;

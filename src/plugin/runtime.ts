@@ -101,12 +101,24 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     records.set(i, { node: i, origin: n.origin, op: n.op, key: keys.get(i)!, status, ...extra });
   };
 
-  // 1. Snapshots: each source's rows, kept by content hash.
+  // 1. Snapshots: each source's rows, kept by content hash. In a flow with gates (plan/4, ADR 0014 §2), a source the
+  // engine can't read as declared is the schema check's hold, not a failed run: it is recorded as refused, nothing is
+  // built, and the run is held (core/hold.ts holdsOf). Any other flow fails as it always did.
+  const refused = new Map<number, string>();
   for (const i of needed) {
     const n = plan.nodes[i]!;
     if (n.op !== 'table') continue;
     aborted(signal);
-    const snap = await snapshot(db, n, env);
+    let snap: Snapshot;
+    try {
+      snap = await snapshot(db, n, env);
+    } catch (e) {
+      if (!(e instanceof RunError) || plan.smaltflPlan !== 4) throw e;
+      refused.set(i, e.message);
+      keys.set(i, '');
+      record(i, 'refused', { refused: e.message });
+      continue;
+    }
     n.schema = snap.schema;
     keys.set(i, snap.key);
     tables.set(i, snap.table);
@@ -115,18 +127,22 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
 
   // 2. Types: every node's output columns, with everything folded onto the snapshots. A donor has its source's
   // columns, or a fill can't take them by name (S4); every output a fill step reaches carries its mark (S1).
+  const unreadable = refused.size > 0;
   const columns = (i: number) => plan.nodes[i]!.schema!.map(([name]) => name);
   const onSnapshots: EmitContext = { table: (i) => (plan.nodes[i]!.op === 'table' ? tables.get(i) : undefined), columns };
-  for (const i of needed) {
+  for (const i of unreadable ? [] : needed) {
     const n = plan.nodes[i]!;
     if (n.op === 'table') continue;
     if (n.op === 'fill' && n.inputs.length === 2) sameColumnsAsSource(plan, n);
     n.schema = typeNode(db, emitSelect(plan, i, onSnapshots), n, snapshotsRead(plan, i, tables));
   }
-  marked(plan, needed);
+  if (!unreadable) marked(plan, needed);
+  // Nothing typed after a refusal: the refused source and every step have no columns to say, and the stored plan says so
+  // (an empty schema), so what reads the plan for the day finds columns, none.
+  if (unreadable) for (const i of needed) plan.nodes[i]!.schema ??= [];
 
   // 3. Keys, from the typed plan.
-  for (const i of needed) {
+  for (const i of unreadable ? [] : needed) {
     const n = plan.nodes[i]!;
     if (n.op !== 'table') keys.set(i, await nodeKey(n, n.inputs.map((j) => keys.get(j)!), env));
   }
@@ -138,7 +154,7 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   // count a holding flow recorded never lets a flow that doesn't hold publish the same day.
   const holdsChecks = plan.publish?.hold.includes('checks') ?? false;
   const ctx: EmitContext = { table: (i) => (stored.has(i) ? tables.get(i) : undefined), columns };
-  for (const i of needed) {
+  for (const i of unreadable ? [] : needed) {
     const n = plan.nodes[i]!;
     if (n.op === 'table') continue;
     aborted(signal);
@@ -178,7 +194,7 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
   // 4b. The gold gates (ADR 0014 §6, plan/4): each gate on a published node the plan doesn't watch is counted over the
   // dataset just built (or reused: the counts are of the content), and kept with the node in the manifest; a hold
   // reads them (core/hold.ts), and verify counts them again.
-  for (const [node, g] of (plan.publish && isPublish2(plan.publish) ? plan.publish.gates : undefined) ?? []) {
+  for (const [node, g] of (plan.publish && isPublish2(plan.publish) && !unreadable ? plan.publish.gates : undefined) ?? []) {
     const rec = records.get(node);
     if (!g.reconcile || !rec) continue;
     aborted(signal);
@@ -186,9 +202,9 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     if (counted) rec.gate = counted;
   }
 
-  // 5. The manifest.
+  // 5. The manifest. With a source refused, the snapshots alone, and no outputs: nothing was built.
   const outputs: Record<string, DatasetRecord> = {};
-  for (const o of plan.outputs) {
+  for (const o of unreadable ? [] : plan.outputs) {
     const r = records.get(o.node)!;
     outputs[o.name] = { key: r.key, content: r.content!, rows: r.rows! };
   }
@@ -201,7 +217,7 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     parameters: plan.parameters,
     engine: env,
     build: { smaltfl: commit, plugins: pluginsOf(db) },
-    nodes: needed.map((i) => records.get(i)!),
+    nodes: needed.filter((i) => records.has(i)).map((i) => records.get(i)!),
     outputs,
     data: context.data ?? null,
     log: context.log ?? null,
@@ -300,7 +316,8 @@ export async function runPlan(db: Database, input: unknown, options: RunOptions,
     }
     held = heldOutputs(plan, [...holds, ...(derived?.holds ?? [])]);
     const current = Object.fromEntries(held.map((name) => [name, currentOf(db, name)?.key]));
-    waiting = waitingOf(manifest, held, current);
+    // A run that built nothing staged nothing, and every output it holds waits all the same, for a corrected file.
+    waiting = unreadable ? [...held] : waitingOf(manifest, held, current);
   }
   const holding = new Set(held);
 

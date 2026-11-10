@@ -88,7 +88,13 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   (`src/core/gatecell.ts` `toggleCheck`, the `checks` property alone, a cell made where none was; `test/gate-toggle.test.ts`
   proves smaltnb's parser agrees with the hand-derived document), recorded at once as a `flow` entry with the reason;
   feedback on a finding (expected once → publish as is; the new level → accept; not interesting → the check turned
-  down in the cell). Slice 7 follows ADR 0014's order; it moves the test's "still wrong" assertion on the refused file.
+  down in the cell).
+- **Gates, slice 7** (ADR 0014 §"As built", 2026-11-10): a refused file is the schema check's hold, not a failed run,
+  in a flow with gates (`ManifestNode.status` `refused`, `holdsOf`/`refusedSaid`, verify coherent on a run that built
+  nothing, a release of it refused, the page tells no claim of a load it can't measure). ADR 0014 is built in full:
+  against the key only the pentest cluster and the DR day read otherwise, both the short test base's doing. **Next:**
+  the maintainer's reactions to the estate app, Q-118 and Q-119, and ADR 0009's remaining pause work (a corrected file
+  replacing a fill on its own, Q-62).
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

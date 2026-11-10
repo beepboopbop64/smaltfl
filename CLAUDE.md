@@ -127,7 +127,8 @@ match smaltdb's `CLAUDE.md`.
   owner's signature on a run whose gates passed or whose holds were decided and published; `sealPart` on a gold
   card's Checks tab). Slice 6: toggles that write the gate cell (`src/core/gatecell.ts` `toggleCheck`,
   `rewriteGateCall`, `withGateImport`; the app's `setCheck`, `recordFlowChange`) and feedback reasons as decisions
-  (`feedbackPart`). Slice 7 is ADR 0014's order.
+  (`feedbackPart`). Slice 7: a refused file as the schema check's hold in a gated flow (`runPlan` records the source
+  as `refused` and builds nothing; `holdsOf`/`refusedSaid`; verify and release know a run that built nothing).
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
@@ -140,8 +141,7 @@ match smaltdb's `CLAUDE.md`.
   the controls example; its Q-104 to Q-109 are the maintainers' to confirm. **Now:** [ADR 0014](docs/adr/0014-gates.md),
   gates (bronze, silver, gold checks as a `gate()` cell in the notebook, written bands and due marks in the ontology,
   scope and dependency rules, the classifier on a kept sample, a sealed gold), in its seven slices, judged against the
-  control estate's answer key (its §"The answer key"); slices 1 to 4 are built (its §"As built"), slices 5 to 7 follow
-  in order.
+  control estate's answer key (its §"The answer key"); all seven slices are built (its §"As built").
 
 ## Rules for this repository
 
