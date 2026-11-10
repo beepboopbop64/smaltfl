@@ -125,7 +125,9 @@ match smaltdb's `CLAUDE.md`.
   on a gold node plan/4's `publish.gates`, counted by the run into `ManifestNode.gate`, held by `holdsOf` with
   `reconcileSaid`, counted again by verify's `gate` check) and the seal (the app's `sealOfRun`/`sealIfReady`: the
   owner's signature on a run whose gates passed or whose holds were decided and published; `sealPart` on a gold
-  card's Checks tab). Slices 6 and 7 are ADR 0014's order.
+  card's Checks tab). Slice 6: toggles that write the gate cell (`src/core/gatecell.ts` `toggleCheck`,
+  `rewriteGateCall`, `withGateImport`; the app's `setCheck`, `recordFlowChange`) and feedback reasons as decisions
+  (`feedbackPart`). Slice 7 is ADR 0014's order.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).

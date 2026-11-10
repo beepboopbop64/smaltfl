@@ -83,7 +83,12 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   the gate says hold, verify's `gate` check), and the seal in the app (`sealOfRun`: gates passed or holds decided and
   published, signed by the owner without asking; the Checks tab's seal part, the card label's SEALED). The estate's
   posture reconciles with the inventory, each summary by its key; Thu 21 now holds the posture on its rule as the key
-  has it. Slices 6 and 7 follow ADR 0014's order; each moves the test's "still wrong" assertions as a decision.
+  has it.
+- **Gates, slice 6** (ADR 0014 §"As built", 2026-11-10): the Checks tab's toggles write the gate cell
+  (`src/core/gatecell.ts` `toggleCheck`, the `checks` property alone, a cell made where none was; `test/gate-toggle.test.ts`
+  proves smaltnb's parser agrees with the hand-derived document), recorded at once as a `flow` entry with the reason;
+  feedback on a finding (expected once → publish as is; the new level → accept; not interesting → the check turned
+  down in the cell). Slice 7 follows ADR 0014's order; it moves the test's "still wrong" assertion on the refused file.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

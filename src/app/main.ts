@@ -25,7 +25,8 @@ import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, timeOf, type 
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
 import { flowNames, isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
-import { CHECK_NAMES, CHECK_SAID, gateChecksOf, gateLayerOf, hasGates, JUDGED, LAYER_SAID, WRITTEN, type CheckName, type GateChecks } from '../core/gates.js';
+import { CHECK_NAMES, CHECK_SAID, checkOf, gateChecksOf, gateLayerOf, hasGates, JUDGED, LAYER_SAID, WRITTEN, type CheckMode, type CheckName, type GateChecks } from '../core/gates.js';
+import { toggleCheck } from '../core/gatecell.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, guessWords, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type KeptMark, type PauseState, type RemedyMark } from '../core/days.js';
 import { UNTIL, afterLine, betweenLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, failLine, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, checksSeen, filesSeen, findingOf, type RunSight, type AfterPart, type KeptLacks, type RemedySaid, type SheetIn, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, reconcileSaid, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Hold, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
@@ -3009,6 +3010,7 @@ async function checksTab(card: string, id: string): Promise<HTMLElement> {
   const built = run?.result.manifest.nodes.find((n) => n.origin.toLowerCase() === id.toLowerCase());
   const rule = state.doc.gates?.[id]?.reconcile ?? Object.entries(state.doc.gates ?? {}).find(([k]) => k.toLowerCase() === id.toLowerCase())?.[1].reconcile ?? null;
   const box = h('div', { class: 'checks-tab' });
+  const owner = isOwner();
   box.append(h('p', { class: 'lede' }, `${layer[0]!.toUpperCase()}${layer.slice(1)} gate: ${LAYER_SAID[layer]}. Written checks hold the day; learned ones warn, unless the ontology marks the value bad.`));
   if (run) box.append(sealPart(run));
   /** A gold check's result from the run (ADR 0014 §6): the reconciliation's counts, the columns as declared, a rule's counts. */
@@ -3047,13 +3049,21 @@ async function checksTab(card: string, id: string): Promise<HTMLElement> {
         ...mine.slice(0, 3).map((f) => h('button', { type: 'button', class: `ch-today ${f.severity}`, onclick: () => (openTab(card, 'news'), void Promise.resolve().then(() => document.getElementById(`finding-${f.key}`)?.scrollIntoView({ block: 'center' }))) }, glyphEl(f.severity === 'ok' ? 'publish' : f.severity, 14), ` ${f.title}`)),
         mine.length > 3 ? h('span', { class: 'ch-quiet' }, `and ${mine.length - 3} more`) : null)
       : h('span', { class: 'ch-ok' }, glyphEl('publish', 14), ' as usual');
+    // The toggle (ADR 0014 §1, slice 6): the owner sets a check's mode, and the gate cell is written.
+    const does: Child = owner
+      ? h('select', { class: `chip ch-mode ${mode}`, 'aria-label': `${name}: hold, warn or off`, onchange: (e: Event) => void setCheck(card, id, name, (e.target as HTMLSelectElement).value as CheckMode) },
+        ...(['hold', 'warn', 'off'] as const).map((m) => h('option', { value: m, ...(m === mode ? { selected: 'selected' } : {}) }, m)))
+      : h('span', { class: `chip ${mode}` }, mode);
     grid.append(h('div', { class: `ch-row${mode === 'off' ? ' off' : ''}`, role: 'row' },
       h('span', { class: 'ch-name', role: 'cell', title: CHECK_SAID[name] }, h('span', { class: 'mono' }, name), h('span', { class: 'ch-said' }, CHECK_SAID[name])),
       h('span', { class: `chip ${WRITTEN.has(name) ? 'written' : 'learned'}`, role: 'cell' }, WRITTEN.has(name) ? 'written' : 'learned'),
-      h('span', { class: `chip ${mode}`, role: 'cell' }, mode),
+      h('span', { class: 'ch-does', role: 'cell' }, does),
       h('span', { class: 'ch-cell', role: 'cell' }, today)));
   }
-  box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, `${layer} gate · ${CHECK_NAMES.filter((c) => checks[c] !== 'off').length} of ${CHECK_NAMES.length} checks on`), grid));
+  box.append(h('div', { class: 'part' }, h('p', { class: 'eyebrow' }, `${layer} gate · ${CHECK_NAMES.filter((c) => checks[c] !== 'off').length} of ${CHECK_NAMES.length} checks on`), grid,
+    owner ? h('p', { class: 'foot' }, 'Hold, warn or off: a change writes the gate cell in the notebook and is recorded as a flow change.') : null));
+  const feedback = feedbackPart(card, id, findings.filter((f) => f.severity === 'alert' || f.severity === 'warn'));
+  if (feedback) box.append(feedback);
   // Where it is written: the gate cell, or the layer's defaults.
   const nb = ref ? state.doc.notebooks?.find((n) => n.path === ref.notebook) : undefined;
   if (ref && nb) {
@@ -3065,6 +3075,62 @@ async function checksTab(card: string, id: string): Promise<HTMLElement> {
       h('p', { class: 'foot' }, 'The gate is written here, and the plan carries it: to change a check, change the cell.')));
   } else box.append(h('p', { class: 'foot' }, `No gate cell yet: ${id} has the ${layer} layer’s defaults. A gate(${id}, { checks }) cell beside it sets them.`));
   return box;
+}
+
+/**
+ * A check of a node's gate set to a mode (ADR 0014 §1, slice 6): the notebook's gate cell written, the document derived
+ * again from it, the change recorded with its reason, and everything that reads the gate drawn again.
+ */
+async function setCheck(card: string, id: string, name: CheckName, mode: CheckMode, reason?: string): Promise<boolean> {
+  if (!isOwner()) {
+    setStatus('A gate is the owner’s to write: its cell is in the notebook.', true);
+    return false;
+  }
+  const was = gateOn(id)?.[name];
+  if (was === mode) return false;
+  try {
+    const t = toggleCheck(state.doc, id, name, mode);
+    state.doc = t.doc;
+  } catch (e) {
+    setStatus(`The gate cell couldn't be written: ${message(e)}`, true);
+    return false;
+  }
+  storyCache.clear();
+  planKindCache.doc = null;
+  await recordFlowChange(reason ?? `${id}: ${name} ${was ?? 'default'} → ${mode}, from the Checks tab`);
+  setStatus(`${id}: ${name} is ${mode}. The gate cell in ${state.doc.cells?.[`gate:${id}`]?.notebook ?? 'the notebook'} says so now; the next run judges by it.`, false);
+  requestCanvas();
+  syncTitle();
+  if (state.selected) void renderSheet().then(() => openTab(card, 'checks'));
+  return true;
+}
+
+/**
+ * Feedback on today's findings (ADR 0014 §7, slice 6): a reason that maps to one effect, each recorded. Expected once
+ * publishes the held day as is with the reason; the new level accepts it (its cause's level, or the band); not
+ * interesting turns the finding's check down, hold to warn and warn to off, written into the gate cell.
+ */
+function feedbackPart(card: string, id: string, found: Finding[]): HTMLElement | null {
+  if (!found.length) return null;
+  const r = onScreen();
+  const held = !!r && !!ownHoldOf(id) && pauseOf(r)?.state === 'waiting';
+  const may = mayDecide(state.viewer);
+  const accept = r && held ? acceptFor(r) : null;
+  const owner = isOwner();
+  const rows = found.slice(0, 6).map((f) => {
+    const check = f.check ?? checkOf(f.kind);
+    const mode = check ? gateOn(id)?.[check] : undefined;
+    const down: CheckMode | null = mode === 'hold' ? 'warn' : mode === 'warn' ? 'off' : null;
+    const acts: Child[] = [];
+    if (held && may && r) acts.push(h('button', { type: 'button', class: 'btn small', onclick: () => void decide(r, 'asis', 'day', `Expected once: ${f.title}`) }, 'Expected once'));
+    if (held && may && r && accept && !accept.offer.off) acts.push(h('button', { type: 'button', class: 'btn small quiet', onclick: () => void decide(r, 'accept', 'day', `The new level: ${f.title}`) }, accept.offer.label.replace(/^Accept /, 'The ')));
+    if (owner && check && down) acts.push(h('button', { type: 'button', class: 'btn small quiet', title: `${check}: ${mode} → ${down}, written into the gate cell`, onclick: () => void setCheck(card, id, check, down, `Not interesting: ${f.title} (${check} ${mode} → ${down})`) }, `Not interesting · ${check} to ${down}`));
+    return h('li', {}, h('span', { class: `fb-what ${f.severity}` }, glyphEl(f.severity === 'alert' ? 'alert' : 'warn', 14), ` ${f.title}`), acts.length ? h('span', { class: 'fb-acts' }, ...acts) : h('span', { class: 'ch-quiet' }, held ? 'ask the owner, or someone who may decide' : 'nothing to decide: the day published'));
+  });
+  return h('div', { class: 'part feedback-part' },
+    h('p', { class: 'eyebrow' }, 'Feedback · one reason, one effect, each recorded'),
+    h('ul', { class: 'feedback' }, ...rows),
+    h('p', { class: 'foot' }, 'Expected once publishes the day as is with the reason; the new level accepts it as the new usual; not interesting turns the check down in the gate cell.'));
 }
 
 /**
@@ -9162,17 +9228,22 @@ async function run(): Promise<void> {
  * decision names; a failed one with why. Before it, the flow, when it changed since the record last saw it, whatever
  * changed it.
  */
+/** The flow, when it changed since the record last saw it, kept by hash with whatever changed it (a toggle's reason). */
+async function recordFlowChange(reason: string | null): Promise<void> {
+  if (!ledger) return;
+  const fh = await flowHash(state.doc);
+  const last = ledger.last('flow');
+  const before = (last?.about as { after?: string } | null)?.after ?? null;
+  if (before === fh) return;
+  const doc = await ledger.keep('flow', withoutDisplay(state.doc));
+  await ledger.append('flow', state.viewer, { before, after: fh, doc }, reason);
+}
+
 async function recordRun(rec: RunRecord | null, error: string | null): Promise<void> {
   if (!ledger) return;
   const result = rec?.result ?? null;
   try {
-    const fh = await flowHash(state.doc);
-    const last = ledger.last('flow');
-    const before = (last?.about as { after?: string } | null)?.after ?? null;
-    if (before !== fh) {
-      const doc = await ledger.keep('flow', withoutDisplay(state.doc));
-      await ledger.append('flow', state.viewer, { before, after: fh, doc });
-    }
+    await recordFlowChange(null);
     // The day whose file the engine had pinned: what the run read, whatever day is on screen.
     const load = loads.list[loads.pinned]?.day ?? null;
     if (result) {

@@ -1,6 +1,6 @@
 # ADR 0014: Gates: bronze, silver and gold checks in the notebook, written bands and due dates in the ontology, a sealed gold
 
-- **Status:** accepted, 2026-11-09; slices 1 to 5 built 2026-11-10 (§"As built"), slices 6 and 7 in order. It records the
+- **Status:** accepted, 2026-11-09; slices 1 to 6 built 2026-11-10 (§"As built"), slice 7 next. It records the
   maintainer's plan and answers of 2026-11-09 (Q-110 to Q-117, docs/OPEN_QUESTIONS.md), given after a survey of how
   layered data-quality checks are built and shown (§Sources). The control estate (ADR 0013 §8) is its answer key.
 - **Date:** 2026-11-09
@@ -396,6 +396,27 @@ and that no silver finding repeats a bronze cause.
   say whatever upstream explains; the summaries reconcile on every day and verify counts them again; nothing else
   moved. **Still wrong against the key:** the pentest cluster and the DR day (the short base, as in slice 2) and the
   refused file (slice 7).
+
+### Slice 6 (2026-11-10): toggles that write the gate cell, feedback reasons as decisions
+
+- **The toggle** (`src/core/gatecell.ts`, `toggleCheck`): on a card's Checks tab the owner sets each check to hold,
+  warn or off, and the notebook's gate cell is written: the `checks` property of the `gate()` call's options object
+  alone (every check as written, the one set changed; a check written at its layer's default stays written, so a gate
+  that says so in full keeps saying so), every other option as written (`rewriteGateCall`); a node with no gate cell
+  gains one at the end of the notebook that defines it, its layer written out, `gate` added to the notebook's import
+  where missing. The page has no TypeScript kit, so the document's derived fields (`gates`, the gate's cell ref, the
+  outline, the lines of the cells after) are brought along by hand, and `test/gate-toggle.test.ts` holds the two
+  together: the written notebook, expanded by smaltnb's parser, is the document the toggle made, on the gates test
+  flow and on the estate. The change is recorded at once as a `flow` entry with its reason (`recordFlowChange`: the
+  document kept by hash, before and after), not at the next run; the flow hash moves with the gate, so the run on
+  screen reads as the flow changed since (its seal open) until the next run.
+- **Feedback** (`feedbackPart`): today's findings of the node, each with the reasons that apply, one effect each,
+  recorded: *Expected once* publishes the held day as is with the reason ("Expected once: Status fail: 59.6% (band
+  0%–15%)"), for someone who may decide; *the new level* (or the new band) accepts it, as the Accept decision does;
+  *not interesting* turns the finding's check down, hold to warn and warn to off, written into the gate cell with the
+  reason as the flow entry's. A day that published offers the last alone.
+- **Against the key:** nothing moves; the key's days are judged as in slice 5. **Still wrong:** the pentest cluster
+  and the DR day (the short base) and the refused file (slice 7).
 
 ## Sources (the survey of 2026-11-09)
 
