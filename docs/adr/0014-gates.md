@@ -10,6 +10,8 @@
   (the combination and forest judges, a watched step, the control estate).
 - **Amends:** ADR 0010 §10 (a watch's settings: they gain a gate), ADR 0013 §3 (the forest's place among the learned
   checks), ADR 0009 §3 (a refused file becomes a held day under the schema check, its slice 3).
+- **Amended by:** [ADR 0015](0015-the-bronze-layer.md): bronze's default for `reconcile` (§2), a scope from the
+  ontology (§4), and two rows of the answer key, each marked where it stands.
 
 ## Context
 
@@ -83,7 +85,7 @@ flips either. By layer:
 | `scope` | rows for keys the inventory says are out of scope, keys in scope with no row (§4) | hold | hold | off |
 | `needs` | a value this dataset's rule says another forbids (§4) | off | hold | off |
 | `due` | what was due and what ran late, against the usual late share (§3) | hold | hold | off |
-| `reconcile` | rows by key equal the step it reads; keys unique; no blank key (§6) | off | off | hold |
+| `reconcile` | rows by key equal the step it reads; keys unique; no blank key (§6) | off (hold: amended by ADR 0015 §1) | off | hold |
 | `shares` | a value's share against its learned range | warn | warn | off |
 | `shape`, `hours` | a measure's quantiles, a time's hours | warn | warn | off |
 | `pairs` | two values together beyond what their shares explain (ADR 0013 §2) | warn | warn | off |
@@ -157,7 +159,7 @@ the **furthest-upstream** gate that failed; downstream findings read "because tl
 
 | Day | Planted | Gate | Check | Verdict |
 |---|---|---|---|---|
-| Mon 4 | MFA file has no rows | bronze mfa | amount | hold: "Almost no apps: 0" |
+| Mon 4 | MFA file has no rows | bronze mfa | amount | hold: "Almost no apps: 0" (amended by ADR 0015) |
 | Thu 7 | logging lacks retention_days | bronze logging | schema | hold: "file has 4 of 5 columns" (no failed run) |
 | Fri 8 | key rotation passes where encryption fails | silver posture | needs | hold: "41 pass key rotation while failing encryption" |
 | Tue 12 | WAF pass rate collapses | bronze waf | values (band) | hold: "Failing 60%, the band is 0–15%" |
@@ -165,7 +167,7 @@ the **furthest-upstream** gate that failed; downstream findings read "because tl
 | Thu 14, Fri 15 | vulnerability due dates cluster | bronze vuln_sla | due | note: "312 due, 9% late, as usual"; publishes |
 | Fri 15, Sat 16 | half the pentests due | bronze pentest | due | note; publishes |
 | Tue 19 | backup scanner outage | bronze backup | values (band on not_assessed) | hold: "Not assessed 45%, the band is 0–5%" |
-| Thu 21 | TLS rows twice | bronze tls; gold | amount; reconcile | hold: "More apps: 406 (+100%)"; "2 rows an application" |
+| Thu 21 | TLS rows twice | bronze tls; gold | amount; reconcile | hold: "More apps: 406 (+100%)"; "2 rows an application" (amended by ADR 0015) |
 | Fri 22, Sat 23 | six in ten DR exercises late | bronze dr_exercise | due | hold: "49 due, 61% late; usually 10%" |
 | Tue 26 | no TLS rows for Payments | bronze tls | scope | hold: "41 in-scope applications have no row" |
 | Fri 29, Sat 30 | access reviews due | bronze access_review | due | note; publishes |

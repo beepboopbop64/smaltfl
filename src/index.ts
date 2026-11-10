@@ -66,8 +66,8 @@ export { MANIFEST_FORMAT, createIdentity, fingerprint, manifestHash, planHash, p
 export type { DatasetRecord, ExpectationResult, Identity, IdentityCard, ManifestNode, RunManifest, SignatureCheck, SignedManifest } from './core/manifest.js';
 export { DECIDE, DECIDE_OPTIONS, checkAction, checkDecision, checkRun, covers, readView, wrapRead } from './core/policy.js';
 export type { ActionCheck, ActionRule, ColumnRule, DecideOption, DecisionOption, Group, Policies, Principal, ReadView, RowRule, Rule } from './core/policy.js';
-export type { ActRequest, ActionType, Edit, LinkType, Noun, ObjectType, Ontology, PropertyType, Reference } from './core/ontology.js';
-export { counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, VERDICT_MARKS } from './core/ontology.js';
+export type { ActRequest, ActionType, Condition, Edit, LinkType, Noun, ObjectType, Ontology, PropertyType, Reference, RowsDef, RowsOf } from './core/ontology.js';
+export { conditionOf, counted, glossOf, marksVerdicts, meaningOf, nounOf, partNamed, propertyOf, ROWS, rowsOf, VERDICT_MARKS } from './core/ontology.js';
 // What holds a run, what waits, and what the record decided (ADR 0009): one group a line, so that changes to one part
 // don't touch the others' lines.
 export { calendarFor, claimHolds, dayClaim, donorDefault, flowStory, loadClaim, rangesFor } from './core/hold.js';

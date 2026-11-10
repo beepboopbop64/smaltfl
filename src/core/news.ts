@@ -15,7 +15,7 @@
 import { daysBetween, namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
 import { clockColumns, likeDays, sampleRows, tellApart, type Apart, type SampleFile } from './apart.js';
-import { gated, gateChecksOf, type CheckName, type GateChecks, type NeedsRule, type ReconcileRule } from './gates.js';
+import { gated, gateChecksOf, writtenRules, type CheckName, type GateChecks, type NeedsRule, type ReconcileRule } from './gates.js';
 import { HistoryRanges, lateAt, lateUsual, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
 import { marksOn, nounOf, partNamed, propertyOf } from './ontology.js';
@@ -122,7 +122,8 @@ export interface JudgeSettings {
   due: readonly { column: string; status: string; miss: string; within: number }[];
   /** The gate's dependency rules (ADR 0014 §4), in the gate's order, for saying a contradiction in words. */
   needs: readonly NeedsRule[];
-  /** The gate's reconciliation (ADR 0014 §6), for saying its counts in words. */
+  /** The node's reconciliation (ADR 0014 §6), for saying its counts in words: the gate cell's, else the key the
+   * ontology's `rows` entry gives it (ADR 0015 §1), as the plan counts it (`writtenRules`). */
   reconcile: ReconcileRule | null;
 }
 
@@ -140,6 +141,8 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
   // New York's calendar is a format-2 flow's, as before ADR 0010; a format-3 document has its block's or none (Q-58).
   const legacyFlow = (doc.smaltfl ?? 2) < 3 && doc.calendar === undefined && watches.every(([, x]) => !isGeneralWatch(x));
   const m = marksOn(doc.ontology, source);
+  // The written rules whose counts the judge says in words (ADR 0015 §1): the gate cell's, else the ontology's.
+  const rules = writtenRules(doc, source);
   return {
     legacy: !general,
     calendar: general?.calendar === false ? NONE : resolveCalendar(doc.calendar, legacyFlow),
@@ -152,8 +155,8 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
     checks: gateChecksOf(doc, source),
     expect: new Map(m.expect.map(([column, value, low, high]) => [`${column.toLowerCase()}|${value}`, [low, high] as [number, number]])),
     due: m.due.map(([column, status, miss, within]) => ({ column, status, miss, within })),
-    needs: Object.entries(doc.gates ?? {}).find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1].needs ?? [],
-    reconcile: Object.entries(doc.gates ?? {}).find(([id]) => id.toLowerCase() === source.toLowerCase())?.[1].reconcile ?? null,
+    needs: rules.needs,
+    reconcile: rules.reconcile ? { key: rules.reconcile.key, ...(rules.reconcile.of !== undefined ? { of: rules.reconcile.of } : {}) } : null,
   };
 }
 

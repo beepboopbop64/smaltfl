@@ -7,7 +7,7 @@
  */
 import { calendarProblems, EVERIES, isEvery, type CalendarDef, type Every } from './calendar.js';
 import { gateProblems, type GateDef } from './gates.js';
-import { marksVerdicts, type Ontology } from './ontology.js';
+import { marksVerdicts, ROWS_FIELDS, type Ontology } from './ontology.js';
 import { DECIDE, DECIDE_OPTIONS, type Policies } from './policy.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { renameIdentifier, SqlTextError, tokens } from './sqltext.js';
@@ -801,6 +801,31 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
               described.add(k);
             });
           });
+        }
+      }
+      // What a dataset's rows are (ADR 0015 §1): one row an object of a type, for the objects a condition selects. The
+      // type's dataset is the inventory the scope is counted against, a source, there before the run as a gate's is.
+      if (o.rows !== undefined) {
+        if (!Array.isArray(o.rows)) add('$.ontology.rows', 'a list of { dataset, of, key?, where? }: what each dataset’s rows are');
+        else {
+          const sources = new Set((Array.isArray(doc.sources) ? doc.sources : []).filter((s: unknown) => isRecord(s) && typeof s.id === 'string').map((s: Record<string, unknown>) => String(s.id).toLowerCase()));
+          const values = (v: unknown) => (typeof v === 'string' && v !== '') || (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string' && x !== '') && new Set(v).size === v.length);
+          const tied = new Set<string>();
+          const objectTypes: unknown[] = o.objectTypes;
+          o.rows.forEach((r: unknown, i: number) => {
+            const at = `$.ontology.rows[${i}]`;
+            if (!isRecord(r) || typeof r.dataset !== 'string' || typeof r.of !== 'string') return add(at, '{ dataset, of, key?, where? }: a source or step, the object type its rows are one each of, its own name for the type’s key, and the condition an object meets');
+            for (const k of Object.keys(r)) if (!(ROWS_FIELDS as readonly string[]).includes(k)) add(`${at}.${k}`, `${k} isn't a rows entry's setting (${ROWS_FIELDS.join(', ')}): refused rather than ignored`);
+            if (!known(r.dataset)) add(`${at}.dataset`, `no source or step ${r.dataset}`);
+            else if (tied.has(r.dataset.toLowerCase())) add(`${at}.dataset`, `${r.dataset} has two entries (ids are compared without case): a dataset’s rows are one thing`);
+            tied.add(r.dataset.toLowerCase());
+            const type = objectTypes.find((t: unknown) => isRecord(t) && t.id === r.of) as Record<string, unknown> | undefined;
+            if (!type) add(`${at}.of`, `no object type ${r.of}`);
+            else if (typeof type.dataset === 'string' && known(type.dataset) && !sources.has(type.dataset.toLowerCase())) add(`${at}.of`, `${r.of}'s objects are ${type.dataset}, a step: a dataset’s rows are counted against a type whose objects are a source, which is there before the run`);
+            if (r.key !== undefined && (typeof r.key !== 'string' || r.key === '')) add(`${at}.key`, 'this dataset’s own name for the type’s key column');
+            if (r.where !== undefined && (!isRecord(r.where) || Object.keys(r.where).length === 0 || Object.keys(r.where).some((c) => c === '') || !Object.values(r.where).every(values))) add(`${at}.where`, '{ column: value | values } over the type’s dataset: every column to hold, a list any of its values (each once); left out, every object');
+          });
+          if (!(isRecord(doc.gates) && Object.keys(doc.gates).length > 0)) add('$.ontology.rows', 'what a dataset’s rows are is a gate’s written check (ADR 0015): the flow has no gate');
         }
       }
     }

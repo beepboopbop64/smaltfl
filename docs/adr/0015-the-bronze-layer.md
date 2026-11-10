@@ -182,4 +182,65 @@ Two rows of ADR 0014's answer key change, on purpose:
 
 ## As built
 
-Nothing yet.
+### Slice 1 (2026-11-10): the ontology's `rows`, the two rules it gives, bronze's key, the estate
+
+- **The declaration** (`RowsDef`, `Condition`, `Ontology.rows`, `ontology.ts`): `{ dataset, of, key?, where? }`.
+  `rowsOf(ontology, dataset)` gives a dataset's entry with its object type resolved: the type's key column, the
+  dataset's own name for it, and the condition in one order (`conditionOf`: by column, each column's values sorted,
+  each once). `validateDocument` takes an entry that names a source or step of the flow and an object type that
+  exists, whose objects are a source (the inventory is there before the run, as a gate's is). It refuses a dataset
+  with two entries, a `key` that isn't a column's name, a `where` that isn't `{ column: value | values }` with text
+  values (an empty one too: every object is said by leaving `where` out, so there is one way to write it), any other
+  key by name ("only isn't a rows entry's setting (dataset, of, key, where): refused rather than ignored"), and the
+  whole list in a flow with no gate.
+- **One function for a node's written rules** (`writtenRules(doc, node)`, `gates.ts`): the gate cell's own first, each
+  kind on its own (a cell that writes a scope still gets the ontology's key, and the other way round); else, from the
+  ontology's entry, the scope (the type's dataset as the inventory, its key, the dataset's own key column, the
+  condition) and the key (a reconciliation by that one column against no other node). Each says where it is written
+  (`from: 'gate' | 'ontology'`), for the page. A type whose key is several columns gives neither. Dependencies are
+  only the gate cell's. The plan's `rulesOf` and the judge's `judgeOf` both read it, so a count is said with the
+  column the engine counted ("406 rows for 203 app_id values"). Only a watched node's rules reach the plan; a
+  published node nothing watches is counted by its gate cell alone, as before.
+- **The condition is data, and the plan's scope is what it was.** Of the two ways the slice could go, `ScopePlan`
+  keeps its four fields (`table`, `key`, `own`, `where`), and a derived scope's `where` is the text `emitMatch`
+  (`emit.ts`) writes from the condition: `"criticality" IN ('critical', 'high') AND "internet_facing" IN ('yes')`,
+  values as text literals, a blank never in scope, `1 = 1` for every object. `validatePlan`'s exact key sets, the
+  measure settings, the plugin and `emitScopeCounts` did not change, and plan/4's encoding did not move.
+  `emitNeedsCounts` writes its `when` through the same function. `plan.ts` now imports `emit.ts`, which imports
+  `optimize.ts`, which imports `plan.ts`: a cycle of functions, none called while the modules load.
+- **Bronze holds on its key by default** (`LAYER_DEFAULTS.bronze.reconcile`: `off` → `hold`). Every bronze watch's
+  plan/4 `checks` says so, so every gated flow's plan hash moved; plan/4 has no pinned vector yet (slice 2 pins its
+  first, E15). A node with no key written counts nothing and is told nothing. Silver and gold are as they were.
+- **The story's lead** (`storyOf`, `story.ts`): where the amount is almost none (under a tenth of a day like it, or
+  the floor that needs no range) and is the node's own to tell, the scope's keys with no row are no lead: they follow
+  from the amount (`tier: follows`, `because: volume`). Rows out of scope on such a day still lead, a step whose
+  amount follows from a source wrong upstream keeps its rule as its own, and an amount marked as expected hands the
+  day back to the scope. Where a key on more than one row leads and the amount is above its range, the amount
+  follows from the key (`because: reconcile:repeats`); a repeated key explains no fall.
+- **The estate** (`examples/control-estate/`): the object type `application` (the inventory `apps`, key `app_id`,
+  title `name`) and one `rows` entry a control, each condition copied from the fixture's `appliesTo` and held to it by
+  `test/estate.test.ts` on three inventories. TLS's and the WAF's gate cells write no scope now (the WAF's is its
+  layer alone), and the notebook's note says the ontology has it. The inventory's rows are called applications, from
+  the type (`nounOf`), where they were rows. `npm run build:app -- --flow examples/control-estate/flow.json` builds a
+  year of every control's history with its scope and key counted: nothing out of scope, no key twice.
+- **What moved, on purpose**, each said where it is asserted:
+  - `test/estate-flow.test.ts`, Thu 21, TLS: was `/^More apps: 406 \(\+100%\)$/`, is `'203 apps repeat a key'`; the
+    amount is told as following from it. The posture's hold that day reads the same words, by its own rule.
+  - `test/estate-flow.test.ts`, Mon 4, MFA: the head is the same, `Almost no apps: 0`; the day gains "600 in scope
+    with no app", told as following from the amount.
+  - `test/estate-flow.test.ts`, the gates: `tls` and `waf` lost `scope: { of: 'apps', key: 'app_id', where:
+    "internet_facing = 'yes'" }`; the plan's scope for both is `"internet_facing" IN ('yes')` over `apps_file`.
+  - `test/gate-toggle.test.ts`: the text of TLS's gate cell after a toggle no longer ends with its scope.
+  - ADR 0014: the two answer-key rows and the `reconcile` row of its defaults table are marked as amended here;
+    `tools/judges/estate-panel.workflow.js` gives its judges the two rows as they now read.
+- **Tests:** `test/rows.test.ts` (the declaration, what is refused, the derived rules in the plan and the judge, the
+  condition counted in the engine with quotes and blanks, a load measured by the plan's rules, the story's lead);
+  `test/estate.test.ts` (the entries against the generator); `test/estate-flow.test.ts` (every control's scope and
+  key in the plan; every control every day of the history and of March counts nothing out of scope and no key twice,
+  but the four planted days, each with its counts; Wed 13, Tue 26 and every other row of the key as before). Its
+  world keeps each day's measures and the ranges each claim was told from.
+- **Left for the next slices:** nothing on screen reads `rows` yet (the lines and the page, slices 4 and 5; the Checks
+  tab still reads a gold node's key from its gate cell). A type with a key of several columns gives no rule. A
+  reconciliation's own "keys of the other node with no row" still leads an empty file: only the scope's is folded
+  under the amount, as the table above says. An app built before this slice has histories without the ten new
+  scopes and the keys, and judges neither until it is rebuilt.

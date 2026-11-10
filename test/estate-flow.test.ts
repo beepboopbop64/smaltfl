@@ -34,15 +34,22 @@
  *   since with two and a half months of history neither control has had twenty due dates for the due check to
  *   learn from (the app's year of history judges both; the test's base is short for speed). The seal itself is the
  *   app's: the owner's signature on a run whose gates passed.
+ * ADR 0015 §1 (the ontology says what a dataset's rows are):
+ * - every control's rows are one an application, for the applications the ontology's `rows` selects: the scope of all
+ *   twelve is counted (ten had none), and each file is held to its key. TLS's and the WAF's gate cells no longer write
+ *   a scope. The calm days count nothing out of scope and no key twice, on every control.
+ * - two rows of the answer key moved on purpose (the ADR's "What moves on the estate"): the empty MFA file keeps its
+ *   head, the amount, and the scope's 600 applications with no row follow from it; the doubled TLS file is led by its
+ *   key, "203 apps repeat a key" (it was the amount, "More apps: 406 (+100%)"), and the amount follows from the key.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
 import { validateDocument } from '../src/core/document.js';
 import { LAYER_DEFAULTS } from '../src/core/gates.js';
 import { planKind } from '../src/core/manifest.js';
-import { reconcileSaid } from '../src/core/hold.js';
+import { flowStory, reconcileSaid } from '../src/core/hold.js';
 import { translate, verifyRun } from '../src/index.js';
-import { ESTATE_PLANTED } from './fixtures/estate.js';
+import { appliesTo, ESTATE_CONTROLS, ESTATE_PLANTED } from './fixtures/estate.js';
 import { SMALTDB } from './helpers/engine.js';
 import { ESTATE_WATCHES, estateHolds, estateWorld, type EstateWorld } from './helpers/estate-world.js';
 
@@ -54,14 +61,18 @@ afterAll(() => w?.close());
 const result = (day: string) => w.result(day);
 const said = (day: string, origin: string) => result(day).holds.find((h) => h.origin === origin)?.said ?? null;
 const claim = (day: string, source: string) => w.claims.get(day)?.[source] ?? null;
+/** A control's story of a day as the page told its claim: its findings, each with its tier and what it follows from. */
+const story = (day: string, source: string) => flowStory(w.ranges.get(day)![source]!, day, w.doc, source);
 
 describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
   it('is plan/4: TLS’s gate as written, every other watch its layer’s defaults, the outputs gold', async () => {
     expect(validateDocument(w.doc)).toEqual([]);
     expect(Object.keys(w.doc.publish!.watch!)).toEqual([...ESTATE_WATCHES]);
     expect(Object.keys(w.doc.gates!)).toEqual(['tls', 'waf', 'posture', 'by_unit', 'by_control', 'by_type']);
-    expect(w.doc.gates!.tls).toEqual({ layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' }, scope: { of: 'apps', key: 'app_id', where: "internet_facing = 'yes'" } });
-    expect(w.doc.gates!.waf).toEqual({ layer: 'bronze', checks: {}, scope: { of: 'apps', key: 'app_id', where: "internet_facing = 'yes'" } });
+    // Moved on purpose by ADR 0015 §1: both cells wrote scope: { of: 'apps', key: 'app_id', where: "internet_facing = 'yes'" };
+    // the ontology's rows say which applications a control covers now, so neither cell writes a scope.
+    expect(w.doc.gates!.tls).toEqual({ layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' } });
+    expect(w.doc.gates!.waf).toEqual({ layer: 'bronze', checks: {} });
     expect(w.doc.gates!.posture).toEqual({ layer: 'silver', checks: { reconcile: 'hold' }, needs: [{ when: { key_rotation: 'pass' }, then: { encryption: ['pass', 'exception', 'not_assessed'] } }], reconcile: { key: ['app_id'], of: 'apps' } });
     expect(w.doc.gates!.by_unit).toEqual({ layer: 'gold', checks: {}, reconcile: { key: ['business_unit'], of: 'posture' } });
     expect(w.doc.gates!.by_control).toEqual({ layer: 'gold', checks: {}, reconcile: { key: ['control'] } });
@@ -71,6 +82,63 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(checks.tls).toEqual({ ...LAYER_DEFAULTS.bronze, classifier: 'off' });
     expect(checks.mfa).toEqual(LAYER_DEFAULTS.bronze);
     expect(checks.posture).toEqual({ ...LAYER_DEFAULTS.silver, reconcile: 'hold' });
+  });
+
+  it('ties every control’s rows to the application by the ontology: its scope and its key in the plan, the key held at bronze (ADR 0015 §1)', async () => {
+    expect(w.doc.ontology!.objectTypes).toMatchObject([{ id: 'application', dataset: 'apps', key: ['app_id'] }]);
+    expect(w.doc.ontology!.rows!.map((r) => r.dataset)).toEqual([...ESTATE_CONTROLS]);
+    const plan = await translate(w.doc, { day: '2024-03-04' });
+    const watch = Object.fromEntries((plan.publish as unknown as { watch: [number, { checks: Record<string, string>; scope: unknown; reconcile: unknown }][] }).watch.map(([n, x]) => [plan.nodes[n]!.origin, x]));
+    const where: Record<string, string> = {
+      tls: `"internet_facing" IN ('yes')`, waf: `"internet_facing" IN ('yes')`, pentest: `"criticality" IN ('critical', 'high') AND "internet_facing" IN ('yes')`,
+      encryption: `"datastore" IN ('yes')`, key_rotation: `"data_class" IN ('pci', 'pii') AND "datastore" IN ('yes')`, backup: `"datastore" IN ('yes')`,
+      dr_exercise: `"criticality" IN ('critical')`, vuln_sla: `"lifecycle" IN ('active')`, mfa: '1 = 1', access_review: `"data_class" IN ('pci', 'pii')`,
+      logging: `"lifecycle" IN ('active')`, privileged_access: `"criticality" IN ('critical', 'high')`,
+    };
+    for (const c of ESTATE_CONTROLS) {
+      expect(watch[c]!.scope, c).toEqual({ table: 'apps_file', key: 'app_id', own: 'app_id', where: where[c] });
+      expect(watch[c]!.reconcile, c).toEqual({ key: ['app_id'], table: null });
+      expect(watch[c]!.checks.scope, c).toBe('hold');
+      expect(watch[c]!.checks.reconcile, c).toBe('hold');
+    }
+    // The posture's rules are its gate cell's, as they were.
+    expect(watch.posture!.scope).toBeNull();
+    expect(watch.posture!.reconcile).toEqual({ key: ['app_id'], table: 'apps_file' });
+  });
+
+  it('counts nothing out of scope and no key twice on every control, every calm day: the history’s and March’s (ADR 0015)', () => {
+    const inScope = Object.fromEntries(ESTATE_CONTROLS.map((c) => [c, w.apps.filter((a) => appliesTo(c, a)).length]));
+    expect(inScope).toMatchObject({ tls: 203, waf: 203, mfa: 600 });
+    for (const c of ESTATE_CONTROLS) {
+      const n = inScope[c]!;
+      const g = w.bases[c]!.gate!;
+      expect(g.scope!.out.every((x) => x === 0) && g.scope!.missing.every((x) => x === 0) && g.scope!.inScope.every((x) => x === n), `${c}: the history's scope`).toBe(true);
+      expect(g.reconcile!.every((r) => r.rows === n && r.keys === n && r.blank === 0 && r.missing === 0 && r.extra === 0), `${c}: the history's key`).toBe(true);
+      expect(g.scope!.out).toHaveLength(w.bases[c]!.days.length);
+    }
+    // March: every control every day, but the four days planted on its scope or its rows (the day the logging file is
+    // refused has no measures at all).
+    const planted: Record<string, { scope: [number, number]; rows: number; keys: number }> = {
+      [`${ESTATE_PLANTED.empty} mfa`]: { scope: [0, 600], rows: 0, keys: 0 },
+      [`${ESTATE_PLANTED.scopeCreep} waf`]: { scope: [40, 0], rows: 243, keys: 243 },
+      [`${ESTATE_PLANTED.double} tls`]: { scope: [0, 0], rows: 406, keys: 203 },
+      [`${ESTATE_PLANTED.scopeLoss} tls`]: { scope: [0, 50], rows: 153, keys: 153 },
+    };
+    let measured = 0;
+    for (let day = '2024-03-01'; day <= '2024-03-31'; day = plusDays(day, 1)) {
+      for (const c of ESTATE_CONTROLS) {
+        const m = w.measures.get(day)?.[c];
+        if (!m) {
+          expect(`${day} ${c}`).toBe(`${ESTATE_PLANTED.column} logging`);
+          continue;
+        }
+        measured++;
+        const n = inScope[c]!;
+        const p = planted[`${day} ${c}`] ?? { scope: [0, 0], rows: n, keys: n };
+        expect(m.gate, `${day} ${c}`).toEqual({ scope: { out: p.scope[0], missing: p.scope[1], inScope: n }, reconcile: { rows: p.rows, keys: p.keys, blank: 0, missing: 0, extra: 0 } });
+      }
+    }
+    expect(measured).toBe(31 * 12 - 1);
   });
 
   it('publishes the calm days, every watch judged', () => {
@@ -85,6 +153,15 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(said(ESTATE_PLANTED.empty, 'mfa')).toMatch(/^Almost no apps: 0/);
     expect(result(ESTATE_PLANTED.empty).published).toEqual([]);
     expect(estateHolds(result(plusDays(ESTATE_PLANTED.empty, 1)))).toEqual([]);
+    // Moved on purpose by ADR 0015 ("What moves on the estate"): MFA covers every application, so the empty file also
+    // counts 600 in scope with no row. The head is the same: an amount that is almost none leads, and the scope's
+    // missing applications follow from it (before, MFA had no scope and the day had the amount alone).
+    const s = story(ESTATE_PLANTED.empty, 'mfa');
+    expect(s.head).toBe(said(ESTATE_PLANTED.empty, 'mfa'));
+    expect(s.hero).toBe('amount');
+    expect(s.findings.find((f) => f.kind === 'volume')).toMatchObject({ tier: 'cause', severity: 'alert' });
+    expect(s.findings.find((f) => f.key === 'scope:missing')).toMatchObject({ title: '600 in scope with no app', tier: 'follows', because: 'volume', was: 'alert', check: 'scope' });
+    expect(s.findings.some((f) => f.kind === 'reconcile')).toBe(false);
   });
 
   it('holds the day the logging file lacks a column under the schema check, nothing built, and verifies it (slice 7)', async () => {
@@ -113,9 +190,15 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(said(ESTATE_PLANTED.vulnCluster, 'vuln_sla')).toBeNull();
   });
 
-  it('holds the doubled TLS file on the amount, and the posture on its reconciliation with the inventory (slices 3, 5)', () => {
+  it('holds the doubled TLS file on its key, the amount following from it, and the posture on its reconciliation with the inventory (slices 3, 5; ADR 0015)', () => {
     expect(estateHolds(result(ESTATE_PLANTED.double))).toEqual(['story:posture', 'story:tls']);
-    expect(said(ESTATE_PLANTED.double, 'tls')).toMatch(/^More apps: 406 \(\+100%\)$/);
+    // Moved on purpose by ADR 0015 ("What moves on the estate"): this was /^More apps: 406 \(\+100%\)$/, the amount.
+    // TLS's rows are one an application, so the file is held to its key: the key leads and the amount follows from it.
+    expect(said(ESTATE_PLANTED.double, 'tls')).toBe('203 apps repeat a key');
+    const s = story(ESTATE_PLANTED.double, 'tls');
+    expect(s.findings.find((f) => f.key === 'reconcile:repeats')).toMatchObject({ tier: 'standalone', severity: 'alert', check: 'reconcile', detail: '406 rows for 203 app_id values: 2 rows a key, where one is expected.' });
+    expect(s.findings.find((f) => f.kind === 'volume')).toMatchObject({ title: 'More apps: 406 (+100%)', tier: 'follows', because: 'reconcile:repeats', was: 'alert' });
+    expect(s.findings.some((f) => f.kind === 'scope')).toBe(false);
     // The fan-out is the TLS file's doing, and the posture's own written rule says so too: a rule a wrong source can't explain away.
     expect(said(ESTATE_PLANTED.double, 'posture')).toBe('203 apps repeat a key');
     expect(claim(ESTATE_PLANTED.double, 'posture')).toBeNull();
@@ -142,11 +225,13 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(v.checks.filter((c) => c.check === 'gate').map((c) => [c.origin, c.ok])).toEqual([['by_unit', true], ['by_control', true], ['by_type', true]]);
   }, 120_000);
 
-  it('holds both scope days on the scope rule, said with the rows and the keys (slice 3)', () => {
+  it('holds both scope days on the scope rule, said with the rows and the keys (slice 3), the scope now the ontology’s (ADR 0015)', () => {
     expect(estateHolds(result(ESTATE_PLANTED.scopeCreep))).toEqual(['story:waf']);
     expect(said(ESTATE_PLANTED.scopeCreep, 'waf')).toBe('40 apps out of scope');
     expect(said(ESTATE_PLANTED.scopeLoss, 'tls')).toBe('50 in scope with no app');
     expect(estateHolds(result(plusDays(ESTATE_PLANTED.scopeLoss, 1)))).toEqual([]);
+    // A file short of a unit is not an amount that is almost none: the scope leads it, as before.
+    expect(story(ESTATE_PLANTED.scopeLoss, 'tls').findings.find((f) => f.key === 'scope:missing')).toMatchObject({ tier: 'standalone', severity: 'alert' });
   });
 
   it('holds the backup outage on the not-assessed band every control shares (slice 2)', () => {

@@ -83,7 +83,18 @@
     "summary.nb.ts"
   ],
   "ontology": {
-    "objectTypes": [],
+    "objectTypes": [
+      {
+        "id": "application",
+        "name": "Application",
+        "dataset": "apps",
+        "key": [
+          "app_id"
+        ],
+        "title": "name",
+        "description": "An application of the inventory: what every control's rows are one each of"
+      }
+    ],
     "linkTypes": [],
     "actionTypes": [],
     "nouns": {
@@ -152,6 +163,103 @@
         "many": "apps"
       }
     },
+    "rows": [
+      {
+        "dataset": "tls",
+        "of": "application",
+        "where": {
+          "internet_facing": "yes"
+        }
+      },
+      {
+        "dataset": "waf",
+        "of": "application",
+        "where": {
+          "internet_facing": "yes"
+        }
+      },
+      {
+        "dataset": "pentest",
+        "of": "application",
+        "where": {
+          "internet_facing": "yes",
+          "criticality": [
+            "critical",
+            "high"
+          ]
+        }
+      },
+      {
+        "dataset": "encryption",
+        "of": "application",
+        "where": {
+          "datastore": "yes"
+        }
+      },
+      {
+        "dataset": "key_rotation",
+        "of": "application",
+        "where": {
+          "datastore": "yes",
+          "data_class": [
+            "pii",
+            "pci"
+          ]
+        }
+      },
+      {
+        "dataset": "backup",
+        "of": "application",
+        "where": {
+          "datastore": "yes"
+        }
+      },
+      {
+        "dataset": "dr_exercise",
+        "of": "application",
+        "where": {
+          "criticality": "critical"
+        }
+      },
+      {
+        "dataset": "vuln_sla",
+        "of": "application",
+        "where": {
+          "lifecycle": "active"
+        }
+      },
+      {
+        "dataset": "mfa",
+        "of": "application"
+      },
+      {
+        "dataset": "access_review",
+        "of": "application",
+        "where": {
+          "data_class": [
+            "pii",
+            "pci"
+          ]
+        }
+      },
+      {
+        "dataset": "logging",
+        "of": "application",
+        "where": {
+          "lifecycle": "active"
+        }
+      },
+      {
+        "dataset": "privileged_access",
+        "of": "application",
+        "where": {
+          "criticality": [
+            "critical",
+            "high"
+          ]
+        }
+      }
+    ],
     "properties": [
       {
         "column": "app_id",

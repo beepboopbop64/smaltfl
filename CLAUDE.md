@@ -129,6 +129,15 @@ match smaltdb's `CLAUDE.md`.
   `rewriteGateCall`, `withGateImport`; the app's `setCheck`, `recordFlowChange`) and feedback reasons as decisions
   (`feedbackPart`). Slice 7: a refused file as the schema check's hold in a gated flow (`runPlan` records the source
   as `refused` and builds nothing; `holdsOf`/`refusedSaid`; verify and release know a run that built nothing).
+- The bronze layer (ADR 0015): the ontology's `rows` says what a dataset's rows are (`RowsDef`, `rowsOf`,
+  `conditionOf` in `ontology.ts`: one row an object of a type, for the objects a condition given as data selects;
+  validated in `document.ts`, a gate's written check). `writtenRules` (`gates.ts`) gives a node's scope, dependencies
+  and key, the gate cell's own first and the ontology's otherwise, read by the plan (`rulesOf`) and the judge
+  (`judgeOf`); `emitMatch` (`emit.ts`) writes the condition, so plan/4's scope keeps its four fields. Bronze holds on
+  `reconcile` by default; the story leads an all but empty file with the amount (the scope's missing keys follow) and
+  a file with its rows twice with its key (the amount follows). The estate declares `application` and one `rows` entry
+  a control (`test/rows.test.ts`; `test/estate.test.ts` holds the entries to the generator; `test/estate-flow.test.ts`,
+  whose world keeps each day's `measures` and `ranges`).
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).

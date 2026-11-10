@@ -335,6 +335,17 @@ export function emitSqlOver(sql: string, bindings: readonly (readonly [name: str
 }
 
 /**
+ * A condition given as data (ADR 0015 §1: the ontology's `where`, as `[column, values]`), as the engine reads it: each
+ * column one of its values, every column to hold, a blank never; with no column, every row. Values are text, written
+ * as literals. `alias` names the relation the columns are read from, when the statement has more than one.
+ */
+export function emitMatch(match: readonly (readonly [column: string, values: readonly string[]])[], alias?: string): string {
+  if (match.length === 0) return '1 = 1';
+  const lit = (v: string) => `'${v.replace(/'/g, "''")}'`;
+  return match.map(([c, vs]) => `${alias ? `${alias}.` : ''}${q(c)} IN (${vs.map(lit).join(', ')})`).join(' AND ');
+}
+
+/**
  * A scope rule's counts (ADR 0014 §4), in one row: the rows whose key is not among the inventory's keys in scope (a
  * blank key among them), the keys in scope with no row, and the keys in scope.
  */
@@ -355,7 +366,7 @@ ${sql}
  */
 export function emitNeedsCounts(sql: string, needs: readonly { table: string | null; key: string | null; when: readonly (readonly [string, readonly string[]])[]; then: readonly (readonly [string, readonly string[]])[] }[]): string {
   const lit = (v: string) => `'${v.replace(/'/g, "''")}'`;
-  const holds = (alias: string, m: readonly (readonly [string, readonly string[]])[]) => m.map(([c, vs]) => `${alias}.${q(c)} IN (${vs.map(lit).join(', ')})`).join(' AND ');
+  const holds = (alias: string, m: readonly (readonly [string, readonly string[]])[]) => emitMatch(m, alias);
   const fails = (alias: string, m: readonly (readonly [string, readonly string[]])[]) => m.map(([c, vs]) => `(${alias}.${q(c)} IS NULL OR ${alias}.${q(c)} NOT IN (${vs.map(lit).join(', ')}))`).join(' OR ');
   const counts = needs.map((n) =>
     n.table && n.key

@@ -71,9 +71,10 @@ const JUDGE = {
   required: ['summary', 'observations', 'proposals'],
 }
 
-// ADR 0014's answer key (docs/adr/0014-gates.md, "The answer key"), in the words a judge needs.
+// ADR 0014's answer key (docs/adr/0014-gates.md, "The answer key"), in the words a judge needs, Mon 4 and Thu 21 as
+// ADR 0015 amends them ("What moves on the estate").
 const KEY = `THE ANSWER KEY for the estate's March 2024 (what was planted, and what the app is meant to say):
-- Mon 4: the MFA file has no rows -> bronze mfa, amount, hold: "Almost no apps: 0".
+- Mon 4: the MFA file has no rows -> bronze mfa, amount, hold: "Almost no apps: 0"; the scope's "600 in scope with no app" follows from the amount and never leads it.
 - Thu 7: the logging file lacks its retention_days column -> bronze logging, schema, hold: "file has 4 of 5 columns" (a held day, not a failed run).
 - Fri 8: key rotation passes where encryption at rest fails -> silver posture, needs, hold: "41 pass key rotation while failing encryption".
 - Tue 12: the WAF pass rate collapses -> bronze waf, values on a written band, hold: "Failing 60%, the band is 0-15%". A real problem: the right fix is NOT to publish as is.
@@ -81,12 +82,12 @@ const KEY = `THE ANSWER KEY for the estate's March 2024 (what was planted, and w
 - Thu 14, Fri 15: vulnerability due dates cluster (Patch Tuesday) -> a look-alike, NOT a problem: a note ("312 due, 9% late, as usual"); publishes.
 - Fri 15, Sat 16: half the pentests due -> a note; publishes.
 - Tue 19: backup scanner outage -> bronze backup, the band on not_assessed, hold.
-- Thu 21: the TLS file's rows arrive twice -> bronze tls, amount, hold: "More apps: 406 (+100%)"; and the posture's reconcile (203 apps repeat a key).
+- Thu 21: the TLS file's rows arrive twice -> bronze tls, its key (reconcile), hold: "203 apps repeat a key"; the amount ("More apps: 406 (+100%)") follows from the key; and the posture's reconcile says the same (203 apps repeat a key).
 - Fri 22, Sat 23: six in ten DR exercises late -> bronze dr_exercise, due, hold: "49 due, 61% late; usually 10%". A real SLA problem. The due check reads yesterday's cohort: a capture that skips Fri 22 cannot show it on Sat 23.
 - Tue 26: no TLS rows for the Payments unit -> bronze tls, scope, hold.
 - Fri 29, Sat 30: access reviews due -> a note; publishes.
 - Every other day (Wed 6): publishes and seals.
-Facts: 600 applications in the inventory; the WAF and TLS files cover about 203 internet-facing applications; the posture has one row an application.`
+Facts: 600 applications in the inventory; the WAF and TLS files cover about 203 internet-facing applications; every control's file and the posture have one row an application.`
 
 const LENSES = [
   {

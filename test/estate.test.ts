@@ -8,10 +8,14 @@
  * - the dependency the contradiction day breaks (key rotation needs encryption at rest) holds on every other day;
  * - the SLA controls flip the day after their due dates cluster, by the usual share running late, in the history as
  *   in the loads; the DR day is the one where more than usual run late;
- * - each planted day holds the trouble it says, and nothing else is planted on it.
+ * - each planted day holds the trouble it says, and nothing else is planted on it;
+ * - the flow's ontology says the same of each control's rows as the generator does (ADR 0015 §1): the condition its
+ *   `rows` entry writes selects exactly the applications the control applies to.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
+import { rowsOf, type Ontology } from '../src/core/ontology.js';
 import { appliesTo, DEPENDS, ESTATE_CONTROLS, ESTATE_PLANTED, ESTATE_TROUBLE, estateApps, estateRows, patchTuesday, type EstateApp, type EstateControl } from './fixtures/estate.js';
 
 const apps = estateApps();
@@ -49,6 +53,25 @@ describe('the inventory and what each control covers', () => {
     }
     expect(statuses('tls', CALM[0]!).size).toBeLessThan(statuses('mfa', CALM[0]!).size);
     expect(statuses('dr_exercise', CALM[0]!).size).toBe(apps.filter((a) => a.criticality === 'critical').length);
+  });
+
+  it('is what the flow’s ontology says of each control’s rows: one an application, for the applications its condition selects (ADR 0015 §1)', () => {
+    const ontology = (JSON.parse(readFileSync(new URL('../examples/control-estate/flow.json', import.meta.url), 'utf8')) as { ontology: Ontology }).ontology;
+    expect(ontology.objectTypes).toEqual([expect.objectContaining({ id: 'application', dataset: 'apps', key: ['app_id'], title: 'name' })]);
+    expect(ontology.rows!.map((r) => r.dataset)).toEqual([...ESTATE_CONTROLS]);
+    // The same inventory, another seed's and a larger one: the conditions are the rule, not this draw's applications.
+    for (const drawn of [apps, estateApps({ seed: 11 }), estateApps({ seed: 3, apps: 2000 })]) {
+      for (const c of ESTATE_CONTROLS) {
+        const r = rowsOf(ontology, c)!;
+        expect(r, c).toMatchObject({ key: 'app_id', own: 'app_id' });
+        expect(r.type.id, c).toBe('application');
+        const selected = drawn.filter((a) => r.where.every(([column, values]) => values.includes(String(a[column as keyof EstateApp]))));
+        expect(selected.map((a) => a.app_id), c).toEqual(drawn.filter((a) => appliesTo(c, a)).map((a) => a.app_id));
+      }
+    }
+    // Every application for MFA, by no condition at all.
+    expect(rowsOf(ontology, 'mfa')!.where).toEqual([]);
+    expect(ontology.rows!.find((r) => r.dataset === 'mfa')).toEqual({ dataset: 'mfa', of: 'application' });
   });
 
   it('uses four status words, keeps exceptions standing, and leaves a few rows a day not assessed', () => {

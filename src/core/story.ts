@@ -676,9 +676,21 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const bandLead = live.filter((f) => f.kind === 'band' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
   // A due mark's late share beyond its usual (ADR 0014 §3) leads too: the lateness is the cause of the misses.
   const dueLead = live.filter((f) => f.kind === 'due' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  // A step's rows are its sources' (ADR 0014 §2): when a source upstream had something wrong on the day, the step's
+  // amount, and a bad value whose share is as usual but whose rows moved with the amount, follow from it.
+  const wrongUpstream = upstream?.find((u) => u.state === 'wrong' || u.state === 'refused') ?? null;
+  // An amount that is almost none (ADR 0015): a file all but empty has no row for the keys its scope expects, and the
+  // amount says so once. Those keys follow from it; they never lead it. Only where the amount is the node's own to
+  // tell: with a source wrong upstream the amount follows from that source, and a written rule is the step's own.
+  const almostNone = !!volume && loud(volume) && !wrongUpstream && volume.severity === 'alert' && volume.value !== undefined && (volume.range ? volume.value < MATERIAL.blank * volume.range.expected : true);
+  const emptied = (f: Finding): boolean => almostNone && f.kind === 'scope' && f.metric?.of === 'scopeMissing';
   // A written rule broken (ADR 0014 §4) leads too: rows out of scope, or a contradiction, say more than the amount.
-  const ruleLead = live.filter((f) => WRITTEN_RULES.has(f.kind) && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  const ruleLead = live.filter((f) => WRITTEN_RULES.has(f.kind) && f.severity === 'alert' && loud(f) && !emptied(f)).sort((a, b) => b.score - a.score)[0] ?? null;
   const lead = (badLead && badLead.kind !== 'band' ? badLead : null) ?? bandLead ?? dueLead ?? ruleLead ?? newLead ?? blankLead;
+  // A key on more than one row leads over the amount it explains (ADR 0015): the repeated rows are the rise, so an
+  // amount above its range follows from the key.
+  const repeats = lead && lead.kind === 'reconcile' && lead.metric?.of === 'reconcile' && lead.metric.count === 'repeats' ? lead : null;
+  const repeated = (f: Finding): boolean => !!repeats && f === volume && f.value !== undefined && !!f.range && f.value > f.range.high;
   const splitFound = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden, judge) : null;
   const split = splitFound && (!lead || (splitFound.bad && splitFound.kind !== 'held' && !blankLead)) ? splitFound : null;
   const gate = k >= 0 && o.step ? gateOf(h, day, o.step, o.limit ?? null) : null;
@@ -698,9 +710,6 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     : hoursF ? (hoursF.rows ?? 0)
     : volume && volume.range && volume.value !== undefined ? Math.abs(volume.value - volume.range.expected) : 0;
   const caused = !!(basis || hoursF || (volume && loud(volume)));
-  // A step's rows are its sources' (ADR 0014 §2): when a source upstream had something wrong on the day, the step's
-  // amount, and a bad value whose share is as usual but whose rows moved with the amount, follow from it.
-  const wrongUpstream = upstream?.find((u) => u.state === 'wrong' || u.state === 'refused') ?? null;
   const viaRows = (f: Finding): string | null => {
     if (!wrongUpstream || !volume || !loudRaw(volume)) return null;
     if (WRITTEN_RULES.has(f.kind)) return null;
@@ -750,6 +759,8 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   const tierOf = (f: Finding): { tier: Tier; predicted?: number } => {
     if (ack.has(f.key)) return { tier: 'note' };
     if (upstreamOf(f) || viaRows(f)) return { tier: 'follows' };
+    // The keys an all but empty file leaves without a row, and the amount a repeated key explains (ADR 0015).
+    if (emptied(f) || repeated(f)) return { tier: 'follows' };
     // A column gone blank: its values' shares falling away, and anything about its values, are the blanks (ADR 0013).
     if (blankLead && f !== blankLead && (f.columns ?? []).some((c) => blankLead.columns?.includes(c)) && f.kind !== 'new') return { tier: 'absorbed' };
     if (f === popFinding && population) return { tier: 'cause' };
@@ -792,7 +803,10 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
     const t = tierOf(f);
     const severity: Severity = t.tier === 'cause' || t.tier === 'standalone' ? f.severity : f.severity === 'ok' ? 'ok' : 'note';
     const up = upstreamOf(f) ?? viaRows(f);
-    return { ...f, severity, was: f.severity, tier: t.tier, ...(ack.has(f.key) ? { acknowledged: true } : {}), ...(t.predicted !== undefined ? { predicted: t.predicted } : {}), ...(up ? { because: up } : t.tier === 'absorbed' || t.tier === 'follows' || t.tier === 'sameDay' ? { because: (hoursF ?? popFinding ?? volume)?.key ?? 'split' } : {}) };
+    // What it follows from: the source upstream; the amount, for the keys an empty file leaves without a row; the
+    // repeated key, for the amount it explains; else the day's cause.
+    const from = ack.has(f.key) ? null : emptied(f) ? volume!.key : repeated(f) ? repeats!.key : null;
+    return { ...f, severity, was: f.severity, tier: t.tier, ...(ack.has(f.key) ? { acknowledged: true } : {}), ...(t.predicted !== undefined ? { predicted: t.predicted } : {}), ...(up ? { because: up } : from ? { because: from } : t.tier === 'absorbed' || t.tier === 'follows' || t.tier === 'sameDay' ? { because: (hoursF ?? popFinding ?? volume)?.key ?? 'split' } : {}) };
   });
   const byRank = (a: Told, b: Told) => RANK[a.severity] - RANK[b.severity] || b.score - a.score;
   const standalone = told.filter((f) => f.tier === 'standalone').sort(byRank);

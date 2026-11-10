@@ -129,6 +129,30 @@ export interface Reference {
   version?: string;
 }
 
+/**
+ * A condition over a dataset's columns, as data (ADR 0015 §1): every column named must hold, a list meaning any of
+ * its values (`{ internet_facing: 'yes', criticality: ['critical', 'high'] }`). Values are text, as the codes of a
+ * property are. `emit.ts` writes it for the engine; the page says it in the ontology's own titles.
+ */
+export type Condition = Record<string, string | string[]>;
+
+/**
+ * What a dataset's rows are (ADR 0015 §1): one row an object of a type (`of`, the object type's id), by the type's
+ * key column (`key`, when this dataset names it otherwise), for the objects that meet `where` (a condition over the
+ * type's own dataset; left out, every object). A watched dataset with an entry and no rule of its own in its gate
+ * cell is judged by the two written rules the entry gives (`writtenRules`, gates.ts): its scope, and its key on one
+ * row each. It changes verdicts, and like a band or a due mark it needs a gate.
+ */
+export interface RowsDef {
+  dataset: string;
+  of: string;
+  key?: string;
+  where?: Condition;
+}
+
+/** A rows entry's settings: any other is refused by name. */
+export const ROWS_FIELDS = ['dataset', 'of', 'key', 'where'] as const;
+
 export interface Ontology {
   objectTypes: ObjectType[];
   linkTypes: LinkType[];
@@ -140,6 +164,42 @@ export interface Ontology {
   /** What a row of each source or step is called, by its id (ADR 0010 §8). Display: kept out of the plan and every
    * verdict. */
   nouns?: Record<string, Noun>;
+  /** What each dataset's rows are (ADR 0015 §1): one row an object of a type, for the objects a condition selects. */
+  rows?: RowsDef[];
+}
+
+/** A condition in one order however it was written, the order the emitter writes it in: `[column, values]`, by column,
+ * each column's values sorted and each once (a dependency rule's `when` is kept the same way in the plan). */
+export function conditionOf(where: Condition | undefined): [column: string, values: string[]][] {
+  return Object.entries(where ?? {})
+    .map(([c, v]): [string, string[]] => [c, [...new Set(Array.isArray(v) ? v : [v])].sort()])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+/** A dataset's rows entry with its object type resolved (`rowsOf`). */
+export interface RowsOf {
+  entry: RowsDef;
+  type: ObjectType;
+  /** The type's key column, and this dataset's own name for it: null where the type's key isn't one column (a key of
+   * several columns gives no rule yet, ADR 0015 §1). */
+  key: string | null;
+  own: string | null;
+  /** The condition, in order (`conditionOf`): empty for every object. */
+  where: [column: string, values: string[]][];
+}
+
+/**
+ * What a dataset's rows are, as the ontology says it (ADR 0015 §1): its entry, the object type it names, the key on
+ * both sides and the condition. Undefined for a dataset with no entry, or one whose entry names no type the ontology
+ * has (validateDocument refuses that).
+ */
+export function rowsOf(ontology: Ontology | undefined, dataset: string): RowsOf | undefined {
+  const d = dataset.toLowerCase();
+  const entry = (ontology?.rows ?? []).find((r) => r.dataset.toLowerCase() === d);
+  const type = entry ? ontology!.objectTypes.find((t) => t.id === entry.of) : undefined;
+  if (!entry || !type) return undefined;
+  const key = type.key.length === 1 ? type.key[0]! : null;
+  return { entry, type, key, own: key === null ? null : (entry.key ?? key), where: conditionOf(entry.where) };
 }
 
 /** The marks on a property that change how a day is judged (ADR 0010 §4): a document with any of them is format 3. */

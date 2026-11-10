@@ -15,7 +15,7 @@ import { plusDays } from '../../src/core/calendar.js';
 import { canonicalJSON } from '../../src/core/canonical.js';
 import type { FlowDocument } from '../../src/core/document.js';
 import { sha256Hex, utf8 } from '../../src/core/hash.js';
-import type { HistoryFile } from '../../src/core/history.js';
+import type { HistoryFile, HistoryRanges } from '../../src/core/history.js';
 import { loadClaim, tailPath, type Claim, type HistoryRef, type StoryClaim2 } from '../../src/core/hold.js';
 import { appendPeriods, emptyHistory, settingsFor, tailBefore, watchColumns, type Measures } from '../../src/core/measures.js';
 import type { RunResult } from '../../src/core/protocol.js';
@@ -40,6 +40,10 @@ export interface EstateWorld {
   results: Map<string, RunResult | Error>;
   /** Each day's claims as the page told them for the controls, by source. */
   claims: Map<string, Record<string, StoryClaim2 | null>>;
+  /** Each day's measures of the controls as the page took them, and the ranges each claim was told from (the history
+   * with the day as its last), by source: what a test reads a day's counts and its story's findings from. */
+  measures: Map<string, Record<string, Measures>>;
+  ranges: Map<string, Record<string, HistoryRanges>>;
   result(day: string): RunResult;
   close(): void;
 }
@@ -59,6 +63,8 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
   const tails: Record<string, Measures[]> = Object.fromEntries(ESTATE_WATCHES.map((w) => [w, []]));
   const results = new Map<string, RunResult | Error>();
   const claimsTold = new Map<string, Record<string, StoryClaim2 | null>>();
+  const measuresTaken = new Map<string, Record<string, Measures>>();
+  const rangesTold = new Map<string, Record<string, HistoryRanges>>();
 
   const pinDay = async (day: string) => {
     for (const c of ESTATE_CONTROLS) {
@@ -83,6 +89,7 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     const told: Record<string, StoryClaim2 | null> = {};
     const measured: Record<string, Measures> = {};
     const kept: Record<string, unknown[][]> = {};
+    const ranges: Record<string, HistoryRanges> = {};
     for (const c of ESTATE_CONTROLS) {
       const { plan, s } = await settingsOf(day, c);
       let m: Measures;
@@ -99,9 +106,11 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
       kept[c] = (await sampleLoad(db, `${c}_file`, { keep: SAMPLE_KEEP, strata: s.counted })).rows;
       const t = await loadClaim({ doc, source: c, flow: plan.flow.hash, base: bases[c]!, baseRef: refs[c]!, tail: tails[c]!, measures: m, settings: s, skip: [], build: 'dev', sample: samples[c]!, kept: kept[c] });
       told[c] = t?.claim ?? null;
-      if (t) claims.push(t.claim);
+      if (t) (claims.push(t.claim), (ranges[c] = t.ranges));
     }
     claimsTold.set(day, told);
+    measuresTaken.set(day, measured);
+    rangesTold.set(day, ranges);
     await pinTail('posture');
     await pinFile(db, samplePath('posture'), utf8(JSON.stringify(samples.posture)));
     const r = await runFlow(db, doc, { smaltdb: SMALTDB, parameters: { day }, claims, tell: { posture: { skip: [], levels: [] } } });
@@ -158,7 +167,7 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     }
   }
   return {
-    doc, db, apps, bases, samples, results, claims: claimsTold,
+    doc, db, apps, bases, samples, results, claims: claimsTold, measures: measuresTaken, ranges: rangesTold,
     result(day) {
       const r = results.get(day);
       if (!r || r instanceof Error) throw new Error(`${day}: ${r ? r.message : 'not run'}`);

@@ -8,6 +8,7 @@
  */
 import type { FlowDocument } from './document.js';
 import type { Finding, Severity } from './news.js';
+import { rowsOf } from './ontology.js';
 
 /** The three layers (ADR 0014 §1): a source as it arrives, a joined step, an output people read. */
 export const LAYERS = ['bronze', 'silver', 'gold'] as const;
@@ -50,9 +51,13 @@ export const CHECK_SAID: Record<CheckName, string> = {
   classifier: 'today’s rows told apart from like days’ rows',
 };
 
-/** Each layer's defaults (ADR 0014 §2, the table): deterministic checks hold, learned ones warn, gold only reconciles. */
+/**
+ * Each layer's defaults (ADR 0014 §2, the table): deterministic checks hold, learned ones warn, gold only reconciles.
+ * Bronze holds on its key too (ADR 0015 §1, amending the table): a file tied to an object type is held to one row an
+ * object; a node with no key written counts nothing, so the default says nothing there.
+ */
 export const LAYER_DEFAULTS: Record<Layer, Record<CheckName, CheckMode>> = {
-  bronze: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', scope: 'hold', needs: 'off', due: 'hold', reconcile: 'off', shares: 'warn', shape: 'warn', hours: 'warn', pairs: 'warn', forest: 'warn', classifier: 'warn' },
+  bronze: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', scope: 'hold', needs: 'off', due: 'hold', reconcile: 'hold', shares: 'warn', shape: 'warn', hours: 'warn', pairs: 'warn', forest: 'warn', classifier: 'warn' },
   silver: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', scope: 'hold', needs: 'hold', due: 'hold', reconcile: 'off', shares: 'warn', shape: 'warn', hours: 'warn', pairs: 'warn', forest: 'warn', classifier: 'warn' },
   gold: { schema: 'hold', amount: 'off', blanks: 'off', values: 'off', rules: 'hold', scope: 'off', needs: 'off', due: 'off', reconcile: 'hold', shares: 'off', shape: 'off', hours: 'off', pairs: 'off', forest: 'off', classifier: 'off' },
 };
@@ -100,6 +105,47 @@ export interface NeedsRule {
   key?: string;
   when: Record<string, string | string[]>;
   then: Record<string, string | string[]>;
+}
+
+/** Where a written rule comes from: the node's gate cell, or the ontology's `rows` entry for it (ADR 0015 §1). */
+export type RuleFrom = 'gate' | 'ontology';
+
+/**
+ * A node's scope rule, from wherever it is written: the gate cell's (its condition as its author wrote it for the
+ * engine, `where`), or the one the ontology's `rows` entry gives (its object type and the condition as data, `match`,
+ * which `emit.ts` writes for the engine). `own` is the node's own key column either way.
+ */
+export type WrittenScope =
+  | { from: 'gate'; of: string; key: string; own: string; where: string }
+  | { from: 'ontology'; of: string; key: string; own: string; match: [column: string, values: string[]][]; type: string };
+
+/** A node's written rules (`writtenRules`): its scope, its dependencies, and its key, each with where it is written. */
+export interface WrittenRules {
+  scope: WrittenScope | null;
+  needs: NeedsRule[];
+  reconcile: (ReconcileRule & { from: RuleFrom }) | null;
+}
+
+/**
+ * The written rules a node is judged by (ADR 0014 §4, §6; ADR 0015 §1), read by the plan (what the engine counts) and
+ * by the judge (what the counts are called), so the two agree. The gate cell's own rule comes first, each kind on its
+ * own; where the cell writes none, the ontology's `rows` entry for the node gives two: the scope (the type's dataset
+ * as the inventory, its key, the entry's condition; no condition is every object) and the key (a reconciliation by
+ * the node's key column alone, against no other node: one row each, never blank). A type whose key is several
+ * columns gives neither yet. Dependencies are only ever the gate cell's.
+ */
+export function writtenRules(doc: Partial<Pick<FlowDocument, 'gates' | 'ontology'>>, node: string): WrittenRules {
+  const lower = node.toLowerCase();
+  const g = Object.entries(doc.gates ?? {}).find(([id]) => id.toLowerCase() === lower)?.[1];
+  const rows = rowsOf(doc.ontology, node);
+  const tied = rows && rows.key !== null && rows.own !== null ? { key: rows.key, own: rows.own } : null;
+  return {
+    scope: g?.scope ? { from: 'gate', of: g.scope.of, key: g.scope.key, own: g.scope.own ?? g.scope.key, where: g.scope.where }
+      : tied ? { from: 'ontology', of: rows!.type.dataset, key: tied.key, own: tied.own, match: rows!.where, type: rows!.type.id }
+      : null,
+    needs: g?.needs ?? [],
+    reconcile: g?.reconcile ? { ...g.reconcile, from: 'gate' } : tied ? { key: [tied.own], from: 'ontology' } : null,
+  };
 }
 
 /** A gate with every check's mode filled in from its layer: what the plan carries and the judges read. */

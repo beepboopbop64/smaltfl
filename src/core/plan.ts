@@ -9,8 +9,9 @@
 import { calendarListProblems, calendarProblems, EVERIES, isEvery, isSlotOf, resolveCalendar, type Calendar, type Every } from './calendar.js';
 import type { DonorRule, FlowDocument, HoldKind, Meanwhile, Missing, ParameterDef, StepDef, Until, WatchDef } from './document.js';
 import { DONOR_RULES, HOLD_KINDS, isGeneralWatch, MEANWHILES, missingProblem, periodOf, UNTILS, validateDocument, withoutDisplay } from './document.js';
+import { emitMatch } from './emit.js';
 import { hashOf } from './hash.js';
-import { CHECK_NAMES, gateChecksOf, hasGates, type GateChecks } from './gates.js';
+import { CHECK_NAMES, gateChecksOf, hasGates, writtenRules, type GateChecks } from './gates.js';
 import { marksOn, type Ontology } from './ontology.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { bindParameters, quoteIdent, SqlTextError, withoutTrailingSemicolons } from './sqltext.js';
@@ -356,8 +357,9 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   // its block's, or none (the owner, Q-58: "None unless chosen"), whatever form its watches take.
   const legacy = doc.smaltfl < 3 && doc.calendar === undefined && entries.every((e) => !isGeneralWatch(e.w));
   const calendar = resolveCalendar(doc.calendar, legacy);
-  // A gate's rules (ADR 0014 §4) in the plan: the inventory and a dependency's dataset by their tables (sources), the
-  // scope's condition bound as any SQL is.
+  // A node's written rules (ADR 0014 §4, ADR 0015 §1) in the plan: the inventory and a dependency's dataset by their
+  // tables (sources). A gate cell's scope condition is bound as any SQL is; one the ontology's `rows` gives is data,
+  // and the emitter writes it, so the plan's scope is the four fields it always was whichever wrote it.
   const tableOf = (id: string): string => {
     const node = index.get(id.toLowerCase());
     const n = node === undefined ? undefined : nodes[node];
@@ -365,12 +367,12 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
     return n.table;
   };
   const rulesOf = (id: string): Pick<WatchPlan, 'scope' | 'needs' | 'reconcile'> => {
-    const g = Object.entries(doc.gates ?? {}).find(([k]) => k.toLowerCase() === id.toLowerCase())?.[1];
+    const r = writtenRules(doc, id);
     const sorted = (m: Record<string, string | string[]>): [string, string[]][] => Object.entries(m).map(([c, v]): [string, string[]] => [c, [...(Array.isArray(v) ? v : [v])].sort()]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     return {
-      scope: g?.scope ? { table: tableOf(g.scope.of), key: g.scope.key, own: g.scope.own ?? g.scope.key, where: bind(g.scope.where, `$.gates.${id}.scope.where`) } : null,
-      needs: (g?.needs ?? []).map((n): NeedsPlan => ({ table: n.from ? tableOf(n.from) : null, key: n.key ?? null, when: sorted(n.when), then: sorted(n.then) })),
-      reconcile: g?.reconcile ? { key: [...g.reconcile.key], table: g.reconcile.of ? tableOf(g.reconcile.of) : null } : null,
+      scope: r.scope ? { table: tableOf(r.scope.of), key: r.scope.key, own: r.scope.own, where: r.scope.from === 'gate' ? bind(r.scope.where, `$.gates.${id}.scope.where`) : emitMatch(r.scope.match) } : null,
+      needs: r.needs.map((n): NeedsPlan => ({ table: n.from ? tableOf(n.from) : null, key: n.key ?? null, when: sorted(n.when), then: sorted(n.then) })),
+      reconcile: r.reconcile ? { key: [...r.reconcile.key], table: r.reconcile.of ? tableOf(r.reconcile.of) : null } : null,
     };
   };
   const watch = entries.map((e): [number, WatchPlan] => [e.node, { ...watchPlan(e.w, e.id, p.period ?? null, doc.ontology, gates), ...(gates ? { checks: gateChecksOf(doc, e.id)!, ...rulesOf(e.id) } : {}) }]);

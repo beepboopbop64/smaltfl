@@ -120,15 +120,24 @@ describe('a toggle on the document', () => {
     await agrees(first.doc);
   });
 
-  it('keeps the estate’s rules as written when a check of TLS’s long gate cell is toggled', async () => {
+  it('keeps the estate’s rules as written when a check of a long gate cell is toggled', async () => {
     const doc = await loadFlowDir(estateDir);
     const t = toggleCheck(doc, 'tls', 'classifier', 'warn');
     expect(t.doc.gates!.tls).toEqual({ ...doc.gates!.tls, checks: { ...doc.gates!.tls!.checks, classifier: 'warn' } });
     const nb = t.doc.notebooks!.find((n) => n.path === 'controls.nb.ts')!;
-    expect(nb.source).toContain("gate(tls, { layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'warn' }, scope: { of: apps, key: 'app_id', where: \"internet_facing = 'yes'\" } });");
+    // Moved on purpose by ADR 0015 §1: TLS's cell ended with `, scope: { of: apps, key: 'app_id', where: "internet_facing
+    // = 'yes'" } });`. The ontology's rows say which applications TLS covers now, and the cell writes no scope.
+    expect(nb.source).toContain("gate(tls, { layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'warn' } });");
     await agrees(t.doc);
+    // The posture's cell still writes its rules, and a toggle leaves them as written.
     const silver = toggleCheck(t.doc, 'posture', 'pairs', 'hold');
     expect(silver.doc.gates!.posture!.checks).toEqual({ reconcile: 'hold', pairs: 'hold' });
+    expect(silver.doc.gates!.posture).toEqual({ ...doc.gates!.posture, checks: { reconcile: 'hold', pairs: 'hold' } });
+    expect(silver.doc.notebooks!.find((n) => n.path === 'posture.nb.ts')!.source).toContain("needs: { when: { key_rotation: 'pass' }, then: { encryption: ['pass', 'exception', 'not_assessed'] } }, reconcile: { key: 'app_id', of: apps } });");
     await agrees(silver.doc);
+    // The WAF's cell is its layer alone: a toggle writes its first check beside it.
+    const waf = toggleCheck(doc, 'waf', 'forest', 'off');
+    expect(waf.doc.notebooks!.find((n) => n.path === 'controls.nb.ts')!.source).toContain("export const waf_gate = gate(waf, { layer: 'bronze', checks: { forest: 'off' } });");
+    await agrees(waf.doc);
   });
 });

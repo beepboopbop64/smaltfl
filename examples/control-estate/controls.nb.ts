@@ -47,13 +47,13 @@ cell('privileged_access');
 export const privileged_access = source('privileged_access');
 
 cell('about_gates', { lang: 'md' });
-md`The bronze gate (ADR 0014): each control's file judged as it arrives. Written checks hold the day, learned ones warn; TLS says so in full, the others take the layer's defaults. TLS and the WAF cover internet-facing applications: their scope is the inventory's, so a row for any other application, or an internet-facing application with no row, is counted`;
+md`The bronze gate (ADR 0014, ADR 0015): each control's file judged as it arrives. Written checks hold the day, learned ones warn; TLS says so in full, the others take the layer's defaults. Which applications a control covers is the ontology's to say: each file has one row an application it applies to, so a row for any other application, an application it applies to with no row, and an application on two rows are counted`;
 
 cell('tls_gate');
-export const tls_gate = gate(tls, { layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' }, scope: { of: apps, key: 'app_id', where: "internet_facing = 'yes'" } });
+export const tls_gate = gate(tls, { layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' } });
 
 cell('waf_gate');
-export const waf_gate = gate(waf, { scope: { of: apps, key: 'app_id', where: "internet_facing = 'yes'" } });
+export const waf_gate = gate(waf, { layer: 'bronze' });
 
 cell('about_checks', { lang: 'md' });
 md`Each control's rows, kept when the status is one we know (pass, fail, exception, not_assessed) and the application is named`;
