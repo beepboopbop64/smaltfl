@@ -11,7 +11,7 @@
  * - `periodOf` takes a period out of a history file: the numbers the file keeps of it (`samePeriod` compares them with
  *   a load's measures). `appendPeriods` folds a tail of measures onto a history file, as the builder folds its days.
  */
-import { isEvery, partsOf, slotsPerDay, type Every } from './calendar.js';
+import { isEvery, partsOf, plusDays, slotsPerDay, type Every } from './calendar.js';
 import { canonicalJSON } from './canonical.js';
 import { hashOf, utf8 } from './hash.js';
 import { timeOf, type HistoryFile, type ValueHistory } from './history.js';
@@ -60,7 +60,20 @@ export interface Measures {
    * the value's text. */
   values: Record<string, [value: string, rows: number][]>;
   pairs: Record<string, [value: string, rows: number][]>;
+  /** The due marks' counts (ADR 0014 §3), by date column, only where the settings name a mark: the rows due on the
+   * slot's day, and the rows still missed by each past due date within 90 days, sorted by date. */
+  due?: Record<string, DueCounts>;
 }
+
+/** What a due mark counts of a load: rows due on the day, and the rows whose due date has passed and are still missed,
+ * by due date. */
+export interface DueCounts {
+  on: number;
+  late: [date: string, rows: number][];
+}
+
+/** How far back a load's missed due dates are counted: ninety days. */
+export const DUE_LOOKBACK = 90;
 
 /**
  * How a watched source's loads are measured: the same settings make the same record, and the plugin caches a file's
@@ -82,6 +95,9 @@ export interface MeasureSettings {
   time: string | null;
   zone: string | null;
   sample: number;
+  /** The ontology's due marks on the source (ADR 0014 §3), `[column, status, miss, within]`, sorted by column; only
+   * where there are any, so every record measured before them is the same record. */
+  due?: [column: string, status: string, miss: string, within: number][];
 }
 
 /** The profile box's sample, as the app and the history take it (src/app/main.ts SAMPLE). */
@@ -93,9 +109,9 @@ const PS = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
 const NUMERIC = new Set(['int', 'real', 'num']);
 
 /** The columns one scan reads, every row: the counted and followed ones the source has, then its time column. */
-export function scanColumns(s: Pick<MeasureSettings, 'counted' | 'followed' | 'time'>, columns: readonly string[]): string[] {
+export function scanColumns(s: Pick<MeasureSettings, 'counted' | 'followed' | 'time' | 'due'>, columns: readonly string[]): string[] {
   const have = new Set(columns);
-  return [...new Set([...s.counted, ...s.followed, ...(s.time ? [s.time] : [])])].filter((c) => have.has(c));
+  return [...new Set([...s.counted, ...s.followed, ...(s.time ? [s.time] : []), ...(s.due ?? []).flatMap(([c, st]) => [c, st])])].filter((c) => have.has(c));
 }
 
 /** What a history's header says of how its periods were measured: enough to measure the next one the same way. */
@@ -143,7 +159,7 @@ export function settingsFor(plan: Pick<FlowPlan, 'nodes' | 'parameters' | 'publi
     paired = [];
   }
   const c = checksOf(plan, node, steps);
-  return { source: plan.nodes[node]!.origin, slot, every: st?.every ?? 'day', checks: c?.checks ?? null, counting: c?.counting ?? null, counted, followed, paired, time: st?.time ?? (base ? timeOf(base) : null), zone: st?.zone ?? base?.zone ?? null, sample: base?.sample ?? SAMPLE };
+  return { source: plan.nodes[node]!.origin, slot, every: st?.every ?? 'day', checks: c?.checks ?? null, counting: c?.counting ?? null, counted, followed, paired, time: st?.time ?? (base ? timeOf(base) : null), zone: st?.zone ?? base?.zone ?? null, sample: base?.sample ?? SAMPLE, ...(st?.due?.length ? { due: st.due.map(([c, status, miss, within]): [string, string, string, number] => [c, status, miss, within]) } : {}) };
 }
 
 /**
@@ -278,7 +294,18 @@ export function measuresOf(s: MeasureSettings, x: MeasureInput): Measures {
   const pairOf = [...pairs.keys()].map((name) => name.split('|').map((c) => ix.get(c)!) as [number, number]);
   const pairCounts = pairOf.map(() => new Map<number, number>());
   const ids = new Array<number>(cols.length);
+  // The due marks (ADR 0014 §3): a date column's rows due on the slot's day, and the rows still missed by each past due
+  // date within the lookback, counted from the same scan.
+  const dues = (s.due ?? []).filter(([c, st]) => at(c) >= 0 && at(st) >= 0).map(([c, st, miss]) => ({ column: c, dAt: at(c), sAt: at(st), miss, on: 0, late: new Map<string, number>() }));
+  const floor = plusDays(slotDay, -DUE_LOOKBACK);
   for (const r of x.scan) {
+    for (const d of dues) {
+      const v = r[d.dAt];
+      if (typeof v !== 'string' || v.length < 10) continue;
+      const date = v.slice(0, 10);
+      if (date === slotDay) d.on++;
+      else if (date < slotDay && date >= floor && String(r[d.sAt] ?? '') === d.miss) d.late.set(date, (d.late.get(date) ?? 0) + 1);
+    }
     for (let k = 0; k < cols.length; k++) {
       const v = r[place[k]!] ?? null;
       let id = texts[k]!.get(v);
@@ -346,6 +373,7 @@ export function measuresOf(s: MeasureSettings, x: MeasureInput): Measures {
     parts,
     values: sorted(singles),
     pairs: sorted(pairs),
+    ...(s.due?.length ? { due: Object.fromEntries(dues.map((d) => [d.column, { on: d.on, late: [...d.late.entries()].sort(byText) }])) } : {}),
   };
 }
 
@@ -384,6 +412,7 @@ export function measuresProblem(m: unknown): string | null {
   if (!Number.isSafeInteger(r.rows) || (r.rows as number) < 0) return 'counts no rows';
   for (const k of ['columns', 'types', 'kinds', 'failed', 'present', 'p50', 'quantiles', 'parts'] as const) if (!Array.isArray(r[k])) return `has no ${k}`;
   for (const k of ['values', 'pairs'] as const) if (typeof r[k] !== 'object' || r[k] === null || Array.isArray(r[k])) return `has no ${k}`;
+  if (r.due !== undefined && (typeof r.due !== 'object' || r.due === null || Array.isArray(r.due))) return 'has due counts that aren’t by column';
   return null;
 }
 
@@ -402,6 +431,8 @@ export interface Period {
   /** Each counted column's values with rows that period, and each pair's cells kept day by day (`a|b`), sorted by
    * the value's text. */
   counts: Record<string, [string, number][]>;
+  /** The due marks' counts that period (ADR 0014 §3), by column, where the history keeps them. */
+  due: Record<string, DueCounts>;
 }
 
 /** A history file's period `k`: the numbers it keeps of it. */
@@ -411,15 +442,19 @@ export function periodOf(file: HistoryFile, k: number): Period {
     if (!vh.counts) continue;
     counts[column] = vh.values.flatMap((v, i): [string, number][] => ((vh.counts![k]?.[i] ?? 0) > 0 ? [[v, vh.counts![k]![i]!]] : [])).sort(byText);
   }
-  return { slot: file.days[k]!, rows: file.rows[k]!, dropped: file.dropped[k]!, failed: [...file.failed[k]!], present: [...file.present[k]!], p50: [...file.p50[k]!], quantiles: (file.quantiles[k] ?? []).map((q) => (q ? [...q] : null)), parts: [...(file.hours[k] ?? [])], counts };
+  const due: Record<string, DueCounts> = {};
+  for (const [column, dh] of Object.entries(file.due ?? {})) due[column] = { on: dh.on[k] ?? 0, late: (dh.late[k] ?? []).map(([d, n]): [string, number] => [d, n]) };
+  return { slot: file.days[k]!, rows: file.rows[k]!, dropped: file.dropped[k]!, failed: [...file.failed[k]!], present: [...file.present[k]!], p50: [...file.p50[k]!], quantiles: (file.quantiles[k] ?? []).map((q) => (q ? [...q] : null)), parts: [...(file.hours[k] ?? [])], counts, due };
 }
 
 /** The same numbers of a load's measures, as `file` keeps them: its counted columns are those it counts each period. */
-export function periodOfMeasures(m: Measures, file: Pick<HistoryFile, 'values' | 'pairs'>): Period {
+export function periodOfMeasures(m: Measures, file: Pick<HistoryFile, 'values' | 'pairs' | 'due'>): Period {
   const counts: Record<string, [string, number][]> = {};
   for (const [column, vh] of Object.entries(file.values ?? {})) if (vh.counts) counts[column] = (m.values[column] ?? []).filter(([, n]) => n > 0).map(([v, n]): [string, number] => [v, n]).sort(byText);
   for (const [pair, vh] of Object.entries(file.pairs ?? {})) if (vh.counts) counts[pair] = (m.pairs[pair] ?? []).filter(([, n]) => n > 0).map(([v, n]): [string, number] => [v, n]).sort(byText);
-  return { slot: m.slot, rows: m.rows, dropped: m.dropped, failed: [...m.failed], present: [...m.present], p50: [...m.p50], quantiles: m.quantiles.map((q) => (q ? [...q] : null)), parts: [...m.parts], counts };
+  const due: Record<string, DueCounts> = {};
+  for (const column of Object.keys(file.due ?? {})) due[column] = { on: m.due?.[column]?.on ?? 0, late: (m.due?.[column]?.late ?? []).map(([d, n]): [string, number] => [d, n]) };
+  return { slot: m.slot, rows: m.rows, dropped: m.dropped, failed: [...m.failed], present: [...m.present], p50: [...m.p50], quantiles: m.quantiles.map((q) => (q ? [...q] : null)), parts: [...m.parts], counts, due };
 }
 
 /**
@@ -432,7 +467,7 @@ export function samePeriod(file: HistoryFile, k: number, m: Measures): string | 
   if (canonicalJSON(file.columns) !== canonicalJSON(m.columns) || canonicalJSON(file.types) !== canonicalJSON(m.types)) return 'its columns differ';
   const a = periodOf(file, k);
   const b = periodOfMeasures(m, file);
-  for (const key of ['rows', 'dropped', 'failed', 'present', 'p50', 'quantiles', 'parts', 'counts'] as const) {
+  for (const key of ['rows', 'dropped', 'failed', 'present', 'p50', 'quantiles', 'parts', 'counts', 'due'] as const) {
     if (canonicalJSON(a[key] as Parameters<typeof canonicalJSON>[0]) !== canonicalJSON(b[key] as Parameters<typeof canonicalJSON>[0])) return `its ${key} differ`;
   }
   const fresh = (vh: ValueHistory, entries: readonly [string, number][], name: string): string | null => {
@@ -460,7 +495,7 @@ export function samePeriod(file: HistoryFile, k: number, m: Measures): string | 
 
 /** A history file with no periods yet, for a source whose base is empty: its header from the settings and the first
  * load's columns, its counted and followed columns and pairs declared. */
-export function emptyHistory(o: { flow: string; source: string; settings: Pick<MeasureSettings, 'checks' | 'counted' | 'followed' | 'paired' | 'time' | 'zone' | 'sample'> & Partial<Pick<MeasureSettings, 'every'>>; columns: string[]; types: string[]; kinds: Kind[]; warmup?: number; built?: string }): HistoryFile {
+export function emptyHistory(o: { flow: string; source: string; settings: Pick<MeasureSettings, 'checks' | 'counted' | 'followed' | 'paired' | 'time' | 'zone' | 'sample'> & Partial<Pick<MeasureSettings, 'every' | 'due'>>; columns: string[]; types: string[]; kinds: Kind[]; warmup?: number; built?: string }): HistoryFile {
   const s = o.settings;
   const have = new Set(o.columns);
   const vh = (counted: boolean): ValueHistory => ({ values: [], first: [], last: [], days: [], rows: [], fresh: [], ...(counted ? { counts: [] } : {}) });
@@ -472,11 +507,15 @@ export function emptyHistory(o: { flow: string; source: string; settings: Pick<M
   const paired = s.paired.filter((c) => have.has(c));
   const pairs: Record<string, ValueHistory> = {};
   for (let a = 0; a < paired.length; a++) for (let b = a + 1; b < paired.length; b++) pairs[`${paired[a]}|${paired[b]}`] = vh(true);
+  // The due marks' counts (ADR 0014 §3), kept day by day for each marked column the source has.
+  const due: HistoryFile['due'] = {};
+  for (const [column, status, miss, within] of s.due ?? []) if (have.has(column) && have.has(status)) due[column] = { status, miss, within, on: [], late: [] };
   return {
     format: 'smaltfl-history/3', built: o.built ?? '', flow: o.flow, source: o.source, every: s.every ?? 'day', time: s.time, zone: s.zone, skipped: [],
     step: s.checks?.step ?? '', rules: s.checks?.rules.map((r) => ({ ...r })) ?? [],
     columns: [...o.columns], types: [...o.types], kinds: [...o.kinds], sample: s.sample,
     days: [], rows: [], dropped: [], failed: [], present: [], p50: [], missing: [], quantiles: [], hours: [], warmup: o.warmup ?? 28 * slotsPerDay(s.every ?? 'day'), values, pairs,
+    ...(Object.keys(due).length ? { due } : {}),
   };
 }
 
@@ -520,6 +559,10 @@ export function appendPeriods(file: HistoryFile, ms: readonly Measures[]): Histo
     out.p50.push([...m.p50]);
     out.quantiles.push(m.quantiles.map((q) => (q ? [...q] : null)));
     out.hours.push([...m.parts]);
+    for (const [column, dh] of Object.entries(out.due ?? {})) {
+      dh.on.push(m.due?.[column]?.on ?? 0);
+      dh.late.push((m.due?.[column]?.late ?? []).map(([d, n]): [string, number] => [d, n]));
+    }
     const fold = (vh: ValueHistory, entries: readonly [string, number][]) => {
       touched.add(vh);
       let novel = 0;

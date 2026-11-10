@@ -389,7 +389,7 @@ export function goLabel(option: DecisionOption | null, scope: 'day' | 'untilPass
   if (option === 'dont') return `Don’t publish ${scope === 'untilPass' && day ? 'from ' : ''}${day ? dayShort(day) : 'this run'}`;
   if (option === 'fill') return remedy.donor ? `Fill from ${dayShort(remedy.donor)}` : 'Fill';
   if (option === 'complete') return remedy.part ? `Publish ${lowerLead(remedy.part)}` : 'Publish the part that arrived';
-  if (option === 'accept') return day ? `Accept from ${dayShort(day)}` : 'Accept the new level';
+  if (option === 'accept') return day ? `Accept from ${dayShort(day)}` : 'Accept the new band or level';
   return 'Pick an option';
 }
 

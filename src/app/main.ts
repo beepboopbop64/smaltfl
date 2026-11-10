@@ -5932,6 +5932,7 @@ function metricName(m: Metric): string {
       const [x, y] = JSON.parse(m.value) as [unknown, unknown];
       return `${col(a)} ${NEWS_NAMES.label(a, x)} with ${col(b)} ${NEWS_NAMES.label(b, y)}, beyond the columns`;
     }
+    case 'late': return `${col(m.column)} late share`;
   }
 }
 
@@ -9244,6 +9245,14 @@ async function decideNow(target: RunRecord | string, option: DecisionOption, sco
   if (option === 'asis' || option === 'accept') {
     const out = await release(r, entry, keys, option);
     if (out?.outcome === 'refused') refused = out.why;
+    // The band accepted is written into the ontology (ADR 0014 §3): the decision is recorded, the document edited from it.
+    else if (option === 'accept' && level?.band && loadSource()) {
+      if (applyBand(level.source, level.band)) {
+        storyCache.clear();
+        planKindCache.doc = null;
+        setStatus(`The new band is in the ontology: ${NEWS_NAMES.column(level.band.column)} ${level.band.value} ${Math.round(level.band.share[0] * 100)}–${Math.round(level.band.share[1] * 100)}%. The next run records the change.`, false);
+      }
+    }
   } else if (derived && dkeys) {
     const out = await releaseDerived(derived, entry, dkeys);
     if (out?.outcome === 'refused') refused = out.why;
@@ -9293,7 +9302,7 @@ function flowStoryOf(day: string): Story | null {
  * flow's verdict on the day (its cause and what it absorbed), the claim it was held on, and what holds it. Off while a
  * later day is current, as publish as is is. Null on a derived run, or where the day can't be accepted.
  */
-function acceptFor(r: RunRecord): { offer: Offer; level: { source: string; from: string; metrics: string[] } } | null {
+function acceptFor(r: RunRecord): { offer: Offer; level: { source: string; from: string; metrics: string[]; band?: { column: string; value: string; share: [number, number] } } } | null {
   const day = dayOfRun(r);
   const src = loadSource();
   if (!day || !src || r.derived) return null;
@@ -9304,7 +9313,31 @@ function acceptFor(r: RunRecord): { offer: Offer; level: { source: string; from:
   if (!level) return null;
   const shown = readersDay(r);
   const later = shown && shown > day ? shown : null;
-  return { offer: { option: 'accept', label: 'Accept the new level', ...(later ? { off: `${dayShort(later)} is published` } : {}) }, level };
+  // A band missed (ADR 0014 §3): the Accept is of a new band, which the decision records and the ontology is edited from.
+  const label = level.band ? `Accept the new band: ${Math.round(level.band.share[0] * 100)}–${Math.round(level.band.share[1] * 100)}%` : 'Accept the new level';
+  return { offer: { option: 'accept', label, ...(later ? { off: `${dayShort(later)} is published` } : {}) }, level };
+}
+
+/**
+ * The ontology edited from an accepted band (ADR 0014 §3): the property of the column, for this source, gets the band
+ * as its expect entry for the value (a general entry stays for the other datasets). The document changes, so the
+ * flow hash does: the next run records the change as any edit is recorded (`recordRun`).
+ */
+function applyBand(source: string, band: { column: string; value: string; share: [number, number] }): boolean {
+  const o = state.doc.ontology;
+  if (!o) return false;
+  const props = o.properties ?? [];
+  const own = propertyOf(o, source, band.column);
+  if (!own) return false;
+  const list = [...(own.expect ?? [])];
+  const mine = list.findIndex((b) => b.value === band.value && (b.datasets ? b.datasets.some((d) => d.toLowerCase() === source.toLowerCase()) : false));
+  const general = list.findIndex((b) => b.value === band.value && !b.datasets);
+  if (mine >= 0) list[mine] = { ...list[mine]!, share: band.share };
+  else if (general >= 0 && own.datasets?.some((d) => d.toLowerCase() === source.toLowerCase())) list[general] = { ...list[general]!, share: band.share };
+  else list.push({ value: band.value, share: band.share, datasets: [source] });
+  const edited = { ...own, expect: list };
+  state.doc = { ...state.doc, ontology: { ...o, properties: props.map((p) => (p === own ? edited : p)) } };
+  return true;
 }
 
 /**

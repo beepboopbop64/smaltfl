@@ -30,6 +30,7 @@ import { measureLoad, pinFile, runFlow, translate, type FlowDocument, type Watch
 import { bindingsPath, readFlow } from '../flow.js';
 import { type DayError, type HistoryFile } from '../../src/core/history.js';
 import { appendPeriods, checksOf, emptyHistory, SAMPLE, watchColumns, type MeasureSettings, type Measures } from '../../src/core/measures.js';
+import { marksOn } from '../../src/core/ontology.js';
 import { pinnedDdl, type Binding, type DataBindings } from '../../examples/sources.js';
 import type { Kind } from '../../src/core/quality.js';
 
@@ -171,7 +172,9 @@ async function jobOf(args: string[]): Promise<{ job: Job; out: string }> {
   }));
   const out = rest[0];
   if (!out) throw new Error('name the history file to write');
-  return { job: { doc, source, binding, bindings: data.sources, settings: { source, every: 'day', counted: [...new Set(count)], followed: [...new Set(follow)], paired: [...new Set(pair)], time: one('time') ?? w?.time ?? null, zone: one('zone') ?? w?.zone ?? null, sample: SAMPLE }, params, files }, out };
+  // The ontology's due marks on the source (ADR 0014 §3), counted day by day where there are any.
+  const due = marksOn(doc.ontology, source).due;
+  return { job: { doc, source, binding, bindings: data.sources, settings: { source, every: 'day', counted: [...new Set(count)], followed: [...new Set(follow)], paired: [...new Set(pair)], time: one('time') ?? w?.time ?? null, zone: one('zone') ?? w?.zone ?? null, sample: SAMPLE, ...(due.length ? { due } : {}) }, params, files }, out };
 }
 
 async function main(): Promise<void> {

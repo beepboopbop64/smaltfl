@@ -18,6 +18,7 @@ import { sha256Hex, utf8 } from '../../src/core/hash.js';
 import type { HistoryFile } from '../../src/core/history.js';
 import { loadClaim, tailPath, type Claim, type HistoryRef, type StoryClaim2 } from '../../src/core/hold.js';
 import { appendPeriods, emptyHistory, settingsFor, tailBefore, watchColumns, type Measures } from '../../src/core/measures.js';
+import { marksOn } from '../../src/core/ontology.js';
 import type { RunResult } from '../../src/core/protocol.js';
 import { measureLoad, pinFile, runFlow, translate } from '../../src/index.js';
 import { pinnedDdl, type DataBindings } from '../../examples/sources.js';
@@ -112,7 +113,8 @@ export async function estateWorld(o: EstateOptions & { baseFrom: string; baseTo:
     const ms = periods[w]!;
     const m0 = ms[0]!;
     const c = watchColumns(doc, w);
-    bases[w] = appendPeriods(emptyHistory({ flow: doc.id, source: w, settings: { checks: m0.checks, counted: c.count, followed: c.follow, paired: c.pair, time: null, zone: null, sample: 2000 }, columns: m0.columns, types: m0.types, kinds: m0.kinds, warmup: o.warmup ?? 14 }), ms);
+    const due = marksOn(doc.ontology, w).due;
+    bases[w] = appendPeriods(emptyHistory({ flow: doc.id, source: w, settings: { checks: m0.checks, counted: c.count, followed: c.follow, paired: c.pair, time: null, zone: null, sample: 2000, ...(due.length ? { due } : {}) }, columns: m0.columns, types: m0.types, kinds: m0.kinds, warmup: o.warmup ?? 14 }), ms);
     const path = `history.${w}.json`;
     const bytes = utf8(JSON.stringify(bases[w]));
     refs[w] = { path, sha256: await sha256Hex(bytes), bytes: bytes.byteLength };

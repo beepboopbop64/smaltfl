@@ -292,14 +292,19 @@ function slaState(a: EstateApp, control: EstateControl, day: string, seed: numbe
   let last: string | null = null;
   let overdue = false;
   let nextDue: string | null = null;
+  let missed: string | null = null;
   for (const c of cs) {
     if (c.done <= day && (!last || c.done > last)) last = c.done;
-    if (c.due < day && c.done > day) overdue = true;
+    if (c.due < day && c.done > day) {
+      overdue = true;
+      if (!missed || c.due < missed) missed = c.due;
+    }
     if (c.due >= day && (!nextDue || c.due < nextDue)) nextDue = c.due;
   }
   // The next due date is the cycle after the last completion when every listed due has passed.
   if (!nextDue && last) nextDue = plusDays(last, SLA[control]!.period);
-  return { last, nextDue, overdue };
+  // A row that is late says so in its date: the due date it missed, which has passed, is what is due.
+  return { last, nextDue: missed ?? nextDue, overdue };
 }
 
 /** Patch Tuesday: the second Tuesday of a month. */
@@ -387,7 +392,8 @@ function rowOf(control: EstateControl, a: EstateApp, day: string, status: Status
     case 'vuln_sla': {
       const fs = findings(a, seed, lateRateOn).filter((f) => f.found <= day && f.fixed > day);
       const overdue = fs.filter((f) => f.due < day);
-      const nextDue = fs.map((f) => f.due).filter((d) => d >= day).sort()[0] ?? null;
+      // The earliest open finding's due date, passed or not: a row late on one says so in its date, as the SLA controls do.
+      const nextDue = fs.map((f) => f.due).sort()[0] ?? null;
       const oldest = overdue.length ? Math.max(...overdue.map((f) => Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${f.due}T00:00:00Z`)) / 864e5))) : 0;
       return [a.app_id, na ? null : fs.filter((f) => f.severity === 'critical').length, na ? null : fs.filter((f) => f.severity === 'high').length, na ? null : overdue.length, dateCell(nextDue), na ? null : oldest, status];
     }

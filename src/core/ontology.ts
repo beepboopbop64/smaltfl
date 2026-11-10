@@ -80,7 +80,37 @@ export interface PropertyType {
   /** This time column runs behind another by about so many minutes (a drop-off after its pickup): what its quantiles are
    * told against. It changes verdicts: format 3. */
   after?: { of: string; minutes: number };
+  /**
+   * Expected bands (ADR 0014 §3): the share of rows a value is expected to have, written, each for the datasets it
+   * names (else wherever the column appears). The `values` check compares the share with the band, and a value with a
+   * band is judged by it alone; a band is changed by a recorded decision (Accept the new band). Needs a gate.
+   */
+  expect?: Band[];
+  /**
+   * A due mark (ADR 0014 §3): this date column is the day a row's obligation is due, `status` the column that says
+   * whether it was met and `miss` the value that says it wasn't. The `due` check counts, over the last `within` days
+   * (default 28), what was due and what is still missed, and judges the late share against its own history; the status
+   * value's own rise is then told through it, not as a bad value. Needs a gate.
+   */
+  due?: Due;
 }
+
+/** An expected band on a value's share, 0 to 1, for the datasets it names (else everywhere the column appears). */
+export interface Band {
+  value: string;
+  share: [low: number, high: number];
+  datasets?: string[];
+}
+
+/** A due mark on a date column: the status column, the value that is a miss, and the window the late share is judged over. */
+export interface Due {
+  status: string;
+  miss: string;
+  within?: number;
+}
+
+/** The window a due mark's late share is judged over when the mark names none: four weeks. */
+export const DUE_WITHIN = 28;
 
 /** What a row of a source or step is called, one and many: "trip" and "trips", "sign-in" and "sign-ins". Display. */
 export interface Noun {
@@ -113,7 +143,7 @@ export interface Ontology {
 }
 
 /** The marks on a property that change how a day is judged (ADR 0010 §4): a document with any of them is format 3. */
-export const VERDICT_MARKS = ['bad', 'newValues', 'after'] as const;
+export const VERDICT_MARKS = ['bad', 'newValues', 'after', 'expect', 'due'] as const;
 
 /** Whether an ontology carries a mark that changes verdicts. */
 export const marksVerdicts = (ontology: Ontology | undefined): boolean => (ontology?.properties ?? []).some((p) => VERDICT_MARKS.some((m) => p[m] !== undefined));
@@ -124,7 +154,7 @@ export const marksVerdicts = (ontology: Ontology | undefined): boolean => (ontol
  * sorted), `newValues` as `[column, "alert"]` for each serious column (one listing bad codes or saying so, Q-56), `after`
  * as `[column, of, minutes]`.
  */
-export function marksOn(ontology: Ontology | undefined, source: string): { bad: [string, ...string[]][]; newValues: [string, 'alert'][]; after: [string, string, number][] } {
+export function marksOn(ontology: Ontology | undefined, source: string): { bad: [string, ...string[]][]; newValues: [string, 'alert'][]; after: [string, string, number][]; expect: [string, string, number, number][]; due: [string, string, string, number][] } {
   const columns = [...new Set((ontology?.properties ?? []).map((x) => x.column.toLowerCase()))];
   const props = columns.flatMap((c) => {
     const p = propertyOf(ontology, source, c);
@@ -135,6 +165,17 @@ export function marksOn(ontology: Ontology | undefined, source: string): { bad: 
     bad: byColumn(props.filter((x) => x.bad?.length).map((x): [string, ...string[]] => [x.column, ...[...x.bad!].sort()])),
     newValues: byColumn(props.filter((x) => x.bad?.length || x.newValues === 'alert').map((x): [string, 'alert'] => [x.column, 'alert'])),
     after: byColumn(props.filter((x) => x.after).map((x): [string, string, number] => [x.column, x.after!.of, x.after!.minutes])),
+    // A band for this dataset (ADR 0014 §3): for each value, the band naming the dataset, else the one naming none; by
+    // column, then value.
+    expect: props.flatMap((x) => {
+      const bands = (x.expect ?? []).filter((b) => (b.datasets ? b.datasets.some((d) => d.toLowerCase() === source.toLowerCase()) : true));
+      const values = [...new Set(bands.map((b) => b.value))];
+      return values.map((v): [string, string, number, number] => {
+        const b = bands.find((y) => y.value === v && y.datasets) ?? bands.find((y) => y.value === v)!;
+        return [x.column, v, b.share[0], b.share[1]];
+      });
+    }).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0)),
+    due: byColumn(props.filter((x) => x.due).map((x): [string, string, string, number] => [x.column, x.due!.status, x.due!.miss, x.due!.within ?? DUE_WITHIN])),
   };
 }
 

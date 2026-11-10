@@ -452,7 +452,7 @@ export function levelStray(now: ReadonlyMap<string, boolean>, then: ReadonlyMap<
 
 /** The causes a level can be accepted for (X6): an amount, a split whose part vanished or surged, a share, a level (a
  * quantile or a blank share), or a new value that stayed. */
-const LEVEL_KINDS = new Set(['volume', 'share', 'gone', 'missing', 'shape', 'new']);
+const LEVEL_KINDS = new Set(['volume', 'share', 'gone', 'missing', 'shape', 'new', 'band']);
 
 /**
  * Whether a held day may be accepted as a new level (ADR 0009 amendment 1 S6, X6, Q-73): the story says something wrong,
@@ -473,8 +473,23 @@ export function acceptable(story: Pick<Story, 'state' | 'hero' | 'split' | 'caus
 
 /** The level an Accept records (S6, C6): the source, the held day it starts, the metrics its cause moved. Null for a
  * day that can't be accepted. */
-export function levelOf(story: Pick<Story, 'state' | 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'>, claim: Pick<StoryClaim, 'state'> | null, holds: readonly Pick<Hold, 'by'>[], day: string, source: string): { source: string; from: string; metrics: string[] } | null {
-  return acceptable(story, claim, holds) ? { source, from: day, metrics: levelMetrics(story) } : null;
+export function levelOf(story: Pick<Story, 'state' | 'hero' | 'split' | 'cause' | 'absorbed' | 'amount'>, claim: Pick<StoryClaim, 'state'> | null, holds: readonly Pick<Hold, 'by'>[], day: string, source: string): { source: string; from: string; metrics: string[]; band?: { column: string; value: string; share: [number, number] } } | null {
+  if (!acceptable(story, claim, holds)) return null;
+  // A band missed (ADR 0014 §3): the Accept is of a new band, five points either side of the day's share, so the
+  // ontology is edited from the decision.
+  const c = story.cause;
+  if (c?.kind === 'band' && c.columns?.[0] && c.values?.[0] && c.value !== undefined) {
+    const value = ((): string => {
+      try {
+        return String(JSON.parse(c.values[0]!));
+      } catch {
+        return c.values[0]!;
+      }
+    })();
+    const round = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 100) / 100;
+    return { source, from: day, metrics: levelMetrics(story), band: { column: c.columns[0]!, value, share: [round(c.value - 0.05), round(c.value + 0.05)] } };
+  }
+  return { source, from: day, metrics: levelMetrics(story) };
 }
 
 // ------------------------------------------------------------------ a day's versions

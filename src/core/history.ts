@@ -98,6 +98,10 @@ export interface HistoryFile {
    * (`counts`) while they number PAIR_CELLS or fewer (ADR 0013), else followed for new combinations only. */
   values: Record<string, ValueHistory>;
   pairs: Record<string, ValueHistory>;
+  /** The due marks' counts (ADR 0014 §3), by date column: the mark (its status column, the value that is a miss, the
+   * window in days), each day's rows due that day, and each day's rows still missed by past due date. Only where the
+   * ontology marks a column. */
+  due?: Record<string, { status: string; miss: string; within: number; on: number[]; late: [date: string, rows: number][][] }>;
   /** The trips file's own columns, month by month, before they were cast to the month's (scripts/data/build.py). */
   schemas?: { month: string; columns: [string, string][] }[];
   /** Each day's weather in the city (scripts/data/build.py): hours on record per borough, rain and snow, the temperatures;
@@ -126,7 +130,10 @@ export type Metric =
    * rows with the other alone, half a row added to each so none is empty). Zero when the two are independent,
    * positive when they go together, and unmoved when a column's share changes while the association doesn't. The
    * pair as the history names it (`a|b`), the cell as its JSON key. */
-  | { of: 'combo'; pair: string; value: string };
+  | { of: 'combo'; pair: string; value: string }
+  /** The late share of a due-marked column (ADR 0014 §3): over the window before the day, the rows still missed whose
+   * due date fell in it over the rows that were due in it. Null on a day with nothing due in the window. */
+  | { of: 'late'; column: string };
 
 /** The quantiles the history keeps of a measure or a time, in order. */
 export const QUANTILES = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
@@ -138,10 +145,11 @@ export const metricKey = (m: Metric) =>
   : m.of === 'value' ? `value:${m.column}=${m.value}`
   : m.of === 'count' ? `count:${m.column}=${m.value}`
   : m.of === 'quantile' ? `quantile:${m.column}@${m.q}`
+  : m.of === 'late' ? `late:${m.column}`
   : m.of === 'combo' ? `combo:${m.pair}=${m.value}`
   : `${m.of}:${m.column}`;
 
-const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level', value: 'share', quantile: 'level', count: 'count', droppedRows: 'count', ruleRows: 'count', combo: 'level' };
+const SCALES: Record<Metric['of'], Scale> = { trips: 'count', dropped: 'share', rule: 'share', missing: 'share', median: 'level', value: 'share', quantile: 'level', count: 'count', droppedRows: 'count', ruleRows: 'count', combo: 'level', late: 'share' };
 
 /** Whether a metric counts the checks: its periods are comparable only while they were counted with the same rules. */
 const ofChecks = (m: Metric) => m.of === 'dropped' || m.of === 'rule' || m.of === 'droppedRows' || m.of === 'ruleRows';
@@ -175,6 +183,7 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
   if ((m.of === 'value' || m.of === 'count') && (!counted?.counts || place < 0)) return null;
   const combo = m.of === 'combo' ? comboPlaces(h, m.pair, m.value) : null;
   if (m.of === 'combo' && !combo) return null;
+  if (m.of === 'late' && !h.due?.[m.column]) return null;
   const start = ofChecks(m) ? checksStart(h) : 0;
   const values = new Array<number | null>(daysBetween(from, h.days.at(-1)!) + 1).fill(null);
   h.days.forEach((day, k) => {
@@ -191,10 +200,53 @@ export function seriesOf(h: HistoryFile, m: Metric): DailySeries | null {
       : m.of === 'ruleRows' ? h.failed[k]![rule]!
       : m.of === 'quantile' ? (h.quantiles?.[k]?.[column]?.[m.q] ?? null)
       : m.of === 'combo' ? (rows ? comboLogOdds(comboTable(combo!, k, rows)) : null)
+      : m.of === 'late' ? (lateAt(h, k, m.column)?.share ?? null)
       : h.p50[k]![column]!;
     values[daysBetween(from, day)] = v;
   });
   return { from, values };
+}
+
+/**
+ * What a due mark counts on a day (ADR 0014 §3): over the window of `within` days before the day (the day itself left
+ * out), the rows that were due (each day's `on`, from the days the history has) and the rows still missed whose due
+ * date fell in the window (the day's own `late` entries), with the late share; null where the column isn't marked or
+ * the day is unknown, and `share` null when nothing was due.
+ */
+export function lateAt(h: Pick<HistoryFile, 'days' | 'due'>, k: number, column: string): { due: number; late: number; share: number | null; within: number; cohort: { due: number; late: number } } | null {
+  const dh = h.due?.[column];
+  const day = h.days[k];
+  if (!dh || day === undefined) return null;
+  const from = plusDays(day, -dh.within);
+  let due = 0;
+  for (let j = k - 1; j >= 0 && h.days[j]! >= from; j--) due += dh.on[j] ?? 0;
+  let late = 0;
+  for (const [d, n] of dh.late[k] ?? []) if (d >= from && d < day) late += n;
+  // The cohort the day judges (ADR 0014 §3): what was due yesterday (the day before in the history, when it is the day
+  // before) and how much of it is still missed today, every cohort seen at the same age.
+  const yesterday = plusDays(day, -1);
+  const cohortDue = k > 0 && h.days[k - 1] === yesterday ? (dh.on[k - 1] ?? 0) : 0;
+  const cohortLate = (dh.late[k] ?? []).find(([d]) => d === yesterday)?.[1] ?? 0;
+  return { due, late, share: due > 0 ? late / due : null, within: dh.within, cohort: { due: cohortDue, late: cohortLate } };
+}
+
+/**
+ * The usual late share of a due-marked column before a day (ADR 0014 §3): over every earlier day's cohort (what was
+ * due the day before it, and how much was still missed: `lateAt`'s `cohort`), the rows missed over the rows due,
+ * pooled, so a control with few due dates a day is judged from all of them, each seen at the same age. Null until
+ * twenty rows have been due: a share from fewer says nothing yet.
+ */
+export function lateUsual(h: Pick<HistoryFile, 'days' | 'due'>, k: number, column: string, learnsFrom: (day: string) => boolean = () => true): { share: number; due: number } | null {
+  let due = 0;
+  let late = 0;
+  for (let j = 0; j < k; j++) {
+    if (!learnsFrom(h.days[j]!)) continue;
+    const at = lateAt(h, j, column);
+    if (!at || at.cohort.due === 0) continue;
+    due += at.cohort.due;
+    late += at.cohort.late;
+  }
+  return due >= 20 ? { share: late / due, due } : null;
 }
 
 /** Where a pair's cell and its two values are counted in a history: the pair's history and the cell's place in it, and

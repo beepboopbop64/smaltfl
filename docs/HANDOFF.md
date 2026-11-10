@@ -64,8 +64,13 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   flow's hashes and vectors stand. The estate's March under it: the empty, doubled and scope days hold on the amount,
   the WAF collapse by the bad value, the backup outage by its blanks; unusual days publish; the look-alikes and the DR
   day still hold alike by `fail` rising, Patch Tuesday's `next_due` filling in holds the vulnerability file on its
-  blanks, and the contradiction publishes: slices 2 and 3's vectors, asserted as such. Slices 2 to 7 follow ADR 0014's
-  order; each moves those assertions as a decision.
+  blanks, and the contradiction publishes: slices 2 and 3's vectors, asserted as such.
+- **Gates, slice 2** (ADR 0014 §"As built", 2026-11-10): `expect` bands and `due` marks in the ontology (plan/4 carries
+  them), the `band` finding, due counts in measures and the history, the `due` finding from yesterday's cohort against
+  the pooled cohort share, Accept the new band. The estate: the WAF collapse and the backup outage hold on their
+  bands; the vulnerability and access-review clusters publish as unusual; the pentest cluster and the DR day still
+  hold by the bad or new value in the test's short base (the app's year judges them). Slices 3 to 7 follow ADR
+  0014's order; each moves the test's "still wrong" assertions as a decision.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

@@ -47,11 +47,12 @@ export function settingsOf(v: unknown): MeasureSettings {
     || !names(s.counted) || !names(s.followed) || !names(s.paired) || !(s.time === null || typeof s.time === 'string') || !(s.zone === null || typeof s.zone === 'string')
     || !Number.isSafeInteger(s.sample) || s.sample < 1
     || !(s.counting === null || (names(s.counting) && s.checks !== null && s.counting.length === s.checks.rules.length))
-    || !(s.checks === null || (typeof s.checks === 'object' && typeof s.checks.step === 'string' && Array.isArray(s.checks.rules) && s.checks.rules.every((r) => typeof r?.name === 'string' && typeof r.check === 'string' && typeof r.onFail === 'string')))) {
-    throw new MeasureError('measure needs its settings: { source, slot, every (day, or a slot of it: 12h … 1h), checks, counting, counted, followed, paired, time, zone, sample }, its slot one of that length');
+    || !(s.checks === null || (typeof s.checks === 'object' && typeof s.checks.step === 'string' && Array.isArray(s.checks.rules) && s.checks.rules.every((r) => typeof r?.name === 'string' && typeof r.check === 'string' && typeof r.onFail === 'string')))
+    || !(s.due === undefined || (Array.isArray(s.due) && s.due.every((d) => Array.isArray(d) && d.length === 4 && typeof d[0] === 'string' && typeof d[1] === 'string' && typeof d[2] === 'string' && Number.isInteger(d[3]) && d[3] >= 1)))) {
+    throw new MeasureError('measure needs its settings: { source, slot, every (day, or a slot of it: 12h … 1h), checks, counting, counted, followed, paired, time, zone, sample, due? }, its slot one of that length');
   }
   if (s.every !== 'day' && s.time === null) throw new MeasureError(`a load of ${s.every} is counted by its time column: its settings name none`);
-  return { source: s.source, slot: s.slot, every: s.every, checks: s.checks ? { step: s.checks.step, rules: s.checks.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })) } : null, counting: s.counting ? [...s.counting] : null, counted: [...s.counted], followed: [...s.followed], paired: [...s.paired], time: s.time, zone: s.zone, sample: s.sample };
+  return { source: s.source, slot: s.slot, every: s.every, checks: s.checks ? { step: s.checks.step, rules: s.checks.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })) } : null, counting: s.counting ? [...s.counting] : null, counted: [...s.counted], followed: [...s.followed], paired: [...s.paired], time: s.time, zone: s.zone, sample: s.sample, ...(s.due?.length ? { due: s.due.map(([c, st, miss, within]): [string, string, string, number] => [c, st, miss, within]) } : {}) };
 }
 
 /** A snapshot's measures: its rows counted where a count is kept, an even sample for the medians and quantiles. */

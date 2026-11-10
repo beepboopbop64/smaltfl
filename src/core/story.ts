@@ -196,7 +196,7 @@ export const ACT_VERB: Record<Act, string> = {
 };
 
 /** The health row's cells (ADR 0008 §6), in order, each with the kinds of finding it holds and its name on screen. */
-export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'new', 'pair', 'combo', 'unlike', 'missing'], shape: ['shape'] };
+export const CELL_KINDS: Record<Cell, readonly Finding['kind'][]> = { file: ['integrity', 'schema'], amount: ['volume'], hours: ['hours'], values: ['gone', 'share', 'band', 'due', 'new', 'pair', 'combo', 'unlike', 'missing'], shape: ['shape'] };
 export const CELL_NAMES: Record<Cell, string> = { file: 'File', amount: 'Amount', hours: 'Hours', values: 'Values', shape: 'Shape' };
 /** The health row's heading: what the five cells are, said once and counted at a glance. */
 export const HEALTH_HEAD = 'Health';
@@ -207,7 +207,7 @@ export const SETTLE_LINE = 'Total in range · nothing to do';
 
 const RANK: Record<Severity, number> = { alert: 0, warn: 1, note: 2, ok: 3 };
 const VALUE_KINDS = new Set<Finding['kind']>(['gone', 'share', 'missing']);
-const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'combo', 'unlike', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
+const NEVER_FOLD = new Set<Finding['kind']>(['new', 'pair', 'combo', 'unlike', 'band', 'due', 'schema', 'integrity', 'weather', 'calm', 'unlearned']);
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const worst = (xs: readonly Severity[]): Severity => xs.reduce<Severity>((a, b) => (RANK[b] < RANK[a] ? b : a), 'ok');
 const weekdayOf = (day: string) => WEEKDAYS[new Date(`${day}T12:00:00Z`).getUTCDay()]!;
@@ -655,7 +655,11 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
   // A value never seen in a column where that is something wrong (ADR 0010 §4) leads the day too: what the checks drop
   // and the shares that fell follow from it.
   const newLead = live.filter((f) => f.kind === 'new' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
-  const lead = badLead ?? newLead ?? blankLead;
+  // A written band missed (ADR 0014 §3) leads after a bad value: the contract comes before what is learned.
+  const bandLead = live.filter((f) => f.kind === 'band' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  // A due mark's late share beyond its usual (ADR 0014 §3) leads too: the lateness is the cause of the misses.
+  const dueLead = live.filter((f) => f.kind === 'due' && f.severity === 'alert' && loud(f)).sort((a, b) => b.score - a.score)[0] ?? null;
+  const lead = (badLead && badLead.kind !== 'band' ? badLead : null) ?? bandLead ?? dueLead ?? newLead ?? blankLead;
   const splitFound = k >= 0 && (volume || valueStories >= 2) ? splitOf(h, day, names, hidden, judge) : null;
   const split = splitFound && (!lead || (splitFound.bad && splitFound.kind !== 'held' && !blankLead)) ? splitFound : null;
   const gate = k >= 0 && o.step ? gateOf(h, day, o.step, o.limit ?? null) : null;
@@ -881,7 +885,7 @@ export function storyOf(h: HistoryRanges, day: string, findings: readonly Findin
       : split.kind === 'vanished'
         ? partRatio < 0.1 ? (split.sender ? `${split.name} sent almost nothing` : `${part} almost gone`) : `${part} ${pctShort(1 - partRatio)} short`
         : partRatio >= 1.95 ? `${surged} ${partRatio.toFixed(1).replace(/\.0$/, '')}× usual` : `${surged} up ${pctShort(partRatio - 1)}`;
-  } else if (hero === 'finding' && badLead && cause?.key === badLead.key && cause.metric?.of === 'value' && cause.value !== undefined && k >= 0) {
+  } else if (hero === 'finding' && badLead && cause?.key === badLead.key && cause.kind !== 'band' && cause.metric?.of === 'value' && cause.value !== undefined && k >= 0) {
     // A bad value that leads with no clean split: its own name and how many times its usual rows ("Failed 14× usual").
     const usualRows = cause.range ? cause.range.expected * (tripsRange?.expected ?? file.rows[k]!) : cause.value * file.rows[k]! - (cause.rows ?? 0);
     const times = usualRows > 0 ? (cause.value * file.rows[k]!) / usualRows : Infinity;

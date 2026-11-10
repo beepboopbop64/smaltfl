@@ -869,7 +869,7 @@ export interface DecideAbout {
   derived?: (RunRef & { keys: Record<string, string> }) | null;
   /** Accept the new level (amendment 1 S6, C6): the source, the day the level starts and the metrics it names, as
    * `metricKey` does. A day published under a standing level (`under`) names the same level. */
-  level?: { source: string; from: string; metrics: string[] };
+  level?: { source: string; from: string; metrics: string[]; band?: { column: string; value: string; share: [number, number] } };
   /**
    * With several watched sources (ADR 0010 §7): the load it is about, in place of the outputs (`outputs` is empty, or,
    * for a fill, the derived run's keys as evidence): one decision a load, applied to every run that carries it.
@@ -970,7 +970,8 @@ function isDecide(a: unknown): a is DecideAbout {
 
 /** Whether a value is a decision's level: its source, the day it starts and the metrics it names. */
 export const isLevel = (v: unknown): v is NonNullable<DecideAbout['level']> =>
-  isRecord(v) && typeof v.source === 'string' && typeof v.from === 'string' && DAY.test(v.from) && Array.isArray(v.metrics) && v.metrics.length > 0 && v.metrics.every((m) => typeof m === 'string');
+  isRecord(v) && typeof v.source === 'string' && typeof v.from === 'string' && DAY.test(v.from) && Array.isArray(v.metrics) && v.metrics.length > 0 && v.metrics.every((m) => typeof m === 'string')
+  && (v.band === undefined || (isRecord(v.band) && typeof v.band.column === 'string' && typeof v.band.value === 'string' && Array.isArray(v.band.share) && v.band.share.length === 2 && v.band.share.every((x) => typeof x === 'number' && x >= 0 && x <= 1) && (v.band.share[0] as number) <= (v.band.share[1] as number)));
 
 /** Whether an option publishes the held run as it came: publish as is, or accept the new level (S6). */
 const asCame = (o: unknown): boolean => o === 'asis' || o === 'accept';

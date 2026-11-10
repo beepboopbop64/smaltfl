@@ -247,7 +247,26 @@
         "bad": [
           "fail"
         ],
-        "newValues": "alert"
+        "newValues": "alert",
+        "expect": [
+          {
+            "value": "not_assessed",
+            "share": [
+              0,
+              0.05
+            ]
+          },
+          {
+            "value": "fail",
+            "share": [
+              0,
+              0.15
+            ],
+            "datasets": [
+              "waf"
+            ]
+          }
+        ]
       },
       {
         "column": "tls",
@@ -561,7 +580,11 @@
       {
         "column": "next_due",
         "title": "Next due",
-        "description": "The day the next completion is due"
+        "description": "The day the next completion is due; on a row that is late, the due date that passed",
+        "due": {
+          "status": "status",
+          "miss": "fail"
+        }
       },
       {
         "column": "open_highs",

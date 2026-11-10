@@ -1,6 +1,6 @@
 # ADR 0014: Gates: bronze, silver and gold checks in the notebook, written bands and due dates in the ontology, a sealed gold
 
-- **Status:** accepted, 2026-11-09; slice 1 built 2026-11-10 (§"As built"), slices 2 to 7 in order. It records the
+- **Status:** accepted, 2026-11-09; slices 1 and 2 built 2026-11-10 (§"As built"), slices 3 to 7 in order. It records the
   maintainer's plan and answers of 2026-11-09 (Q-110 to Q-117, docs/OPEN_QUESTIONS.md), given after a survey of how
   layered data-quality checks are built and shown (§Sources). The control estate (ADR 0013 §8) is its answer key.
 - **Date:** 2026-11-09
@@ -245,6 +245,51 @@ and that no silver finding repeats a bronze cause.
   on a day with the usual late share, and say the DR day by its share); Patch Tuesday fills `next_due` in on almost
   every row, so the blanks check holds the vulnerability file for three days ("Next_due blank: 6%, usually 43–89%";
   a due-marked column's blanks are not a finding, slice 2); the contradiction day publishes (slice 3's `needs`).
+
+### Slice 2 (2026-11-10): written bands and due marks in the ontology, the `values` check on bands, the `due` check, Accept the new band
+
+- **The marks** (`src/core/ontology.ts`): a property's `expect: [{ value, share: [low, high], datasets? }]`, a band
+  on a value's share for the datasets it names (else wherever the column appears; a band naming the dataset wins over
+  one naming none); a date column's `due: { status, miss, within? }` (the window four weeks by default). Both are a
+  gate's written checks: `validateDocument` refuses them in a flow without gates, and plan/4's watch carries them
+  (`expect: [column, value, low, high][]`, `due: [column, status, miss, within][]`; `marksOn`), so every plan before
+  plan/4 is the plan it was.
+- **The `values` check on a band** (`newsOf`): a value with a band is judged by the band alone: outside it, something
+  wrong, a `band` finding ("Status fail: 59.6% (band 0%–15%)", the band in `Finding.band`), written (`check:
+  values`), so it holds under the layer's defaults and leads the day after a bad value (`story.ts`, `bandLead`);
+  inside it, nothing is said of the value, whatever its learned range would say. A bad value with a band is still
+  never softened.
+- **The `due` check.** The measures gain `due` counts where a watch has a due mark (`MeasureSettings.due`,
+  `Measures.due`: the rows due on the slot's day, and the rows still missed by each past due date within ninety days;
+  counted from the same scan; absent, and the record byte for byte what it was, where no mark is set), and the
+  history keeps them day by day (`HistoryFile.due`, still smaltfl-history/3 with an optional block; `appendPeriods`,
+  `periodOf`, `samePeriod`). The judge (`lateAt`, `lateUsual`, `history.ts`) takes **yesterday's cohort**: what was due
+  the day before and how much of it is still missed today, against the usual share pooled over every earlier cohort
+  seen at the same age, by a binomial test (three standard errors over the usual, and five rows or a twentieth of the
+  dues over it): something wrong ("Late: 60 of 100 due (usually 10%)"), else a note ("Late: 10 of 100 due (usually
+  10%)", with the window's counts in the detail). Not judged until twenty rows have been due. Where it is judged, the
+  miss value's own rise, its first appearance and the date column's blanks are the due check's to tell: no bad-value
+  finding, no new-value finding, no blanks finding for them. A `late` series (`{ of: 'late', column }`, the window's
+  late share) is kept for the charts.
+- **Why a cohort, not a window share.** A window's late share decays as late rows are fixed, so a day after a cluster
+  (everything still late) against the pooled windows (half fixed) always read wrong; every cohort at the same age is
+  the like-for-like the maintainer asked for (Q-113). The vulnerability file counts, on a due day, only the findings
+  still open (a finding fixed early has left the file), so its cohorts read "78 of 81 late" every month, and as usual:
+  the statistic is honest about what the file can say.
+- **Accept the new band** (Q-111): a day held by a band finding offers "Accept the new band: 55–65%" (`fill.ts`
+  `levelOf`, five points either side of the day's share); the decide entry's `level` carries `band: { column, value,
+  share }` (`hold.ts`, `isLevel`), and when its release applies the app edits the ontology from it (`applyBand`, a
+  dataset-named band on the property) and the next run records the document change as any edit is recorded.
+- **The estate** marks `status` with a band on not-assessed everywhere (0–5%) and on WAF's failures (0–15%), and
+  `next_due` as due (status, miss `fail`); its fixture's late rows carry the due date they missed in `next_due`, as a
+  late obligation would.
+- **Against the key** (`test/estate-flow.test.ts`, two and a half months of history): the WAF collapse holds on its
+  band and the backup outage on its, each said with the band; the vulnerability and access-review clusters publish as
+  unusual (the pass share's fall), their misses the due check's; Patch Tuesday's `next_due` filling in is no finding.
+  **Still wrong against the key:** the pentest cluster holds by the bad value and the DR problem by the new value,
+  because in the test's short base neither control has had twenty due dates for the due check to learn from (the
+  app, built on a year, judges both: Mar 16 publishes, Mar 23 holds as "Late: 30 of 49 due"); the posture repeats each
+  control's finding as its own (slice 3); the contradiction day publishes (slice 3).
 
 ## Sources (the survey of 2026-11-09)
 

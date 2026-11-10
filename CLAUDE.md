@@ -110,7 +110,11 @@ match smaltdb's `CLAUDE.md`.
   declares a gate is plan/4, every other plan hashes as before), `JudgeSettings.checks` what `newsOf` applies
   (`checkOf` maps a finding's kind to its check, `gated` caps a learned check at warn, drops an off one, never softens
   a bad value; `Finding.check`). The app: the layer on the card's label, a read-only **Checks** tab (`checksTab`,
-  `loadFindings` tells another watched load's own news from its base and tail). Slices 2 to 7 are ADR 0014's order.
+  `loadFindings` tells another watched load's own news from its base and tail). Slice 2: the ontology's `expect`
+  bands and `due` marks (`ontology.ts`, plan/4's watch `expect`/`due`), the `band` finding (a value with a band is
+  judged by it alone), the due counts in measures and the history (`Measures.due`, `HistoryFile.due`, only with a
+  mark), the `due` finding from yesterday's cohort against the pooled cohort share (`lateAt`, `lateUsual`), Accept
+  the new band (`levelOf`'s `band`, `applyBand` in the app). Slices 3 to 7 are ADR 0014's order.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);
   `tools/judges/` holds the Workflow scripts that judged the views in rounds (tools/README.md).
@@ -123,8 +127,8 @@ match smaltdb's `CLAUDE.md`.
   the controls example; its Q-104 to Q-109 are the maintainers' to confirm. **Now:** [ADR 0014](docs/adr/0014-gates.md),
   gates (bronze, silver, gold checks as a `gate()` cell in the notebook, written bands and due marks in the ontology,
   scope and dependency rules, the classifier on a kept sample, a sealed gold), in its seven slices, judged against the
-  control estate's answer key (its §"The answer key"); slice 1 is built (its §"As built"), slices 2 to 7 follow in
-  order.
+  control estate's answer key (its §"The answer key"); slices 1 and 2 are built (its §"As built"), slices 3 to 7 follow
+  in order.
 
 ## Rules for this repository
 

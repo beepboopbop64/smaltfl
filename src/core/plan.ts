@@ -163,6 +163,10 @@ export interface WatchPlan {
   after: [column: string, of: string, minutes: number][];
   /** plan/4 only (ADR 0014 §1): the gate's checks, every one filled in from its layer, each hold, warn or off. */
   checks?: GateChecks;
+  /** plan/4 only (ADR 0014 §3): the ontology's expected bands on the node's values, `[column, value, low, high]`, and
+   * its due marks, `[column, status, miss, within]`, each sorted by column. */
+  expect?: [column: string, value: string, low: number, high: number][];
+  due?: [column: string, status: string, miss: string, within: number][];
 }
 
 /**
@@ -318,7 +322,7 @@ export async function translate(doc: FlowDocument, values: Readonly<Record<strin
   // its block's, or none (the owner, Q-58: "None unless chosen"), whatever form its watches take.
   const legacy = doc.smaltfl < 3 && doc.calendar === undefined && entries.every((e) => !isGeneralWatch(e.w));
   const calendar = resolveCalendar(doc.calendar, legacy);
-  const watch = entries.map((e): [number, WatchPlan] => [e.node, { ...watchPlan(e.w, e.id, p.period ?? null, doc.ontology), ...(gates ? { checks: gateChecksOf(doc, e.id)! } : {}) }]);
+  const watch = entries.map((e): [number, WatchPlan] => [e.node, { ...watchPlan(e.w, e.id, p.period ?? null, doc.ontology, gates), ...(gates ? { checks: gateChecksOf(doc, e.id)! } : {}) }]);
   return { ...plan, smaltflPlan: gates ? 4 : notebooks ? 3 : 2, publish: { hold, period: p.period ?? null, together: p.together ?? true, calendar: { ...calendar }, watch, meanwhile: p.meanwhile ?? 'last', until: p.until ?? 'decision' } };
 }
 
@@ -333,10 +337,12 @@ function judgesItsOwnWay(doc: FlowDocument, watched: readonly string[]): boolean
 
 /** A watch's settings, filled in: a file name means the settings every flow had before ADR 0010 (fixed floors, the
  * weekly pattern, the same weekday's donor), an object its own, each default as ADR 0010 §10 gives it. */
-function watchPlan(w: string | WatchDef, source: string, period: string | null, ontology: Ontology | undefined): WatchPlan {
+function watchPlan(w: string | WatchDef, source: string, period: string | null, ontology: Ontology | undefined, gated = false): WatchPlan {
   const g = typeof w === 'string' ? null : w;
   const pattern = g?.pattern ?? 'weekly';
   const sorted = (xs: readonly string[] | undefined) => (xs ? [...xs].sort() : null);
+  // The bands and due marks (ADR 0014 §3) are plan/4's: a plan without gates carries the marks it always did.
+  const { expect, due, ...marks } = marksOn(ontology, source);
   return {
     history: typeof w === 'string' ? w : w.history,
     period: g?.period ?? period,
@@ -351,7 +357,8 @@ function watchPlan(w: string | WatchDef, source: string, period: string | null, 
     relearn: g?.relearn ?? false,
     count: sorted(g?.count),
     follow: sorted(g?.follow),
-    ...marksOn(ontology, source),
+    ...marks,
+    ...(gated ? { expect, due } : {}),
   };
 }
 
@@ -473,7 +480,7 @@ export function validatePlan(plan: unknown): asserts plan is FlowPlan {
 }
 
 const WATCH_PLAN_FIELDS = ['after', 'bad', 'calendar', 'count', 'donor', 'every', 'follow', 'history', 'holds', 'newValues', 'pattern', 'period', 'relearn', 'scale', 'time', 'zone'];
-const WATCH_PLAN_FIELDS_4 = [...WATCH_PLAN_FIELDS, 'checks'].sort();
+const WATCH_PLAN_FIELDS_4 = [...WATCH_PLAN_FIELDS, 'checks', 'due', 'expect'].sort();
 
 /** plan/2's publish block: every field there, each one this version reads, each value one it can judge. */
 function validatePublish2(p: FlowPlan, fail: (message: string) => never, gated = false): void {
@@ -506,11 +513,6 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never, gated =
     const at = `publish.watch[${i}]`;
     const fields = gated ? WATCH_PLAN_FIELDS_4 : WATCH_PLAN_FIELDS;
     if (Object.keys(w).sort().join() !== fields.join()) fail(`${at} has ${Object.keys(w).sort().join(', ')}; a watch has exactly ${fields.join(', ')}`);
-    // plan/4 (ADR 0014 §1): every check of the vocabulary, each hold, warn or off, in the vocabulary's order.
-    if (gated) {
-      const c = w.checks as Record<string, unknown> | null;
-      if (typeof c !== 'object' || c === null || Object.keys(c).join() !== CHECK_NAMES.join() || Object.values(c).some((m) => m !== 'hold' && m !== 'warn' && m !== 'off')) fail(`${at}.checks is every check (${CHECK_NAMES.join(', ')}), each hold, warn or off`);
-    }
     if (typeof w.history !== 'string' || w.history === '') fail(`${at}.history is a file`);
     if (w.period === null ? period === null : !text(w.period)) fail(`${at}.period ${String(w.period)} is not one of the plan's text parameters`);
     if (!isEvery(w.every)) fail(`${at}.every ${String(w.every)} is not one this version can judge (${EVERIES.join(', ')})`);
@@ -531,6 +533,13 @@ function validatePublish2(p: FlowPlan, fail: (message: string) => never, gated =
     rows('bad', (r) => r.length >= 2 && r.every((v) => typeof v === 'string'));
     rows('newValues', (r) => r.length === 2 && r[1] === 'alert');
     rows('after', (r) => r.length === 3 && typeof r[1] === 'string' && typeof r[2] === 'number' && Number.isFinite(r[2]));
+    // plan/4 (ADR 0014 §1): every check of the vocabulary, each hold, warn or off, in the vocabulary's order.
+    if (gated) {
+      const c = w.checks as Record<string, unknown> | null;
+      if (typeof c !== 'object' || c === null || Object.keys(c).join() !== CHECK_NAMES.join() || Object.values(c).some((m) => m !== 'hold' && m !== 'warn' && m !== 'off')) fail(`${at}.checks is every check (${CHECK_NAMES.join(', ')}), each hold, warn or off`);
+      rows('expect', (r) => r.length === 4 && typeof r[1] === 'string' && typeof r[2] === 'number' && typeof r[3] === 'number' && (r[2] as number) >= 0 && (r[2] as number) <= (r[3] as number) && (r[3] as number) <= 1);
+      rows('due', (r) => r.length === 4 && typeof r[1] === 'string' && typeof r[2] === 'string' && Number.isInteger(r[3]) && (r[3] as number) >= 1);
+    }
     if (w.holds) holding++;
   });
   const judged = kinds.includes('short') || kinds.includes('wrong');

@@ -15,7 +15,7 @@
 import { daysBetween, namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
 import { gated, gateChecksOf, type CheckName, type GateChecks } from './gates.js';
-import { HistoryRanges, QUANTILES, type Metric, type ValueHistory } from './history.js';
+import { HistoryRanges, lateAt, lateUsual, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
 import { marksOn, nounOf, partNamed, propertyOf } from './ontology.js';
 import { clockText } from './quality.js';
@@ -29,7 +29,7 @@ export type Act = 'expected' | 'incident' | 'notify' | 'rule' | 'quarantine' | '
 
 export interface Finding {
   key: string;
-  kind: 'volume' | 'hours' | 'gone' | 'share' | 'new' | 'pair' | 'combo' | 'unlike' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
+  kind: 'volume' | 'hours' | 'gone' | 'share' | 'band' | 'due' | 'new' | 'pair' | 'combo' | 'unlike' | 'missing' | 'shape' | 'dropped' | 'rule' | 'schema' | 'weather' | 'calm' | 'unlearned' | 'key' | 'unmatched' | 'placeholder' | 'empty' | 'integrity';
   severity: Severity;
   /** How far out, in typical misses (capped): what ranks findings of a severity. */
   score: number;
@@ -66,6 +66,11 @@ export interface Finding {
   unlike?: { score: number; highest: number; days: number; numbers: string[] };
   /** The gate's check it belongs to (ADR 0014 §2), set where the node has a gate. */
   check?: CheckName;
+  /** A value's written band (ADR 0014 §3, a `band` finding): its low and high share. */
+  band?: [number, number];
+  /** A due mark's counts (a `due` finding): what was due in the window, what is still missed, the window in days, and
+   * the usual late share where the history has one. */
+  due?: { due: number; late: number; within: number; usual?: number };
 }
 
 /** How a column and a value are said: a column's title, and a code with what it stands for. */
@@ -108,10 +113,14 @@ export interface JudgeSettings {
   /** The gate's checks (ADR 0014 §2), each hold, warn or off, for a node of a flow with gates; null where the flow has
    * none, and the day is judged as it always was. */
   checks: GateChecks | null;
+  /** The ontology's expected bands (ADR 0014 §3), by `column|value` (the column in lower case, the value as text). */
+  expect: ReadonlyMap<string, [number, number]>;
+  /** The ontology's due marks (ADR 0014 §3). */
+  due: readonly { column: string; status: string; miss: string; within: number }[];
 }
 
 /** The legacy form's settings: what every flow was judged by before ADR 0010. */
-export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly', relearn: false, checks: null }) as JudgeSettings;
+export const LEGACY_JUDGE: JudgeSettings = Object.freeze({ legacy: true, calendar: resolveCalendar(undefined, true), scale: 'fixed', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'weekly', relearn: false, checks: null, expect: new Map(), due: [] }) as JudgeSettings;
 
 /**
  * How a document judges a watched source (ADR 0010 §10, §11): its watch's settings and the marks its ontology puts on the
@@ -134,6 +143,8 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
     pattern: general?.pattern ?? 'weekly',
     relearn: general?.relearn ?? false,
     checks: gateChecksOf(doc, source),
+    expect: new Map(m.expect.map(([column, value, low, high]) => [`${column.toLowerCase()}|${value}`, [low, high] as [number, number]])),
+    due: m.due.map(([column, status, miss, within]) => ({ column, status, miss, within })),
   };
 }
 
@@ -461,6 +472,50 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     };
   };
 
+  // The due marks (ADR 0014 §3): what was due in the window before the day and what is still missed, the late share
+  // against its own history. Where it is judged (a range for the day), the miss value's own rise and blanks in the date
+  // column are its to tell: a cluster of due dates with the usual share late is a note, not a bad value up.
+  // The day judges yesterday's cohort: what was due the day before and how much of it is still missed today, against
+  // the usual share pooled over every earlier cohort at the same age (`lateUsual`), not a day's range: a control with a
+  // few due dates a day has too few to learn a range from, and the question is one of proportion. Something wrong
+  // when the late rows are three standard errors over the usual share of the dues, and at least five rows (or a
+  // twentieth of the dues) over it; a note otherwise; not judged until twenty rows have been due. The window's counts
+  // (the last `within` days) are said beside it.
+  const dueJudged = new Set<string>();
+  for (const d of judge.due) {
+    const at = lateAt(file, k, d.column);
+    if (!at) continue;
+    const usual = lateUsual(file, k, d.column, (day) => h.learnsFrom(day));
+    if (usual) dueJudged.add(d.column.toLowerCase());
+    const c = at.cohort;
+    if (c.late === 0 && (c.due === 0 || !usual)) continue;
+    const pct = (x: number) => `${Math.round(x * 1000) / 10}%`.replace(/\.0%$/, '%');
+    const counts = `${fmtInt(c.late)} of ${fmtInt(c.due)} due`;
+    const miss = names.value(d.status, d.miss);
+    const window = `Last ${at.within} days: ${fmtInt(at.due)} due, ${fmtInt(at.late)} late.`;
+    const share = c.due > 0 ? c.late / c.due : null;
+    const base = { key: `due:${d.column}`, kind: 'due' as const, look: 'columns' as const, columns: [d.column, d.status], values: [JSON.stringify(d.miss)], metric: { of: 'late' as const, column: d.column }, rows: c.late, ...(share !== null ? { value: share } : {}), due: { due: c.due, late: c.late, within: at.within, ...(usual ? { usual: usual.share } : {}) } };
+    // Yesterday's load not in the history (a day skipped, or run out of order): what was due isn't known.
+    if (c.due === 0 && !(k > 0 && file.days[k - 1] === plusDays(day, -1))) {
+      out.push({ ...base, severity: 'note', score: 1, title: `Late: ${fmtInt(c.late)}, due yesterday`, detail: `Still ${miss} from yesterday's due date; yesterday's load isn't in the history, so what was due isn't known. ${window}`, acts: ['notify'] });
+      continue;
+    }
+    if (!usual || share === null) {
+      out.push({ ...base, severity: 'note', score: 1, title: `Late: ${counts}`, detail: `Due yesterday and still ${miss}; too few due dates in the history to judge the late share by yet. ${window}`, acts: ['notify'] });
+      continue;
+    }
+    const expected = usual.share * c.due;
+    const z = (c.late - expected) / Math.sqrt(Math.max(0.25, c.due * usual.share * (1 - usual.share)));
+    if (z >= 3 && c.late - expected >= Math.max(5, 0.05 * c.due)) {
+      out.push({ ...base, severity: 'alert', score: Math.min(99, z), title: `Late: ${counts} (usually ${pct(usual.share)})`, detail: `${pct(share)} of what was due yesterday is still ${miss}; usually ${pct(usual.share)} the day after. ${window}`, acts: ['incident', 'notify', 'expected'] });
+    } else {
+      out.push({ ...base, severity: 'note', score: Math.max(0, z) / 10, title: `Late: ${counts} (usually ${pct(usual.share)})`, detail: `${pct(share)} of what was due yesterday is still ${miss}, as usual (${pct(usual.share)} over ${fmtInt(usual.due)} due). ${window}`, acts: ['notify'] });
+    }
+  }
+  /** Whether a column's value is the miss a judged due mark tells: its rise is the due check's, not a bad value's. */
+  const dueMiss = (column: string, key: string): boolean => judge.due.some((d) => d.status.toLowerCase() === column.toLowerCase() && d.miss === String(parse(key)) && dueJudged.has(d.column.toLowerCase()));
+  const dueColumn = (column: string): boolean => judge.due.some((d) => d.column.toLowerCase() === column.toLowerCase());
+
   // Each coded value's share: one usually there and gone, or one whose share is unusual.
   for (const [column, vh] of Object.entries(file.values ?? {})) {
     if (!vh.counts) continue;
@@ -468,7 +523,20 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     vh.values.forEach((key, i) => {
       // A value first seen today is told as new (below), not as a share against a history of none.
       if (vh.first[i]! >= k) return;
+      if (dueMiss(column, key)) return;
       const bad = key !== 'null' && !!badCodes?.has(String(parse(key)));
+      // A written band (ADR 0014 §3): the share against the band, and nothing else; a value with a band is judged by it.
+      const band = judge.expect.get(`${column.toLowerCase()}|${String(parse(key))}`);
+      if (band) {
+        const share = rows ? (vh.counts![k]?.[i] ?? 0) / rows : 0;
+        const [low, high] = band;
+        if (share < low - 1e-9 || share > high + 1e-9) {
+          const today = vh.counts![k]?.[i] ?? 0;
+          const pct = (x: number) => `${Math.round(x * 1000) / 10}%`.replace(/\.0%$/, '%');
+          out.push({ key: `band:${column}=${key}`, kind: 'band', severity: 'alert', score: 99, title: `${sentence(names.column(column))} ${label(column, key)}: ${pct(share)} (band ${pct(low)}–${pct(high)})`, detail: `${fmtInt(today)} ${noun(today)} with it today; the ontology expects ${pct(low)} to ${pct(high)} of ${noun()}.`, look: 'columns', columns: [column], values: [key], metric: { of: 'value', column, value: key }, value: share, rows: today, band: [low, high], acts: ['incident', 'notify'], ...(bad ? { bad: true } : {}) });
+        }
+        return;
+      }
       const j = judged({ of: 'value', column, value: key });
       if (!j) {
         // A value marked bad with no range to judge it by (a first-year holiday, a flow's first weeks): something wrong
@@ -522,6 +590,7 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   // Completeness: a column missing more (or fewer) values than a day like it.
   file.columns.forEach((column, c) => {
     if (file.values?.[column]?.counts) return; // a coded column's missing values are its null value, above
+    if (dueColumn(column)) return; // a due date's blank is nothing due (ADR 0014 §3)
     const j = judged({ of: 'missing', column });
     if (!j || !outside(j)) return;
     const delta = j.value - j.range.expected;
@@ -534,8 +603,11 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
 
   // Values and combinations never seen before.
   for (const [column, vh] of Object.entries(file.values ?? {})) {
-    const fresh = newOn(vh, k);
-    if (!fresh) continue;
+    const found = newOn(vh, k);
+    if (!found) continue;
+    // A judged due mark's miss first seen today is lateness, told by the due check (ADR 0014 §3), not a new value.
+    const fresh = found.keys.some((key) => dueMiss(column, key)) ? { ...found, keys: found.keys.filter((key) => !dueMiss(column, key)), rows: undefined } : found;
+    if (fresh.keys.length === 0) continue;
     const n = fresh.rows ?? vh.fresh.find(([d]) => d === k)?.[1] ?? 0;
     // A serious column's new value is something wrong, however few rows bring it (ADR 0010 §4, the owner, Q-56).
     const serious = judge.serious.has(column.toLowerCase());

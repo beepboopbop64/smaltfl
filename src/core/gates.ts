@@ -29,7 +29,7 @@ export type CheckMode = (typeof CHECK_MODES)[number];
 export const WRITTEN: ReadonlySet<CheckName> = new Set<CheckName>(['schema', 'amount', 'blanks', 'values', 'rules', 'scope', 'needs', 'due', 'reconcile']);
 
 /** The checks this build judges: the others are named, switchable and not yet told (ADR 0014's slices 2 to 5). */
-export const JUDGED: ReadonlySet<CheckName> = new Set<CheckName>(['schema', 'amount', 'blanks', 'values', 'rules', 'shares', 'shape', 'hours', 'pairs', 'forest']);
+export const JUDGED: ReadonlySet<CheckName> = new Set<CheckName>(['schema', 'amount', 'blanks', 'values', 'rules', 'due', 'shares', 'shape', 'hours', 'pairs', 'forest']);
 
 /** What each check says, in a few words, for the Checks tab. */
 export const CHECK_SAID: Record<CheckName, string> = {
@@ -133,6 +133,8 @@ export function checkOf(kind: Finding['kind']): CheckName | null {
     case 'share': return 'shares';
     case 'gone': return 'shares';
     case 'new': return 'values';
+    case 'band': return 'values';
+    case 'due': return 'due';
     case 'missing': return 'blanks';
     case 'shape': return 'shape';
     case 'dropped': return 'rules';

@@ -1,19 +1,23 @@
 /**
  * The control estate through the engine (ADR 0014, the answer key), slice by slice. Each watch's history is built from
  * mid-December to the end of February, then March's loads arrive one a day, under the gates the notebooks write (TLS's
- * in full, the others their layer's defaults). What each planted day is told by is asserted here, and so is what this
- * slice still gets wrong against the key: those assertions are the next slices' vectors, and move when the slice
- * lands, as a decision, not a fix.
+ * in full, the others their layer's defaults) and the ontology's marks (a band on not-assessed everywhere and on WAF's
+ * failures; a due mark on next_due). What each planted day is told by is asserted here, and so is what this slice
+ * still gets wrong against the key: those assertions are the next slices' vectors, and move when the slice lands, as
+ * a decision, not a fix.
  *
  * Slice 1 (the gate, the defaults, the rule that written checks hold and learned ones warn unless the value is bad):
  * - the empty MFA file holds on the amount; the doubled TLS file and both scope days hold on the amount too (slice 3
- *   names scope); the WAF collapse holds by the bad value's share; the backup outage holds by the blanks its
- *   not-assessed rows leave; the refused logging file is a failed run (slice 7 makes it the schema check's hold);
- * - a learned finding that isn't a bad value publishes as unusual (not assessed up on key rotation, a day unlike any);
- * - still wrong against the key: the SLA look-alikes (vulnerabilities, pentests, access reviews) hold by the bad
- *   value `fail` rising, the DR problem holds for the same reason, and Patch Tuesday's `next_due` filling in holds
- *   the vulnerability file on its blanks; the contradiction day publishes (slice 2: due marks and bands; slice 3:
- *   needs and scope).
+ *   names scope); the refused logging file is a failed run (slice 7 makes it the schema check's hold);
+ * - a learned finding that isn't a bad value publishes as unusual.
+ * Slice 2 (bands and due marks):
+ * - the WAF collapse and the backup outage hold on their bands, said with the band;
+ * - the vulnerability and access-review clusters publish: the miss is the due check's, and the pass share's fall is
+ *   unusual at most; Patch Tuesday's next_due filling in is no longer a finding;
+ * - still wrong against the key: the pentest cluster holds by the bad value and the DR problem by the new value,
+ *   since with two and a half months of history neither control has had twenty due dates for the due check to
+ *   learn from (the app's year of history judges both; the test's base is short for speed); the posture repeats each
+ *   bronze finding as its own (slice 3 attributes it); the contradiction day publishes (slice 3's needs).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { plusDays } from '../src/core/calendar.js';
@@ -69,9 +73,12 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect((r as Error).message).toMatch(/logging_file: the header has 4 fields but 5 columns are declared/);
   });
 
-  it('holds the WAF collapse by the bad value’s share, whatever the shares check does: a bad value is never softened', () => {
-    expect(said(ESTATE_PLANTED.collapse, 'waf')).toMatch(/^status fail 1\d(\.\d)?× usual$/);
+  it('holds the WAF collapse on its written band, said with the band (slice 2)', () => {
+    expect(said(ESTATE_PLANTED.collapse, 'waf')).toBe('Status fail: 59.6% (band 0%–15%)');
     expect(claim(ESTATE_PLANTED.collapse, 'waf')).toMatchObject({ state: 'wrong' });
+    // Patch Tuesday fills next_due in on almost every row: a due-marked column's blanks are nothing due, not a finding.
+    expect(said(ESTATE_PLANTED.collapse, 'vuln_sla')).toBeNull();
+    expect(said(ESTATE_PLANTED.vulnCluster, 'vuln_sla')).toBeNull();
   });
 
   it('holds the doubled TLS file and both scope days on the amount (slice 3 says scope)', () => {
@@ -81,16 +88,17 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(estateHolds(result(plusDays(ESTATE_PLANTED.scopeLoss, 1)))).toEqual([]);
   });
 
-  it('holds the backup outage by the blanks its not-assessed rows leave, told from the not-assessed share (slice 2 says the band)', () => {
-    expect(said(ESTATE_PLANTED.outage, 'backup')).toMatch(/^Status not_assessed: 4\d% \(usually/);
+  it('holds the backup outage on the not-assessed band every control shares (slice 2)', () => {
+    expect(said(ESTATE_PLANTED.outage, 'backup')).toBe('Status not_assessed: 47.9% (band 0%–5%)');
     expect(estateHolds(result(ESTATE_PLANTED.outage))).toContain('story:backup');
     expect(estateHolds(result(plusDays(ESTATE_PLANTED.outage, 1)))).toEqual([]);
   });
 
   it('publishes a learned finding that isn’t a bad value as unusual: the gate’s rule', () => {
-    // Not assessed up on key rotation, and a day unlike any on privileged access: told, not held.
+    // Blanks up on key rotation (its not-assessed rows, inside their band), and a day unlike any on privileged access:
+    // told, not held.
     expect(claim('2024-03-02', 'key_rotation')).toMatchObject({ state: 'unusual' });
-    expect(claim('2024-03-02', 'key_rotation')!.head).toMatch(/^Status not_assessed: 3\.0%/);
+    expect(claim('2024-03-02', 'key_rotation')!.head).toMatch(/^Key_age_days blank: 3\.0%/);
     expect(claim('2024-03-02', 'privileged_access')).toMatchObject({ state: 'unusual' });
     expect(claim('2024-03-02', 'privileged_access')!.head).toMatch(/^Unlike any day/);
     expect(estateHolds(result('2024-03-02'))).toEqual([]);
@@ -98,17 +106,22 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(estateHolds(result('2024-03-10'))).toEqual([]);
   });
 
-  it('still holds the SLA look-alikes and the DR problem alike, by the bad value rising: slice 2’s vector (due marks)', () => {
-    // The vulnerability due dates (Thu 14) and the pentests (Fri 15): the usual share late, told as something wrong.
-    expect(said(plusDays(ESTATE_PLANTED.vulnCluster, 1), 'vuln_sla')).toMatch(/^status fail 4\.\d× usual$/);
+  it('publishes the vulnerability and access-review clusters: the miss is the due check’s, the pass share’s fall unusual at most (slice 2)', () => {
+    for (const day of [plusDays(ESTATE_PLANTED.vulnCluster, 1), plusDays(ESTATE_PLANTED.vulnCluster, 2), plusDays(ESTATE_PLANTED.reviewCluster, 1), plusDays(ESTATE_PLANTED.reviewCluster, 2)]) {
+      const source = day < '2024-03-20' ? 'vuln_sla' : 'access_review';
+      expect(said(day, source), day).toBeNull();
+      expect(claim(day, source), day).toMatchObject({ state: 'unusual' });
+      expect(claim(day, source)!.head, day).toMatch(/^Status pass: 8\d% \(usually/);
+    }
+  });
+
+  it('still holds the pentest cluster by the bad value and the DR problem by the new value: too few due dates in a short base for the due check (the app’s year learns them)', () => {
     expect(said(plusDays(ESTATE_PLANTED.pentestCluster, 1), 'pentest')).toMatch(/^Status fail: 9\.9%$/);
-    expect(said(plusDays(ESTATE_PLANTED.reviewCluster, 1), 'access_review')).toMatch(/^status fail 12\.5× usual$/);
-    // The DR exercises (Fri 22): six in ten late, a real problem, held for the same reason as the look-alikes.
     expect(said(plusDays(ESTATE_PLANTED.drLate, 1), 'dr_exercise')).toMatch(/^New status: fail · 31 apps$/);
-    expect(said(plusDays(ESTATE_PLANTED.drLate, 2), 'dr_exercise')).toMatch(/^Status fail: 3\d%$/);
-    // Patch Tuesday fills next_due in on almost every row: the blanks check holds the file for three days.
-    expect(said(ESTATE_PLANTED.collapse, 'vuln_sla')).toMatch(/^Next_due blank: 6\.\d% \(usually 43–89%\)$/);
-    expect(said(ESTATE_PLANTED.vulnCluster, 'vuln_sla')).toMatch(/^Next_due blank: 6\.\d%/);
+    expect(said(plusDays(ESTATE_PLANTED.drLate, 2), 'dr_exercise')).toMatch(/^Rto_met no: 2\d%$/);
+    // The posture repeats what the controls' files say, as its own: slice 3 attributes a silver finding to its bronze cause.
+    expect(said(plusDays(ESTATE_PLANTED.vulnCluster, 1), 'posture')).toMatch(/^vuln_sla fail 4\.\d× usual$/);
+    expect(said(plusDays(ESTATE_PLANTED.reviewCluster, 1), 'posture')).toMatch(/^access_review fail 12\.5× usual$/);
   });
 
   it('publishes the contradiction day: slice 3’s vector (needs)', () => {

@@ -111,17 +111,17 @@ describe('the combination judge (ADR 0013 §2)', () => {
     expect(f.title.split(/\s+/).length).toBeLessThanOrEqual(8);
     expect(f.detail.split(/\s+/).length).toBeLessThanOrEqual(20);
     // Neither column's own share is out of range that day: only the combination says anything.
-    const news = newsOf(h, SWAP, names, { judge: { legacy: false, calendar: h.calendar, scale: 'volume', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'none', relearn: false, checks: null } });
+    const news = newsOf(h, SWAP, names, { judge: { legacy: false, calendar: h.calendar, scale: 'volume', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'none', relearn: false, checks: null, expect: new Map(), due: [] } });
     expect(news.filter((x) => x.kind === 'share' || x.kind === 'gone' || x.kind === 'volume')).toEqual([]);
     expect(news.find((x) => x.kind === 'combo')).toBeDefined();
-    const story = storyOf(h, SWAP, news, { names, judge: { legacy: false, calendar: h.calendar, scale: 'volume', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'none', relearn: false, checks: null } });
+    const story = storyOf(h, SWAP, news, { names, judge: { legacy: false, calendar: h.calendar, scale: 'volume', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'none', relearn: false, checks: null, expect: new Map(), due: [] } });
     expect(story.state).toBe('wrong');
     expect(story.head).toContain('TLS Fail with Encryption Pass');
   });
 
   it('says nothing of the combination when each column moved on its own, the association as usual', () => {
     expect(comboNews(h, TILT, opts).filter((f) => f.severity !== 'note')).toEqual([]);
-    const news = newsOf(h, TILT, names, { judge: { legacy: false, calendar: h.calendar, scale: 'volume', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'none', relearn: false, checks: null } });
+    const news = newsOf(h, TILT, names, { judge: { legacy: false, calendar: h.calendar, scale: 'volume', bad: new Map(), serious: new Set(), after: new Map(), pattern: 'none', relearn: false, checks: null, expect: new Map(), due: [] } });
     expect(news.filter((x) => x.kind === 'share').map((x) => x.columns![0])).toContain('tls');
   });
 

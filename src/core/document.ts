@@ -760,6 +760,23 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
             if (p.name !== undefined && (typeof p.name !== 'string' || !p.name.includes('{code}'))) add(`${at}.name`, 'how a part is named, with {code} for its code: "Vendor {code}"');
             if (p.role !== undefined && p.role !== 'sender') add(`${at}.role`, 'sender: the column names who sent the rows');
             if (p.after !== undefined && (!isRecord(p.after) || typeof p.after.of !== 'string' || p.after.of === '' || typeof p.after.minutes !== 'number' || !Number.isFinite(p.after.minutes))) add(`${at}.after`, '{ of: a time column, minutes }');
+            // Bands and due marks (ADR 0014 §3) are a gate's written checks: a document without gates has none.
+            const gated = isRecord(doc.gates) && Object.keys(doc.gates).length > 0;
+            if (p.expect !== undefined) {
+              if (!Array.isArray(p.expect)) add(`${at}.expect`, 'a list of { value, share: [low, high], datasets? }');
+              else {
+                p.expect.forEach((b: unknown, j: number) => {
+                  const bt = `${at}.expect[${j}]`;
+                  if (!isRecord(b) || typeof b.value !== 'string' || !Array.isArray(b.share) || b.share.length !== 2 || b.share.some((x: unknown) => typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > 1) || (b.share[0] as number) > (b.share[1] as number)) return add(bt, '{ value, share: [low, high] }, each share 0 to 1, low at most high');
+                  if (b.datasets !== undefined && (!Array.isArray(b.datasets) || b.datasets.length === 0 || b.datasets.some((d: unknown) => !known(d)))) add(`${bt}.datasets`, 'a list of sources or steps the band is for');
+                });
+                if (!gated) add(`${at}.expect`, 'a band is a gate’s written check (ADR 0014): the flow has no gate');
+              }
+            }
+            if (p.due !== undefined) {
+              if (!isRecord(p.due) || typeof p.due.status !== 'string' || p.due.status === '' || typeof p.due.miss !== 'string' || (p.due.within !== undefined && (!Number.isInteger(p.due.within) || (p.due.within as number) < 1 || (p.due.within as number) > 366))) add(`${at}.due`, '{ status: the status column, miss: the value that is a miss, within?: days (1 to 366) }');
+              else if (!gated) add(`${at}.due`, 'a due mark is a gate’s written check (ADR 0014): the flow has no gate');
+            }
             const column = p.column;
             const scopes = Array.isArray(p.datasets) ? p.datasets : ['*'];
             scopes.forEach((d: unknown, j: number) => {
