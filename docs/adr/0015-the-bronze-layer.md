@@ -180,6 +180,33 @@ Two rows of ADR 0014's answer key change, on purpose:
 - **Not in this ADR:** the stage rail (Q-125), the seal (Q-127), options with their gain and cost (Q-124), proposals
   (Q-128, Q-132), the question cells and the builder (Q-122).
 
+## Amendment 1 (2026-11-10): the Ontology page is the files, and its rules are the toggles
+
+The maintainer, after exploring slice 1 in the published app: the Ontology page was not what they expected. Their
+words, condensed: *a section for each of the files that gets uploaded, that explains what the columns are and has
+some data visualization of those columns (borrow from the import card); underneath each column, its rules: the
+application's id has to exist, the pass rate is generally between X and Y, derived from the past 90 days, this
+combination has to mean something else; rules that are hard-coded as well as ones that are discovered (create the
+discovered section, leave it alone for now). Once those rules are set, they are the toggles on the data import card,
+which write to the notebook.* Their answers are Q-140 to Q-143.
+
+1. **The Ontology page leads with one section a file the flow reads.** What the file is; the file's own rules (what
+   its rows are, which objects it covers); then a card a column: its meaning, its values drawn from the load on
+   screen, and its rules; then what was discovered, empty until the models write there. Object types, links and
+   actions, where a flow has them, come after.
+2. **Rules belong to a file** (Q-140). Nothing is shared between files. A column's meaning (its title, its
+   description, the words for its values) stays the flow's dictionary.
+3. **A rule runs once it is set** (Q-141). The import card's toggle switches it off, written in the gate cell by the
+   rule, not by check and column: §3's `columns` is replaced when this is built.
+4. **A range says how it is kept** (Q-142): fixed once set, or rolling over a number of days the rule gives. Other
+   ways may follow.
+5. **Rules are added, changed and removed in the app** (Q-143), each a recorded change, kept across a reload (§4).
+
+**Order of work**, one piece at a time, each published in the app for the maintainer to look at before the next:
+(a) the page by file, showing the rules the ontology has today, nothing edited and no hash moved; (b) rules as each
+file's own, with their forms and the two ways a range is kept; (c) the card's toggles from those rules, writing the
+notebook; then §5 and §6 as written. Slice 1 stands: its scope and key become the file's own rules on the page.
+
 ## As built
 
 ### Slice 1 (2026-11-10): the ontology's `rows`, the two rules it gives, bronze's key, the estate
