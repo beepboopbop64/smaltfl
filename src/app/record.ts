@@ -63,7 +63,7 @@ export class FlowRecord {
     readonly flow: string,
     readonly origin: string,
     readonly identity: Identity,
-    private readonly db: IDBDatabase | null,
+    private readonly store: RecordStore | null,
   ) {}
 
   /**
@@ -87,7 +87,7 @@ export class FlowRecord {
       identity = await createIdentity('This browser');
       if (db) await put(db, 'identity', { id: 'self', card: identity.card, privateKey: identity.privateKey }).catch(() => undefined);
     }
-    const rec = new FlowRecord(flow, logOrigin(flow, identity.card.fingerprint), identity, db);
+    const rec = new FlowRecord(flow, logOrigin(flow, identity.card.fingerprint), identity, db ? new RecordStore(db, options.wait ?? OPEN_WAIT) : null);
     if (db) {
       const rows = (await getAll(db, 'entries', IDBKeyRange.bound([rec.origin, 0], [rec.origin, Number.MAX_SAFE_INTEGER]))) as { entry: LogEntry; leaf: string }[];
       rows.sort((a, b) => a.entry.seq - b.entry.seq);
@@ -107,7 +107,7 @@ export class FlowRecord {
   }
 
   get durable(): boolean {
-    return this.db !== null;
+    return this.store !== null;
   }
 
   /** The record's head: what a run records as its context, and a checkpoint signs. */
@@ -138,7 +138,7 @@ export class FlowRecord {
   private async appendNow(kind: string, as: string, about: JSONValue, reason: string | null, amends: number | null): Promise<LogEntry> {
     const entry = entryOf(this.origin, this.entries.length, { kind, by: { card: this.identity.card.fingerprint, as }, about, reason, amends });
     const leaf = entryLeaf(entry);
-    if (this.db) await put(this.db, 'entries', { origin: this.origin, seq: entry.seq, entry, leaf });
+    if (this.store) await this.store.put('entries', { origin: this.origin, seq: entry.seq, entry, leaf });
     this.entries.push(entry);
     this.leaves.push(leaf);
     await this.sign();
@@ -149,7 +149,7 @@ export class FlowRecord {
   async keep(kind: string, value: unknown): Promise<string> {
     const json = canonicalJSON(value as Parameters<typeof canonicalJSON>[0]);
     const hash = await sha256Hex(json);
-    if (this.db) await put(this.db, 'blobs', { hash, kind, json }).catch(() => undefined);
+    if (this.store) await this.store.put('blobs', { hash, kind, json }).catch(() => undefined);
     else this.memoryBlobs.set(hash, { hash, kind, json });
     return hash;
   }
@@ -161,7 +161,7 @@ export class FlowRecord {
       const a = e.about as Record<string, unknown> | null;
       for (const k of ['blob', 'doc', 'plan']) if (a && typeof a[k] === 'string') named.add(a[k] as string);
     }
-    const all = this.db ? ((await getAll(this.db, 'blobs')) as { hash: string; kind: string; json: string }[]) : [...this.memoryBlobs.values()];
+    const all = this.store ? ((await this.store.getAll('blobs')) as { hash: string; kind: string; json: string }[]) : [...this.memoryBlobs.values()];
     return all.filter((b) => named.has(b.hash));
   }
 
@@ -169,7 +169,7 @@ export class FlowRecord {
   async sign(): Promise<SignedCheckpoint> {
     const h = this.head();
     const envelope = await signCheckpoint(this.identity, h.origin, h.size, h.root);
-    if (this.db) await put(this.db, 'checkpoints', { origin: h.origin, size: h.size, envelope }).catch(() => undefined);
+    if (this.store) await this.store.put('checkpoints', { origin: h.origin, size: h.size, envelope }).catch(() => undefined);
     this.checkpoints = [...this.checkpoints.filter((c) => parseCheckpoint(c.checkpoint).size !== h.size), envelope];
     await this.check();
     return envelope;
@@ -262,6 +262,69 @@ function openDb(wait: number): Promise<IDBDatabase> {
     req.onerror = () => settle(() => reject(req.error));
     req.onblocked = () => settle(() => reject(new Error('the record is open in an older tab')));
   });
+}
+
+/**
+ * The record's connection to IndexedDB, opened again when the browser has closed it. A browser may close a page's
+ * connection on its own: iOS Safari does when the page is put in the background or its web view is suspended, Chrome
+ * when the store is cleared, any browser when another tab upgrades the database. A transaction asked of a closed
+ * connection throws ("The database connection is closing"); the record then opens a new one and asks once more, so a
+ * run started after the page comes back keeps its entry. A write that still can't be kept rejects, as before.
+ */
+export class RecordStore {
+  private conn: IDBDatabase | null;
+  constructor(conn: IDBDatabase, private readonly wait: number, private readonly reopen: (wait: number) => Promise<IDBDatabase> = openDb) {
+    this.conn = this.watch(conn);
+  }
+
+  private watch(conn: IDBDatabase): IDBDatabase {
+    // Closed by the browser, or asked to make way for another tab's upgrade: forget it, so the next use opens again.
+    conn.onclose = () => {
+      if (this.conn === conn) this.conn = null;
+    };
+    conn.onversionchange = () => {
+      conn.close();
+      if (this.conn === conn) this.conn = null;
+    };
+    return conn;
+  }
+
+  private async open(): Promise<IDBDatabase> {
+    if (!this.conn) this.conn = this.watch(await this.reopen(this.wait));
+    return this.conn;
+  }
+
+  /** `work` on the connection; once more on a new connection where the browser had closed this one. */
+  private async use<T>(work: (db: IDBDatabase) => Promise<T>): Promise<T> {
+    const db = await this.open();
+    try {
+      return await work(db);
+    } catch (e) {
+      if (!isClosedConnection(e)) throw e;
+      try {
+        db.close();
+      } catch {
+        // Already closing.
+      }
+      if (this.conn === db) this.conn = null;
+      return work(await this.open());
+    }
+  }
+
+  put(store: string, value: unknown): Promise<void> {
+    return this.use((db) => put(db, store, value));
+  }
+
+  getAll(store: string, range?: IDBKeyRange): Promise<unknown[]> {
+    return this.use((db) => getAll(db, store, range));
+  }
+}
+
+/** Whether an error is IndexedDB saying the connection is closed or closing (an InvalidStateError from transaction()). */
+export function isClosedConnection(e: unknown): boolean {
+  const name = (e as { name?: string } | null)?.name;
+  const message = String((e as { message?: string } | null)?.message ?? '');
+  return name === 'InvalidStateError' || /connection (is )?(closing|closed)/i.test(message);
 }
 
 /** One store's write, in its own transaction: resolved when it is committed. */

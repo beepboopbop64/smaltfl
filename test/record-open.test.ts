@@ -97,3 +97,31 @@ describe('opening the record', () => {
     }
   });
 });
+
+describe('a connection the browser closed', () => {
+  it('opens a new one and keeps the entry, as iOS Safari closes a backgrounded page’s connection', async () => {
+    const uninstall = installFakeIndexedDB();
+    try {
+      const { RecordStore, isClosedConnection } = await import('../src/app/record.js');
+      const rec = await FlowRecord.open(flowId(), { wait: 1000 });
+      expect(rec.durable).toBe(true);
+      await rec.append('run', 'owner', { outcome: 'ok' });
+      // The browser closes the connection under the page: every transaction now throws, as WebKit's does.
+      const store = (rec as unknown as { store: { conn: IDBDatabase } }).store;
+      const closed = Object.create(store.conn) as IDBDatabase;
+      Object.defineProperty(closed, 'transaction', { value: () => { throw Object.assign(new Error("Failed to execute 'transaction' on 'IDBDatabase': The database connection is closing."), { name: 'InvalidStateError' }); } });
+      store.conn = closed;
+      await rec.append('run', 'owner', { outcome: 'ok' });
+      expect(rec.lost).toBe(0);
+      expect(rec.status).toMatchObject({ ok: true, size: 2, durable: true });
+      // Opened again, the record has both entries: the second was kept on the new connection.
+      const again = await FlowRecord.open(rec.flow, { wait: 1000 });
+      expect(again.entries.length).toBe(2);
+      expect(isClosedConnection({ name: 'InvalidStateError' })).toBe(true);
+      expect(isClosedConnection(new Error('quota exceeded'))).toBe(false);
+      expect(RecordStore).toBeTypeOf('function');
+    } finally {
+      uninstall();
+    }
+  });
+});
