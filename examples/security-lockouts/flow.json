@@ -1,0 +1,85 @@
+{
+  "smaltfl": 4,
+  "id": "lockouts",
+  "name": "Lock-outs",
+  "description": "Lock-outs at work, a day at a time: the same sign-in file the Sign-ins flow reads, checked by the same shared rules (examples/ontologies/auth.json), and counted another way: the users locked out, and lock-outs by how they signed in. A second flow from one starting file, so a change to the file's rules reaches both.",
+  "parameters": [
+    {
+      "name": "day",
+      "type": "text",
+      "default": null
+    }
+  ],
+  "sources": [
+    {
+      "id": "auth",
+      "table": "auth_file"
+    }
+  ],
+  "notebooks": [
+    "lockouts.nb.ts"
+  ],
+  "calendar": {
+    "base": "us"
+  },
+  "ontology": {
+    "import": [
+      "../ontologies/auth.json"
+    ],
+    "objectTypes": [],
+    "linkTypes": [],
+    "actionTypes": [],
+    "properties": [
+      {
+        "column": "lockouts",
+        "title": "Lock-outs",
+        "description": "Sign-ins that ended locked out"
+      },
+      {
+        "column": "attempts",
+        "title": "Attempts",
+        "description": "Sign-ins tried"
+      }
+    ]
+  },
+  "policies": {
+    "principals": [
+      {
+        "id": "owner",
+        "name": "Owner",
+        "role": "Owns the flow",
+        "owner": true
+      },
+      {
+        "id": "sam",
+        "name": "Sam",
+        "role": "Security analyst"
+      }
+    ],
+    "groups": [],
+    "rules": [
+      {
+        "id": "analysts",
+        "kind": "action",
+        "name": "Sam may decide",
+        "action": "smaltfl:decide",
+        "for": [
+          "sam"
+        ]
+      }
+    ]
+  },
+  "publish": {
+    "hold": [
+      "checks",
+      "wrong"
+    ],
+    "period": "day",
+    "watch": {
+      "auth": {
+        "history": "history.json",
+        "time": "event_time"
+      }
+    }
+  }
+}

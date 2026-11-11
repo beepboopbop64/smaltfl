@@ -1,7 +1,7 @@
 [
   {
     "name": "rules-ontology",
-    "what": "Sign-ins, the Ontology view with the sign-in file (auth) opened: its three rules set on columns, each in words with what a broken row does (Method one of its five values, else the day holds; Latency 0 to 30,000 ms and Country never blank, else the row is flagged), each with Change and Remove for the owner, and an Add a rule button on every column's card",
+    "what": "Sign-ins, the Ontology view with the sign-in file (auth) opened: its three rules set on columns, each in words with what a broken row does (Method one of its five values, else the day holds; Latency 0 to 30,000 ms and Country never blank, else the row is flagged), each with Change and Remove for the owner, and an Add a rule button on every column's card; a note that the file's meanings and rules are shared (examples/ontologies/auth.json), with its download",
     "view": "ontology",
     "viewFirst": true,
     "click": ".of-item[data-file=\"auth\"] .of-row",
@@ -11,7 +11,8 @@
       "text": [
         "Method is Password, Single sign-on, MFA push, Passkey or API key: else hold the day",
         "Latency is from 0 to 30,000 ms: else flag the row and keep it",
-        "Country is never blank: else flag the row and keep it"
+        "Country is never blank: else flag the row and keep it",
+        "Shared. auth’s meanings and rules come from ../ontologies/auth.json, which every flow that reads auth imports"
       ],
       "noText": [
         "Not checked: switched off in auth_valid’s cell"

@@ -70,8 +70,11 @@ describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
       ['counts.nb.ts', ['md', 'step', 'md', 'step', 'publish']],
     ]);
     expect(await flowHash(doc)).toBe(await flowHash({ ...doc, cells: undefined, groups: undefined, outline: undefined }));
-    // Everything but the format is the JSON example's: the steps too, where the JSON's visual steps are SQL here.
-    const { notebooks: _n, smaltfl: _f, cells: _c, groups: _g, outline: _o, ...rest } = doc;
+    // Everything but the format is the JSON example's: the steps too, where the JSON's visual steps are SQL here, and
+    // the ontology, whose sign-in file's meanings and rules come from the shared ontology the folder imports (it says so).
+    expect(doc.ontology?.shared).toEqual([{ file: 'auth', path: '../ontologies/auth.json', columns: ['event_time', 'result', 'method', 'country', 'ua_family', 'latency_ms', 'user'] }]);
+    const { shared: _s, ...ontology } = doc.ontology!;
+    const { notebooks: _n, smaltfl: _f, cells: _c, groups: _g, outline: _o, ...rest } = { ...doc, ontology };
     const { smaltfl: _jf, ...jrest } = json;
     expect({ ...rest, steps: rest.steps.map((s) => (s.kind === 'sql' ? { ...s, sql: '' } : s)) }).toEqual({ ...jrest, steps: jrest.steps.map((s) => (s.kind === 'aggregate' ? { kind: 'sql', id: s.id, inputs: s.inputs, sql: '', description: s.description, dataset: s.dataset } : s)) });
   });

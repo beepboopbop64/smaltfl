@@ -38,6 +38,7 @@ import { sha256Hex } from '../core/hash.js';
 import { counted, glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, saysMore, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
 import { ontologyPage, originSaid, typesShown, type ColumnCard, type FileSection, type Rule } from '../core/ontologypage.js';
 import { applyBand, asShipped, keptOf as keptFlow, nameColumn, removeRule, restoreKept, setRule, switchRule, type FlowEdit, type RuleInput } from '../core/flowedit.js';
+import { sharedOf } from '../core/shared.js';
 import { ACTION_SAID, checkStepOf, RULE_ACTIONS, ruleOn, rulesOf, ruleSaid, type OntologyRule, type OntologyRuleKind, type RuleAction } from '../core/rules.js';
 import { DECIDE, DECIDE_OPTIONS, checkDecision, checkRun, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
@@ -8208,6 +8209,20 @@ function columnForm(f: FileSection, c: ColumnCard, seen: readonly string[], clos
   return form;
 }
 
+/**
+ * Where a file's meanings and rules come from when they are shared (shared.ts, Q-148): the starting file's own
+ * ontology, which every flow that reads the file imports. A change made here is this flow's until the shared file is
+ * replaced, so the owner can download it as this flow has it now, to put in its place.
+ */
+function sharedNote(file: string): HTMLElement | null {
+  const from = state.doc.ontology?.shared?.find((x) => x.file.toLowerCase() === file.toLowerCase());
+  if (!from) return null;
+  const name = from.path.split('/').pop() ?? `${file}.json`;
+  return h('div', { class: 'of-shared' },
+    h('p', {}, h('b', {}, 'Shared. '), `${file}’s meanings and rules come from `, h('code', {}, ...breakable(from.path)), `, which every flow that reads ${file} imports. A change made here is this flow’s until that file is replaced with it.`),
+    isOwner() ? h('button', { type: 'button', class: 'btn quiet', onclick: () => void saveFile(name, `${JSON.stringify(sharedOf(state.doc, file), null, 2)}\n`, 'application/json') }, `Download ${name} as this flow has it`) : null);
+}
+
 /** A file's section: what it is, its own rules, a card a column (drawn once the load has been looked into), and what
  * was discovered. `refused` says the load's file wasn't read (ADR 0014 §2): its cards are the columns the data list
  * declares, with their meanings and rules, which don't depend on the day, and nothing drawn. */
@@ -8297,7 +8312,8 @@ function fileSection(f: FileSection, refused: boolean, day: string | null): HTML
   const sec = h('div', { class: 'of-sec', id: `of-sec-${f.id}`, role: 'region', 'aria-label': `${f.id}: what it is, its rules and its columns` },
     h('div', { class: 'of-about' },
       f.description ? h('p', { class: 'of-desc' }, f.description) : h('p', { class: 'of-none' }, 'Not described yet.'),
-      f.inventory ? h('p', { class: 'of-inv' }, `${f.inventory.said}.`) : null),
+      f.inventory ? h('p', { class: 'of-inv' }, `${f.inventory.said}.`) : null,
+      sharedNote(f.id)),
     h('section', { class: 'of-part of-own' }, h('h3', { class: 'of-h' }, 'This file’s rules'), ruleList(f.rules, 'No rules of its own yet.')),
     h('section', { class: 'of-part' }, h('h3', { class: 'of-h' }, cards.length ? `Columns · ${cards.length}` : 'Columns'), wait, cards.length ? h('div', { class: 'of-cols' }, ...cards) : null),
     h('section', { class: 'of-part of-disc' }, h('h3', { class: 'of-h' }, 'Discovered'),

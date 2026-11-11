@@ -850,6 +850,9 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
           if (!(isRecord(doc.gates) && Object.keys(doc.gates).length > 0)) add('$.ontology.rows', 'what a dataset’s rows are is a gate’s written check (ADR 0015): the flow has no gate');
         }
       }
+      // A shared ontology is brought in when the flow is read (shared.ts): a document still listing paths wasn't.
+      if ((o as Record<string, unknown>).import !== undefined) add('$.ontology.import', 'shared ontologies are brought in when the flow is read (readFlow): this document lists paths it was never read with');
+      if (o.shared !== undefined && (!Array.isArray(o.shared) || o.shared.some((x: unknown) => !isRecord(x) || typeof x.file !== 'string' || typeof x.path !== 'string' || !known(x.file) || !Array.isArray(x.columns) || x.columns.some((c: unknown) => typeof c !== 'string')))) add('$.ontology.shared', 'where each shared part came from: [{ file: a source, path, columns }]');
       // Rules set on a file's columns (rules.ts): each a source's own, enforced by its check step.
       if (o.rules !== undefined) for (const [path, message] of rulesIssues(doc, o.rules)) add(path, message);
     }

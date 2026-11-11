@@ -53,6 +53,7 @@
     "test:isolated": "node scripts/fetch-packed.mjs --check && NODE_OPTIONS=--max-semi-space-size=64 SMALTFL_ISOLATE=1 vitest run",
     "check": "npm run typecheck && npm test",
     "bench": "node scripts/fetch-packed.mjs --check && SMALTFL_BENCH=1 vitest run",
+    "rules:sync": "node scripts/rules-sync.mjs",
     "build:app": "node scripts/fetch-packed.mjs --check && node scripts/build-app.mjs"
   },
   "peerDependencies": {

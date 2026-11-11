@@ -161,7 +161,10 @@ match smaltdb's `CLAUDE.md`.
   `emitRuleCheck`), edited on the Ontology page (`setRule`, `removeRule`; `ruleForm`) and switched on each source's
   **Rules** tab, which writes the check cell's `ontology: { name: 'on' | 'off' }` list (`switchRule`,
   `writeRuleSwitches`, `rewriteCheckCall`; `syncRuleCells` writes every check cell again when the ontology changes;
-  `rulesTab`); the sign-in log ships three;
+  `rulesTab`); the sign-in log ships three. A starting file's shared ontology (`src/core/shared.ts`,
+  `examples/ontologies/auth.json`): a flow's `ontology.import` is brought in when it is read (`importOntologies` in
+  `readFlow` and `loadFlowDir`, then `syncRuleCells`), so every flow reading the file has its rules
+  (`examples/security-lockouts/` is the second; `test/shared.test.ts`); `npm run rules:sync` writes the cells on disk;
   `test/rules.test.ts`, `tools/browser/stops/rules.json`.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);

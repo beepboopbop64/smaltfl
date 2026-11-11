@@ -165,7 +165,8 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
 - **Rules people set, and the import card's switches** (ADR 0015 amendment 1, pieces b and c, second stage,
   2026-11-10, on `claude/trusting-euler-ogz88y`): `ontology.rules` (`src/core/rules.ts`), each a file's own, enforced by
   the check step that reads the file; added, changed and removed on the Ontology page; switched on each source's
-  **Rules** tab; the sign-in log ships three. Q-148 decided (defined in the ontology, switched in the check cell, cells rewritten when the ontology changes); open: Q-149 to Q-151 (how a rule is enforced, the
+  **Rules** tab; the sign-in log ships three, from the sign-in file's shared ontology (`examples/ontologies/auth.json`),
+  which the Sign-ins and Lock-outs flows both import. Q-148 decided (defined in the ontology, switched in the check cell, cells rewritten when the ontology changes); open: Q-149 to Q-151 (how a rule is enforced, the
   kinds, the sign-in log's rules) and still Q-144. **Next:** a range derived from the last days, fixed or rolling
   (Q-142); rules on a dataset the flow makes (Q-144); a rule drawn against today's number (§5).
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):

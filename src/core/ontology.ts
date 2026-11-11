@@ -4,6 +4,7 @@
  * hash chain, refusals included, after the action rule (policy.ts) allows them.
  */
 import type { OntologyRule } from './rules.js';
+import type { SharedFrom } from './shared.js';
 import type { ParamType } from './sqltext.js';
 
 export interface ObjectType {
@@ -170,6 +171,9 @@ export interface Ontology {
   /** Rules people set on a file's columns (rules.ts, ADR 0015 amendment 1): each one file's own, enforced by the check
    * step that reads the file. */
   rules?: OntologyRule[];
+  /** The shared ontologies the flow brought in when it was read (shared.ts): each starting file's, and where it was read
+   * from. A flow on disk lists them as `import` (paths), which reading the flow resolves into this. */
+  shared?: SharedFrom[];
 }
 
 /** A condition in one order however it was written, the order the emitter writes it in: `[column, values]`, by column,

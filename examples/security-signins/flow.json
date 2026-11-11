@@ -25,70 +25,13 @@
     "base": "us"
   },
   "ontology": {
+    "import": [
+      "../ontologies/auth.json"
+    ],
     "objectTypes": [],
     "linkTypes": [],
     "actionTypes": [],
-    "nouns": {
-      "auth": {
-        "one": "sign-in",
-        "many": "sign-ins"
-      }
-    },
     "properties": [
-      {
-        "column": "event_time",
-        "title": "When",
-        "description": "When the sign-in happened (UTC)"
-      },
-      {
-        "column": "result",
-        "title": "Result",
-        "description": "How the sign-in ended",
-        "values": {
-          "success": "Signed in",
-          "fail": "Failed",
-          "locked": "Locked out"
-        },
-        "bad": [
-          "fail",
-          "locked"
-        ]
-      },
-      {
-        "column": "method",
-        "title": "Method",
-        "description": "How the user proved who they are",
-        "values": {
-          "password": "Password",
-          "sso": "Single sign-on",
-          "mfa_push": "MFA push",
-          "passkey": "Passkey",
-          "api_key": "API key"
-        }
-      },
-      {
-        "column": "country",
-        "title": "Country",
-        "description": "Where the sign-in came from",
-        "newValues": "alert"
-      },
-      {
-        "column": "ua_family",
-        "title": "Client",
-        "description": "The software that signed in",
-        "newValues": "alert"
-      },
-      {
-        "column": "latency_ms",
-        "title": "Latency",
-        "description": "How long the sign-in took",
-        "unit": "ms"
-      },
-      {
-        "column": "user",
-        "title": "User",
-        "description": "Who signed in"
-      },
       {
         "column": "signins",
         "title": "Sign-ins",
@@ -108,38 +51,6 @@
         "column": "hour",
         "title": "Hour",
         "description": "The hour of the day (UTC)"
-      }
-    ],
-    "rules": [
-      {
-        "id": "method_one_of",
-        "file": "auth",
-        "column": "method",
-        "kind": "oneOf",
-        "values": [
-          "password",
-          "sso",
-          "mfa_push",
-          "passkey",
-          "api_key"
-        ],
-        "action": "hold"
-      },
-      {
-        "id": "latency_ms_range",
-        "file": "auth",
-        "column": "latency_ms",
-        "kind": "range",
-        "min": 0,
-        "max": 30000,
-        "action": "flag"
-      },
-      {
-        "id": "country_required",
-        "file": "auth",
-        "column": "country",
-        "kind": "required",
-        "action": "flag"
       }
     ]
   },

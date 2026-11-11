@@ -636,7 +636,38 @@ sense."* The choices made here are Q-148 to Q-151.
   through once the rule is switched off, verified). `test/ontologypage.test.ts` gains the sign-in log's rules on their
   cards. `tools/browser/stops/rules.json` drives the sign-ins app at phone size through the Ontology page, a rule
   added, the Rules tab, a switch, a reload and dark: no problems, no page error.
-- **Not built yet:** an ontology shared by several flow documents (each carries its own; a change reaches every check
-  cell of the flow it is made in); a range derived from the last days and kept fixed or rolling (Q-142); a rule across files or on
+- **Not built yet:** a range derived from the last days and kept fixed or rolling (Q-142); a rule across files or on
   a dataset the flow makes (Q-144 is still open); rules drawn against today's number with the last four weeks (§5);
   the Discovered section's proposals.
+
+### Amendment 1, pieces (b) and (c): a starting file's shared ontology (2026-11-11)
+
+The maintainer: *"make that change so it flows through if you have multiple different workflows that have the same
+starting file. It always brings those changes in."* (Q-148.)
+
+- **A starting file's ontology is a document of its own** (`smaltfl-ontology/1`, `src/core/shared.ts`;
+  `examples/ontologies/auth.json`): `{ smaltflOntology: 1, file, description?, noun?, properties?, rules? }`, the
+  file's columns' meanings and the rules its rows are held to, a rule naming no file (it is the shared file's).
+- **A flow imports it** (`ontology.import: ["../ontologies/auth.json"]`), and reading the flow brings it in
+  (`importOntologies`, from `readFlow` in `scripts/flow.ts` and the tests' `loadFlowDir`): the shared meanings, then the
+  flow's own; the shared rules, then the flow's own; the file's noun and description where the flow says none; and
+  `ontology.shared` (`{ file, path, columns }`) says where they came from. Then the check cells are synced
+  (`syncRuleCells`), so every cell that enforces the file lists its rules. A flow describing a shared column again, or
+  naming a rule as a shared one is named, is refused (a meaning is said in one place); a document still listing paths
+  is refused (it was never read with its imports); a shared file about a file the flow doesn't read is refused.
+- **A change reaches every flow that imports the file** the next time each is read: its plan enforces the rule, its
+  cell lists it (a new rule on), each flow keeping its own switches. `npm run rules:sync` (`scripts/rules-sync.mjs`,
+  `syncFlowFiles`) writes the cells on disk for every flow folder. The flow document a run hashes is the one read, with
+  the shared content in it: a change to the shared file is a change to each flow, recorded as one.
+- **Two flows share the sign-in file**: Sign-ins (`examples/security-signins/`, its sign-in file's meanings and rules
+  moved to the shared file; its JSON form keeps them inline, and `test/notebook.test.ts` holds the merged ontology to
+  it) and Lock-outs (`examples/security-lockouts/`, new: the users locked out and lock-outs by method, its own check
+  cell `signins_checked` enforcing the same rules).
+- **In the app**, a shared file's section on the Ontology page says so ("Shared. auth's meanings and rules come from
+  ../ontologies/auth.json, which every flow that reads auth imports") and offers the owner the shared file as this flow
+  has it (`sharedOf`): a page can't write the repository, so an edit made in one flow's app reaches the others once the
+  downloaded file replaces the shared one.
+- **Tests:** `test/shared.test.ts` (both flows get the same meanings and rules, enforced by each one's cell; a rule
+  added to and one taken from the shared file reach both plans and both cells; each flow keeps its switches; the file
+  written back as read and with an edit; what is refused). The sign-ins and lock-outs apps were built and driven with
+  stops: the shared note, the Rules tab, no problems.
