@@ -1,4 +1,5 @@
-// Builds the app into dist/app: page.html (the page's content; the artifact host adds the document skeleton),
+// Builds the app into dist/app: page.html (the page's content; the artifact host adds the document skeleton), index.html
+// (the same page as a document, for a static host such as GitHub Pages),
 // app.js (the page), worker.js (the engine worker), inline.js (the engine in the page, for browsers without the
 // worker), and data/ (a flow's files, listed in data/loads.json, format 2: each source's binding with its file or its
 // daily loads and the days a paused one may be filled from, and each watched source's history, ADR 0010 §9).
@@ -107,9 +108,12 @@ for (const name of ['worker', 'inline', 'app']) {
 }
 // The page's title is the flow's name: the artifact host and the browser tab show it.
 const titleOf = (doc) => `${doc.name} · smaltfl`.replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'));
-writeFileSync(`${out}/page.html`, readFileSync('src/app/page.html', 'utf8')
+const pageHtml = readFileSync('src/app/page.html', 'utf8')
   .replace('src="app.js"', `src="${hashed.app}"`)
-  .replace(/<title>[^<]*<\/title>/, `<title>${titleOf(await readFlow(flowPath ?? EXAMPLE_FLOW))}</title>`));
+  .replace(/<title>[^<]*<\/title>/, `<title>${titleOf(await readFlow(flowPath ?? EXAMPLE_FLOW))}</title>`);
+writeFileSync(`${out}/page.html`, pageHtml);
+// The same page as a document of its own, for any static host (GitHub Pages serves it at the folder's address).
+writeFileSync(`${out}/index.html`, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>[hidden]{display:none!important}body{margin:0}</style></head><body>\n${pageHtml}\n</body></html>\n`);
 writeFileSync(`${out}/bundles.json`, JSON.stringify(hashed, null, 2) + '\n');
 const fromData = (path) => git('show', `${data}:${path}`);
 /** A data file's entry in the published list, checked against the bytes read: the list is what the app trusts. */

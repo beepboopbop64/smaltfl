@@ -15,6 +15,7 @@ match smaltdb's `CLAUDE.md`.
 | `npm run check` | `npm run typecheck` then `npm test` (vitest, under a minute on four cores) | Before every commit |
 | `npm run test:slow` | The month-long engine runs `npm test` leaves out (`SLOW` in `vitest.config.ts`: `test/estate-flow.test.ts`, about 90 s). CI runs it, and `npm run test:isolated` (every file in a fresh module graph), in a job beside `test` | Changes to the runtime, the gates or the estate |
 | `npm run build` | `dist/`: the core (`index.js`), the runtime plugin (`plugin/index.js`) and their declarations | Packaging checks |
+| `npm run docs:dev` | The site (VitePress, `docs/`, the brand kit copied unchanged into `docs/.vitepress/theme/`); `.github/workflows/docs.yml` deploys it to GitHub Pages with the estate demo at `/app/` and the sign-ins at `/signins/` (each build writes `index.html` beside `page.html`) | Docs and site changes |
 | `npm run bench` | The scenario benchmarks in `bench/`, written to `bench/results/node.json` | Changes that could affect speed |
 | `npm run build:app` | The app in `dist/app` on `examples/nyc-taxis-weather/` (its notebooks expanded, shipped as `data/flow.json`), with the `data` branch's daily loads if fetched (else the XS fixtures); `-- --flow examples/security-signins/flow.json --out dist/app-signins` for the sign-ins (its generator's `--demo` days from the data list's `generateArgs`). Bundles are named by content (`bundles.json`) | Changes to `src/app` |
 
@@ -109,6 +110,10 @@ match smaltdb's `CLAUDE.md`.
   them by hosting and criticality (`by_profile`), each control by type (`control_by_type`) and the controls failed
   together (`failed_together`); the generator's hosting effects (`riskOf`) are what they show). A small output's Data
   tab draws it at a glance (`src/app/grid.ts` `gridOf`, `standOut`; `heatGrid` in `viz.ts`; `tools/browser/stops/apps.json`).
+  The notebook read as a page (`renderNotebookSheet`, full screen on a phone): under each step its callouts (what a
+  written rule caught, the day's warn and alert news), its **Output** (`outputCells`: first rows, a summary's heat table
+  open) and, on a watched step, **Models**; then **Your cells** (`exploreCells`, `exploreSql`: SQL over any dataset by
+  name, notes), kept in the browser and never in the notebook or a hash (`tools/browser/stops/notebook.json`).
 - Gates (ADR 0014): `src/core/gates.ts` is the vocabulary (`CHECK_NAMES`, written or learned, `LAYER_DEFAULTS`),
   `gate()` in `src/notebook.ts` the cell (`notebook.ts` derives `doc.gates`, the cell kept as `cells["gate:<node>"]`,
   outline kind `gate`), plan/4 a watch's `checks` (every check's mode, filled in from its layer; only a flow that

@@ -182,6 +182,13 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   (`src/app/grid.ts`: a heat table, the cells most out of line with their row said in words, "MFA · SaaS · High 32% ·
   9% elsewhere"; `test/grid.test.ts`, `tools/browser/stops/apps.json`). `test/estate-flow.test.ts` checks every
   application's score against the generator and the interactions through the engine.
+- **The notebook as a page, and the site** (2026-11-11, on `claude/trusting-euler-ogz88y`): a notebook's box opens as a
+  page with each step's callouts, output and models under it, and the reader's own SQL and note cells at the bottom
+  (kept in the browser). The site (`docs/`, VitePress with smalt-brand's kit copied unchanged): home, Quick start, A walk
+  through the demo, Working in the app, Writing a flow, Status, and the design records; `.github/workflows/docs.yml`
+  deploys it with the estate demo at `/app/` and the sign-ins at `/signins/`. Waiting on the owners: Pages turned on
+  for the repository (Source: GitHub Actions), and smalt-brand's product page, status row and `FAMILY` entry for
+  smaltfl (its mark and positioning line are owner decisions).
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

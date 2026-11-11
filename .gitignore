@@ -2,3 +2,5 @@ node_modules/
 dist/
 .cache/
 *.tgz
+docs/.vitepress/dist/
+docs/.vitepress/cache/

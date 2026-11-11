@@ -54,7 +54,10 @@
     "check": "npm run typecheck && npm test",
     "bench": "node scripts/fetch-packed.mjs --check && SMALTFL_BENCH=1 vitest run",
     "rules:sync": "node scripts/rules-sync.mjs",
-    "build:app": "node scripts/fetch-packed.mjs --check && node scripts/build-app.mjs"
+    "build:app": "node scripts/fetch-packed.mjs --check && node scripts/build-app.mjs",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "peerDependencies": {
     "smaltdb": ">=0.9.0 <0.10.0"
@@ -68,6 +71,7 @@
     "@types/node": "^22.20.5",
     "esbuild": "^0.28.2",
     "typescript": "5.9",
+    "vitepress": "^1.6.4",
     "vitest": "^5.0.5"
   }
 }

@@ -1,24 +1,25 @@
 # smaltfl
 
-**Small. Alternative. Flow.** Data pipelines for smaltdb.
+<a href="https://smaltworks.dev/stability"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/public/work-in-progress-on-dark.svg"><img alt="Work in progress. Come build with us." src="docs/public/work-in-progress.svg" height="56"></picture></a>
 
-smaltfl builds flows visually and runs them in the browser: sources become datasets through typed steps, with an
-ontology, actions, enforced access policies and content hashes attached to everything it produces. A planned member
-of the [smalt family](https://smaltworks.dev).
+**Small. Alternative. Flow.** Data pipelines for smaltdb, built visually and run in the browser.
 
-> **Status: a working app on real data, and a handoff.** The core and the runtime plugin run flows on smaltdb with
-> content hashes, signed manifests, verification and an audit trail. The app (`src/app/`) runs the taxi example on real
-> January 2024 trips and three real incidents in the browser: the day's news drawn visual-first, a day that is off
-> paused until someone decides (publish as is, keep, fill from another day, the part that arrived, accept a new level),
-> and the same for any dataset (a generated sign-in log is the second example).
-> - **Start here:** [docs/HANDOFF.md](docs/HANDOFF.md) (what is built, how to check it, what is left)
-> - Decisions: [docs/adr/](docs/adr/README.md) (ADR 0001 to 0010)
-> - The architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-> - The example it is built and measured against: [docs/SCENARIO.md](docs/SCENARIO.md)
+[Documentation](https://stenhoor.github.io/smaltfl/) · [smaltworks.dev](https://smaltworks.dev)
+
+smaltfl reads daily files, runs them through steps written as [smaltnb](https://github.com/stenhoor/smaltnb) notebooks,
+and publishes datasets, with an ontology, enforced access policies and content hashes attached to what it produces.
+Each day is judged against the days before it: a day that is off is **paused, not published**, told as one cause with
+what it reaches, until someone with the right to decides (publish as is, keep it back, fill it from another day, accept
+a new level). Everything runs in the browser, on [smaltdb](https://github.com/stenhoor/smaltdb).
+
+> **Status: early development.** [Try the live demo →](https://stenhoor.github.io/smaltfl/app/) (the control estate:
+> 600 applications, twelve security controls, a year of history and a planted March) ·
+> [Read the docs →](https://stenhoor.github.io/smaltfl/) · [A walk through the demo](https://stenhoor.github.io/smaltfl/guide/demo)
+> - **Where the work stands:** [docs/HANDOFF.md](docs/HANDOFF.md) (what is built, how to check it, what is left)
+> - Decisions: [docs/adr/](docs/adr/README.md) (ADR 0001 to 0015)
+> - The architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the scenario it is measured against: [docs/SCENARIO.md](docs/SCENARIO.md)
 > - The owner's answers and the questions still open: [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md)
-> - What the family already provides: [docs/research/ecosystem-survey.md](docs/research/ecosystem-survey.md)
-> - Brand: [docs/brand/DECISIONS.md](docs/brand/DECISIONS.md) (the colour is cobalt teal; the mark is on hold after
->   round 3)
+> - Brand: [docs/brand/DECISIONS.md](docs/brand/DECISIONS.md) (the layer's colour is set; the mark is on hold)
 
 ## Development
 
@@ -27,6 +28,8 @@ npm ci && npm run deps   # dependencies, then the smaltdb build pinned in packed
 npm run check            # typecheck and tests
 npm run bench            # the scenario benchmarks (bench/results/node.json)
 npm run build:app        # the app, in dist/app (with the data branch's loads when fetched: git fetch origin data --depth 1)
+npm run build:app -- --flow examples/control-estate/flow.json --out dist/app-estate   # the demo
+npm run docs:dev         # the site (VitePress), with live reload
 ```
 
 The tests are the worked example: [test/runtime.test.ts](test/runtime.test.ts) runs the reference flow
