@@ -1,0 +1,73 @@
+[
+  {
+    "name": "models-calm",
+    "what": "Sign-ins, a calm Wednesday (Mar 13): the sign-in file's Models tab. The forest: today's score under the cut among a year of learned days' ticks, what moved most. The classifier: its AUC on the track under 0.7, the like days it compared with",
+    "day": "Wed 13",
+    "card": "auth",
+    "tab": "Models",
+    "full": true,
+    "expect": {
+      "text": [
+        "Is the day unlike the days before?",
+        "is like the days before it",
+        "Can today’s rows be told from earlier days’?",
+        "look like like days’"
+      ],
+      "noText": [
+        "can’t judge"
+      ],
+      "minCharts": 2
+    }
+  },
+  {
+    "name": "models-forest",
+    "what": "Thu Mar 14, every value nudged a little, each inside its range: the forest speaks (today past the cut), naming what set the day apart; the classifier doesn't",
+    "day": "Thu 14",
+    "card": "auth",
+    "tab": "Models",
+    "full": true,
+    "expect": {
+      "text": [
+        "is unlike every one of the",
+        "WHAT SET IT APART",
+        "look like like days’"
+      ],
+      "count": {
+        "#sheet .md-part .dot-warn": 1
+      }
+    }
+  },
+  {
+    "name": "models-classifier",
+    "what": "Tue Mar 19, a client release moves most sign-ins to the phone's app: the classifier speaks (AUC past 0.7), the client ranked first among what tells today apart; the forest doesn't",
+    "day": "Tue 19",
+    "card": "auth",
+    "tab": "Models",
+    "full": true,
+    "expect": {
+      "text": [
+        "can be told from like days’",
+        "WHAT TELLS TODAY APART",
+        "Client",
+        "is like the days before it"
+      ],
+      "count": {
+        "#sheet .md-part .dot-warn": 1
+      }
+    }
+  },
+  {
+    "name": "models-classifier-dark",
+    "what": "The classifier's day in dark",
+    "scheme": "dark",
+    "day": "Tue 19",
+    "card": "auth",
+    "tab": "Models",
+    "full": true,
+    "expect": {
+      "text": [
+        "WHAT TELLS TODAY APART"
+      ]
+    }
+  }
+]

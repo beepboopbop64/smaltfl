@@ -24,7 +24,7 @@ import { effectOf, type Effect } from '../core/effect.js';
 import { daysFrom, HistoryRanges, isHistory, metricKey, QUANTILES, timeOf, type HistoryFile, type Metric } from '../core/history.js';
 import type { Identity, ManifestNode, SignedManifest } from '../core/manifest.js';
 import type { Backtest, NormalRange, NormalRanges, Place } from '../core/normal.js';
-import { flowNames, isPlaceholder, judgeOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
+import { flowNames, isPlaceholder, judgeOf, labelOf, newsOf, shareWords, tableNewsOf, usualHours, type Act, type Finding, type Names, type Severity, type TableFacts } from '../core/news.js';
 import { CHECK_NAMES, CHECK_SAID, checkOf, gateChecksOf, gateLayerOf, hasGates, JUDGED, LAYER_SAID, WRITTEN, type CheckMode, type CheckName, type GateChecks } from '../core/gates.js';
 import { toggleCheck } from '../core/gatecell.js';
 import { calendarHead, heldLoadLine, dayMid, dayShort, guessWords, judgedWords, lacked, MARK as REMEDY_MARK, noRowsBefore, reachLabel, readersOf as readersHad, readersSee, rowsFrom, shortfall, shownRun, stagedBar, stoppedLine as stoppedWords, toldLine, type DayState, type EpisodeDay, type KeptMark, type PauseState, type RemedyMark } from '../core/days.js';
@@ -33,7 +33,7 @@ import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, leve
 import { dayVersions, donorIdOf, fillCounts, levelOf as acceptedLevel, levelWays, partLabel as remedyPart, type Offer, type Repair, type Version } from '../core/fill.js';
 import { derivedAbout, derivedFails, derivedKeys, derivedWhy, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
 import { followsCause as followsFrom, ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, axisShare, recentSpan, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type HourValues, type Story, type Told } from '../core/story.js';
-import { amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeChip, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
+import { aucTrack, forestTicks, rankBars, amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeChip, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { counted, glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, saysMore, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
 import { ontologyPage, originSaid, typesShown, type ColumnCard, type FileSection, type Rule } from '../core/ontologypage.js';
@@ -48,7 +48,8 @@ import { checksOver, clockText, columnSql, fillGaps, growForest, isolationPath, 
 import type { ReleaseResult, RunResult, TellFor, VerifyLevel, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
 import { measureLoad, pinFile, releaseRun, runFlow, sampleLoad, verifyRun } from '../index.js';
-import { appendSample, isSample, SAMPLE_KEEP, samplePath, type SampleFile } from '../core/apart.js';
+import { apartEvidence, appendSample, isSample, SAMPLE_KEEP, samplePath, type SampleFile } from '../core/apart.js';
+import { forestEvidence } from '../core/combos.js';
 import { appendPeriods, hourValuesOf, settingsFor, tailBefore, type Measures } from '../core/measures.js';
 import { utf8 } from '../core/hash.js';
 import { describe as describeFile, severityOf as fileSeverity, type FileCheck } from '../core/integrity.js';
@@ -2784,8 +2785,8 @@ function renderFlowEdits(): void {
 // runs). Above the tabs: what it reads and what reads it, a tap away, and the day's load, to step through without
 // closing it. A card keeps its tab and its place in each tab.
 
-type Tab = 'news' | 'data' | 'columns' | 'dropped' | 'odd' | 'history' | 'checks' | 'rules' | 'integrity' | 'about';
-const TAB_LABEL: Record<Tab, string> = { news: 'News', data: 'Data', columns: 'Columns', dropped: 'Dropped', odd: 'Odd rows', history: 'History', checks: 'Checks', rules: 'Rules', integrity: 'Integrity', about: 'About' };
+type Tab = 'news' | 'data' | 'columns' | 'dropped' | 'odd' | 'history' | 'checks' | 'rules' | 'models' | 'integrity' | 'about';
+const TAB_LABEL: Record<Tab, string> = { news: 'News', data: 'Data', columns: 'Columns', dropped: 'Dropped', odd: 'Odd rows', history: 'History', checks: 'Checks', rules: 'Rules', models: 'Models', integrity: 'Integrity', about: 'About' };
 const drill = {
   tab: new Map<string, Tab>(),
   scroll: new Map<string, number>(),
@@ -2820,6 +2821,8 @@ function tabsOf(card: string): Tab[] {
   if (historyOf(id)) out.push('history');
   // The gate's checks (ADR 0014 §7), on a node a flow with gates judges or lets out.
   if (!profileOf(card) && gateOn(id)) out.push('checks');
+  // The two models (ADR 0015 §6), on a node a watch judges: what each found, whether or not it speaks.
+  if (!profileOf(card) && Object.keys(state.doc.publish?.watch ?? {}).some((w) => w.toLowerCase() === id.toLowerCase())) out.push('models');
   out.push('integrity', 'about');
   return out;
 }
@@ -2833,6 +2836,7 @@ const TABS: Record<Tab, (card: string, id: string, who: string) => Promise<HTMLE
   history: historyTab,
   checks: checksTab,
   rules: rulesTab,
+  models: modelsTab,
   integrity: integrityTab,
   about: aboutTab,
 };
@@ -3235,7 +3239,7 @@ async function checksTab(card: string, id: string): Promise<HTMLElement> {
  * A check of a node's gate set to a mode (ADR 0014 §1, slice 6): the notebook's gate cell written, the document derived
  * again from it, the change recorded with its reason, and everything that reads the gate drawn again.
  */
-async function setCheck(card: string, id: string, name: CheckName, mode: CheckMode, reason?: string): Promise<boolean> {
+async function setCheck(card: string, id: string, name: CheckName, mode: CheckMode, reason?: string, back: Tab = 'checks'): Promise<boolean> {
   if (!isOwner()) {
     setStatus('A gate is the owner’s to write: its cell is in the notebook.', true);
     return false;
@@ -3254,7 +3258,7 @@ async function setCheck(card: string, id: string, name: CheckName, mode: CheckMo
   setStatus(`${id}: ${name} is ${mode}. The gate cell in ${state.doc.cells?.[`gate:${id}`]?.notebook ?? 'the notebook'} says so now; the next run judges by it.`, false);
   requestCanvas();
   syncTitle();
-  if (state.selected) void renderSheet().then(() => openTab(card, 'checks'));
+  if (state.selected) void renderSheet().then(() => openTab(card, back));
   return true;
 }
 
@@ -3344,6 +3348,82 @@ async function rulesTab(card: string, id: string): Promise<HTMLElement> {
   box.append(h('div', { class: 'part' },
     h('button', { type: 'button', class: 'btn quiet', onclick: () => openFileRules(id) }, owner ? 'Add or change rules on the Ontology page' : 'See the rules on the Ontology page'),
     h('p', { class: 'foot' }, `A change is recorded as a flow change, kept in this browser, and takes effect from the next run.${anyDayWaits() ? ` ${WAITS_AGAIN}` : ''}`)));
+  return box;
+}
+
+/**
+ * The two models on a watched node (ADR 0015 §6), each with its question, its evidence drawn whether or not it speaks,
+ * and why when it can't run. The forest: is the day unlike every day before it? Each learned day's score as a tick, the
+ * cut as a line, today as a dot, then the numbers that set it apart most. The classifier: can today's rows be told from
+ * like days' rows? Its AUC on a track from chance to certain, then the columns that tell today apart. Both learned:
+ * they warn and never hold. In a flow with gates each has its switch, written in the gate cell.
+ */
+async function modelsTab(card: string, id: string): Promise<HTMLElement> {
+  const day = newsDay() ?? viewedDay();
+  const box = h('div', { class: 'models-tab' });
+  box.append(h('p', { class: 'lede' }, 'Two checks nobody wrote: they learn what a day of this file is like, and warn when one isn’t. Neither holds a day.'));
+  const h0 = rangesForLoad(id);
+  // The file's columns and values as people read them: titles and what a code stands for, its noun for its rows.
+  const meant = meaningsOf(id);
+  const flow = flowNames(state.doc, id);
+  const names: Names = { ...flow, column: (c) => meant(c)?.title ?? c, label: (c, v) => (v === null || v === undefined ? 'none' : (meaningFor(meant(c), v) ?? String(v))), value: (c, v) => (v === null || v === undefined ? 'none' : (meaningFor(meant(c), v) ?? String(v))) };
+  const monthDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const checks = gateOn(id);
+  const owner = isOwner();
+  /** A model's switch where the flow has gates (its check's mode in the gate cell), else that it runs and warns. */
+  const switchFor = (name: 'forest' | 'classifier'): Child => {
+    if (!checks) return h('span', { class: 'chip warn' }, 'on · warns');
+    const mode = checks[name];
+    const on = mode !== 'off';
+    const sw = h('button', { type: 'button', class: 'vf-switch md-switch', role: 'switch', 'aria-checked': String(on), 'aria-label': `The ${name}: ${on ? 'on' : 'off'}`, ...(owner ? {} : { disabled: 'disabled', title: 'The owner switches the models' }) },
+      h('span', { class: 'vf-switch-k', 'aria-hidden': 'true' }), h('span', { class: 'rl-state' }, on ? 'On' : 'Off'));
+    sw.addEventListener('click', () => void setCheck(card, id, name, on ? 'off' : 'warn', `Switched the ${name} ${on ? 'off' : 'on'} on ${id}, from the Models tab`, 'models'));
+    return sw;
+  };
+  const part = (title: string, question: string, name: 'forest' | 'classifier', body: Child[]) =>
+    h('section', { class: 'part md-part', 'aria-label': title }, h('div', { class: 'md-head' }, h('div', {}, h('p', { class: 'eyebrow' }, title), h('h3', { class: 'md-q' }, question)), switchFor(name)), ...body);
+  const off = (name: 'forest' | 'classifier') => !!checks && checks[name] === 'off';
+
+  // The forest.
+  const forestBody: Child[] = [];
+  if (off('forest')) forestBody.push(h('p', { class: 'of-none' }, 'Switched off in the gate cell.'));
+  else if (!day || !h0) forestBody.push(h('p', { class: 'of-none' }, !h0 ? 'No history for this file yet: nothing to learn from.' : 'No day to judge.'));
+  else {
+    const e = forestEvidence(h0, day, { names, label: labelOf(names) });
+    if ('why' in e) forestBody.push(h('p', { class: 'of-none' }, `It can’t judge ${dayShort(day)}: ${e.why}.`));
+    else {
+      forestBody.push(
+        h('p', { class: `md-verdict${e.speaks ? ' warn' : ''}` }, e.speaks ? `${dayShort(day)} is unlike every one of the ${fmtInt(e.learned.length)} days it learned from.` : `${dayShort(day)} is like the days before it: its score is under the cut.`),
+        svgNode(forestTicks({ learned: e.learned.map((x) => x.score), score: e.score, cut: e.cut, speaks: e.speaks, aria: `The day's score ${e.score.toFixed(2)} against the cut ${e.cut.toFixed(2)}, the highest of ${e.learned.length} learned days' scores` })),
+        h('p', { class: 'foot' }, `A tick a day it learned from, at that day’s own score; the line is the highest of them (or 0.5). Past it, a day is unlike any before.`),
+        h('p', { class: 'eyebrow' }, e.speaks ? 'What set it apart' : 'What moved most'),
+        h('ul', { class: 'md-list' }, ...e.top.map((t) => h('li', {}, t.words))));
+    }
+  }
+  box.append(part('The forest', 'Is the day unlike the days before?', 'forest', forestBody));
+
+  // The classifier.
+  const classBody: Child[] = [];
+  const a = day ? apartFor(id, day) : undefined;
+  if (off('classifier')) classBody.push(h('p', { class: 'of-none' }, 'Switched off in the gate cell.'));
+  else if (!samples.has(id)) classBody.push(h('p', { class: 'of-none' }, 'No kept sample for this file: nothing to learn from.'));
+  else if (!day || !a) classBody.push(h('p', { class: 'of-none' }, day ? `No kept rows of ${dayShort(day)} in this browser: run the day to keep them.` : 'No day to judge.'));
+  else {
+    const e = apartEvidence(a.sample, a.today, day, judgeOf(state.doc, id).pattern, (d) => h0?.learnsFrom(d) ?? true);
+    if ('why' in e) classBody.push(h('p', { class: 'of-none' }, `It can’t judge ${dayShort(day)}: ${e.why}.`));
+    else {
+      const f = e.found;
+      classBody.push(
+        h('p', { class: `md-verdict${e.speaks ? ' warn' : ''}` }, e.speaks ? `${dayShort(day)}’s ${names.noun?.() ?? 'rows'} can be told from like days’: AUC ${f.auc.toFixed(2)}.` : `${dayShort(day)}’s ${names.noun?.() ?? 'rows'} look like like days’: AUC ${f.auc.toFixed(2)}, under what it speaks at.`),
+        svgNode(aucTrack({ auc: f.auc, floor: f.floor, speaks: e.speaks, aria: `AUC ${f.auc.toFixed(2)} on a track from 0.5, chance, to 1; random labels reach ${f.floor.toFixed(2)}; it speaks from 0.7` })),
+        h('p', { class: 'foot' }, `${fmtInt(f.n)} ${names.noun?.(f.n) ?? 'rows'} a side, against ${plural(e.days.length, 'like day')}${e.days.length ? `, ${monthDay(e.days[0]!)} to ${monthDay(e.days.at(-1)!)}` : ''}. The shaded part is what random labels reach on the same rows.`),
+        // What tells today apart only means something when today can be told apart: at chance, the ranking is noise.
+        !e.speaks ? h('p', { class: 'of-none' }, 'Nothing tells today apart: the model does about as well as chance.') : null,
+        e.speaks && f.columns.length ? h('p', { class: 'eyebrow' }, 'What tells today apart') : null,
+        e.speaks && f.columns.length ? svgNode(rankBars({ rows: f.columns.slice(0, 5).map((c) => ({ label: names.column(c.column), share: c.share })), aria: `The columns that tell today apart: ${f.columns.slice(0, 5).map((c) => `${names.column(c.column)} ${Math.round(c.share * 100)}%`).join(', ')}` })) : null);
+    }
+  }
+  box.append(part('The classifier', 'Can today’s rows be told from earlier days’?', 'classifier', classBody));
   return box;
 }
 

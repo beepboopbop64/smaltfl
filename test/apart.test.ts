@@ -5,7 +5,7 @@
  * columns the held-out half loses most on when shuffled. Learned: it warns under the layer's defaults.
  */
 import { describe, expect, it } from 'vitest';
-import { appendSample, aucOf, clockColumns, emptySample, keepSample, likeDays, sampleRows, tellApart } from '../src/core/apart.js';
+import { apartEvidence, apartSpeaks, appendSample, aucOf, clockColumns, emptySample, keepSample, likeDays, sampleRows, tellApart } from '../src/core/apart.js';
 import { LAYER_DEFAULTS } from '../src/core/gates.js';
 import { HistoryRanges } from '../src/core/history.js';
 import { LEGACY_JUDGE, newsOf } from '../src/core/news.js';
@@ -130,5 +130,23 @@ describe('telling today apart', () => {
     const ungated = newsOf(h, '2023-10-11', vendorNames, { apart: { sample, today: rows(200, 500, 0.5) } }).find((x) => x.kind === 'apart');
     expect(ungated?.severity).toBe('warn');
     expect(newsOf(h, '2023-10-11', vendorNames, {}).some((x) => x.kind === 'apart')).toBe(false);
+  });
+
+  it('gives its evidence whether or not it speaks, and why when it can’t run (ADR 0015 §6)', () => {
+    let sample = emptySample({ flow: 'f', source: 's', columns: COLUMNS, kinds: [...KINDS] });
+    for (let i = 1; i <= 28; i++) sample = appendSample(sample, `2023-09-${String(i).padStart(2, '0')}`, rows(60, i));
+    const shifted = apartEvidence(sample, rows(200, 500, 0.5), '2023-10-11', 'none');
+    const same = apartEvidence(sample, rows(200, 501), '2023-10-11', 'none');
+    if ('why' in shifted || 'why' in same) throw new Error('both run');
+    expect(shifted.speaks).toBe(true);
+    expect(apartSpeaks(shifted.found)).toBe(true);
+    expect(same.speaks).toBe(false);
+    expect(same.found.auc).toBeLessThan(0.7);
+    expect(shifted.days.length).toBeGreaterThanOrEqual(10);
+    // Days the history doesn't learn from aren't like days.
+    const fewer = apartEvidence(sample, rows(200, 501), '2023-10-11', 'none', (d) => d > '2023-09-20');
+    expect('days' in fewer ? fewer.days.every((d) => d > '2023-09-20') && fewer.days.length > 0 : false).toBe(true);
+    expect(apartEvidence(emptySample({ flow: 'f', source: 's', columns: COLUMNS, kinds: [...KINDS] }), rows(200, 1), '2023-10-11', 'none')).toEqual({ why: 'no like days kept in the sample yet' });
+    expect(apartEvidence(sample, rows(10, 1), '2023-10-11', 'none')).toEqual({ why: 'too few rows a side to learn from' });
   });
 });

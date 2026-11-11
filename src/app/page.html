@@ -975,6 +975,16 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .of-rule-form select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--muted); border-radius: 8px; padding: 9px 10px; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 16px; }
 .of-range, .of-when { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; min-width: 0; }
 .rules-tab .lede { margin-bottom: 12px; }
+.models-tab .lede { margin-bottom: 12px; }
+.md-part { display: grid; gap: 8px; }
+.md-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.md-q { margin: 2px 0 0; font-size: 16px; }
+.md-verdict { margin: 0; font-weight: 600; }
+.md-verdict.warn { color: var(--warn-ink, var(--ink)); }
+.md-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; overflow-wrap: anywhere; }
+.md-switch { min-height: 44px; min-width: 44px; flex: none; }
+.md-head .chip { white-space: nowrap; flex: none; }
+.models-tab .md-part + .md-part { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--edge); }
 .of-shared { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--sunk); display: grid; gap: 8px; }
 .of-shared p { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
 .of-shared .btn { justify-self: start; min-height: 44px; }
@@ -1087,6 +1097,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .zoom-panel { fill: var(--sunk); stroke: var(--hair); stroke-width: 1; } .viz .level { stroke: var(--ink-2); stroke-width: 1.2; }
 .viz text.key { font-size: 11px; }
 .viz .cut { stroke: var(--ink); stroke-width: 1.5; }
+.viz .ghost-tick { stroke: var(--muted); stroke-width: 1; opacity: 0.35; }
 .viz .line { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .viz .line.temp { stroke: var(--ink-2); stroke-width: 1.8; }
 /* A usual count's end and a range's ends are soft (thin, the band's own edge); only a real limit is a heavy tick. */

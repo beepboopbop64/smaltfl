@@ -33,6 +33,8 @@ Build the app first (`npm run build:app`) and copy `dist/app` somewhere, because
 - `rules.json`: rules set on a file's columns, on the sign-ins (`npm run build:app -- --flow
   examples/security-signins/flow.json --out dist/app-signins`): the Ontology page's rules, a rule added, the import
   card's Rules tab, a rule switched off, a reload and dark. It must report `problems: none`.
+- `models.json`: the two models on the sign-ins (same build as `rules.json`): the sign-in file's Models tab on a calm
+  day, on Thu Mar 14 (the forest speaks) and Tue Mar 19 (the classifier speaks, the client first), and dark.
 - `fills.json` and `fills-nov.json`: the fill flows, as designed. Some selectors may have moved since; update them
   when a stop reports "nothing to click".
 

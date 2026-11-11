@@ -4,7 +4,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DEFS, amountLine, bandSpan, notJudgedMark, degrees, weatherHours, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeChip, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
+import { DEFS, aucTrack, forestTicks, rankBars, amountLine, bandSpan, notJudgedMark, degrees, weatherHours, bulletTrack, composition, contextBars, dayStrip, decisionRow, dumbbellRows, episodeBars, episodeChip, episodeDays, episodeIcon, esc, episodeLine, gateBars, glyph, hourBars, learnStrip, lineage, niceMax, partBar, quantileStrip, reachIcon, ruleRows, splitRows, stripBar, trendPips, waterfall, wrapName } from '../src/app/viz.js';
 
 const hours = Array.from({ length: 24 }, (_, h) => (h < 13 ? 5000 : 300));
 const usual = Array.from({ length: 24 }, () => 5000);
@@ -896,3 +896,31 @@ describe('a share’s row at a phone’s width (dumbbellRows)', () => {
     expect(label.length * 7 + '0.1%'.length * 6.6 + 12).toBeLessThanOrEqual(334);
   });
 });
+
+describe('the models’ views (ADR 0015 §6)', () => {
+  it('draws the forest: a tick a learned day, the cut, today labelled, warned when past the cut', () => {
+    const svg = forestTicks({ learned: [0.42, 0.45, 0.5, 0.57], score: 0.61, cut: 0.57, speaks: true, aria: 'The day against the cut' });
+    expect(svg.match(/class="ghost-tick"/g)).toHaveLength(4);
+    expect(svg).toContain('today 0.61');
+    expect(svg).toContain('cut 0.57');
+    expect(svg).toContain('class="dot dot-warn"');
+    expect(forestTicks({ learned: [0.4], score: 0.45, cut: 0.5, aria: 'x' })).not.toContain('dot-warn');
+  });
+
+  it('draws the classifier: its AUC from chance to certain, what random labels reach shaded, the 0.7 it speaks from', () => {
+    const svg = aucTrack({ auc: 0.92, floor: 0.56, speaks: true, aria: 'AUC 0.92' });
+    expect(svg).toContain('AUC 0.92');
+    expect(svg).toContain('0.5 chance');
+    expect(svg).toContain('class="dot dot-warn"');
+    // An AUC under chance sits at chance's end of the track, never off it.
+    expect(aucTrack({ auc: 0.4, floor: 0.55, aria: 'x' })).toMatch(/<circle class="dot" cx="6"/);
+  });
+
+  it('ranks what tells today apart, a bar a column with its share', () => {
+    const svg = rankBars({ rows: [{ label: 'Client', share: 0.81 }, { label: 'Method', share: 0.1 }], aria: 'Client 81%, Method 10%' });
+    expect(svg).toContain('>Client<');
+    expect(svg).toContain('>81%<');
+    expect(svg.match(/<rect class="ink"/g)).toHaveLength(2);
+  });
+});
+

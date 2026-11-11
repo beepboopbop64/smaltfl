@@ -671,3 +671,42 @@ starting file. It always brings those changes in."* (Q-148.)
   added to and one taken from the shared file reach both plans and both cells; each flow keeps its switches; the file
   written back as read and with an edit; what is refused). The sign-ins and lock-outs apps were built and driven with
   stops: the shared note, the Rules tab, no problems.
+
+### §6 as built (2026-11-11): the models, their evidence and their views, on data that tests them
+
+The maintainer: *"let's go ahead and create the two models, the isolation forest as well as the classification check.
+We might need to take a look at the data sets as well and make sure that they're complicated enough and we have enough
+history for those two things to work... create functions to generate the data so we can create more data over time and
+flag specific days where things go a little off the rails."* The choices are Q-152 and Q-153.
+
+- **The models were there; what they found wasn't shown, and the sign-in log couldn't exercise them.** The forest
+  (ADR 0013 §3) ran on every flow; the classifier (ADR 0014 §5) only under a gate with a kept sample, so never on the
+  sign-ins; neither showed its evidence unless it spoke; the generated sign-ins drew every column on its own.
+- **The data** (`test/fixtures/security.ts` `securityRows`, `scripts/data/security.ts`): people's sign-ins have
+  structure (a client by the method, a latency by the method, a country by the user, `natural` segments); the numeric
+  history the older tests read is unchanged. Two demo days only the models see (`SIGNIN_DEMO`, `DEMO_DAYS`): Thu Mar 14,
+  every result and method value nudged a little, each inside its range (`nudges`, the forest's); Tue Mar 19, a client
+  release moving most sign-ins to the phone's app, which no count the history keeps sees (the classifier's). A year
+  of history by default (`--from 2023-03-01`), the examples at `--scale 0.03` (about 6,000 sign-ins a day: at 2,000
+  the rare combinations are too noisy for a day-level model); a wider span makes more data, a day the same file
+  whatever the span.
+- **The classifier runs wherever a sample is kept** (Q-152), unless a gate switches it off, warning at most without a
+  gate; the app build keeps a sample for every watch. `apartEvidence` and `apartSpeaks` (`apart.ts`) are what `newsOf`
+  tells it by and what the view reads.
+- **The forest's evidence** (`forestEvidence`, `combos.ts`): its score, every learned day's score by the trees it
+  wasn't grown on, the cut (0.5 or the highest learned day's), and the numbers that set the day apart, whether or not it
+  speaks; `unlikeNews` grows the same forest (`grownFor`, `creditOf`) and keeps its early exit.
+- **The Models tab** (`modelsTab`, `main.ts`; `forestTicks`, `aucTrack`, `rankBars`, `viz.ts`) on every watched card:
+  the forest's question, a tick a learned day, the cut, today, then what set it apart (or moved most); the
+  classifier's question, its AUC on a track from chance to 1 with what random labels reach shaded and the 0.7 it speaks
+  from, the like days, then what tells today apart, only when it speaks (at chance the ranking is noise). In a flow with
+  gates each has its switch, written in the gate cell; otherwise "on · warns". Columns and values by the file's
+  titles and meanings.
+- **Tests:** `test/models.test.ts` (slow set: a year through the engine at the app's scale, then March a day at a time;
+  on the 15 calm days neither model speaks; on Mar 14 only the forest warns, its score past its cut; on Mar 19 only the
+  classifier, AUC 0.92, by the client; the loud days hold by their own checks; neither model holds a day);
+  `test/forest-evidence.test.ts`, `test/apart.test.ts` (the evidence and why it can't run), `test/viz.test.ts` (the
+  drawings); `tools/browser/stops/models.json` (the sign-ins' Models tab on a calm day, Mar 14 and Mar 19, and dark).
+- **Found and fixed on the way:** a check step enforcing ontology rules recorded its own rules with the day bound in,
+  starting a history segment a day, and `countedChecks` stopped recognizing it, so dropped-row news went quiet
+  (`stepRules`, `checksOf`).

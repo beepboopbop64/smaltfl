@@ -1670,4 +1670,65 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
 
 /** The patterns, once per page: the hatch the 'not today's run' marks use (another day's rows instead of the day), and
  * the stipple of another day's rows inside it (a fill: the ink's dots on a 4 px grid, ADR 0009 amendment 1 S12). */
+/**
+ * The forest's evidence (ADR 0015 §6): each day it learned from as a thin tick at its own score, the cut today must pass
+ * as a line (the highest of them, or 0.5), and today as a dot, labelled. A day past the cut is unlike every day before.
+ */
+export function forestTicks(o: { learned: readonly number[]; score: number; cut: number; aria: string; w?: number; speaks?: boolean }): string {
+  const w = o.w ?? 334;
+  const h = 74;
+  const ty = 26;
+  const lo = Math.min(0.3, ...o.learned, o.score) - 0.02;
+  const hi = Math.max(0.75, o.cut, o.score) + 0.03;
+  const x = (v: number) => 6 + ((v - lo) / (hi - lo)) * (w - 12);
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  s += `<line class="base" x1="6" x2="${w - 6}" y1="${ty + 14}" y2="${ty + 14}"/>`;
+  for (const v of o.learned) s += `<line class="ghost-tick" x1="${f1(x(v))}" x2="${f1(x(v))}" y1="${ty}" y2="${ty + 14}"/>`;
+  s += `<line class="cut" x1="${f1(x(o.cut))}" x2="${f1(x(o.cut))}" y1="${ty - 6}" y2="${ty + 20}"/>`;
+  s += `<text x="${f1(Math.min(w - 40, Math.max(40, x(o.cut))))}" y="${ty + 34}" text-anchor="middle" class="lbl-m">cut ${o.cut.toFixed(2)}</text>`;
+  s += `<circle class="dot${o.speaks ? ' dot-warn' : ''}" cx="${f1(x(o.score))}" cy="${ty + 7}" r="5.5"/>`;
+  s += `<text x="${f1(Math.min(w - 40, Math.max(40, x(o.score))))}" y="${ty - 10}" text-anchor="middle" class="lbl-b">today ${o.score.toFixed(2)}</text>`;
+  s += `<text x="6" y="${ty + 34}" class="tick" aria-hidden="true">ordinary</text><text x="${w - 6}" y="${ty + 34}" text-anchor="end" class="tick" aria-hidden="true">odd</text>`;
+  return `${s}</svg>`;
+}
+
+/**
+ * The classifier's evidence (ADR 0015 §6): its held-out AUC on a track from 0.5 (chance) to 1 (told apart every time),
+ * what random labels reach on the same rows shaded, the 0.7 it speaks from as a tick, and today's AUC as a dot.
+ */
+export function aucTrack(o: { auc: number; floor: number; aria: string; w?: number; speaks?: boolean }): string {
+  const w = o.w ?? 334;
+  const h = 70;
+  const ty = 26;
+  const bh = 12;
+  const x = (v: number) => 6 + ((Math.min(1, Math.max(0.5, v)) - 0.5) / 0.5) * (w - 12);
+  let s = open(w, h, o.aria, 'data-y0="0"');
+  s += `<rect class="ghost flat" x="6" y="${ty}" width="${f1(x(o.floor) - 6)}" height="${bh}" rx="2"/>`;
+  s += `<line class="base" x1="6" x2="${w - 6}" y1="${ty + bh}" y2="${ty + bh}"/>`;
+  s += `<line class="cut" x1="${f1(x(0.7))}" x2="${f1(x(0.7))}" y1="${ty - 4}" y2="${ty + bh + 4}"/>`;
+  s += `<circle class="dot${o.speaks ? ' dot-warn' : ''}" cx="${f1(x(o.auc))}" cy="${ty + bh / 2}" r="5.5"/>`;
+  s += `<text x="${f1(Math.min(w - 40, Math.max(40, x(o.auc))))}" y="${ty - 9}" text-anchor="middle" class="lbl-b">AUC ${o.auc.toFixed(2)}</text>`;
+  s += `<text x="6" y="${ty + bh + 18}" class="tick" aria-hidden="true">0.5 chance</text>`;
+  s += `<text x="${f1(x(0.7))}" y="${ty + bh + 18}" text-anchor="middle" class="tick" aria-hidden="true">0.7</text>`;
+  s += `<text x="${w - 6}" y="${ty + bh + 18}" text-anchor="end" class="tick" aria-hidden="true">1</text>`;
+  return `${s}</svg>`;
+}
+
+/** What tells today apart, ranked: a bar a column, its share of what the classifier loses when the column is shuffled. */
+export function rankBars(o: { rows: readonly { label: string; share: number }[]; aria: string; w?: number }): string {
+  const w = o.w ?? 334;
+  const rh = 24;
+  const lw = Math.min(150, Math.max(60, ...o.rows.map((r) => r.label.length * 6.8)));
+  const bw = w - lw - 48;
+  const h = o.rows.length * rh + 4;
+  let s = open(w, h, o.aria);
+  o.rows.forEach((r, i) => {
+    const y = i * rh + 4;
+    s += `<text x="0" y="${y + 13}" class="lbl-m">${esc(r.label.length > 22 ? `${r.label.slice(0, 21)}…` : r.label)}</text>`;
+    s += `<rect class="ink" x="${f1(lw)}" y="${y + 3}" width="${f1(Math.max(2, r.share * bw))}" height="12" rx="2"/>`;
+    s += `<text x="${f1(lw + Math.max(2, r.share * bw) + 6)}" y="${y + 13}" class="lbl-m">${Math.round(r.share * 100)}%</text>`;
+  });
+  return `${s}</svg>`;
+}
+
 export const DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><pattern id="viz-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" class="hatch-bg"/><line x1="0" y1="0" x2="0" y2="4" class="hatch-line"/></pattern><pattern id="viz-stipple" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" class="stipple-bg"/><circle cx="2" cy="2" r="1.05" class="stipple-dot"/></pattern></defs></svg>`;

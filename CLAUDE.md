@@ -164,7 +164,11 @@ match smaltdb's `CLAUDE.md`.
   `rulesTab`); the sign-in log ships three. A starting file's shared ontology (`src/core/shared.ts`,
   `examples/ontologies/auth.json`): a flow's `ontology.import` is brought in when it is read (`importOntologies` in
   `readFlow` and `loadFlowDir`, then `syncRuleCells`), so every flow reading the file has its rules
-  (`examples/security-lockouts/` is the second; `test/shared.test.ts`); `npm run rules:sync` writes the cells on disk;
+  (`examples/security-lockouts/` is the second; `test/shared.test.ts`); `npm run rules:sync` writes the cells on disk.
+  The models (§6 as built): the classifier runs wherever a sample is kept (`apartEvidence`, `apartSpeaks`), the forest's
+  evidence (`forestEvidence`), the **Models** tab (`modelsTab`; `forestTicks`, `aucTrack`, `rankBars` in `viz.ts`); the
+  sign-ins' rows have structure and two days only the models see (`SIGNIN_DEMO`, `DEMO_DAYS`), at `--scale 0.03` with a
+  year of history; `test/models.test.ts` (slow set, `test/helpers/signins-world.ts`), `tools/browser/stops/models.json`;
   `test/rules.test.ts`, `tools/browser/stops/rules.json`.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);

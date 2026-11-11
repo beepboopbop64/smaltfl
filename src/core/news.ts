@@ -14,7 +14,7 @@
  */
 import { daysBetween, namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
-import { clockColumns, likeDays, sampleRows, tellApart, type Apart, type SampleFile } from './apart.js';
+import { apartEvidence, type Apart, type SampleFile } from './apart.js';
 import { gated, gateChecksOf, writtenRules, type CheckName, type GateChecks, type NeedsRule, type ReconcileRule } from './gates.js';
 import { HistoryRanges, lateAt, lateUsual, QUANTILES, type Metric, type ValueHistory } from './history.js';
 import type { NoRange, NormalRange, NormalRanges } from './normal.js';
@@ -317,6 +317,13 @@ export function shareWords(value: number, low: number, high: number): { value: s
   return { value: `${at(value, d)}%`, range: lo === hi ? `${lo}%` : `${lo}–${hi}%` };
 }
 const cap = (d: number) => (Number.isFinite(d) ? Math.min(99, Math.abs(d)) : 99);
+/** A value in a short title, by its history key: its meaning when that is short ("Credit card"), else its own value
+ * ("N", "$2.50"). What the findings and the models' views name a value by. */
+export const labelOf = (names: Names) => (column: string, key: string): string => {
+  const said = (names.label ?? names.value)(column, parse(key));
+  return said.split(/\s+/).length <= 3 ? said : String(parse(key));
+};
+
 const parse = (key: string): unknown => {
   try {
     return JSON.parse(key) as unknown;
@@ -347,11 +354,7 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   const noun = (n?: number) => nounFor(names, n);
   const Noun = (n?: number) => sentence(noun(n));
   const cal = h.calendar;
-  // A value in a short title: its meaning when that is short ("Credit card"), else its own value ("N", "$2.50").
-  const label = (column: string, key: string) => {
-    const said = (names.label ?? names.value)(column, parse(key));
-    return said.split(/\s+/).length <= 3 ? said : String(parse(key));
-  };
+  const label = labelOf(names);
   const judged = (m: Metric): { ranges: NormalRanges; range: NormalRange; value: number; d: number } | null => {
     const ranges = h.of(m);
     const range = ranges?.at(day);
@@ -790,12 +793,10 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   // with no gate never more than unusual: a model warns, it doesn't hold. Nothing with too few rows a side.
   if (options.apart && (!judge.checks || judge.checks.classifier !== 'off')) {
     const { sample, today } = options.apart;
-    const days = likeDays(sample, day, judge.pattern, (d) => !h.learnsFrom(d));
-    const reference = sampleRows(sample, days);
-    const found = tellApart(today, reference, sample.columns, sample.kinds, { days: days.length, seed: 2017, leaveOut: new Set(clockColumns(sample, days)) });
-    // Told at an AUC of 0.7 and four standard errors over chance (and over what random labels reach): a slow drift
-    // tells days apart a little, and a little is not news.
-    if (found && found.z >= 4 && found.auc >= 0.7 && found.auc > found.floor + 0.05) {
+    const e = apartEvidence(sample, today, day, judge.pattern, (d) => h.learnsFrom(d));
+    // Told at an AUC of 0.7 and four standard errors over chance (and over what random labels reach): `apartSpeaks`.
+    const found = 'found' in e ? e.found : null;
+    if (found && 'speaks' in e && e.speaks) {
       const top = found.columns.slice(0, 2);
       const share = Math.round(top.reduce((t, c) => t + c.share, 0) * 100);
       const said = top.map((c) => names.column(c.column)).join(' and ');

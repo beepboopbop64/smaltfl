@@ -429,3 +429,19 @@ export function tellApart(today: readonly (readonly unknown[])[], reference: rea
   const cols = positive.sort((p, q) => q.drop - p.drop).map((d) => ({ column: d.column, share: total > 0 ? d.drop / total : 0 }));
   return { auc, z, floor, n, days: options.days ?? 0, columns: cols };
 }
+
+/** Whether what the classifier found is news (ADR 0014 §5): an AUC of 0.7 and four standard errors over chance, and
+ * over what random labels reach. A slow drift tells days apart a little, and a little is not news. */
+export const apartSpeaks = (a: Apart): boolean => a.z >= 4 && a.auc >= 0.7 && a.auc > a.floor + 0.05;
+
+/**
+ * The classifier's evidence for a day (ADR 0015 §6), whether or not it speaks: today's kept rows against the like days'
+ * rows of the sample (`likeDays`, leaving out the days `learnsFrom` refuses), and what it found; or why it can't run.
+ */
+export function apartEvidence(sample: SampleFile, today: readonly (readonly unknown[])[], day: string, pattern: 'weekly' | 'none' | 'monthly', learnsFrom: (d: string) => boolean = () => true): { found: Apart; days: string[]; speaks: boolean } | { why: string } {
+  const days = likeDays(sample, day, pattern, (d) => !learnsFrom(d));
+  if (!days.length) return { why: 'no like days kept in the sample yet' };
+  const found = tellApart(today, sampleRows(sample, days), sample.columns, sample.kinds, { days: days.length, seed: 2017, leaveOut: new Set(clockColumns(sample, days)) });
+  if (!found) return { why: 'too few rows a side to learn from' };
+  return { found, days, speaks: apartSpeaks(found) };
+}

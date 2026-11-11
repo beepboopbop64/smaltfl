@@ -364,7 +364,7 @@ export const SIGNIN_DEMO: SecurityOptions = {
     [DEMO_DAYS.shares]: { method: { password: 0.25, sso: 0.5, mfa_push: 0.2, passkey: 0.03, api_key: 0.02 } },
     [DEMO_DAYS.classifier]: { ua_family: { okhttp: 0.55, chrome: 0.15, edge: 0.1, safari: 0.1, outlook: 0.05, firefox: 0.02, other: 0.02, 'python-requests': 0.005, curl: 0.005 } },
   },
-  nudges: { [DEMO_DAYS.forest]: { result: { fail: 1.35, locked: 1.7 }, method: { password: 0.85, sso: 1.13, mfa_push: 1.13, passkey: 1.45, api_key: 0.75 } } },
+  nudges: { [DEMO_DAYS.forest]: { result: { fail: 1.3, locked: 1.5 }, method: { password: 0.82, sso: 1.16, mfa_push: 1.16, passkey: 1.5, api_key: 0.7 } } },
   extra: { [DEMO_DAYS.combo]: [{ n: 8_000, hours: BUSINESS, dist: { result: { locked: 1 }, method: { api_key: 1 }, country: { US: 1 }, ua_family: { 'python-requests': 1 } } }] },
 };
 
