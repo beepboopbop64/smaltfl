@@ -34,7 +34,10 @@ export const SECURITY_DAYS: string[] = [];
 for (let d = '2022-10-01'; d <= '2024-12-31'; d = plusDays(d, 1)) SECURITY_DAYS.push(d);
 
 export type Dist = Record<string, number>;
-export interface Segment { n: number; hours: number[]; dist: Record<string, Dist> }
+/** A segment of a day's rows: how many, in which hours, each coded column's shares. A `natural` segment is the day's
+ * ordinary sign-ins, whose rows carry the structure people's sign-ins have (`securityRows`): a client by the method, a
+ * latency by the method, a country by the user. A planted burst is not natural: its shares are what it is. */
+export interface Segment { n: number; hours: number[]; dist: Record<string, Dist>; natural?: boolean }
 const CODED = ['result', 'method', 'country', 'ua_family'] as const;
 
 const BASE: Record<string, Dist> = {
@@ -84,6 +87,9 @@ export interface SecurityOptions {
   /** A day's mix of one or more coded columns set outright (the demo's day with one column off, its amount as usual):
    * `{ '2024-03-18': { method: { sso: 0.5, … } } }`, normalised with the rest. */
   shares?: Record<string, Record<string, Dist>>;
+  /** A day's values nudged: each named value's share multiplied (`{ '2024-03-14': { method: { sso: 1.1 } } }`), the rest
+   * normalised. Small nudges on many values at once make a day no single number flags: what the forest is for. */
+  nudges?: Record<string, Record<string, Dist>>;
 }
 
 /** Whether a day is its month's last, and whether it is Patch Tuesday (the Tuesday between the 8th and the 14th). */
@@ -142,13 +148,15 @@ function planDays(o: SecurityOptions, rnd: () => number): SecurityDay[] {
     if (mfaGone) dist.method!.mfa_push = 0;
     if (inc && day === PLANTED.burst) dist.result!.locked = 0.02;
     for (const [c, d] of Object.entries(o.shares?.[day] ?? {})) dist[c] = { ...d };
+    for (const [c, d] of Object.entries(o.nudges?.[day] ?? {})) for (const [v, x] of Object.entries(d)) if (dist[c]![v] !== undefined) dist[c]![v]! *= x;
     for (const c of CODED) {
       const d = dist[c]!;
       const t = Object.values(d).reduce((a, b) => a + b, 0);
       for (const v in d) d[v]! /= t;
     }
     // A drop takes those rows away, not shares them out.
-    const segs: Segment[] = [{ n: n * (mfaGone ? 0.75 : 1), hours: norm(HUMAN), dist }];
+    // A day whose client mix is set outright keeps it as set: its rows' clients aren't drawn by the method.
+    const segs: Segment[] = [{ n: n * (mfaGone ? 0.75 : 1), hours: norm(HUMAN), dist, natural: !o.shares?.[day]?.ua_family }];
     if (inc && day === PLANTED.burst) segs.push({ n: 150_000 * scale, hours: onlyHours([2, 3, 4]), dist: { result: { fail: 0.97, locked: 0.03 }, method: { password: 1 }, country: { RU: 1 }, ua_family: { 'python-requests': 1 } } });
     if (inc && day === PLANTED.hydra) segs.push({ n: 40_000 * scale, hours: onlyHours([20, 21, 22]), dist: { result: { fail: 0.99, locked: 0.01 }, method: { password: 1 }, country: { BR: 1 }, ua_family: { hydra: 1 } } });
     for (const x of o.extra?.[day] ?? []) segs.push({ n: x.n * scale, hours: onlyHours(x.hours), dist: x.dist });
@@ -304,14 +312,61 @@ export function securityRows(plan: SecurityDay, scale = 1, seed = 7): (string | 
         const day = r < 0.001 ? plusDays(plan.day, 1) : plan.day;
         const time = `${day} ${two(hour)}:${two(Math.floor(rnd() * 60))}:${two(Math.floor(rnd() * 60))}`;
         const result = r > 0.998 ? 'unknown' : pick(seg.dist.result!);
-        const latency = Math.round(180 * Math.exp(0.5 * gauss(rnd)));
-        const user = rnd() < 0.004 ? null : `u${Math.floor(rnd() * 4000)}`;
-        out.push([time, result, pick(seg.dist.method!), pick(seg.dist.country!), pick(seg.dist.ua_family!), latency, user]);
+        const id = Math.floor(rnd() * 4000);
+        const user = rnd() < 0.004 ? null : `u${id}`;
+        const method = pick(seg.dist.method!);
+        // People's sign-ins have structure (`natural`): the client follows the method most of the time (a key from a
+        // script, a push from the phone's app), the latency is the method's (a push waits for a person), and a user signs
+        // in from their own country nine times in ten. The shares a day's plan gives are kept on the whole.
+        const natural = seg.natural === true;
+        const client = natural && rnd() < CLIENT_TIE ? pick(CLIENT_BY_METHOD[method] ?? seg.dist.ua_family!) : pick(seg.dist.ua_family!);
+        const country = natural && rnd() < 0.9 ? homeCountry(id, seg.dist.country!) : pick(seg.dist.country!);
+        const latency = Math.round((natural ? (LATENCY_BY_METHOD[method] ?? 180) : 180) * Math.exp(0.5 * gauss(rnd)));
+        out.push([time, result, method, country, client, latency, user]);
       }
     }
   }
   return out.sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0));
 }
+
+/** How often a person's client follows their method, and which clients each method's sign-ins come from. */
+const CLIENT_TIE = 0.6;
+const CLIENT_BY_METHOD: Record<string, Dist> = {
+  password: { chrome: 0.5, edge: 0.25, safari: 0.15, firefox: 0.1 },
+  sso: { chrome: 0.45, edge: 0.3, safari: 0.2, firefox: 0.05 },
+  mfa_push: { okhttp: 0.5, outlook: 0.4, safari: 0.1 },
+  passkey: { safari: 0.5, chrome: 0.4, edge: 0.1 },
+  api_key: { 'python-requests': 0.45, curl: 0.35, okhttp: 0.2 },
+};
+/** A method's typical latency in ms: a push waits for the person to tap it. */
+const LATENCY_BY_METHOD: Record<string, number> = { password: 200, sso: 260, mfa_push: 1400, passkey: 120, api_key: 60 };
+/** A user's own country, the same every day: by their number, in the day's country shares. */
+function homeCountry(id: number, dist: Dist): string {
+  let x = (((id * 2654435761) >>> 0) % 10_000) / 10_000;
+  const t = Object.values(dist).reduce((a, b) => a + b, 0);
+  for (const [v, p] of Object.entries(dist)) if ((x -= p / t) <= 0) return v;
+  return Object.keys(dist).at(-1)!;
+}
+
+/**
+ * The demo's loads (`scripts/data/security.mjs --demo`, ADR 0012), each a kind of trouble a reader, or a model, should
+ * tell apart: nothing arrived (Fri Mar 15); one column's mix off, its amount as usual (Mon Mar 18); a combination off,
+ * lock-outs through API keys (Wed Mar 20); and two days only the models see (ADR 0015 §6): every value nudged a little,
+ * each inside its own range, so the day as a whole is unlike any before it (Thu Mar 14, the forest's); and a client
+ * release that moves most people's sign-ins to the phone's app, which no count the history keeps sees (Tue Mar 19, the
+ * classifier's: the rows look different).
+ */
+export const DEMO_DAYS = { forest: '2024-03-14', missing: '2024-03-15', shares: '2024-03-18', classifier: '2024-03-19', combo: '2024-03-20' } as const;
+const BUSINESS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+export const SIGNIN_DEMO: SecurityOptions = {
+  missing: [DEMO_DAYS.missing],
+  shares: {
+    [DEMO_DAYS.shares]: { method: { password: 0.25, sso: 0.5, mfa_push: 0.2, passkey: 0.03, api_key: 0.02 } },
+    [DEMO_DAYS.classifier]: { ua_family: { okhttp: 0.55, chrome: 0.15, edge: 0.1, safari: 0.1, outlook: 0.05, firefox: 0.02, other: 0.02, 'python-requests': 0.005, curl: 0.005 } },
+  },
+  nudges: { [DEMO_DAYS.forest]: { result: { fail: 1.35, locked: 1.7 }, method: { password: 0.85, sso: 1.13, mfa_push: 1.13, passkey: 1.45, api_key: 0.75 } } },
+  extra: { [DEMO_DAYS.combo]: [{ n: 8_000, hours: BUSINESS, dist: { result: { locked: 1 }, method: { api_key: 1 }, country: { US: 1 }, ua_family: { 'python-requests': 1 } } }] },
+};
 
 /** Rows as a CSV file with a header: what the example's loads are. */
 export function csvOf(rows: readonly (readonly (string | number | null)[])[]): string {

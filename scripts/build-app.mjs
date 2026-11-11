@@ -174,12 +174,13 @@ if (days.length) {
   // The generator's fixed sources (an inventory), which a gate's scope rule reads beside each load (ADR 0014 §4).
   const generated = existsSync(join(work, 'loads.json')) ? JSON.parse(readFileSync(join(work, 'loads.json'), 'utf8')) : null;
   const fixedArgs = Object.entries((generated && !Array.isArray(generated) && generated.fixed) || {}).flatMap(([id, path]) => ['--fixed', `${id}=${path}`]);
-  // A flow with gates (ADR 0014 §5) keeps a sample beside each history, for the classifier.
-  const gated = Object.keys(flowDoc.gates ?? {}).length > 0;
+  // Every watch keeps a sample beside its history, for the classifier (ADR 0014 §5, ADR 0015 §6: it runs wherever a
+  // sample is kept, a gate or not).
+  const sampled = watches.length > 0;
   const sampleName = (w) => (watches.length === 1 ? 'sample.json' : `sample.${w}.json`);
   for (const w of watches) {
     const base = existsSync(join(work, `base.${w}.json`)) ? join(work, `base.${w}.json`) : join(work, 'base.json');
-    execFileSync('node', ['scripts/data/history.mjs', '--flow', flowPath, '--watch', w, '--files', base, ...fixedArgs, ...(gated ? ['--sample', join(work, sampleName(w))] : []), join(work, historyName(w))], { stdio: 'inherit' });
+    execFileSync('node', ['scripts/data/history.mjs', '--flow', flowPath, '--watch', w, '--files', base, ...fixedArgs, ...(sampled ? ['--sample', join(work, sampleName(w))] : []), join(work, historyName(w))], { stdio: 'inherit' });
   }
   mkdirSync(`${out}/data/loads`, { recursive: true });
   const entry = (name, bytes, from) => {
@@ -188,7 +189,7 @@ if (days.length) {
   };
   const flowEntry = await shipFlow(flowPath);
   const histories = Object.fromEntries(watches.map((w) => [w, entry(historyName(w), readFileSync(join(work, historyName(w))), `${bind.generate}, scripts/data/history.mjs`)]));
-  const samples = gated ? Object.fromEntries(watches.map((w) => [w, entry(sampleName(w), readFileSync(join(work, sampleName(w))), `${bind.generate}, scripts/data/history.mjs --sample`)])) : {};
+  const samples = sampled ? Object.fromEntries(watches.map((w) => [w, entry(sampleName(w), readFileSync(join(work, sampleName(w))), `${bind.generate}, scripts/data/history.mjs --sample`)])) : {};
   // The generator's loads: a list of one source's files (`[{ file, slot, rows }]`), or days of several daily sources
   // with the fixed files beside them (`{ fixed: { id: path }, loads: [{ slot, files: { id: { file, rows } } }] }`).
   const made = JSON.parse(readFileSync(join(work, 'loads.json'), 'utf8'));

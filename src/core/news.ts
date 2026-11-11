@@ -785,9 +785,10 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
     if (gaps.length) out.push({ key: 'weather-gaps', kind: 'weather', severity: 'note', score: 1, title: `The weather has hours missing`, detail: `${listed(gaps)}: fewer than 24 hours on record.`, look: 'history', acts: ['notify'] });
   }
 
-  // The classifier (ADR 0014 §5): today's kept rows against the like days' rows of the sample, under a gate whose
-  // classifier is on; told as unusual at most under the layer's defaults (learned). Nothing with too few rows a side.
-  if (options.apart && judge.checks && judge.checks.classifier !== 'off') {
+  // The classifier (ADR 0014 §5, ADR 0015 §6): today's kept rows against the like days' rows of the sample, wherever a
+  // sample is kept, unless a gate switches it off; told as unusual at most under the layer's defaults (learned), and
+  // with no gate never more than unusual: a model warns, it doesn't hold. Nothing with too few rows a side.
+  if (options.apart && (!judge.checks || judge.checks.classifier !== 'off')) {
     const { sample, today } = options.apart;
     const days = likeDays(sample, day, judge.pattern, (d) => !h.learnsFrom(d));
     const reference = sampleRows(sample, days);
@@ -799,7 +800,7 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
       const share = Math.round(top.reduce((t, c) => t + c.share, 0) * 100);
       const said = top.map((c) => names.column(c.column)).join(' and ');
       out.push({
-        key: 'apart', kind: 'apart', severity: found.z >= 6 && found.auc >= 0.8 ? 'alert' : 'warn', score: Math.min(99, found.z), title: `Rows unlike earlier days: AUC ${found.auc.toFixed(2)}`,
+        key: 'apart', kind: 'apart', severity: judge.checks && found.z >= 6 && found.auc >= 0.8 ? 'alert' : 'warn', score: Math.min(99, found.z), title: `Rows unlike earlier days: AUC ${found.auc.toFixed(2)}`,
         detail: `${sentence(said)} explain ${share}% of what tells today’s ${noun()} from ${found.days} earlier days’ (${fmtInt(found.n)} a side; chance reaches ${found.floor.toFixed(2)}).`,
         look: 'rows', columns: top.map((c) => c.column), value: found.auc, rows: today.length, apart: found, acts: ['expected', 'notify'],
       });

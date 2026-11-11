@@ -41,6 +41,8 @@
     }
   },
   "generateArgs": [
-    "--demo"
+    "--demo",
+    "--scale",
+    "0.03"
   ]
 }

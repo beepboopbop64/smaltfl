@@ -16,6 +16,7 @@
  * Pure: no DOM, no engine.
  */
 import type { FlowDocument, StepDef } from './document.js';
+import { emitRuleCheck } from './emit.js';
 import { meaningOf, propertyOf, type Ontology } from './ontology.js';
 
 /** What a rule asks of its column: a value on every row, one of some values, a number from `min` to `max`, or one of
@@ -95,6 +96,13 @@ export function enforcedBy(doc: RulesDoc, step: StepDef): OntologyRule[] {
   const file = doc.sources.find((s) => lower(s.id) === lower(step.inputs[0]!));
   if (!file || checkStepOf(doc, file.id)?.id !== step.id) return [];
   return rulesOf(doc.ontology, file.id).filter((r) => ruleOn(step, r.id));
+}
+
+/** A check step's rules as its counts name them: its own as written, then the ontology's it enforces, by name, as the
+ * engine reads them. What a history and a load's measures record of the step's checks. */
+export function stepRules(doc: RulesDoc, step: StepDef): { name: string; check: string; onFail: 'warn' | 'drop' | 'fail' }[] {
+  if (step.kind !== 'expectations') return [];
+  return [...step.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })), ...enforcedBy(doc, step).map((r) => ({ name: r.id, check: emitRuleCheck(r), onFail: ON_FAIL[r.action] }))];
 }
 
 /** "A", "A or B", "A, B or C". */

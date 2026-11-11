@@ -153,7 +153,9 @@ export function checksOf(plan: Pick<FlowPlan, 'nodes'>, node: number, steps?: re
   if (!n || n.op !== 'expect') return null;
   // As the document writes them, when the caller has it: a rule with a parameter is the same rule whatever its value.
   const step = steps?.find((x) => x.id === n.origin);
-  const written = step?.kind === 'expectations' && step.rules.length === n.rules.length ? step.rules : null;
+  // The step's own rules come first, as written (their parameters unbound); the ontology's it enforces follow, as the
+  // engine reads them (rules.ts), with nothing to bind.
+  const written = step?.kind === 'expectations' && step.rules.length <= n.rules.length && step.rules.every((r, k) => r.name === n.rules[k]![0]) ? step.rules : null;
   return {
     checks: { step: n.origin, rules: n.rules.map(([name, check, onFail], k) => ({ name, check: written?.[k]?.check ?? check, onFail })) },
     counting: n.rules.map(([, check]) => check),

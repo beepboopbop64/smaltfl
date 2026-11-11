@@ -248,12 +248,12 @@ describe('a load with rows that break them, through the engine', () => {
 
   it('counts a flagged row, keeps it, and verifies', async () => {
     const doc = await signins();
-    const { db, run: go } = await run(doc, [[at, 'success', 'sso', 'US', 'chrome', 99_999, 'u1'], [at, 'success', 'sso', null, 'chrome', 120, 'u2']]);
+    const { db, run: go } = await run(doc, [[at, 'success', 'sso', 'US', 'chrome', 99_999, 'planted_1'], [at, 'success', 'sso', null, 'chrome', 120, 'planted_2']]);
     try {
       const r = await go();
       expect(counts(r)).toMatchObject({ method_one_of: 0, latency_ms_range: 1, country_required: 1 });
       // Flagged rows are kept: both are among the checked sign-ins.
-      expect(db.query(`SELECT count(*) FROM auth_valid WHERE "user" IN ('u1', 'u2')`).rows[0]![0]).toBe(2);
+      expect(db.query(`SELECT count(*) FROM auth_valid WHERE "user" IN ('planted_1', 'planted_2')`).rows[0]![0]).toBe(2);
       expect((await verifyRun(db, r.run, { smaltdb: SMALTDB, level: 'rerun' })).ok).toBe(true);
     } finally {
       db.close();

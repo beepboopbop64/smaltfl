@@ -9,10 +9,11 @@ const core = (path: string): string => fileURLToPath(new URL(`./node_modules/sma
 
 /**
  * The tests too long for `npm test` (under a minute on four cores), run by `npm run test:slow` and by CI beside it: the
- * estate's month through the engine a day at a time (no day can start before the day before has run), and the tests on
+ * estate's month through the engine a day at a time (no day can start before the day before has run), the models on a
+ * year of the sign-in log (test/models.test.ts, through the engine at the app's scale), and the tests on
  * the real history, which run only where `dist/app/data/history.json` was built from the data branch (minutes each).
  */
-const SLOW = ['test/estate-flow.test.ts', 'test/*-real.test.ts'];
+const SLOW = ['test/estate-flow.test.ts', 'test/models.test.ts', 'test/*-real.test.ts'];
 
 /**
  * The files that take longest, started first in this order, so none of them is left to run alone at the end: a world of

@@ -212,6 +212,83 @@ const median = (xs: number[]) => {
   return s.length ? (s.length % 2 ? s[(s.length - 1) / 2]! : (s[s.length / 2 - 1]! + s[s.length / 2]!) / 2) : 0;
 };
 
+/** The forest a day is judged by: grown on the learned days before it, with the day's own numbers; or why it can't be. */
+type Grown = { k: number; features: Feature[]; learned: number[]; train: number[][]; today: number[]; size: number; forest: NonNullable<ReturnType<typeof growForest>> };
+function grownFor(h: HistoryRanges, day: string, o: Pick<UnlikeOptions, 'names' | 'label'>): Grown | { why: string; days?: number } {
+  const file = h.file;
+  const k = file.days.indexOf(day);
+  if (k < 0) return { why: 'the day isn’t in the history' };
+  if (!file.rows[k]) return { why: 'the day has no rows' };
+  const features = dayFeatures(h, o);
+  if (features.length < 2) return { why: 'too few numbers to read: no counted column' };
+  const learned = file.days.map((d, j) => j).filter((j) => j < k && j >= file.warmup && file.rows[j]! > 0 && h.learnsFrom(file.days[j]!));
+  if (learned.length < LEARN_DAYS) return { why: `too few days to learn from (${learned.length} of ${LEARN_DAYS})`, days: learned.length };
+  const row = (j: number) => features.map((f) => f.at(j) ?? 0);
+  const train = learned.map(row);
+  const today = row(k);
+  const size = Math.ceil(train.length / 2);
+  const forest = growForest(train, { trees: TREES, size, seed: 2008 });
+  if (!forest) return { why: 'too few days to learn from' };
+  return { k, features, learned, train, today, size, forest };
+}
+
+/** What set a point apart in a forest: for each tree the splits on its way down, credited with the share of the tree's
+ * rows each cut away; the features by credit, most first. */
+function creditOf(g: Grown, x: readonly number[]): { f: number; c: number }[] {
+  const credit = new Array<number>(g.features.length).fill(0);
+  g.forest.trees.forEach((t, ti) => {
+    let before = t.members.length;
+    for (const cut of isolationPath(g.forest, ti, g.train, x)) {
+      if (before > 0) credit[cut.feature]! += (before - cut.left.length) / before;
+      before = cut.left.length;
+    }
+  });
+  return credit.map((c, f) => ({ c, f })).filter((x) => x.c > 0).sort((p, q) => q.c - p.c);
+}
+
+/** The forest's evidence for a day (ADR 0015 §6), whether or not it speaks: its score, every learned day's own score
+ * (by the trees it wasn't grown on), the cut it has to pass (0.5, or the highest learned day's, the larger), and the
+ * numbers that set it apart most, each against its usual (the learned days' median). */
+export interface ForestEvidence {
+  day: string;
+  score: number;
+  cut: number;
+  highest: number;
+  speaks: boolean;
+  learned: { day: string; score: number }[];
+  top: { name: string; columns: string[]; words: string; credit: number }[];
+}
+
+/** The forest's evidence for a day, or why it can't be read (too few days, nothing counted). */
+export function forestEvidence(h: HistoryRanges, day: string, o: Pick<UnlikeOptions, 'names' | 'label'>): ForestEvidence | { why: string; days?: number } {
+  const g = grownFor(h, day, o);
+  if ('why' in g) return g;
+  const yard = avgPath(g.size);
+  const grownOn = g.forest.trees.map((t) => {
+    const m = new Uint8Array(g.train.length);
+    for (const i of t.members) m[i] = 1;
+    return m;
+  });
+  const learned = g.learned.map((j, i) => {
+    let total = 0;
+    let n = 0;
+    for (let ti = 0; ti < g.forest.trees.length; ti++) {
+      if (grownOn[ti]![i]) continue;
+      total += pathLength(g.forest.trees[ti]!.root, g.train[i]!);
+      n++;
+    }
+    return { day: h.file.days[j]!, score: n ? 2 ** (-(total / n) / yard) : 0 };
+  });
+  const highest = Math.max(0, ...learned.map((x) => x.score));
+  const score = scoreOf(g.forest, g.today);
+  const cut = Math.max(0.5, highest);
+  const top = creditOf(g, g.today).slice(0, 3).map(({ f, c }) => {
+    const ft = g.features[f]!;
+    return { name: ft.name, columns: ft.columns, words: ft.words(g.k, median(g.learned.map((j) => ft.at(j) ?? 0))), credit: c / g.forest.trees.length };
+  });
+  return { day, score, cut, highest, speaks: score > cut, learned, top };
+}
+
 /**
  * A day unlike every day before it (ADR 0013 §3): an isolation forest grown on the learned days' numbers scores today;
  * each learned day is scored by the trees it was left out of; today is unlike them when its score is past every one of
@@ -219,19 +296,9 @@ const median = (xs: number[]) => {
  * each credited with the share of the day's companions it cut away.
  */
 export function unlikeNews(h: HistoryRanges, day: string, o: UnlikeOptions): Finding[] {
-  const file = h.file;
-  const k = file.days.indexOf(day);
-  if (k < 0 || !file.rows[k]) return [];
-  const features = dayFeatures(h, o);
-  if (features.length < 2) return [];
-  const learned = file.days.map((d, j) => j).filter((j) => j < k && j >= file.warmup && file.rows[j]! > 0 && h.learnsFrom(file.days[j]!));
-  if (learned.length < LEARN_DAYS) return [];
-  const row = (j: number) => features.map((f) => f.at(j) ?? 0);
-  const train = learned.map(row);
-  const today = row(k);
-  const size = Math.ceil(train.length / 2);
-  const forest = growForest(train, { trees: TREES, size, seed: 2008 });
-  if (!forest) return [];
+  const g = grownFor(h, day, o);
+  if ('why' in g) return [];
+  const { k, features, learned, train, today, size, forest } = g;
   // Today is unlike the days before only past 0.5 and past every learned day's own score: asked in that order, so an
   // ordinary day (most of them) needs no learned day scored, and the scoring stops at the first that reaches today's.
   const score = scoreOf(forest, today);
@@ -257,15 +324,7 @@ export function unlikeNews(h: HistoryRanges, day: string, o: UnlikeOptions): Fin
     if (score <= highest) return [];
   }
   // What set it apart: the splits on its way down each tree, credited with the share of companions each cut away.
-  const credit = new Array<number>(features.length).fill(0);
-  forest.trees.forEach((t, ti) => {
-    let before = t.members.length;
-    for (const cut of isolationPath(forest, ti, train, today)) {
-      if (before > 0) credit[cut.feature]! += (before - cut.left.length) / before;
-      before = cut.left.length;
-    }
-  });
-  const top = credit.map((c, f) => ({ c, f })).filter((x) => x.c > 0).sort((p, q) => q.c - p.c).slice(0, 3);
+  const top = creditOf(g, today).slice(0, 3);
   const columns = [...new Set(top.flatMap(({ f }) => features[f]!.columns))];
   // Words at a glance are budgeted (ADR 0008): the title names what set the day apart most when that fits eight
   // words, the detail the three that did; the numbers are in `members`, for a screen with room.

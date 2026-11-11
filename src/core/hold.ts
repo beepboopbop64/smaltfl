@@ -15,6 +15,7 @@
  */
 import { canonicalJSON } from './canonical.js';
 import type { DayState, PauseState } from './days.js';
+import { stepRules } from './rules.js';
 import { isGeneralWatch, sourceOf, type FlowDocument, type HoldKind, type WatchDef } from './document.js';
 import type { Repair } from './fill.js';
 import { dayOfSlot, isEvery, type Every } from './calendar.js';
@@ -226,10 +227,10 @@ export type RunHold = Hold | FillHold;
  * its fill step, `sourceOf`), with the same rules (names, checks and what each does). A box put in front of the source
  * would leave the checks other rows to count.
  */
-export function countedChecks(doc: Pick<FlowDocument, 'steps'>, h: HistoryRanges, source: string | undefined): boolean {
+export function countedChecks(doc: Pick<FlowDocument, 'steps'> & Partial<Pick<FlowDocument, 'sources' | 'ontology'>>, h: HistoryRanges, source: string | undefined): boolean {
   const step = doc.steps.find((x) => x.id === h.file.step);
   return !!source && step?.kind === 'expectations' && step.inputs.length === 1 && sourceOf(doc, step.inputs[0]!) === source
-    && h.sameChecks(step.rules.map((r) => ({ name: r.name, check: r.check, onFail: r.onFail })));
+    && h.sameChecks(stepRules({ ...doc, sources: doc.sources ?? [] }, step));
 }
 
 /** What a flow's own verdict reads of its document: its steps, its ontology, its watch and its calendar. */

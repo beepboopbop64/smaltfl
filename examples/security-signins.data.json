@@ -4,8 +4,45 @@
   "generate": "scripts/data/security.mjs",
   "sources": {
     "auth": {
-      "table": "auth_file", "format": "csv", "file": "auth.csv", "header": true,
-      "columns": [["event_time", "TEXT"], ["result", "TEXT"], ["method", "TEXT"], ["country", "TEXT"], ["ua_family", "TEXT"], ["latency_ms", "REAL"], ["user", "TEXT"]]
+      "table": "auth_file",
+      "format": "csv",
+      "file": "auth.csv",
+      "header": true,
+      "columns": [
+        [
+          "event_time",
+          "TEXT"
+        ],
+        [
+          "result",
+          "TEXT"
+        ],
+        [
+          "method",
+          "TEXT"
+        ],
+        [
+          "country",
+          "TEXT"
+        ],
+        [
+          "ua_family",
+          "TEXT"
+        ],
+        [
+          "latency_ms",
+          "REAL"
+        ],
+        [
+          "user",
+          "TEXT"
+        ]
+      ]
     }
-  }
+  },
+  "generateArgs": [
+    "--demo",
+    "--scale",
+    "0.03"
+  ]
 }

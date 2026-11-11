@@ -125,7 +125,10 @@ describe('telling today apart', () => {
     expect(same.some((x) => x.kind === 'apart')).toBe(false);
     expect(newsOf(h, '2023-10-11', vendorNames, { judge: { ...bronze, checks: { ...LAYER_DEFAULTS.bronze, classifier: 'off' } }, apart: { sample, today: rows(200, 500, 0.5) } }).some((x) => x.kind === 'apart')).toBe(false);
     expect(newsOf(h, '2023-10-11', vendorNames, { judge: bronze }).some((x) => x.kind === 'apart')).toBe(false);
-    // Without a gate, the classifier doesn't run: a flow with no gate is judged as it always was.
-    expect(newsOf(h, '2023-10-11', vendorNames, { apart: { sample, today: rows(200, 500, 0.5) } }).some((x) => x.kind === 'apart')).toBe(false);
+    // Without a gate, the classifier runs where a sample is kept (ADR 0015 §6), and warns at most: a model doesn't hold.
+    // Without a sample there is nothing to run it on, and a flow is judged as it always was.
+    const ungated = newsOf(h, '2023-10-11', vendorNames, { apart: { sample, today: rows(200, 500, 0.5) } }).find((x) => x.kind === 'apart');
+    expect(ungated?.severity).toBe('warn');
+    expect(newsOf(h, '2023-10-11', vendorNames, {}).some((x) => x.kind === 'apart')).toBe(false);
   });
 });
