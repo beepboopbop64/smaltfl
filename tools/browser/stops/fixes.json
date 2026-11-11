@@ -1,0 +1,52 @@
+[
+  {
+    "name": "fixes-thu",
+    "what": "Thu Mar 14 runs first, as a person stepping through the days does: a day judged here is a day a fill may take",
+    "day": "Thu 14",
+    "card": "auth",
+    "tab": "News",
+    "expect": {}
+  },
+  {
+    "name": "fixes-sheet",
+    "what": "Sign-ins, Fri Mar 15: the file came with no rows and the day paused. The decision sheet offers what the sign-in file's ontology allows: carry a good day forward (or back), and replace the file; never a like day (an estimate), never the part alone",
+    "day": "Fri 15",
+    "card": "auth",
+    "tab": "News",
+    "clicks": [
+      ".vf-decide"
+    ],
+    "full": true,
+    "expect": {
+      "count": {
+        ".vf-option[data-option=fill]": 1,
+        ".vf-option[data-option=complete]": 0,
+        ".vf-replace": 1
+      },
+      "pageText": [
+        "Replace the file",
+        "carries Thu 14 forward"
+      ],
+      "noPageText": [
+        "stands in: an estimate"
+      ]
+    }
+  },
+  {
+    "name": "fixes-pick-fill",
+    "what": "The fill picked: Thu 14's rows carried forward into Fri 15, marked, staged and checked before anything goes out",
+    "day": "Fri 15",
+    "card": "auth",
+    "tab": "News",
+    "clicks": [
+      ".vf-decide",
+      ".vf-option[data-option=fill]"
+    ],
+    "full": true,
+    "expect": {
+      "pageText": [
+        "carries Thu 14 forward"
+      ]
+    }
+  }
+]

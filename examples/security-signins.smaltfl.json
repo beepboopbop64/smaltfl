@@ -19,10 +19,22 @@
   ],
   "steps": [
     {
+      "id": "auth_filled",
+      "kind": "fill",
+      "inputs": [
+        "auth"
+      ],
+      "description": "The sign-ins as they arrived, each marked with the day it came from when a paused day is filled from another day",
+      "time": "event_time",
+      "shift": [
+        "event_time"
+      ]
+    },
+    {
       "id": "auth_valid",
       "kind": "expectations",
       "inputs": [
-        "auth"
+        "auth_filled"
       ],
       "rules": [
         {
@@ -64,7 +76,8 @@
           "name": "hour",
           "expr": "CAST(substr(event_time, 12, 2) AS INTEGER)"
         },
-        "result"
+        "result",
+        "filled_from"
       ],
       "measures": [
         {
@@ -89,7 +102,8 @@
       "description": "Failed and locked-out sign-ins by country and client",
       "groupBy": [
         "country",
-        "ua_family"
+        "ua_family",
+        "filled_from"
       ],
       "measures": [
         {
@@ -227,7 +241,14 @@
         "kind": "required",
         "action": "flag"
       }
-    ]
+    ],
+    "fixes": {
+      "auth": [
+        "forward",
+        "backward",
+        "replace"
+      ]
+    }
   },
   "policies": {
     "principals": [

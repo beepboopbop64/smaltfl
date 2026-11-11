@@ -9,6 +9,7 @@
  * Every word on screen comes from core/decision.ts; every judgement from core/fill.ts and core/hold.ts. Nothing here
  * decides what a day may be filled from: the flow's verdict does (donorChoices), and the plugin checks the release.
  */
+import { fixesOf, fixOfDonor } from '../core/rules.js';
 import { donorBinding, pinnedDdl, type Binding } from '../../examples/sources.js';
 import { fillStepOf, type FlowDocument } from '../core/document.js';
 import { donorChoices, donorRuleOf, fillCounts, missingOf, offersOf, repairDocument, type DonorPick, type FillCounts, type Missing, type NoDonor, type Offer, type Repair } from '../core/fill.js';
@@ -64,8 +65,11 @@ export function donorsOf(o: { h: HistoryRanges; doc: FlowDocument; day: string; 
     const c = fillCounts(o.h, o.day, missing, p.day);
     if (c) counts.set(p.day, c);
   }
-  const usable = picks.filter((p) => counts.has(p.day));
-  const offers = offersOf({ story: o.story, claim: o.claim, fill: step, donors: usable, later: o.later, partFails: o.partFails, readers: o.readers });
+  // Only the fixes the file allows (the ontology's `fixes`): a donor carries a day forward or back, or stands in a like
+  // day, and a file that never allows the estimate never gets a like day offered.
+  const fixes = fixesOf(o.doc.ontology, o.source);
+  const usable = picks.filter((p) => counts.has(p.day) && fixes.has(fixOfDonor(p)));
+  const offers = offersOf({ story: o.story, claim: o.claim, fill: step, donors: usable, later: o.later, partFails: o.partFails, readers: o.readers, fixes });
   if (!offers.length) return null;
   return { step: step.id, source: o.source, missing, offers, picks: usable, none, counts, part: fillCounts(o.h, o.day, missing, null) };
 }

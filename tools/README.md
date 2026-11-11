@@ -35,6 +35,8 @@ Build the app first (`npm run build:app`) and copy `dist/app` somewhere, because
   card's Rules tab, a rule switched off, a reload and dark. It must report `problems: none`.
 - `models.json`: the two models on the sign-ins (same build as `rules.json`): the sign-in file's Models tab on a calm
   day, on Thu Mar 14 (the forest speaks) and Tue Mar 19 (the classifier speaks, the client first), and dark.
+- `fixes.json`: the fixes the sign-in file allows, on Fri Mar 15 (its file came empty): the fill carrying Thu 14
+  forward, Replace the file, no like day offered as an estimate.
 - `fills.json` and `fills-nov.json`: the fill flows, as designed. Some selectors may have moved since; update them
   when a stop reports "nothing to click".
 

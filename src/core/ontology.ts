@@ -3,7 +3,7 @@
  * types that edit them. An object is its backing row with its edits applied. Edits are recorded by the runtime in a
  * hash chain, refusals included, after the action rule (policy.ts) allows them.
  */
-import type { OntologyRule } from './rules.js';
+import type { FixKind, OntologyRule } from './rules.js';
 import type { SharedFrom } from './shared.js';
 import type { ParamType } from './sqltext.js';
 
@@ -177,6 +177,9 @@ export interface Ontology {
   /** The shared ontologies the flow brought in when it was read (shared.ts): each starting file's, and where it was read
    * from. A flow on disk lists them as `import` (paths), which reading the flow resolves into this. */
   shared?: SharedFrom[];
+  /** The fixes a held day of each file may be offered (rules.ts `FIX_KINDS`), by file: what the news, the brief and the
+   * decision sheet suggest and offer. A file not listed allows every one. */
+  fixes?: Record<string, FixKind[]>;
 }
 
 /** A condition in one order however it was written, the order the emitter writes it in: `[column, values]`, by column,

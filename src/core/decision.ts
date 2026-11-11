@@ -187,13 +187,20 @@ function drawingOf(h: HistoryRanges | null, story: Pick<Story, 'hero' | 'hours' 
   const range = k >= 0 ? trips?.at(day) : undefined;
   const lacks = range && rows.day < range.low ? range.expected : rows.day;
   const days = [...before, day];
-  const scale = Math.max(1, ...prev, rows.day, lacks, rows.readers ?? 0);
+  // A day missing whole (its file came with no rows, fill.ts `missingOf`): a fill carries a donor's whole day in, its
+  // rows as the history has them, drawn stippled as another day's.
+  const whole = remedy && 'hours' in remedy.missing && remedy.missing.hours[0] === 0 && remedy.missing.hours[1] === 23 ? remedy.missing.hours : null;
+  const fills = whole && file ? remedy!.donors.flatMap((d) => {
+    const j = file.days.indexOf(d);
+    return j >= 0 ? [{ day: d, rows: { cause: 'amount' as const, days: [...prev, file.rows[j]!] }, filled: whole }] : [];
+  }) : [];
+  const scale = Math.max(1, ...prev, rows.day, lacks, rows.readers ?? 0, ...fills.map((f) => f.rows.days.at(-1) ?? 0));
   return {
     cause: 'amount', scale, short: null, part: null,
     asis: { cause: 'amount', days: [...prev, rows.day] }, usual: { cause: 'amount', days: [...prev, lacks] },
     dont: readers && rows.readers !== null ? { cause: 'amount', days: [...prev, rows.readers] } : null,
     ticks: days.length > 1 ? [[0, dayShort(days[0]!)], [days.length - 1, dayShort(day)]] : [], cut: null,
-    fills: [], complete: null,
+    fills, complete: null,
   };
 }
 

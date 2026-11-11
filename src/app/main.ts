@@ -39,6 +39,7 @@ import { counted, glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, saysMo
 import { ontologyPage, originSaid, typesShown, type ColumnCard, type FileSection, type Rule } from '../core/ontologypage.js';
 import { applyBand, asShipped, keptOf as keptFlow, nameColumn, removeRule, restoreKept, setRule, switchRule, type FlowEdit, type RuleInput } from '../core/flowedit.js';
 import { sharedOf } from '../core/shared.js';
+import { fixesOf, fixOfDonor, type FixKind } from '../core/rules.js';
 import { ACTION_SAID, checkStepOf, RULE_ACTIONS, ruleOn, rulesOf, ruleSaid, type OntologyRule, type OntologyRuleKind, type RuleAction } from '../core/rules.js';
 import { DECIDE, DECIDE_OPTIONS, checkDecision, checkRun, covers, readView, wrapRead, type DecideOption, type DecisionOption, type Principal, type ReadView, type RowRule } from '../core/policy.js';
 import { createIdentity, ontologyHash, policiesHash, signManifest, verifyManifest } from '../core/manifest.js';
@@ -3401,6 +3402,11 @@ async function modelsTab(card: string, id: string): Promise<HTMLElement> {
     else {
       forestBody.push(
         h('p', { class: `md-verdict${e.speaks ? ' warn' : ''}` }, e.speaks ? `${dayShort(day)} is unlike every one of the ${fmtInt(e.learned.length)} days it learned from.` : `${dayShort(day)} is like the days before it: its score is under the cut.`),
+        // As a count of days, not a bare score (frequency framing reads more easily than a number on a scale).
+        h('p', { class: 'md-count' }, ((): string => {
+          const higher = e.learned.filter((x) => x.score >= e.score).length;
+          return higher === 0 ? `Odder than all ${fmtInt(e.learned.length)} days it learned from.` : `${fmtInt(higher)} of the ${fmtInt(e.learned.length)} days it learned from scored as odd or odder.`;
+        })()),
         svgNode(forestTicks({ learned: e.learned.map((x) => x.score), score: e.score, cut: e.cut, speaks: e.speaks, aria: `The day's score ${e.score.toFixed(2)} against the cut ${e.cut.toFixed(2)}, the highest of ${e.learned.length} learned days' scores` })),
         h('p', { class: 'foot' }, `A tick a day it learned from, at that day’s own score; the line is the highest of them (or 0.5). Past it, a day is unlike any before.`),
         h('p', { class: 'eyebrow' }, e.speaks ? 'What set it apart' : 'What moved most'),
@@ -5572,6 +5578,13 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
   // With a later day current, a withdrawal moves no name back: readers keep that day (S5), and the Keep row says so.
   const readers = withdraws && !later ? (back?.day === day ? null : back) : readersOn(r, shown);
   const rem = remediesFor(r);
+  /** What a fill from a donor does, by the fix the donor gives (rules.ts `fixOfDonor`). */
+  const fixWords = (donor: string): string | null => {
+    const p = rem?.picks.find((x) => x.day === donor);
+    if (!p) return null;
+    const f = fixOfDonor(p);
+    return f === 'forward' ? `carries ${dayShort(donor)} forward` : f === 'backward' ? `carries ${dayShort(donor)} back` : `${dayShort(donor)} stands in: an estimate`;
+  };
   const accept = acceptFor(r);
   const donors = rem ? rem.picks.map((p) => ({ day: p.day, counts: rem.counts.get(p.day)! })) : [];
   const draw = decisionDrawing(history, story, day ?? '', readers?.day ?? null, { day: rows, readers: readers?.rows ?? null }, rem ? { missing: rem.missing, donors: rem.picks.map((p) => p.day) } : null, readers?.repair ? { missing: readers.repair.missing, donor: readers.repair.donor?.day ?? null } : null, keptLacks(readers));
@@ -5618,7 +5631,10 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     const failing = d ? d.fails : !!o.fails;
     // Before a pick, what a row says under it: what publishing overrides (to someone who may publish), else its note
     // (the rows that arrived; a kept day of another weekday). Once picked, its one line.
-    const line = !pick.option ? ((anyone ? o.warn : null) ?? o.note ?? null) : pick.option === o.option ? (o.option === 'asis' ? (o.warnPicked ?? o.sub) : d ? (d.fails ? (d.failed ?? failLine(null)) : d.sub) : o.sub) : null;
+    // A fill says what it does with its donor: carried forward, carried back, or a like day standing in, an estimate.
+    const carried = o.option === 'fill' && d ? fixWords(d.day) : null;
+    const line0 = !pick.option ? ((anyone ? o.warn : null) ?? o.note ?? null) : pick.option === o.option ? (o.option === 'asis' ? (o.warnPicked ?? o.sub) : d ? (d.fails ? (d.failed ?? failLine(null)) : d.sub) : o.sub) : null;
+    const line = carried && (pick.option === 'fill' || !pick.option) && !(d?.fails && pick.option === 'fill') ? [carried, pick.option === 'fill' ? line0 : null].filter(Boolean).join(' · ') : line0;
     const warns = (o.option === 'asis' && !!o.warn && anyone && !pick.option) || (!!line && failing && pick.option === o.option);
     const more = line ? h('span', { class: 'vf-opt-more' }, warns ? h('span', { class: 'vf-opt-warn' }, glyphEl('alert', 13), line) : h('span', { class: 'vf-opt-sub' }, line)) : null;
     if (still) return h('div', { class: 'vf-option drawn still', 'data-option': o.option }, svg);
@@ -5629,6 +5645,20 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
       h('button', { type: 'button', class: 'vf-donor', 'data-day': x.day, 'aria-pressed': 'false', 'aria-label': x.aria, onclick: () => ((pick.donor = o.donors!.indexOf(x)), void prepare()) }, x.chip))));
   };
   const rowsEl = h('div', { class: `vf-options${anyone ? '' : ' ro'}`, role: 'radiogroup', 'aria-label': 'What readers get', ...(anyone ? {} : { 'aria-readonly': 'true' }) });
+  // Replace the file (the ontology's `replace` fix): a corrected file for the day, checked in the page, pinned as the
+  // day's load and run: the held run stays as it was, and the new run is judged as any day is.
+  const allowed = src ? fixesOf(state.doc.ontology, src) : new Set<FixKind>();
+  const replaceRow = anyone && day && allowed.has('replace') && loads.list.some((l) => l.day === day)
+    ? (() => {
+        const input = h('input', { type: 'file', accept: '.csv,.parquet,.json,text/csv', class: 'vf-file', 'aria-label': `A corrected file for ${dayMid(day)}` }) as HTMLInputElement;
+        input.addEventListener('change', () => {
+          const f = input.files?.[0];
+          if (f) void f.arrayBuffer().then((b) => replaceDayFile(day, new Uint8Array(b), f.name)).then((ok) => ok && document.querySelector('.vf-detail-wrap')?.remove());
+        });
+        return h('div', { class: 'vf-replace' },
+          h('label', { class: 'vf-replace-btn' }, input, h('span', { class: 'vf-replace-h' }, 'Replace the file'), h('span', { class: 'vf-opt-sub' }, `A corrected file for ${dayShort(day)} runs again: the paused run stays recorded, the new one is judged as any day is.`)));
+      })()
+    : null;
   // One switch for a decision that may stand for the days after it, until one passes (amendment 1 S12).
   const scopes = h('button', { type: 'button', role: 'switch', class: 'vf-switch', 'aria-checked': 'false', hidden: true, onclick: () => ((pick.scope = pick.scope === 'untilPass' ? 'day' : 'untilPass'), sync()) }, h('span', { class: 'vf-switch-k', 'aria-hidden': 'true' }), t.switch ?? '');
   const why = h('div', { class: 'vf-why', hidden: true });
@@ -5703,13 +5733,13 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     const l = receiptLines({ state: st, day, readers: out ? day : had.day, past: !out && had.past, released: out ? n : 0, who: personName(entry.by.as), at: decidedAt(entry.at), seq: entry.seq, under: null, standing: (entry.about as { scope?: unknown }).scope === 'untilPass', remedy: now?.remedy ? { ...now.remedy, ...remedyCounts(now.pause) } : null, withdrawn: now?.withdrawn ?? null, level: (entry.about as { level?: { from?: string } }).level?.from ?? null, reason: entry.reason ?? null });
     const kept = t.options.find((o) => o.option === option);
     const sheetEl = document.querySelector('.vf-detail');
-    for (const el of [status, rowsEl, why, scopes, foot]) el?.remove();
+    for (const el of [status, rowsEl, replaceRow, why, scopes, foot]) el?.remove();
     sheetEl?.append(
       kept ? h('div', { class: 'vf-options done' }, rowOf(kept, true, true)) : '',
       receiptBox(l, st, entry.seq, `${(derived ?? r).result.hash.slice(0, 4)} ${(derived ?? r).result.hash.slice(4, 8)}`, l.change && anyone ? () => decisionSheet(r, story) : null, day, l.versions && day ? () => versionsSheet(day) : null));
     headMark.replaceWith(glyphEl(PAUSE_MARK[st], 16));
   };
-  openDetail(t.title, 'ok', [status, ask, rowsEl, why, scopes, foot]);
+  openDetail(t.title, 'ok', [status, ask, rowsEl, replaceRow, why, scopes, foot]);
   document.querySelector('.vf-detail')?.classList.toggle('readonly', !anyone);
   document.querySelector('.vf-detail .vf-dhead h3')?.prepend(headMark);
   sync();
@@ -8706,6 +8736,9 @@ const loads = {
   /** The load whose file is pinned in the engine as the trips source: what a run reads, whatever is shown. */
   pinned: -1,
   bytes: new Map<number, Uint8Array>(),
+  /** Days whose file a person replaced with a corrected one (the `replace` fix), by place in the list: its bytes, their
+   * sha256 as the page hashed them, and the file's name. A run of the day reads it in place of the listed file. */
+  replaced: new Map<number, { bytes: Uint8Array<ArrayBuffer>; sha256: string; name: string }>(),
   /** The other daily sources' bytes for the same loads (ADR 0013 §5), by source id. */
   others: new Map<number, Record<string, Uint8Array>>(),
   /** The days a paused day may be filled from that aren't loads (loads.json `donors`, ADR 0009 amendment 1 S13): never
@@ -9058,6 +9091,29 @@ function setEpisode(name: string): void {
   else renderLoads();
 }
 
+/**
+ * A day's file replaced with a corrected one (the ontology's `replace` fix): hashed here, kept for the day in place of
+ * the listed file, and the day run again. The paused run stays recorded as it was; the new run records the corrected
+ * file's hash in its manifest, and the integrity view says it isn't the listed file. Someone who may decide only.
+ */
+async function replaceDayFile(day: string, bytes: Uint8Array<ArrayBuffer>, name: string): Promise<boolean> {
+  const k = loads.list.findIndex((l) => l.day === day);
+  if (k < 0 || state.running) return false;
+  if (!mayRun()) {
+    setStatus('Only someone who may decide replaces a day’s file.', true);
+    return false;
+  }
+  if (!bytes.length) {
+    setStatus(`${name} is empty: nothing to replace ${dayLabel(day)}’s file with.`, true);
+    return false;
+  }
+  const sha256 = await sha256Hex(bytes);
+  loads.replaced.set(k, { bytes, sha256, name });
+  setStatus(`${dayLabel(day)}: running again on ${name} (${sha256.slice(0, 8)}), in place of the listed file…`, false);
+  await runLoad(k);
+  return true;
+}
+
 /** Put a load in the engine as the trips source and run the flow on it. Only the last few loads' bytes are kept. */
 async function runLoad(k: number): Promise<void> {
   const engine = state.engine;
@@ -9065,7 +9121,8 @@ async function runLoad(k: number): Promise<void> {
   if (!engine || !l || state.running) return;
   // A day stepped to is a run (round 3, #7): only someone who may decide steps days, before anything is fetched.
   if (!mayRun()) return void run();
-  let bytes = loads.bytes.get(k);
+  const replaced = loads.replaced.get(k);
+  let bytes = replaced?.bytes ?? loads.bytes.get(k);
   try {
     if (!bytes) {
       setStatus(`Fetching ${dayLabel(l.day)}${sourceOpen() ? `: ${rowsSaid(l.rows)}` : ''}, checked against the data's list…`);
@@ -9074,7 +9131,7 @@ async function runLoad(k: number): Promise<void> {
       for (const old of [...loads.bytes.keys()].slice(0, Math.max(0, loads.bytes.size - 3))) loads.bytes.delete(old);
     }
     // The engine hashes the bytes again as it pins them, kept ones included, and refuses them if they don't match.
-    await pinFile(engine, loadFile(), bytes, l.sha256);
+    await pinFile(engine, loadFile(), bytes, replaced?.sha256 ?? l.sha256);
     // The other daily sources' files for the day (ADR 0013 §5), each checked and pinned under its binding's name.
     const others = loads.others.get(k) ?? {};
     for (const [id, f] of Object.entries(l.files ?? {})) {

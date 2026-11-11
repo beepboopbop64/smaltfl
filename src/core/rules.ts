@@ -79,23 +79,66 @@ export const ruleOn = (step: StepDef | null | undefined, id: string): boolean =>
  * (on where it said nothing), with `set` applied. Null when the file has no rule (the cell says nothing). */
 export function switchesFor(doc: RulesDoc, step: StepDef, set: Record<string, 'on' | 'off'> = {}): Record<string, 'on' | 'off'> | null {
   if (step.kind !== 'expectations' || step.inputs.length !== 1) return null;
-  const rules = rulesOf(doc.ontology, step.inputs[0]!);
+  const file = fileOfCheck(doc, step);
+  if (!file) return null;
+  const rules = rulesOf(doc.ontology, file);
   if (!rules.length) return null;
   return Object.fromEntries(rules.map((r) => [r.id, set[r.id] ?? (ruleOn(step, r.id) ? 'on' : 'off')]));
 }
 
-/** The check step that enforces a file's rules: the first, in the flow's order, whose one input is the file itself. */
+/** The check step that enforces a file's rules: the first, in the flow's order, whose one input is the file itself, or
+ * the fill step that reads it (a fill passes the file's rows on, marked). */
 export function checkStepOf(doc: RulesDoc, file: string): StepDef | null {
-  return (doc.steps ?? []).find((s) => s.kind === 'expectations' && s.inputs.length === 1 && lower(s.inputs[0]!) === lower(file)) ?? null;
+  const fills = new Set((doc.steps ?? []).filter((s) => s.kind === 'fill' && lower(s.inputs[0] ?? '') === lower(file)).map((s) => lower(s.id)));
+  return (doc.steps ?? []).find((s) => s.kind === 'expectations' && s.inputs.length === 1 && (lower(s.inputs[0]!) === lower(file) || fills.has(lower(s.inputs[0]!)))) ?? null;
+}
+
+/**
+ * The fixes a held day of a file may be offered (the maintainer, 2026-11-11: "so if imputation is never an option, it
+ * won't try to suggest doing that"): carry the nearest good day before forward (`forward`), carry the nearest good day
+ * after back (`backward`), stand in a like day, the same weekday, for what is missing (`impute`, an estimate), publish the
+ * part that arrived alone (`part`), and replace the day's file with a corrected one (`replace`). Publishing as is and
+ * keeping the last good day are the decision itself, always there.
+ */
+export const FIX_KINDS = ['forward', 'backward', 'impute', 'part', 'replace'] as const;
+export type FixKind = (typeof FIX_KINDS)[number];
+
+/** What each fix does, in a few words. */
+export const FIX_SAID: Record<FixKind, string> = {
+  forward: 'carry the last good day forward',
+  backward: 'carry the next good day back',
+  impute: 'stand in a like day (an estimate)',
+  part: 'publish the part that arrived',
+  replace: 'replace the file with a corrected one',
+};
+
+/** The fixes a file allows: the ontology's list for it, else every one. */
+export function fixesOf(o: Ontology | undefined, file: string): ReadonlySet<FixKind> {
+  const listed = Object.entries(o?.fixes ?? {}).find(([f]) => lower(f) === lower(file))?.[1];
+  return new Set(listed ?? FIX_KINDS);
+}
+
+/** The fix a donor gives: the same weekday stands in a like day (an estimate); the nearest day before or after carries
+ * that day forward or back. */
+export const fixOfDonor = (pick: { rule: 'weekday' | 'nearest'; direction: 'before' | 'after' }): FixKind => (pick.rule === 'weekday' ? 'impute' : pick.direction === 'before' ? 'forward' : 'backward');
+
+/** The file a check step reads: its input, or the file the fill it reads fills. */
+function fileOfCheck(doc: RulesDoc, step: StepDef): string | null {
+  const input = step.inputs[0];
+  if (!input) return null;
+  const direct = doc.sources.find((s) => lower(s.id) === lower(input));
+  if (direct) return direct.id;
+  const fill = (doc.steps ?? []).find((s) => s.kind === 'fill' && lower(s.id) === lower(input));
+  return doc.sources.find((s) => lower(s.id) === lower(fill?.inputs[0] ?? ''))?.id ?? null;
 }
 
 /** The rules a check step enforces beside its own: the ones its cell has switched on of the file it reads, if it is
  * that file's check step. */
 export function enforcedBy(doc: RulesDoc, step: StepDef): OntologyRule[] {
   if (step.kind !== 'expectations' || step.inputs.length !== 1) return [];
-  const file = doc.sources.find((s) => lower(s.id) === lower(step.inputs[0]!));
-  if (!file || checkStepOf(doc, file.id)?.id !== step.id) return [];
-  return rulesOf(doc.ontology, file.id).filter((r) => ruleOn(step, r.id));
+  const file = fileOfCheck(doc, step);
+  if (!file || checkStepOf(doc, file)?.id !== step.id) return [];
+  return rulesOf(doc.ontology, file).filter((r) => ruleOn(step, r.id));
 }
 
 /** A check step's rules as its counts name them: its own as written, then the ontology's it enforces, by name, as the
@@ -187,7 +230,7 @@ export function rulesIssues(doc: { sources?: unknown; steps?: unknown }, rules: 
       if (seen.has(lower(r.id))) add(`${at}.id`, `${r.file} has two rules named ${r.id} (names are compared without case)`);
       seen.add(lower(r.id));
       ids.set(file, seen);
-      const step = steps.find((s) => s.kind === 'expectations' && s.inputs.length === 1 && typeof s.inputs[0] === 'string' && lower(s.inputs[0]) === file);
+      const step = checkStepOf({ sources: sources as RulesDoc['sources'], steps }, r.file);
       if (step?.kind === 'expectations' && Array.isArray(step.rules) && step.rules.some((x) => isRecord(x) && typeof x.name === 'string' && lower(x.name) === lower(r.id as string))) add(`${at}.id`, `${step.id}, the check step that enforces ${r.file}'s rules, has a rule of its own named ${r.id}`);
     }
   });

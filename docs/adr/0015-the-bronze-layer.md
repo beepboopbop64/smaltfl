@@ -710,3 +710,29 @@ flag specific days where things go a little off the rails."* The choices are Q-1
 - **Found and fixed on the way:** a check step enforcing ontology rules recorded its own rules with the day bound in,
   starting a history segment a day, and `countedChecks` stopped recognizing it, so dropped-row news went quiet
   (`stepRules`, `checksOf`).
+
+### The fixes a held day is offered, set in the ontology (2026-11-11)
+
+The maintainer (Q-154): the ontology says which fixes the news and the decision sheet may suggest; the sign-in log
+allows carrying a day forward or back and replacing the file, never imputation.
+
+- **The vocabulary** (`FIX_KINDS`, `FIX_SAID`, `fixesOf`, `fixOfDonor` in `rules.ts`): `forward`, `backward`, `impute`,
+  `part`, `replace`. A donor is named by the fix it gives: the same weekday stands in a like day (`impute`, an
+  estimate), the nearest day before or after is carried forward or back. `ontology.fixes` by file, validated, and a
+  shared ontology's `fixes`, merged and written back (`shared.ts`).
+- **Only what is allowed is offered**: `donorsOf` (`src/app/fills.ts`) drops donors whose fix isn't allowed, `offersOf`
+  offers the part alone only where `part` is and a fill only where a fill is; the brief takes its options from the same
+  offers, so it never proposes what the file doesn't allow.
+- **A day whose file came with no rows is missing whole** (`missingOf`: hours 0 to 23), so a fill carries a whole day
+  in, drawn stippled on the sheet (`decisionDrawing`, `decisionRow`); it has no part that arrived to offer.
+- **The sign-in flow fills**: a `fill()` cell before its check (`auth_filled`), its counts carrying `filled_from`; a
+  file's rules find their check step through a fill (`checkStepOf`, `fileOfCheck`).
+- **The sheet says what a fill does** ("carries Thu 14 forward · 7,153 filled"; "Thu 7 stands in: an estimate") and,
+  where `replace` is allowed, offers **Replace the file** (`replaceDayFile`, Q-155): a corrected file hashed in the
+  page, pinned as the day's load and run again.
+- **The Models tab, from the research** (docs/research/ui-news-models-remedies.md): the forest's verdict as a count of
+  days ("Odder than all 340 days it learned from"), the classifier's track labelled "can't tell apart" to "easy to tell
+  apart".
+- **Tests:** `test/fixes.test.ts` (the vocabulary, the ontology's word and its refusals, donors named by fix, a whole
+  empty day, what is offered by what is allowed); `tools/browser/stops/fixes.json` (the sign-ins' Fri Mar 15: the fill
+  carrying Thu 14 forward, Replace the file, no estimate).

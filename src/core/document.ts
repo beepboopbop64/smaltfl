@@ -8,7 +8,7 @@
 import { calendarProblems, EVERIES, isEvery, type CalendarDef, type Every } from './calendar.js';
 import { gateProblems, type GateDef } from './gates.js';
 import { marksVerdicts, ROWS_FIELDS, type Ontology } from './ontology.js';
-import { rulesIssues } from './rules.js';
+import { FIX_KINDS, rulesIssues } from './rules.js';
 import { DECIDE, DECIDE_OPTIONS, type Policies } from './policy.js';
 import type { ParamType, ParamValue } from './sqltext.js';
 import { renameIdentifier, SqlTextError, tokens } from './sqltext.js';
@@ -854,6 +854,14 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
       // A shared ontology is brought in when the flow is read (shared.ts): a document still listing paths wasn't.
       if ((o as Record<string, unknown>).import !== undefined) add('$.ontology.import', 'shared ontologies are brought in when the flow is read (readFlow): this document lists paths it was never read with');
       if (o.shared !== undefined && (!Array.isArray(o.shared) || o.shared.some((x: unknown) => !isRecord(x) || typeof x.file !== 'string' || typeof x.path !== 'string' || !known(x.file) || !Array.isArray(x.columns) || x.columns.some((c: unknown) => typeof c !== 'string')))) add('$.ontology.shared', 'where each shared part came from: [{ file: a source, path, columns }]');
+      // The fixes each file allows (rules.ts): a source's own, each one of the vocabulary, each once.
+      if (o.fixes !== undefined) {
+        if (!isRecord(o.fixes)) add('$.ontology.fixes', 'the fixes each file allows: { file: [forward, backward, impute, part, replace] }');
+        else for (const [f, list] of Object.entries(o.fixes)) {
+          if (!(Array.isArray(doc.sources) ? doc.sources : []).some((s: unknown) => isRecord(s) && typeof s.id === 'string' && s.id.toLowerCase() === f.toLowerCase())) add(`$.ontology.fixes.${f}`, `no source ${f}`);
+          if (!Array.isArray(list) || list.some((x) => !(FIX_KINDS as readonly unknown[]).includes(x)) || new Set(list).size !== list.length) add(`$.ontology.fixes.${f}`, `${FIX_KINDS.join(', ')}, each once`);
+        }
+      }
       // Rules set on a file's columns (rules.ts): each a source's own, enforced by its check step.
       if (o.rules !== undefined) for (const [path, message] of rulesIssues(doc, o.rules)) add(path, message);
     }

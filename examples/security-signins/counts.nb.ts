@@ -9,18 +9,18 @@ md`Sign-ins by hour and result`;
 
 cell('signins_by_hour', { lang: 'sql' });
 export const signins_by_hour = sql`
-  SELECT CAST(substr(event_time, 12, 2) AS INTEGER) AS hour, result, count(*) AS signins, count(DISTINCT user) AS users
+  SELECT CAST(substr(event_time, 12, 2) AS INTEGER) AS hour, result, filled_from, count(*) AS signins, count(DISTINCT user) AS users
   FROM ${auth_valid}
-  GROUP BY 1, 2`;
+  GROUP BY 1, 2, 3`;
 
 cell('by_country', { lang: 'md' });
 md`Failed and locked-out sign-ins by country and client`;
 
 cell('failures_by_country', { lang: 'sql' });
 export const failures_by_country = sql`
-  SELECT country, ua_family, sum(CASE WHEN result IN ('fail', 'locked') THEN 1 ELSE 0 END) AS failures, count(*) AS signins
+  SELECT country, ua_family, filled_from, sum(CASE WHEN result IN ('fail', 'locked') THEN 1 ELSE 0 END) AS failures, count(*) AS signins
   FROM ${auth_valid}
-  GROUP BY 1, 2`;
+  GROUP BY 1, 2, 3`;
 
 cell('published');
 publish(signins_by_hour, { description: 'Sign-ins by hour' });

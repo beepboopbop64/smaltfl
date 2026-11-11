@@ -13,6 +13,7 @@
  *   calendar marks unless the held day is one, and a file in the data's list (S3). The watch's own rule comes first:
  *   the one it names, else its pattern's (ADR 0010 §3, C1).
  */
+import type { FixKind } from './rules.js';
 import { isSpecial, plusDays, type Every } from './calendar.js';
 import { canonicalJSON } from './canonical.js';
 import { dayShort } from './days.js';
@@ -81,7 +82,9 @@ function valueOf(json: string): string | number | boolean | null {
  * Null for any other cause, a part that surged among them: nothing is missing. A slot's hours are its own, named as
  * the day's (06:00–10:00 of the 06–12 slot is hours 6 to 9, ADR 0010 §7).
  */
-export function missingOf(story: Pick<Story, 'hero' | 'hours' | 'split'>, time: string): Missing | null {
+export function missingOf(story: Pick<Story, 'hero' | 'hours' | 'split'> & Partial<Pick<Story, 'amount'>>, time: string): Missing | null {
+  // A day whose file came with no rows at all is missing whole: every hour of it is what another day carries in.
+  if (story.hero === 'amount' && story.amount && story.amount.value === 0) return { time, hours: [0, 23] };
   if (story.hero === 'hours' && story.hours) {
     // A slot's parts are its own hours, placed in the day (ADR 0010 §7); quarter hours (a slot under 3 hours) are no
     // hours a fill can name: nothing it can take.
@@ -332,6 +335,9 @@ export interface OfferInput {
   holds?: readonly Pick<Hold, 'by'>[];
   /** What the held load covers (ADR 0010 §7): a level starts on a day, so a slot of one gets no Accept. */
   every?: Every;
+  /** The fixes the file allows (rules.ts `fixesOf`): the part that arrived is offered only where `part` is; the donors
+   * given are the allowed ones already. */
+  fixes?: ReadonlySet<FixKind>;
 }
 
 /**
@@ -346,8 +352,10 @@ export function offersOf(o: OfferInput): Offer[] {
     const missing = missingOf(o.story, o.fill.time)!;
     const later = o.later ? `${dayShort(o.later)} is published` : undefined;
     const donor = o.donors[0];
-    out.push({ option: 'fill', label: donor ? `Fill from ${dayShort(donor.day)}` : 'Fill', ...(later ? { off: later } : !donor ? { off: 'No good day near' } : {}) });
-    out.push({ option: 'complete', label: partLabel(missing, o.story.split?.name), ...(later ? { off: later } : {}), ...(o.partFails ? { note: 'fails its checks' } : {}) });
+    const fills = !o.fixes || ['forward', 'backward', 'impute'].some((f) => o.fixes!.has(f as FixKind));
+    if (fills) out.push({ option: 'fill', label: donor ? `Fill from ${dayShort(donor.day)}` : 'Fill', ...(later ? { off: later } : !donor ? { off: 'No good day near' } : {}) });
+    // A whole day missing has no part that arrived; a file that allows no fill but the part still gets the part.
+    if ((o.fixes?.has('part') ?? true) && !('hours' in missing && missing.hours[0] === 0 && missing.hours[1] === 23)) out.push({ option: 'complete', label: partLabel(missing, o.story.split?.name), ...(later ? { off: later } : {}), ...(o.partFails ? { note: 'fails its checks' } : {}) });
   }
   if (o.readers === 'fill' || o.readers === 'complete') out.push({ option: 'dont', label: o.readers === 'fill' ? 'Withdraw the fill' : 'Withdraw the part', withdraws: true });
   // Accept the new level (S6): off while a later day is current, as publish as is is.

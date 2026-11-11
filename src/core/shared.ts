@@ -13,7 +13,7 @@
  */
 import type { FlowDocument } from './document.js';
 import type { Noun, Ontology, PropertyType } from './ontology.js';
-import type { OntologyRule } from './rules.js';
+import type { FixKind, OntologyRule } from './rules.js';
 
 /** A rule as a shared file keeps it: its file is the shared file's. */
 export type SharedRule = Omit<OntologyRule, 'file'>;
@@ -31,6 +31,8 @@ export interface SharedOntology {
   properties?: PropertyType[];
   /** The rules its rows are held to. */
   rules?: SharedRule[];
+  /** The fixes a held day of it may be offered (rules.ts `FIX_KINDS`); left out, every one. */
+  fixes?: FixKind[];
 }
 
 /** Where a flow's shared parts came from, as the flow keeps it: the file it is about, the path it was read from, and
@@ -50,7 +52,7 @@ const lower = (x: string) => x.toLowerCase();
 export function asShared(value: unknown, path: string): SharedOntology {
   if (!isRecord(value) || value.smaltflOntology !== 1) throw new SharedOntologyError(`${path} isn't a shared ontology ({ "smaltflOntology": 1, "file", … })`);
   if (typeof value.file !== 'string' || value.file === '') throw new SharedOntologyError(`${path} names no file: the source it is about`);
-  const known = ['smaltflOntology', 'file', 'description', 'noun', 'properties', 'rules'];
+  const known = ['smaltflOntology', 'file', 'description', 'noun', 'properties', 'rules', 'fixes'];
   for (const k of Object.keys(value)) if (!known.includes(k)) throw new SharedOntologyError(`${path}: ${k} isn't a shared ontology's part (${known.join(', ')})`);
   if (value.properties !== undefined && !Array.isArray(value.properties)) throw new SharedOntologyError(`${path}: properties is a list`);
   if (value.rules !== undefined && !Array.isArray(value.rules)) throw new SharedOntologyError(`${path}: rules is a list`);
@@ -74,6 +76,7 @@ export async function importOntologies(doc: FlowDocument, read: (path: string) =
   const properties: PropertyType[] = [];
   const rules: OntologyRule[] = [];
   const nouns: Record<string, Noun> = {};
+  const fixes: Record<string, FixKind[]> = {};
   let sources = doc.sources;
   for (const path of paths as string[]) {
     const s = asShared(await read(path), path);
@@ -84,6 +87,7 @@ export async function importOntologies(doc: FlowDocument, read: (path: string) =
     properties.push(...(s.properties ?? []));
     rules.push(...(s.rules ?? []).map((r) => ({ ...r, file: src.id }) as OntologyRule));
     if (s.noun) nouns[src.id] = s.noun;
+    if (s.fixes) fixes[src.id] = [...s.fixes];
     if (s.description && !src.description) sources = sources.map((x) => (x === src ? { ...x, description: s.description! } : x));
   }
   const ontology: Ontology = {
@@ -91,6 +95,7 @@ export async function importOntologies(doc: FlowDocument, read: (path: string) =
     ...(properties.length || own.properties ? { properties: [...properties, ...(own.properties ?? [])] } : {}),
     ...(rules.length || own.rules ? { rules: [...rules, ...(own.rules ?? [])] } : {}),
     ...(Object.keys(nouns).length || own.nouns ? { nouns: { ...nouns, ...(own.nouns ?? {}) } } : {}),
+    ...(Object.keys(fixes).length || own.fixes ? { fixes: { ...fixes, ...(own.fixes ?? {}) } } : {}),
     shared,
   };
   return { ...doc, sources, ontology };
@@ -110,6 +115,7 @@ export function sharedOf(doc: Pick<FlowDocument, 'sources' | 'ontology'>, file: 
   const properties = (o?.properties ?? []).filter((p) => columns.has(lower(p.column)) || (p.datasets?.length === 1 && lower(p.datasets[0]!) === lower(file)));
   const rules = (o?.rules ?? []).filter((r) => lower(r.file) === lower(file)).map(({ file: _f, ...r }) => r);
   const noun = o?.nouns?.[src?.id ?? file];
+  const fixes = Object.entries(o?.fixes ?? {}).find(([f]) => lower(f) === lower(file))?.[1];
   return {
     smaltflOntology: 1,
     file: src?.id ?? file,
@@ -117,5 +123,6 @@ export function sharedOf(doc: Pick<FlowDocument, 'sources' | 'ontology'>, file: 
     ...(noun ? { noun } : {}),
     ...(properties.length ? { properties } : {}),
     ...(rules.length ? { rules } : {}),
+    ...(fixes ? { fixes: [...fixes] } : {}),
   };
 }

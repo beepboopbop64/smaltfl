@@ -169,6 +169,11 @@ match smaltdb's `CLAUDE.md`.
   evidence (`forestEvidence`), the **Models** tab (`modelsTab`; `forestTicks`, `aucTrack`, `rankBars` in `viz.ts`); the
   sign-ins' rows have structure and two days only the models see (`SIGNIN_DEMO`, `DEMO_DAYS`), at `--scale 0.03` with a
   year of history; `test/models.test.ts` (slow set, `test/helpers/signins-world.ts`), `tools/browser/stops/models.json`;
+  the columns they leave out (`src/core/modelcols.ts`: ids, keys, free text; a property's `models: 'include'|'exclude'`).
+  The fixes a held day is offered (`ontology.fixes`, `FIX_KINDS`, `fixesOf`, `fixOfDonor` in `rules.ts`; forward,
+  backward, impute, part, replace), filtered in `donorsOf`/`offersOf`, a whole empty day fillable (`missingOf`), Replace
+  the file on the decision sheet (`replaceDayFile`); the sign-ins allow forward, backward and replace (`test/fixes.test.ts`,
+  `tools/browser/stops/fixes.json`). docs/research/ui-news-models-remedies.md is the UI research;
   `test/rules.test.ts`, `tools/browser/stops/rules.json`.
 - `tools/`: not part of the package or the tests. `tools/browser/` drives the built app at phone size (`tour.cjs`
   with stop sets and `expect` checks, the episode and integrity suites, colour-blind and slicing helpers);

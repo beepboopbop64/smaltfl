@@ -45,28 +45,30 @@ describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
     expect(documentFormat(doc)).toBe(4);
     expect(validateDocument(doc)).toEqual([]);
     const brief = doc.steps.map((s) => [s.id, s.kind, s.inputs, s.dataset?.description]);
-    expect(doc.steps.map((s) => s.description)).toEqual(['Sign-ins with a known result, on the day', 'Sign-ins by hour and result', 'Failed and locked-out sign-ins by country and client']);
+    expect(doc.steps.map((s) => s.description)).toEqual(['The sign-ins as they arrived, each marked with the day it came from when a paused day is filled from another day', 'Sign-ins with a known result, on the day', 'Sign-ins by hour and result', 'Failed and locked-out sign-ins by country and client']);
     expect(brief).toEqual([
-      ['auth_valid', 'expectations', ['auth'], 'Checked sign-ins'],
+      ['auth_filled', 'fill', ['auth'], undefined],
+      ['auth_valid', 'expectations', ['auth_filled'], 'Checked sign-ins'],
       ['signins_by_hour', 'sql', ['auth_valid'], 'Sign-ins by hour'],
       ['failures_by_country', 'sql', ['auth_valid'], 'Failures by country'],
     ]);
     const json = jsonDoc();
-    const checks = json.steps[0] as Extract<StepDef, { kind: 'expectations' }>;
-    expect(doc.steps[0]).toMatchObject({ rules: checks.rules, maxDropped: checks.maxDropped });
+    const checks = json.steps[1] as Extract<StepDef, { kind: 'expectations' }>;
+    expect(doc.steps[1]).toMatchObject({ rules: checks.rules, maxDropped: checks.maxDropped });
     // Each step knows its cell, and the canvas gets a section a notebook (display only, out of every hash).
     expect(doc.cells).toEqual({
-      auth_valid: { notebook: 'checks.nb.ts', cell: 'auth_valid', lang: 'ts', line: 15, endLine: 24 },
+      auth_filled: { notebook: 'checks.nb.ts', cell: 'auth_filled', lang: 'ts', line: 15, endLine: 16 },
+      auth_valid: { notebook: 'checks.nb.ts', cell: 'auth_valid', lang: 'ts', line: 21, endLine: 30 },
       signins_by_hour: { notebook: 'counts.nb.ts', cell: 'signins_by_hour', lang: 'sql', line: 10, endLine: 14 },
       failures_by_country: { notebook: 'counts.nb.ts', cell: 'failures_by_country', lang: 'sql', line: 19, endLine: 23 },
     });
     // Each notebook is a box on the canvas, folded, its steps inside; a source stands on its own as an input.
     expect(doc.groups).toEqual([
-      { id: 'nb-checks', name: 'Checks', steps: ['auth_valid'], collapsed: true, color: 'smalt' },
+      { id: 'nb-checks', name: 'Checks', steps: ['auth_filled', 'auth_valid'], collapsed: true, color: 'smalt' },
       { id: 'nb-counts', name: 'Counts', steps: ['signins_by_hour', 'failures_by_country'], collapsed: true, color: 'teal' },
     ]);
     expect(doc.outline!.map((o) => [o.path, o.cells.map((c) => c.kind)])).toEqual([
-      ['checks.nb.ts', ['params', 'source', 'md', 'step', 'publish']],
+      ['checks.nb.ts', ['params', 'source', 'md', 'step', 'md', 'step', 'publish']],
       ['counts.nb.ts', ['md', 'step', 'md', 'step', 'publish']],
     ]);
     expect(await flowHash(doc)).toBe(await flowHash({ ...doc, cells: undefined, groups: undefined, outline: undefined }));
@@ -87,7 +89,8 @@ describe('the sign-ins example as notebooks (ADR 0011 §1, §5)', () => {
     expect(planKind(plan)).toBe('plan/3');
     expect(() => validatePlan(plan)).not.toThrow();
     expect(plan.nodes[1]).toEqual(other.nodes[1]);
-    expect(plan.nodes.slice(2).map((n) => n.op)).toEqual(['sql', 'sql']);
+    expect(plan.nodes[2]).toEqual(other.nodes[2]);
+    expect(plan.nodes.slice(3).map((n) => n.op)).toEqual(['sql', 'sql']);
     expect(plan.publish).toEqual(other.publish);
     expect(plan.outputs.map((o) => o.name)).toEqual(other.outputs.map((o) => o.name));
     // A plan/3 hash is not a plan/2 hash of the same bytes.
