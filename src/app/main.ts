@@ -1705,6 +1705,7 @@ function notebookElements(o: NotebookOutline): HTMLElement[] {
       } else if (c.kind === 'source' && c.source) {
         between(c.source);
         put(card(c.source, 'source'));
+        for (const el of outputCells(c.source)) put(el);
       } else if (c.kind === 'step' && c.step) {
         between(c.step);
         const st = steps().get(c.step);
@@ -1712,12 +1713,180 @@ function notebookElements(o: NotebookOutline): HTMLElement[] {
         const lines = text.split('\n').length;
         put(h('div', { class: 'nb-step' }, card(c.step, 'step'), checks(c.step) ?? '',
           h('details', { ...(st?.kind === 'sql' ? { open: 'open' } : {}) }, h('summary', {}, `${c.lang === 'sql' ? 'SQL' : st?.kind === 'expectations' ? 'The rules' : 'The cell'} · ${plural(lines, 'line')}`), h('pre', { class: 'cell-code' }, h('code', {}, text)))));
+        for (const el of outputCells(c.step)) put(el);
       } else if (c.kind === 'publish' && c.publishes) {
         put(h('p', { class: 'nb-pub' }, 'Publishes ', ...c.publishes.flatMap((n, i) => [i ? ', ' : '', h('b', {}, n)])));
       }
     }
   }
   return parts;
+}
+
+/**
+ * The cells a notebook shows under a step once the flow has run (the maintainer, 2026-11-11: "each of the steps should
+ * have an output cell that you can view the data set"): callouts first, for what a written rule caught and for the
+ * day's news about the step, each a tap from where it is told in full; then the output, its first rows (and the
+ * picture of a small output, `glanceOf`), folded until opened; then, on a watched step, the two models' visuals behind a
+ * toggle. Nothing here is part of the notebook's source or its hash: it is what the run made, read in place.
+ */
+function outputCells(id: string): HTMLElement[] {
+  if (!visible(id) || !nodeOf(id)) return [];
+  const out: HTMLElement[] = [];
+  const cell = (kind: string, label: string, body: Node | string, cls = '') => h('section', { class: `nb-out ${kind} ${cls}`.trim(), 'aria-label': label }, h('span', { class: 'nb-out-k' }, label), body);
+  // What a written rule caught: a check step's rules with rows against them.
+  const e = nodeOf(id)?.expectations;
+  for (const r of e?.rules ?? []) {
+    if (!r.failed) continue;
+    const sev = r.onFail === 'fail' ? 'alert' : r.onFail === 'drop' ? 'warn' : 'note';
+    const did = r.onFail === 'drop' ? 'dropped' : r.onFail === 'fail' ? 'held the day on' : 'flagged';
+    out.push(cell('callout', 'Rule', h('button', { type: 'button', class: `nb-call ${sev}`, onclick: () => openTab(id, 'dropped') },
+      glyphEl(sev === 'alert' ? 'alert' : sev === 'warn' ? 'warn' : 'note', 14), h('span', {}, h('b', {}, RULE_TITLE(r.name)), ` ${did} ${plural(r.failed, 'row')}`), h('span', { class: 'nb-go' }, '›')), sev));
+  }
+  // The day's news about the step: what is out of the ordinary, each a tap from its News.
+  const told = cardNews(id).filter((f) => (f.severity === 'warn' || f.severity === 'alert') && f.kind !== 'calm').slice(0, 2);
+  for (const f of told) {
+    out.push(cell('callout', 'News', h('button', { type: 'button', class: `nb-call ${f.severity}`, onclick: () => openTab(id, 'news') },
+      glyphEl(f.severity === 'alert' ? 'alert' : f.severity === 'warn' ? 'warn' : 'note', 14), h('span', {}, f.title), h('span', { class: 'nb-go' }, '›')), f.severity));
+  }
+  // The output: its first rows when opened, a small output's picture above them.
+  const body = h('div', { class: 'nb-out-body' }, h('div', { class: 'mini-wait' }));
+  let filled = false;
+  const fill = async () => {
+    if (filled) return;
+    filled = true;
+    const nv = await nodeView(id, state.viewer);
+    if (typeof nv === 'string') return body.replaceChildren(h('p', { class: 'foot' }, nv));
+    const r = await state.engine!.query(`SELECT * FROM (\n${nv.read}\n) LIMIT 8`);
+    const total = nodeOf(id)?.rows;
+    const glance = await glanceOf(id, nv.read).catch(() => null);
+    body.replaceChildren(...(glance ? [glance] : []), table(r.columns, r.rows as unknown[][], undefined, false, meaningsOf(id)),
+      h('p', { class: 'foot' }, `${total !== undefined ? `First ${fmtInt(r.rows.length)} of ${fmtInt(total)} rows` : `${fmtInt(r.rows.length)} rows`} · `, h('button', { type: 'button', class: 'linkish', onclick: () => openTab(id, 'data') }, 'all of them, with each column’s shape ›'),
+      ' · ', h('button', { type: 'button', class: 'linkish', onclick: () => addExploreCell(`SELECT *\nFROM ${id}\nLIMIT 20`) }, 'explore it in a cell of your own')));
+  };
+  const rows = nodeOf(id)?.rows;
+  const data = h('details', { class: 'nb-out output' }, h('summary', {}, h('span', { class: 'nb-out-k' }, 'Output'), ` ${id}${rows !== undefined ? ` · ${fmtInt(rows)} rows` : ''}`), body);
+  data.addEventListener('toggle', () => data.open && void fill());
+  // A small output (a summary) is open from the start: it is read, not scrolled.
+  if (rows !== undefined && rows <= 120 && isOutput(id)) (data.open = true), void fill();
+  out.push(data);
+  // The two models, on a watched step: the forest's strip and the classifier's track, behind a toggle.
+  if (Object.keys(state.doc.publish?.watch ?? {}).some((w) => w.toLowerCase() === id.toLowerCase())) {
+    const mbody = h('div', { class: 'nb-out-body' }, h('div', { class: 'mini-wait' }));
+    const models = h('details', { class: 'nb-out models' }, h('summary', {}, h('span', { class: 'nb-out-k' }, 'Models'), ' the isolation forest and the classifier on this day'), mbody);
+    let done = false;
+    models.addEventListener('toggle', () => {
+      if (!models.open || done) return;
+      done = true;
+      void modelsTab(id, id).then((el) => mbody.replaceChildren(el)).catch((err: unknown) => mbody.replaceChildren(h('p', { class: 'foot' }, `The models couldn’t be drawn: ${String(err)}`)));
+    });
+    out.push(models);
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ explore cells: the reader's own
+
+/** A cell the reader adds under a notebook to look further: SQL over the flow's datasets by name, or a note. */
+interface ExploreCell { id: string; kind: 'sql' | 'note'; text: string }
+
+/** Explore cells are the reader's, kept in this browser by flow and notebook: never in the notebook's source, the plan
+ * or a hash, so exploring changes nothing the flow computes or what readers are published. */
+const exploreKey = (path: string) => `smaltfl:explore:${state.doc.id}:${path}`;
+let exploreAt: { path: string; host: HTMLElement } | null = null;
+function exploreCellsOf(path: string): ExploreCell[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(exploreKey(path)) ?? '[]') as unknown;
+    return Array.isArray(v) ? (v as ExploreCell[]).filter((c) => c && typeof c.text === 'string' && (c.kind === 'sql' || c.kind === 'note')) : [];
+  } catch {
+    return [];
+  }
+}
+function saveExploreCells(path: string, cells: ExploreCell[]): void {
+  try {
+    localStorage.setItem(exploreKey(path), JSON.stringify(cells));
+  } catch {
+    // Not kept past this page; the cells still work while it is open.
+  }
+  memo.set(path, cells);
+}
+const memo = new Map<string, ExploreCell[]>();
+const cellsFor = (path: string) => memo.get(path) ?? exploreCellsOf(path);
+
+/** Add a cell to the notebook on screen, and open it to edit. */
+function addExploreCell(text: string, kind: ExploreCell['kind'] = 'sql'): void {
+  if (!exploreAt) return;
+  const cell: ExploreCell = { id: `x${Date.now().toString(36)}`, kind, text };
+  saveExploreCells(exploreAt.path, [...cellsFor(exploreAt.path), cell]);
+  drawExplore(cell.id);
+}
+
+/**
+ * A reader's SQL as the engine runs it: each dataset of the flow named after FROM or JOIN is the version this run made
+ * (what its sheet's Data shows to this viewer), so `SELECT … FROM posture` reads today's posture, and a dataset closed to
+ * the viewer is refused by name.
+ */
+async function exploreSql(text: string): Promise<string> {
+  const names = new Map([...state.doc.sources.map((x) => x.id), ...steps().keys()].map((n) => [n.toLowerCase(), n] as const));
+  const used = new Set<string>();
+  for (const m of text.matchAll(/\b(?:FROM|JOIN)\s+([A-Za-z_]\w*)/gi)) if (names.has(m[1]!.toLowerCase())) used.add(names.get(m[1]!.toLowerCase())!);
+  const reads = new Map<string, string>();
+  for (const n of used) {
+    const nv = await nodeView(n, state.viewer);
+    if (typeof nv === 'string') throw new Error(`${n}: ${nv}`);
+    reads.set(n.toLowerCase(), nv.read);
+  }
+  return text.replace(/\b(FROM|JOIN)(\s+)([A-Za-z_]\w*)\b/gi, (all, kw: string, sp: string, name: string) => (reads.has(name.toLowerCase()) ? `${kw}${sp}(\n${reads.get(name.toLowerCase())}\n) AS ${name}` : all));
+}
+
+/** The reader's cells under a notebook: each SQL cell its editor, Run, and its result (rows, and a picture where they
+ * make a grid); each note its words; Add a cell; all kept in this browser. */
+function exploreCells(o: NotebookOutline): HTMLElement {
+  const host = h('section', { class: 'nb-explore', 'aria-label': 'Your cells' });
+  exploreAt = { path: o.path, host };
+  drawExplore();
+  return host;
+}
+
+function drawExplore(editing?: string): void {
+  if (!exploreAt) return;
+  const { path, host } = exploreAt;
+  const cells = cellsFor(path);
+  const first = [...steps().keys()].find((k) => isOutput(k)) ?? [...steps().keys()].pop() ?? state.doc.sources[0]?.id ?? 'x';
+  const parts: HTMLElement[] = [h('h3', { class: 'nb-h' }, 'Your cells'),
+    h('p', { class: 'foot' }, cells.length ? 'Kept in this browser, not in the notebook: what you explore here changes nothing the flow computes or publishes.' : 'Explore further: SQL over any dataset of the flow by its name (today’s version), or a note. Kept in this browser, not in the notebook.')];
+  cells.forEach((c, k) => {
+    const remove = h('button', { type: 'button', class: 'linkish', 'aria-label': 'Remove this cell', onclick: () => (saveExploreCells(path, cells.filter((x) => x.id !== c.id)), drawExplore()) }, 'Remove');
+    if (c.kind === 'note') {
+      const ta = h('textarea', { class: 'nb-x-note', rows: '2', 'aria-label': 'A note' }) as HTMLTextAreaElement;
+      ta.value = c.text;
+      ta.addEventListener('change', () => saveExploreCells(path, cellsFor(path).map((x) => (x.id === c.id ? { ...x, text: ta.value } : x))));
+      parts.push(h('div', { class: 'nb-x note' }, h('div', { class: 'nb-x-head' }, h('span', { class: 'nb-out-k' }, `Note ${k + 1}`), remove), ta));
+      return;
+    }
+    const ta = h('textarea', { class: 'nb-x-sql', rows: String(Math.min(10, Math.max(3, c.text.split('\n').length))), spellcheck: 'false', 'aria-label': 'SQL' }) as HTMLTextAreaElement;
+    ta.value = c.text;
+    const result = h('div', { class: 'nb-x-out' });
+    const go = async () => {
+      saveExploreCells(path, cellsFor(path).map((x) => (x.id === c.id ? { ...x, text: ta.value } : x)));
+      result.replaceChildren(h('div', { class: 'mini-wait' }));
+      try {
+        const sql = await exploreSql(ta.value.trim().replace(/;\s*$/, ''));
+        const r = await state.engine!.query(`SELECT * FROM (\n${sql}\n) LIMIT 200`);
+        const glance = await glanceOf('', sql).catch(() => null);
+        result.replaceChildren(...(glance ? [glance] : []), table(r.columns, r.rows as unknown[][]), h('p', { class: 'foot' }, `${fmtInt(r.rows.length)}${r.rows.length === 200 ? '+' : ''} rows`));
+      } catch (err) {
+        result.replaceChildren(h('p', { class: 'nb-x-err', role: 'alert' }, String(err instanceof Error ? err.message : err)));
+      }
+    };
+    ta.addEventListener('keydown', (ev) => { if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') { ev.preventDefault(); void go(); } });
+    parts.push(h('div', { class: 'nb-x sql' }, h('div', { class: 'nb-x-head' }, h('span', { class: 'nb-out-k' }, `SQL ${k + 1}`), h('button', { type: 'button', class: 'btn small primary', onclick: () => void go() }, 'Run'), remove), ta, result));
+    if (c.id === editing) requestAnimationFrame(() => (ta.focus(), void go()));
+    else if (state.engine && latest()) void go();
+  });
+  parts.push(h('div', { class: 'nb-actions' },
+    h('button', { type: 'button', class: 'btn small', onclick: () => addExploreCell(`SELECT *\nFROM ${first}\nLIMIT 20`) }, '+ SQL cell'),
+    h('button', { type: 'button', class: 'btn small', onclick: () => addExploreCell('', 'note') }, '+ Note')));
+  host.replaceChildren(...parts);
 }
 
 /**
@@ -1728,6 +1897,7 @@ function notebookElements(o: NotebookOutline): HTMLElement[] {
 function renderNotebookSheet(g: GroupDef, o: NotebookOutline): void {
   const sheet = $('sheet');
   sheet.classList.remove('drill');
+  sheet.classList.add('nb-page');
   const folded = state.collapsed.has(g.id);
   const published = g.steps.filter((id) => isOutput(id));
   const fold = h('button', { class: 'btn small', type: 'button', onclick: () => setFolded(g.id, !folded) }, folded ? 'Show its steps on the canvas' : 'Fold it into one box');
@@ -1752,6 +1922,7 @@ function renderNotebookSheet(g: GroupDef, o: NotebookOutline): void {
     h('div', { class: 'sheet-body' },
       h('div', { class: 'nb-actions' }, fold),
       h('div', { class: 'nb' }, ...notebookElements(o)),
+      exploreCells(o),
       isOwner() ? h('details', { class: 'about-flow' }, h('summary', {}, 'The box on the canvas'),
         h('div', { class: 'sheet-body' },
           h('div', { class: 'field' }, h('label', { for: name.id }, 'Name'), name),
@@ -7121,6 +7292,7 @@ function setAside(f: Finding, day: string): void {
 // ------------------------------------------------------------------ the sheet
 
 async function renderSheet(): Promise<void> {
+  $('sheet').classList.remove('nb-page');
   if (state.section) {
     const g = state.doc.groups?.find((x) => x.id === state.section);
     const o = notebookOfSection(state.section);

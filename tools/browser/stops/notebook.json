@@ -1,0 +1,99 @@
+[
+  {
+    "name": "mar06-nb-summary",
+    "what": "Control estate, calm Wed Mar 6: the summary notebook read as a page: each step's SQL, its output open beneath it (a summary is small: its heat table and first rows), then the reader's own cells",
+    "day": "Wed 6",
+    "box": "nb-summary",
+    "full": true,
+    "expect": {
+      "text": [
+        "OUTPUT",
+        "Your cells",
+        "+ SQL cell"
+      ],
+      "count": {
+        "#sheet .nb-out.output": 6,
+        "#sheet .nb-out.output[open]": 6,
+        "#sheet .nb-out .glance": 6
+      }
+    }
+  },
+  {
+    "name": "mar06-nb-posture",
+    "what": "Control estate, calm Wed Mar 6: the posture notebook: the posture's output folded (600 rows), and the Models toggle under the watched posture",
+    "day": "Wed 6",
+    "box": "nb-posture",
+    "full": true,
+    "expect": {
+      "text": [
+        "OUTPUT",
+        "MODELS"
+      ],
+      "count": {
+        "#sheet .nb-out.models": 1
+      }
+    }
+  },
+  {
+    "name": "mar06-nb-posture-models",
+    "what": "Control estate, calm Wed Mar 6: the posture notebook with the posture's output and its models opened in place",
+    "day": "Wed 6",
+    "box": "nb-posture",
+    "clicks": [
+      "#sheet .nb-out.output > summary",
+      "#sheet .nb-out.models > summary"
+    ],
+    "waitFor": "#sheet .nb-out.models .models-tab",
+    "full": true,
+    "expect": {
+      "text": [
+        "THE FOREST",
+        "THE CLASSIFIER"
+      ],
+      "count": {
+        "#sheet .nb-out.output table.data": 1
+      }
+    }
+  },
+  {
+    "name": "mar06-nb-explore",
+    "what": "Control estate, calm Wed Mar 6: a reader's own SQL cell under the summary notebook: the apps at risk by business unit, run against today's scores",
+    "day": "Wed 6",
+    "box": "nb-summary",
+    "clicks": [
+      "#sheet .nb-explore .nb-actions button",
+      [
+        "#sheet .nb-x-sql",
+        "SELECT business_unit, hosting, count(*) AS apps, sum(CASE WHEN standing = 'at_risk' THEN 1 ELSE 0 END) AS at_risk FROM app_scores GROUP BY 1, 2"
+      ],
+      "#sheet .nb-x .btn.primary"
+    ],
+    "waitFor": "#sheet .nb-x-out table",
+    "full": true,
+    "expect": {
+      "text": [
+        "SQL 1",
+        "AT A GLANCE"
+      ],
+      "count": {
+        "#sheet .nb-x-out table.data": 1,
+        "#sheet .nb-x-err": 0
+      }
+    }
+  },
+  {
+    "name": "mar08-nb-posture",
+    "what": "Control estate, held Fri Mar 8: the posture notebook with the day's news as a callout under the posture (key rotation passing where encryption fails)",
+    "day": "Fri 8",
+    "box": "nb-posture",
+    "full": true,
+    "expect": {
+      "text": [
+        "NEWS"
+      ],
+      "count": {
+        "#sheet .nb-out.callout.alert": 1
+      }
+    }
+  }
+]
