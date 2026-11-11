@@ -31,9 +31,10 @@ import { calendarHead, heldLoadLine, dayMid, dayShort, guessWords, judgedWords, 
 import { UNTIL, afterLine, betweenLine, dayPausedLine, daySentence, decidedLines, decisionDrawing, donorPicked, failLine, goShown, heldLine, outputPausedLine, passedLine, pausedChecks, pauseLines, pauseReasons, pickFails, receiptLines, remedyHead, ribbonOf, runFigures, sheetText, versionLines, checksSeen, filesSeen, findingOf, type RunSight, type AfterPart, type KeptLacks, type RemedySaid, type SheetIn, type SheetPick, type SheetText, type Sight } from '../core/decision.js';
 import { countedChecks, rangesFor, dayClaim, dayState, flowStory, levelFor, levelsOf, loadClaim, reconcileSaid, skipOf, tailPath, type Claim, decisionFor, heldOutputs, inputsKey, inputsOf, pausesOf, pauseState, lastPublished, sameKeys, stagedKeys, standingEnds, standingFor, type DecideAbout, type Decided, type HistoryRef, type Hold, type Inputs, type Pause, type ReleaseAbout, type StoryClaim } from '../core/hold.js';
 import { dayVersions, donorIdOf, fillCounts, levelOf as acceptedLevel, levelWays, partLabel as remedyPart, type Offer, type Repair, type Version } from '../core/fill.js';
+import { gridOf, shadeOf, shareOf, standOut } from './grid.js';
 import { derivedAbout, derivedFails, derivedKeys, derivedWhy, donorsOf, filledRows, pinDonor, repairOf, stageRepair, type Listed, type Remedies } from './fills.js';
 import { followsCause as followsFrom, ACT_VERB, CELL_KINDS, CELL_NAMES, CONTEXT_TAG, HEALTH_HEAD, STRIP_KEY, approx, axisShare, recentSpan, cardWords, changeLabel, compact, countLabel, countRange, fallSteps, gateHead, overLabel, gateLabels, gateOf, partLabel, ruleOrder, ruleUsual, shortWho, splitSentence, splitSteps, storyOf, type Cell, type DayStep, type Gate, type HourValues, type Story, type Told } from '../core/story.js';
-import { aucTrack, forestTicks, rankBars, amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeChip, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
+import { aucTrack, forestTicks, heatGrid, rankBars, amountLine, bulletTrack, degrees, weatherHours, chain, composition, contextBars, dayStrip, decisionRow, effectBars, learnStrip, episodeBars, episodeChip, episodeDays, episodeIcon, heldLineage, partBar, reachIcon, DEFS as VIZ_DEFS, dumbbellRows, episodeLine, farStrip, gateBars, glyph, hourBars, lineage, microDot, quantileStrip, ruleRows, splitRows, stripBar, trendPips, waterfall, type Dumbbell, type Mark as VizMark, type StripDay } from './viz.js';
 import { sha256Hex } from '../core/hash.js';
 import { counted, glossOf, meaningOf, nounOf as ontologyNoun, propertyOf, saysMore, type Edit, type Noun, type PropertyType } from '../core/ontology.js';
 import { ontologyPage, originSaid, typesShown, type ColumnCard, type FileSection, type Rule } from '../core/ontologypage.js';
@@ -3696,7 +3697,50 @@ async function dataTab(card: string, id: string, who: string): Promise<HTMLEleme
       if (flag) th.querySelector('.th-name')!.append(h('span', { class: `th-flag ${flag.severity}`, title: flag.title, 'aria-label': flag.title }, '●'));
     }
   }).catch(() => undefined);
-  return h('div', { class: 'data-tab' }, from, lead, grid);
+  const glance = blanks ? null : await glanceOf(id, read).catch(() => null);
+  return h('div', { class: 'data-tab' }, from, glance, lead, grid);
+}
+
+/**
+ * A small output at a glance (src/app/grid.ts): its rows as a heat table above them, each cell its share (or its count
+ * against its column's largest), and in words the few cells most out of line with the rest of their row, "backup ·
+ * On premises 31% · 12% elsewhere". Values and columns by what the ontology calls them. Null where the output isn't a
+ * grid (too many rows, no numbers).
+ */
+async function glanceOf(id: string, read: string): Promise<HTMLElement | null> {
+  const r = await state.engine!.query(`SELECT * FROM (\n${read}\n) LIMIT 401`);
+  const meanings = meaningsOf(id);
+  const g = gridOf(r.columns, r.rows as never, { order: (c) => { const v = meanings(c)?.values; return v ? Object.keys(v) : undefined; } });
+  if (!g) return null;
+  const named = (column: string, v: string) => (v === '(blank)' ? v : meaningFor(meanings(column), v) ?? v);
+  const title = (c: string) => meanings(c)?.title ?? c;
+  const rows = g.rows.map((v) => named(g.rowBy, v));
+  let cols = g.shape === 'long' ? g.cols.map((x) => x.split(' · ').map((v, k) => named(g.colBy[k]!, v)).join(' · ')) : g.shape === 'square' ? rows : g.cols.map(title);
+  // A suffix every column shares ("_failing") is said once, in the caption.
+  const suffix = g.shape === 'wide' && cols.length > 1 ? /(_[a-z]+)$/.exec(cols[0]!)?.[1] : undefined;
+  if (suffix && cols.every((c) => c.endsWith(suffix))) cols = cols.map((c) => c.slice(0, -suffix.length));
+  const pctOf = (x: number) => (x > 0 && x < 0.01 ? '<1%' : `${Math.round(x * 100)}%`);
+  const hot = standOut(g);
+  const cells = g.cells.map((row, i) => row.map((cell, j) => {
+    if (!cell || (g.shape === 'square' && i === j)) return null;
+    const t = shadeOf(g, i, j);
+    const text = g.shade === 'share' && g.shape !== 'square' ? pctOf(shareOf(g, i, j) ?? 0) : fmtInt(cell.value);
+    return { text, shade: t, hot: hot.some((x) => x.r === i && x.c === j) };
+  }));
+  const measure = suffix ? suffix.slice(1) : title(g.measure);
+  const of = g.of ? `as a share of ${title(g.of).toLowerCase()}` : 'against each column’s largest';
+  const caption = g.shape === 'square'
+    ? `Failed together: a row a control, a column another, the shade the share of the row’s failures that fail the column too; the darkest is the most`
+    : `${title(measure)} ${of}${g.shape === 'long' ? `, by ${title(g.rowBy).toLowerCase()} and ${g.colBy.map((c) => title(c).toLowerCase()).join(' · ')}` : ''}; the darkest is the most${g.cells.some((row) => row.includes(null)) ? ', a dashed cell applies to none' : ''}`;
+  const svg = heatGrid({ rows, cols, cells, aria: caption, w: 340 });
+  const words = hot.map((x) => g.shape === 'square'
+    ? h('li', {}, h('b', {}, `${cols[x.c]} with ${rows[x.r]}`), ` ${pctOf(x.share)} of ${rows[x.r]}’s failures · ${pctOf(x.others)} of the others’`)
+    : h('li', {}, h('b', {}, `${rows[x.r]} · ${cols[x.c]}`), ` ${pctOf(x.share)} · ${pctOf(x.others)} elsewhere`));
+  return h('section', { class: 'glance', 'aria-label': 'At a glance' },
+    h('h3', { class: 'eyebrow' }, 'At a glance'),
+    h('div', { class: 'glance-grid' }, svgNode(svg)),
+    h('p', { class: 'foot' }, caption),
+    words.length ? h('div', { class: 'glance-out' }, h('span', { class: 'glance-k' }, 'Stands out'), h('ul', {}, ...words)) : null);
 }
 
 /** The finding about a column today, if the day's news has one: its severity and what it says. */

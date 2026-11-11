@@ -49,7 +49,7 @@ import { LAYER_DEFAULTS } from '../src/core/gates.js';
 import { planKind } from '../src/core/manifest.js';
 import { flowStory, reconcileSaid } from '../src/core/hold.js';
 import { translate, verifyRun } from '../src/index.js';
-import { appliesTo, ESTATE_CONTROLS, ESTATE_PLANTED } from './fixtures/estate.js';
+import { appliesTo, ESTATE_CONTROLS, ESTATE_PLANTED, estateRows } from './fixtures/estate.js';
 import { SMALTDB } from './helpers/engine.js';
 import { ESTATE_WATCHES, estateHolds, estateWorld, type EstateWorld } from './helpers/estate-world.js';
 
@@ -68,7 +68,7 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
   it('is plan/4: TLS’s gate as written, every other watch its layer’s defaults, the outputs gold', async () => {
     expect(validateDocument(w.doc)).toEqual([]);
     expect(Object.keys(w.doc.publish!.watch!)).toEqual([...ESTATE_WATCHES]);
-    expect(Object.keys(w.doc.gates!)).toEqual(['tls', 'waf', 'posture', 'by_unit', 'by_control', 'by_type']);
+    expect(Object.keys(w.doc.gates!)).toEqual(['tls', 'waf', 'posture', 'app_scores', 'by_unit', 'by_control', 'by_type', 'by_profile', 'control_by_type', 'failed_together']);
     // Moved on purpose by ADR 0015 §1: both cells wrote scope: { of: 'apps', key: 'app_id', where: "internet_facing = 'yes'" };
     // the ontology's rows say which applications a control covers now, so neither cell writes a scope.
     expect(w.doc.gates!.tls).toEqual({ layer: 'bronze', checks: { schema: 'hold', amount: 'hold', blanks: 'hold', values: 'hold', rules: 'hold', shares: 'warn', pairs: 'warn', forest: 'warn', classifier: 'off' } });
@@ -144,7 +144,7 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
   it('publishes the calm days, every watch judged', () => {
     for (const day of ['2024-03-01', '2024-03-03', '2024-03-06', '2024-03-11', '2024-03-20', '2024-03-22', '2024-03-27', '2024-03-28']) {
       expect(estateHolds(result(day)), day).toEqual([]);
-      expect(result(day).published, day).toEqual(['by_control', 'by_type', 'by_unit', 'posture']);
+      expect(result(day).published, day).toEqual(['app_scores', 'by_control', 'by_profile', 'by_type', 'by_unit', 'control_by_type', 'failed_together', 'posture']);
     }
   });
 
@@ -211,10 +211,13 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
       // The day a file was refused built nothing: no gate to count (slice 7).
       if (!r || r instanceof Error || r.manifest.nodes.some((n) => n.status === 'refused')) continue;
       const gold = r.manifest.nodes.filter((n) => n.gate);
-      expect(gold.map((n) => n.origin).sort(), day).toEqual(['by_control', 'by_type', 'by_unit']);
+      expect(gold.map((n) => n.origin).sort(), day).toEqual(['app_scores', 'by_control', 'by_profile', 'by_type', 'by_unit', 'control_by_type', 'failed_together']);
       for (const n of gold) {
         const g = w.doc.gates![n.origin]!.reconcile!;
-        expect(reconcileSaid(n.gate!.reconcile, g.key, g.of ?? null), `${day} ${n.origin}`).toBeNull();
+        // The scores are one row an application of the posture: the day TLS's file came twice, the posture's repeats
+        // are theirs too, and their gate counts them (the posture holds the day on its own rule).
+        if (n.origin === 'app_scores' && day === ESTATE_PLANTED.double) expect(reconcileSaid(n.gate!.reconcile, g.key, g.of ?? null)).toMatch(/^rows don't reconcile: 203 rows repeat/);
+        else expect(reconcileSaid(n.gate!.reconcile, g.key, g.of ?? null), `${day} ${n.origin}`).toBeNull();
         expect(n.gate!.reconcile.rows, `${day} ${n.origin}`).toBeGreaterThan(0);
       }
       expect(r.holds.some((h) => h.by === 'checks'), day).toBe(false);
@@ -222,7 +225,7 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     const calm = result('2024-03-06');
     const v = await verifyRun(w.db, calm.run, { smaltdb: SMALTDB, level: 'rerun', manifest: calm.hash });
     expect(v.ok).toBe(true);
-    expect(v.checks.filter((c) => c.check === 'gate').map((c) => [c.origin, c.ok])).toEqual([['by_unit', true], ['by_control', true], ['by_type', true]]);
+    expect(v.checks.filter((c) => c.check === 'gate').map((c) => [c.origin, c.ok])).toEqual([['app_scores', true], ['by_unit', true], ['by_control', true], ['by_type', true], ['by_profile', true], ['control_by_type', true], ['failed_together', true]]);
   }, 120_000);
 
   it('holds both scope days on the scope rule, said with the rows and the keys (slice 3), the scope now the ontology’s (ADR 0015)', () => {
@@ -294,5 +297,56 @@ describe('the estate flow under its gates (ADR 0014 slice 1)', () => {
     expect(estateHolds(result(ESTATE_PLANTED.contradiction))).toEqual(['story:posture']);
     expect(said(ESTATE_PLANTED.contradiction, 'posture')).toBe('41 apps: key_rotation pass needs encryption pass/exception/not_assessed');
     expect(estateHolds(result(plusDays(ESTATE_PLANTED.contradiction, 1)))).toEqual([]);
+  });
+});
+
+describe('each application scored, and the controls by type of application', () => {
+  const rows = (name: string) => {
+    const r = w.db.query(`SELECT * FROM ${name}`);
+    return r.rows.map((row) => Object.fromEntries(r.columns.map((c, i) => [c, row[i]]))) as Record<string, string | number | null>[];
+  };
+  const last = '2024-03-31';
+
+  it('scores every application from the controls that apply to it, as the generator has them', () => {
+    expect(result(last).published).toContain('app_scores');
+    const status = new Map(ESTATE_CONTROLS.map((c) => {
+      const { columns, rows: rs } = estateRows(c, last, w.apps);
+      const id = columns.indexOf('app_id');
+      const st = columns.indexOf('status');
+      return [c, new Map(rs.map((r) => [String(r[id]), String(r[st])]))];
+    }));
+    const scores = new Map(rows('app_scores').map((r) => [String(r.app_id), r]));
+    expect(scores.size).toBe(w.apps.length);
+    for (const a of w.apps) {
+      const mine = ESTATE_CONTROLS.filter((c) => appliesTo(c, a)).map((c) => [c, status.get(c)!.get(a.app_id)!] as const);
+      const n = (word: string) => mine.filter(([, s]) => s === word).length;
+      const failed = n('fail');
+      const standing = failed >= 3 ? 'at_risk' : failed > 0 ? 'failing' : n('not_assessed') > 0 ? 'unknown' : 'passing';
+      expect(scores.get(a.app_id), a.app_id).toMatchObject({ applicable: mine.length, passed: n('pass'), failed, excepted: n('exception'), not_assessed: n('not_assessed'), failed_controls: mine.filter(([, s]) => s === 'fail').map(([c]) => c).join(' '), standing });
+    }
+    // Some of every standing.
+    expect(new Set([...scores.values()].map((r) => r.standing))).toEqual(new Set(['passing', 'failing', 'at_risk', 'unknown']));
+  });
+
+  it('counts the profiles and the controls by type from the scores, and shows where hosting meets a control', () => {
+    const profiles = rows('by_profile');
+    expect(profiles.length).toBe(9);
+    expect(profiles.reduce((s, r) => s + Number(r.apps), 0)).toBe(w.apps.length);
+    for (const r of profiles) expect(Number(r.all_passed) + Number(r.failing_some) + Number(r.at_risk) + Number(r.unsettled)).toBe(Number(r.apps));
+    const cells = rows('control_by_type');
+    const share = (control: string, hosting: string) => {
+      const xs = cells.filter((r) => r.control === control && r.hosting === hosting);
+      return xs.reduce((s, r) => s + Number(r.failing), 0) / xs.reduce((s, r) => s + Number(r.apps), 0);
+    };
+    // On-premises applications miss backups and central logging; SaaS ones fail MFA; retiring apps aside.
+    expect(share('backup', 'onprem')).toBeGreaterThan(1.5 * share('backup', 'cloud'));
+    expect(share('logging', 'onprem')).toBeGreaterThan(1.5 * share('logging', 'cloud'));
+    expect(share('mfa', 'saas')).toBeGreaterThan(1.5 * share('mfa', 'cloud'));
+    // Failed together: the diagonal is each control's own failures, and the matrix is symmetric.
+    const together = new Map(rows('failed_together').map((r) => [String(r.control), r]));
+    for (const c of ESTATE_CONTROLS) {
+      expect(together.get(c)![c], c).toBe(together.get(c)!.failing);
+      for (const d of ESTATE_CONTROLS) expect(together.get(c)![d], `${c} ${d}`).toBe(together.get(d)![c]);
+    }
   });
 });

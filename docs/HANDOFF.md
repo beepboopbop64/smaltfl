@@ -171,6 +171,17 @@ Each piece has its ADR, tests, and a line in CLAUDE.md's layout.
   Q-148 decided (defined in the ontology, switched in the check cell, cells rewritten when the ontology changes); open: Q-149 to Q-151 (how a rule is enforced, the
   kinds, the sign-in log's rules) and still Q-144. **Next:** a range derived from the last days, fixed or rolling
   (Q-142); rules on a dataset the flow makes (Q-144); a rule drawn against today's number (§5).
+- **Each application scored, and the controls by type of application** (2026-11-11, on `claude/trusting-euler-ogz88y`):
+  the estate's `scores.nb.ts` scores every application from the posture (`app_scores`: its standing, passing, failing
+  one or two, at risk with three or more, or not settled; the controls it fails by name; passed, excepted, not
+  assessed, applicable; worst first, a silver gate reconciling it with the posture), and `summary.nb.ts` adds
+  `by_profile` (standings by hosting and criticality), `control_by_type` (each control's failures by hosting and
+  criticality) and `failed_together` (for the applications failing each control, how many fail each other), each with
+  a gold gate. The generator's hosting effects (`riskOf`: on premises misses backups and central logging, SaaS fails
+  MFA) are what they show; ADR 0014's answer key doesn't move. A small output's Data tab draws it at a glance
+  (`src/app/grid.ts`: a heat table, the cells most out of line with their row said in words, "MFA · SaaS · High 32% ·
+  9% elsewhere"; `test/grid.test.ts`, `tools/browser/stops/apps.json`). `test/estate-flow.test.ts` checks every
+  application's score against the generator and the interactions through the engine.
 - **Round-3 fixes, partly done** (the last three commits, `f76107b`, `791d07b` and `e42d9ec`):
   - Hour-fall days are told as they were (below).
   - The pause is carried through every view.

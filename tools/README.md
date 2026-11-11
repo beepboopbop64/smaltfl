@@ -24,6 +24,8 @@ Build the app first (`npm run build:app`) and copy `dist/app` somewhere, because
   canvases, decision sheets and restricted viewers.
 - `judges-decide.json`: the decision sequence, captured in a fresh session before Mon 25 runs. Once a later day is
   published, releasing an earlier one is refused by design.
+- `apps.json`: the estate's application scores and the summaries by type of application at a glance (the heat
+  tables on the Data tab: control by hosting and criticality, the controls failed together, profiles at risk).
 - `estate.json`: the control estate's screens (`npm run build:app -- --flow examples/control-estate/flow.json --out
   dist/app-estate`): a calm day, the held days of ADR 0014's answer key, and bronze, silver and gold cards with their
   News, Checks and Data, each stop with a `what` a judge reads. Its days run in order, since a day's due check reads

@@ -1,0 +1,100 @@
+[
+  {
+    "name": "mar06-flow",
+    "what": "Control estate, calm Wed Mar 6: the Flow view with the posture, scores and summary boxes unfolded",
+    "day": "Wed 6",
+    "unfold": [
+      "nb-posture",
+      "nb-scores",
+      "nb-summary"
+    ]
+  },
+  {
+    "name": "mar06-scores-data",
+    "what": "Control estate, calm Wed Mar 6: silver app_scores, Data: each application's controls passed and failed, the ones it fails by name, its standing",
+    "day": "Wed 6",
+    "card": "app_scores",
+    "tab": "Data",
+    "full": true,
+    "expect": {
+      "text": [
+        "Controls that apply",
+        "Standing"
+      ],
+      "count": {
+        ".glance": 0
+      }
+    }
+  },
+  {
+    "name": "mar06-control-type-data",
+    "what": "Control estate, calm Wed Mar 6: gold control_by_type, Data: a heat table of each control's failures by hosting and criticality, and the cells that stand out (backups and logging on premises, MFA on SaaS)",
+    "day": "Wed 6",
+    "card": "control_by_type",
+    "tab": "Data",
+    "full": true,
+    "expect": {
+      "text": [
+        "AT A GLANCE",
+        "STANDS OUT",
+        "On premises"
+      ],
+      "count": {
+        ".glance svg.viz": 1,
+        ".glance .heat-g": 3,
+        ".glance .heat.hot": 3
+      },
+      "minCharts": 1
+    }
+  },
+  {
+    "name": "mar06-together-data",
+    "what": "Control estate, calm Wed Mar 6: gold failed_together, Data: which controls fail together, a row a control",
+    "day": "Wed 6",
+    "card": "failed_together",
+    "tab": "Data",
+    "full": true,
+    "expect": {
+      "text": [
+        "AT A GLANCE",
+        "Failed together: a row a control"
+      ],
+      "count": {
+        ".glance svg.viz": 1
+      }
+    }
+  },
+  {
+    "name": "mar06-profile-data",
+    "what": "Control estate, calm Wed Mar 6: gold by_profile, Data: applications at risk by hosting and criticality",
+    "day": "Wed 6",
+    "card": "by_profile",
+    "tab": "Data",
+    "full": true,
+    "expect": {
+      "text": [
+        "AT A GLANCE",
+        "At risk"
+      ],
+      "count": {
+        ".glance svg.viz": 1
+      }
+    }
+  },
+  {
+    "name": "mar06-byunit-data",
+    "what": "Control estate, calm Wed Mar 6: gold by_unit, Data: each unit's failures by control, shares of its applications",
+    "day": "Wed 6",
+    "card": "by_unit",
+    "tab": "Data",
+    "full": true,
+    "expect": {
+      "text": [
+        "AT A GLANCE"
+      ],
+      "count": {
+        ".glance svg.viz": 1
+      }
+    }
+  }
+]

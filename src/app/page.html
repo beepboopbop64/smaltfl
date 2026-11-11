@@ -1114,6 +1114,18 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz .cut { stroke: var(--ink); stroke-width: 1.5; }
 .viz .ghost-tick { stroke: var(--muted); stroke-width: 1; opacity: 0.35; }
 .viz .ink.faded { opacity: 0.28; }
+/* At a glance: a small output's heat table above its rows, and the cells that stand out. */
+.glance { margin: 4px 0 14px; padding: 10px 12px; border: 1px solid var(--hair); border-radius: 10px; background: var(--surface); }
+.glance .eyebrow { margin: 0 0 6px; }
+.glance-grid { overflow-x: auto; }
+.glance .foot { margin: 6px 0 0; }
+.glance-out { margin-top: 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.glance-k { font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.glance-out ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+/* A heat table (grid.ts): the shade the share, the number on it; light text on the darkest; a blank where nothing applies. */
+.viz .heat { fill: var(--bad); } .viz .heat.hot { stroke: var(--ink); stroke-width: 1.6; }
+.viz .heat-none { fill: none; stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 2; }
+.viz text.heat-t { font-family: var(--mono); font-size: 10px; fill: var(--ink); font-variant-numeric: tabular-nums; } .viz text.heat-t.on { fill: var(--surface); }
 .viz .line { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .viz .line.temp { stroke: var(--ink-2); stroke-width: 1.8; }
 /* A usual count's end and a range's ends are soft (thin, the band's own edge); only a real limit is a heavy tick. */

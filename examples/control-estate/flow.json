@@ -80,6 +80,7 @@
   "notebooks": [
     "controls.nb.ts",
     "posture.nb.ts",
+    "scores.nb.ts",
     "summary.nb.ts"
   ],
   "ontology": {
@@ -161,6 +162,22 @@
       "privileged_access": {
         "one": "app",
         "many": "apps"
+      },
+      "app_scores": {
+        "one": "app",
+        "many": "apps"
+      },
+      "by_profile": {
+        "one": "profile",
+        "many": "profiles"
+      },
+      "control_by_type": {
+        "one": "cell",
+        "many": "cells"
+      },
+      "failed_together": {
+        "one": "control",
+        "many": "controls"
       }
     },
     "rows": [
@@ -894,6 +911,72 @@
         "column": "app_type",
         "title": "Application type",
         "description": "Internet-facing, critical, regulated, or none of these"
+      },
+      {
+        "column": "applicable",
+        "title": "Controls that apply",
+        "description": "How many of the twelve controls apply to the application"
+      },
+      {
+        "column": "passed",
+        "title": "Passed",
+        "description": "Controls the application passes"
+      },
+      {
+        "column": "failed",
+        "title": "Failed",
+        "description": "Controls the application fails"
+      },
+      {
+        "column": "excepted",
+        "title": "Excepted",
+        "description": "Controls the application has a standing exception for"
+      },
+      {
+        "column": "not_assessed",
+        "title": "Not assessed",
+        "description": "Controls with no assessment for the application today"
+      },
+      {
+        "column": "failed_controls",
+        "title": "Controls failed",
+        "description": "The controls the application fails, by name"
+      },
+      {
+        "column": "all_passed",
+        "title": "All passed",
+        "description": "Applications passing or excepted on every control that applies"
+      },
+      {
+        "column": "failing_some",
+        "title": "Failing one or two",
+        "description": "Applications failing one or two controls"
+      },
+      {
+        "column": "at_risk",
+        "title": "At risk",
+        "description": "Applications failing three or more controls"
+      },
+      {
+        "column": "unsettled",
+        "title": "Not settled",
+        "description": "Applications failing none, with a control not assessed"
+      },
+      {
+        "column": "failed_per_app",
+        "title": "Failed per app",
+        "description": "The controls failed per application, on average"
+      },
+      {
+        "column": "standing",
+        "title": "Standing",
+        "description": "The application in one word: passing every control that applies, failing one or two, at risk with three or more, or not settled",
+        "values": {
+          "passing": "Passing",
+          "failing": "Failing",
+          "at_risk": "At risk",
+          "unknown": "Not settled"
+        }
       }
     ]
   },

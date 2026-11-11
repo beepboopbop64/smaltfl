@@ -104,7 +104,11 @@ match smaltdb's `CLAUDE.md`.
   views follow (`judged`). `examples/control-estate/` is the richer dataset (ADR 0013 §8: a typed inventory, twelve
   controls by applicability, five on SLA dates, three layers of planted days; `test/fixtures/estate.ts`,
   `scripts/data/estate.ts`, `test/estate.test.ts` asserts the data's facts; `test/estate-flow.test.ts` runs its March
-  through the engine, `test/helpers/estate-world.ts`, against ADR 0014's answer key).
+  through the engine, `test/helpers/estate-world.ts`, against ADR 0014's answer key; `scores.nb.ts` scores each application
+  (`app_scores`: controls passed, failed, excepted, the ones failed by name, a standing) and `summary.nb.ts` counts
+  them by hosting and criticality (`by_profile`), each control by type (`control_by_type`) and the controls failed
+  together (`failed_together`); the generator's hosting effects (`riskOf`) are what they show). A small output's Data
+  tab draws it at a glance (`src/app/grid.ts` `gridOf`, `standOut`; `heatGrid` in `viz.ts`; `tools/browser/stops/apps.json`).
 - Gates (ADR 0014): `src/core/gates.ts` is the vocabulary (`CHECK_NAMES`, written or learned, `LAYER_DEFAULTS`),
   `gate()` in `src/notebook.ts` the cell (`notebook.ts` derives `doc.gates`, the cell kept as `cells["gate:<node>"]`,
   outline kind `gate`), plan/4 a watch's `checks` (every check's mode, filled in from its layer; only a flow that

@@ -210,6 +210,11 @@ function riskOf(a: EstateApp, control: EstateControl): number {
   if (a.hosting === 'saas') r *= control === 'tls' || control === 'waf' || control === 'backup' ? 0.5 : 1;
   if (a.data_class === 'pci' || a.data_class === 'pii') r *= 0.8;
   if (a.internet_facing === 'yes' && (control === 'mfa' || control === 'logging')) r *= 1.3;
+  // Where an application runs meets what a control asks: on-premises kit misses backups and central logging, and SaaS
+  // vendors federate sign-in loosely. The summaries by hosting and criticality show these, and the failures that come
+  // together (backup with encryption, the datastore's health).
+  if (a.hosting === 'onprem' && (control === 'backup' || control === 'logging')) r *= 1.9;
+  if (a.hosting === 'saas' && control === 'mfa') r *= 2.5;
   return r;
 }
 

@@ -1738,4 +1738,65 @@ export function rankBars(o: { rows: readonly { label: string; share: number }[];
   return `${s}</svg>`;
 }
 
+/**
+ * A heat table (src/app/grid.ts): a row a value, a column a value or a count, each cell its number, shaded by its share
+ * (or against its column's largest), the darkest third with light text. Labels on the left and on top, short; a blank
+ * cell where the output has no row (a control that doesn't apply to that kind of application). Cells marked `hot` are
+ * outlined: the ones the words beside it name.
+ */
+export function heatGrid(o: { rows: readonly string[]; cols: readonly string[]; cells: readonly (readonly ({ text: string; shade: number; hot?: boolean } | null)[])[]; aria: string; w?: number }): string {
+  const w = o.w ?? 340;
+  const short = (x: string, n: number) => (x.length > n ? `${x.slice(0, n - 1)}…` : x);
+  const lw = Math.min(118, Math.max(48, ...o.rows.map((r) => short(r, 17).length * 6.6)));
+  const cw = Math.max(18, Math.min(52, (w - lw) / Math.max(1, o.cols.length)));
+  const ch = 22;
+  // Columns of two parts ("On premises · High"), each first part's columns side by side: the first part once over its
+  // run, the second under it, said short where it doesn't fit ("High" → "H").
+  const parts = o.cols.map((c) => c.split(' · '));
+  const runs: { label: string; from: number; to: number }[] = [];
+  if (parts.length > 1 && parts.every((p) => p.length === 2)) {
+    parts.forEach((p, j) => (runs.length && runs[runs.length - 1]!.label === p[0] ? (runs[runs.length - 1]!.to = j) : runs.push({ label: p[0]!, from: j, to: j })));
+    if (runs.length === parts.length) runs.length = 0;
+  }
+  const grouped = runs.length > 0;
+  const labels = grouped ? parts.map((p) => p[1]!) : [...o.cols];
+  const fits = (x: string) => x.length * 6.2 <= cw - 2;
+  // Under a group, labels that don't fit go to their first letter where that tells them apart, said once in a key.
+  const distinct = [...new Set(labels)];
+  const initial = grouped && !labels.every(fits) && new Set(distinct.map((x) => x[0]!.toUpperCase())).size === distinct.length;
+  const shown = initial ? labels.map((x) => x[0]!.toUpperCase()) : labels;
+  const key = initial ? distinct.map((x) => `${x[0]!.toUpperCase()} ${x}`).join(' · ') : '';
+  // Column labels turn when they don't fit their cell.
+  const turn = !shown.every(fits);
+  const lineH = turn ? Math.min(96, 10 + Math.max(...shown.map((c) => short(c, 16).length)) * 5.6) : 18;
+  const top = lineH + (grouped ? 18 : 0);
+  const h = top + o.rows.length * ch + 2 + (key ? 18 : 0);
+  let s = open(f1(lw + cw * o.cols.length + (turn ? 34 : 0)), h, o.aria);
+  if (key) s += `<text x="${f1(lw)}" y="${f1(h - 4)}" class="tick">${esc(key)}</text>`;
+  for (const r of runs) {
+    const x0 = lw + r.from * cw + 2;
+    const x1 = lw + (r.to + 1) * cw - 2;
+    const room = Math.floor((x1 - x0) / 6.4);
+    s += `<text x="${f1((x0 + x1) / 2)}" y="11" class="lbl-mid heat-g" text-anchor="middle">${esc(short(r.label, Math.max(3, room)))}</text><line class="hair" x1="${f1(x0)}" x2="${f1(x1)}" y1="15.5" y2="15.5"/>`;
+  }
+  shown.forEach((c, j) => {
+    const x = lw + j * cw + cw / 2;
+    s += turn
+      ? `<text x="${f1(x + 3)}" y="${f1(top - 4)}" class="tick" transform="rotate(-55 ${f1(x + 3)} ${f1(top - 4)})">${esc(short(c, 16))}</text>`
+      : `<text x="${f1(x)}" y="${f1(top - 5)}" class="tick" text-anchor="middle">${esc(c)}</text>`;
+  });
+  o.rows.forEach((r, i) => {
+    const y = top + i * ch;
+    s += `<text x="0" y="${f1(y + 15)}" class="lbl-m">${esc(short(r, 17))}</text>`;
+    o.cells[i]!.forEach((cell, j) => {
+      const x = lw + j * cw;
+      if (!cell) { s += `<rect class="heat-none" x="${f1(x + 1)}" y="${f1(y + 1)}" width="${f1(cw - 2)}" height="${ch - 2}" rx="2"/>`; return; }
+      const t = Math.max(0, Math.min(1, cell.shade));
+      s += `<rect class="heat${cell.hot ? ' hot' : ''}" x="${f1(x + 1)}" y="${f1(y + 1)}" width="${f1(cw - 2)}" height="${ch - 2}" rx="2" fill-opacity="${(0.06 + 0.9 * t).toFixed(2)}"/>`;
+      if (cw >= 20) s += `<text x="${f1(x + cw / 2)}" y="${f1(y + 15)}" text-anchor="middle" class="heat-t${t > 0.55 ? ' on' : ''}">${esc(cell.text)}</text>`;
+    });
+  });
+  return `${s}</svg>`;
+}
+
 export const DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><pattern id="viz-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" class="hatch-bg"/><line x1="0" y1="0" x2="0" y2="4" class="hatch-line"/></pattern><pattern id="viz-stipple" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" class="stipple-bg"/><circle cx="2" cy="2" r="1.05" class="stipple-dot"/></pattern></defs></svg>`;
