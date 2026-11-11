@@ -74,6 +74,9 @@ export interface PropertyType {
   /** A value never seen before in this column is something wrong: a new country, a new tool (ADR 0010 §4, Q-56). It
    * changes verdicts: format 3. */
   newValues?: 'alert';
+  /** Whether the two models read it (modelcols.ts): by default an id or a file's key is left out, as are free text,
+   * times and columns with too many values to be a code; `include` reads it whatever it is, `exclude` never. */
+  models?: 'include' | 'exclude';
   /** How a part with one of its codes is named in a head, `{code}` standing for the code: "Vendor {code}". Display. */
   name?: string;
   /** The column names who sent the rows: a part that stopped "sent almost nothing" rather than being "almost gone".

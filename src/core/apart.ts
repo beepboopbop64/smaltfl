@@ -10,6 +10,7 @@
 import { plusDays } from './calendar.js';
 import type { Kind } from './quality.js';
 import { random } from './quality.js';
+import { dataLeftOut } from './modelcols.js';
 
 /** The rows kept of each day (ADR 0014 §5): a few hundred, stratified by the counted columns, every row flagged by a
  * check among them, in the columns' order. */
@@ -185,19 +186,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}/;
  * A date tells today from any earlier day by itself, which is no news; the dates' meaning is the due check's.
  */
 function leftOut(rows: readonly (readonly unknown[])[], c: number, kind: Kind): boolean {
-  if (kind === 'empty' || kind === 'text' || kind === 'time') return true;
-  if (kind === 'measure') return false;
-  const seen = new Set<string>();
-  let dates = 0;
-  let present = 0;
-  for (const r of rows) {
-    const v = r[c];
-    if (v === null || v === undefined || v === '') continue;
-    present++;
-    seen.add(JSON.stringify(v));
-    if (typeof v === 'string' && DATE.test(v)) dates++;
-  }
-  return seen.size > DISTINCT || (present > 0 && dates >= 0.8 * present);
+  return dataLeftOut(rows, c, kind, DISTINCT) !== null;
 }
 
 function featuresOf(rows: readonly (readonly unknown[])[], columns: readonly string[], kinds: readonly Kind[], skip: ReadonlySet<number>): { features: Feature[]; encode: (r: readonly unknown[]) => number[] } {
@@ -438,10 +427,23 @@ export const apartSpeaks = (a: Apart): boolean => a.z >= 4 && a.auc >= 0.7 && a.
  * The classifier's evidence for a day (ADR 0015 §6), whether or not it speaks: today's kept rows against the like days'
  * rows of the sample (`likeDays`, leaving out the days `learnsFrom` refuses), and what it found; or why it can't run.
  */
-export function apartEvidence(sample: SampleFile, today: readonly (readonly unknown[])[], day: string, pattern: 'weekly' | 'none' | 'monthly', learnsFrom: (d: string) => boolean = () => true): { found: Apart; days: string[]; speaks: boolean } | { why: string } {
+export function apartEvidence(sample: SampleFile, today: readonly (readonly unknown[])[], day: string, pattern: 'weekly' | 'none' | 'monthly', learnsFrom: (d: string) => boolean = () => true, leaveOut: (column: string) => boolean = () => false): { found: Apart; days: string[]; speaks: boolean } | { why: string } {
   const days = likeDays(sample, day, pattern, (d) => !learnsFrom(d));
   if (!days.length) return { why: 'no like days kept in the sample yet' };
-  const found = tellApart(today, sampleRows(sample, days), sample.columns, sample.kinds, { days: days.length, seed: 2017, leaveOut: new Set(clockColumns(sample, days)) });
+  const out = new Set([...clockColumns(sample, days), ...sample.columns.flatMap((c, k) => (leaveOut(c) ? [k] : []))]);
+  const found = tellApart(today, sampleRows(sample, days), sample.columns, sample.kinds, { days: days.length, seed: 2017, leaveOut: out });
   if (!found) return { why: 'too few rows a side to learn from' };
   return { found, days, speaks: apartSpeaks(found) };
+}
+
+/**
+ * What the classifier reads of a sample's columns on a day, and why it leaves the others out (ADR 0015 §6): the
+ * ontology's or the name's reason (`leaveOut`, modelcols.ts `modelLeftOut`), a count that only grows with the day, or
+ * what the rows are (free text, a time, dates, too many values). In the sample's column order.
+ */
+export function apartColumns(sample: SampleFile, day: string, pattern: 'weekly' | 'none' | 'monthly', learnsFrom: (d: string) => boolean = () => true, leaveOut: (column: string) => string | null = () => null): { column: string; why: string | null }[] {
+  const days = likeDays(sample, day, pattern, (d) => !learnsFrom(d));
+  const rows = sampleRows(sample, days);
+  const clock = new Set(clockColumns(sample, days));
+  return sample.columns.map((column, c) => ({ column, why: leaveOut(column) ?? (clock.has(c) ? 'grows with the day, like a clock' : dataLeftOut(rows, c, sample.kinds[c]!, DISTINCT)) }));
 }

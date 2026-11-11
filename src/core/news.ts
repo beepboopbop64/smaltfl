@@ -12,6 +12,7 @@
  * enough change: MATERIAL), and findings that are one thing seen through several columns (the same rows missing a
  * passenger count, a rate code and a surcharge) are told once. A day with nothing to tell says so. No DOM, no engine.
  */
+import { modelLeftOut } from './modelcols.js';
 import { daysBetween, namedOf, NONE, plusDays, resolveCalendar, specialOf, shortName, type Calendar } from './calendar.js';
 import { isGeneralWatch, sourceOf, type FlowDocument } from './document.js';
 import { apartEvidence, type Apart, type SampleFile } from './apart.js';
@@ -128,6 +129,9 @@ export interface JudgeSettings {
   /** The node's own key column as its scope counts it (`writtenRules`), where it has a scope: with the reconciliation's
    * key it says whether the two rules read one column, and so count a row with no key twice (ADR 0015 §1). */
   scopeKey?: string | null;
+  /** Why the two models leave a column out (modelcols.ts `modelLeftOut`: the ontology, a key, an id), or null where they
+   * read it; absent, they read every column the data allows. */
+  models?: (column: string) => string | null;
 }
 
 /** The legacy form's settings: what every flow was judged by before ADR 0010. */
@@ -161,6 +165,7 @@ export function judgeOf(doc: Pick<FlowDocument, 'publish' | 'ontology' | 'calend
     needs: rules.needs,
     reconcile: rules.reconcile ? { key: rules.reconcile.key, ...(rules.reconcile.of !== undefined ? { of: rules.reconcile.of } : {}) } : null,
     scopeKey: rules.scope?.own ?? null,
+    models: (column) => modelLeftOut(doc.ontology, source, column),
   };
 }
 
@@ -709,7 +714,8 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   out.push(...comboNews(h, day, { names, M, label, noun }));
   // The forest speaks when nothing loud is said of the columns it would name: what it adds is the day no single
   // number flags.
-  for (const f of unlikeNews(h, day, { names, label, noun })) {
+  const modelsOut = (c: string) => judge.models?.(c) != null;
+  for (const f of unlikeNews(h, day, { names, label, noun, leaveOut: modelsOut })) {
     const loud = out.filter((x) => x.severity === 'alert' || x.severity === 'warn');
     if (!loud.some((x) => (x.columns ?? []).some((c) => f.columns?.includes(c)) || x.kind === 'volume' || x.kind === 'hours')) out.push(f);
   }
@@ -793,7 +799,7 @@ export function newsOf(h: HistoryRanges, day: string, names: Names, options: { c
   // with no gate never more than unusual: a model warns, it doesn't hold. Nothing with too few rows a side.
   if (options.apart && (!judge.checks || judge.checks.classifier !== 'off')) {
     const { sample, today } = options.apart;
-    const e = apartEvidence(sample, today, day, judge.pattern, (d) => h.learnsFrom(d));
+    const e = apartEvidence(sample, today, day, judge.pattern, (d) => h.learnsFrom(d), modelsOut);
     // Told at an AUC of 0.7 and four standard errors over chance (and over what random labels reach): `apartSpeaks`.
     const found = 'found' in e ? e.found : null;
     if (found && 'speaks' in e && e.speaks) {

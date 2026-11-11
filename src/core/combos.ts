@@ -155,6 +155,8 @@ export function comboNews(h: HistoryRanges, day: string, o: ComboOptions): Findi
 
 export interface UnlikeOptions {
   names: Names;
+  /** The columns the models leave out (modelcols.ts): none of their values or pairs is a number the forest reads. */
+  leaveOut?: (column: string) => boolean;
   label: (column: string, key: string) => string;
   noun: (n?: number) => string;
 }
@@ -174,13 +176,14 @@ interface Feature {
 }
 
 /** The numbers a day is seen by: every counted value's share, each pair's larger cells' log odds, the share dropped. */
-export function dayFeatures(h: HistoryRanges, o: Pick<UnlikeOptions, 'names' | 'label'>): Feature[] {
+export function dayFeatures(h: HistoryRanges, o: Pick<UnlikeOptions, 'names' | 'label' | 'leaveOut'>): Feature[] {
   const file = h.file;
   const out: Feature[] = [];
+  const out_ = (c: string) => o.leaveOut?.(c) ?? false;
   const col = (x: string) => o.names.column(x);
   const share = (k: number, n: number | undefined) => (file.rows[k]! > 0 ? (n ?? 0) / file.rows[k]! : null);
   for (const [column, vh] of Object.entries(file.values ?? {})) {
-    if (!vh.counts) continue;
+    if (!vh.counts || out_(column)) continue;
     vh.values.forEach((key, i) => {
       out.push({ columns: [column], name: `${col(column)} ${o.label(column, key)}`, at: (k) => share(k, vh.counts![k]?.[i]), words: (k, usual) => `${col(column)} ${o.label(column, key)} ${pct(share(k, vh.counts![k]?.[i]) ?? 0)} (usually ${pct(usual)})` });
     });
@@ -188,6 +191,7 @@ export function dayFeatures(h: HistoryRanges, o: Pick<UnlikeOptions, 'names' | '
   for (const [pair, vh] of Object.entries(file.pairs ?? {})) {
     if (!vh.counts) continue;
     const [a, b] = pair.split('|') as [string, string];
+    if (out_(a) || out_(b)) continue;
     const top = vh.values.map((key, i) => ({ key, i })).sort((p, q) => vh.rows[q.i]! - vh.rows[p.i]!).slice(0, CELLS_A_PAIR);
     for (const { key, i } of top) {
       const places = comboPlaces(file, pair, key);
@@ -214,7 +218,7 @@ const median = (xs: number[]) => {
 
 /** The forest a day is judged by: grown on the learned days before it, with the day's own numbers; or why it can't be. */
 type Grown = { k: number; features: Feature[]; learned: number[]; train: number[][]; today: number[]; size: number; forest: NonNullable<ReturnType<typeof growForest>> };
-function grownFor(h: HistoryRanges, day: string, o: Pick<UnlikeOptions, 'names' | 'label'>): Grown | { why: string; days?: number } {
+function grownFor(h: HistoryRanges, day: string, o: Pick<UnlikeOptions, 'names' | 'label' | 'leaveOut'>): Grown | { why: string; days?: number } {
   const file = h.file;
   const k = file.days.indexOf(day);
   if (k < 0) return { why: 'the day isn’t in the history' };
@@ -260,7 +264,7 @@ export interface ForestEvidence {
 }
 
 /** The forest's evidence for a day, or why it can't be read (too few days, nothing counted). */
-export function forestEvidence(h: HistoryRanges, day: string, o: Pick<UnlikeOptions, 'names' | 'label'>): ForestEvidence | { why: string; days?: number } {
+export function forestEvidence(h: HistoryRanges, day: string, o: Pick<UnlikeOptions, 'names' | 'label' | 'leaveOut'>): ForestEvidence | { why: string; days?: number } {
   const g = grownFor(h, day, o);
   if ('why' in g) return g;
   const yard = avgPath(g.size);

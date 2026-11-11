@@ -48,7 +48,7 @@ import { checksOver, clockText, columnSql, fillGaps, growForest, isolationPath, 
 import type { ReleaseResult, RunResult, TellFor, VerifyLevel, VerifyResult } from '../core/protocol.js';
 import { identifiers, literal, quoteIdent } from '../core/sqltext.js';
 import { measureLoad, pinFile, releaseRun, runFlow, sampleLoad, verifyRun } from '../index.js';
-import { apartEvidence, appendSample, isSample, SAMPLE_KEEP, samplePath, type SampleFile } from '../core/apart.js';
+import { apartColumns, apartEvidence, appendSample, isSample, SAMPLE_KEEP, samplePath, type SampleFile } from '../core/apart.js';
 import { forestEvidence } from '../core/combos.js';
 import { appendPeriods, hourValuesOf, settingsFor, tailBefore, type Measures } from '../core/measures.js';
 import { utf8 } from '../core/hash.js';
@@ -3367,6 +3367,13 @@ async function modelsTab(card: string, id: string): Promise<HTMLElement> {
   const meant = meaningsOf(id);
   const flow = flowNames(state.doc, id);
   const names: Names = { ...flow, column: (c) => meant(c)?.title ?? c, label: (c, v) => (v === null || v === undefined ? 'none' : (meaningFor(meant(c), v) ?? String(v))), value: (c, v) => (v === null || v === undefined ? 'none' : (meaningFor(meant(c), v) ?? String(v))) };
+  const judge = judgeOf(state.doc, id);
+  /** What a model reads and what it leaves out, and why: a line under its drawing. */
+  const readsLine = (reads: string[], left: { column: string; why: string }[]): HTMLElement =>
+    h('details', { class: 'md-reads' },
+      h('summary', {}, `Reads ${reads.length ? listed(reads) : 'nothing'}${left.length ? ` · leaves out ${plural(left.length, 'column')}` : ''}`),
+      left.length ? h('ul', { class: 'md-list' }, ...left.map((x) => h('li', {}, `${names.column(x.column)}: ${x.why}`))) : null,
+      h('p', { class: 'foot' }, 'An id, a file’s key, free text and times tell one row from another and nothing more. A column’s models setting in the ontology (include or exclude) says otherwise.'));
   const monthDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   const checks = gateOn(id);
   const owner = isOwner();
@@ -3389,7 +3396,7 @@ async function modelsTab(card: string, id: string): Promise<HTMLElement> {
   if (off('forest')) forestBody.push(h('p', { class: 'of-none' }, 'Switched off in the gate cell.'));
   else if (!day || !h0) forestBody.push(h('p', { class: 'of-none' }, !h0 ? 'No history for this file yet: nothing to learn from.' : 'No day to judge.'));
   else {
-    const e = forestEvidence(h0, day, { names, label: labelOf(names) });
+    const e = forestEvidence(h0, day, { names, label: labelOf(names), leaveOut: (c) => judge.models?.(c) != null });
     if ('why' in e) forestBody.push(h('p', { class: 'of-none' }, `It can’t judge ${dayShort(day)}: ${e.why}.`));
     else {
       forestBody.push(
@@ -3398,6 +3405,8 @@ async function modelsTab(card: string, id: string): Promise<HTMLElement> {
         h('p', { class: 'foot' }, `A tick a day it learned from, at that day’s own score; the line is the highest of them (or 0.5). Past it, a day is unlike any before.`),
         h('p', { class: 'eyebrow' }, e.speaks ? 'What set it apart' : 'What moved most'),
         h('ul', { class: 'md-list' }, ...e.top.map((t) => h('li', {}, t.words))));
+      const counted = Object.entries(h0.file.values ?? {}).filter(([, vh]) => vh.counts).map(([c]) => c);
+      forestBody.push(readsLine(counted.filter((c) => judge.models?.(c) == null).map((c) => names.column(c)), counted.flatMap((c) => { const why = judge.models?.(c); return why ? [{ column: c, why }] : []; })));
     }
   }
   box.append(part('The forest', 'Is the day unlike the days before?', 'forest', forestBody));
@@ -3409,7 +3418,7 @@ async function modelsTab(card: string, id: string): Promise<HTMLElement> {
   else if (!samples.has(id)) classBody.push(h('p', { class: 'of-none' }, 'No kept sample for this file: nothing to learn from.'));
   else if (!day || !a) classBody.push(h('p', { class: 'of-none' }, day ? `No kept rows of ${dayShort(day)} in this browser: run the day to keep them.` : 'No day to judge.'));
   else {
-    const e = apartEvidence(a.sample, a.today, day, judgeOf(state.doc, id).pattern, (d) => h0?.learnsFrom(d) ?? true);
+    const e = apartEvidence(a.sample, a.today, day, judge.pattern, (d) => h0?.learnsFrom(d) ?? true, (c) => judge.models?.(c) != null);
     if ('why' in e) classBody.push(h('p', { class: 'of-none' }, `It can’t judge ${dayShort(day)}: ${e.why}.`));
     else {
       const f = e.found;
@@ -3419,6 +3428,10 @@ async function modelsTab(card: string, id: string): Promise<HTMLElement> {
         h('p', { class: 'foot' }, `${fmtInt(f.n)} ${names.noun?.(f.n) ?? 'rows'} a side, against ${plural(e.days.length, 'like day')}${e.days.length ? `, ${monthDay(e.days[0]!)} to ${monthDay(e.days.at(-1)!)}` : ''}. The shaded part is what random labels reach on the same rows.`),
         // What tells today apart only means something when today can be told apart: at chance, the ranking is noise.
         !e.speaks ? h('p', { class: 'of-none' }, 'Nothing tells today apart: the model does about as well as chance.') : null,
+        readsLine(...((): [string[], { column: string; why: string }[]] => {
+          const cols = apartColumns(a.sample, day, judge.pattern, (d) => h0?.learnsFrom(d) ?? true, (c) => judge.models?.(c) ?? null);
+          return [cols.filter((x) => !x.why).map((x) => names.column(x.column)), cols.flatMap((x) => (x.why ? [{ column: x.column, why: x.why }] : []))];
+        })()),
         e.speaks && f.columns.length ? h('p', { class: 'eyebrow' }, 'What tells today apart') : null,
         e.speaks && f.columns.length ? svgNode(rankBars({ rows: f.columns.slice(0, 5).map((c) => ({ label: names.column(c.column), share: c.share })), aria: `The columns that tell today apart: ${f.columns.slice(0, 5).map((c) => `${names.column(c.column)} ${Math.round(c.share * 100)}%`).join(', ')}` })) : null);
     }

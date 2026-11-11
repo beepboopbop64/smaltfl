@@ -777,6 +777,7 @@ function validateExtras(doc: Record<string, unknown>, ids: Map<string, string>, 
               else if (codes) p.bad.forEach((v: string, j: number) => !codes.includes(v) && add(`${at}.bad[${j}]`, `${v} is not one of the column's values (${codes.join(', ')})`));
             }
             if (p.newValues !== undefined && p.newValues !== 'alert') add(`${at}.newValues`, 'alert: a value never seen before is something wrong');
+            if (p.models !== undefined && p.models !== 'include' && p.models !== 'exclude') add(`${at}.models`, 'include or exclude: whether the two models read the column');
             if (p.name !== undefined && (typeof p.name !== 'string' || !p.name.includes('{code}'))) add(`${at}.name`, 'how a part is named, with {code} for its code: "Vendor {code}"');
             if (p.role !== undefined && p.role !== 'sender') add(`${at}.role`, 'sender: the column names who sent the rows');
             if (p.after !== undefined && (!isRecord(p.after) || typeof p.after.of !== 'string' || p.after.of === '' || typeof p.after.minutes !== 'number' || !Number.isFinite(p.after.minutes))) add(`${at}.after`, '{ of: a time column, minutes }');
