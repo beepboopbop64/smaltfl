@@ -475,7 +475,8 @@ export function acceptable(story: Pick<Story, 'state' | 'hero' | 'split' | 'caus
   if (story.hero === 'hours' || story.hero === 'refused' || story.hero === 'gate') return false;
   if (story.split?.kind === 'held' || story.split?.bad || story.cause?.bad) return false;
   if (story.hero === 'split') return !!story.split;
-  if (story.hero === 'amount') return true;
+  // A file that came with no rows is missing, never a new level: nothing arrived to judge later days by.
+  if (story.hero === 'amount') return !!story.amount && story.amount.value > 0;
   return !!story.cause && LEVEL_KINDS.has(story.cause.kind) && levelMetrics(story).length > 0;
 }
 

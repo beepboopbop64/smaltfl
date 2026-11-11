@@ -21,7 +21,7 @@
   },
   {
     "name": "models-forest",
-    "what": "Thu Mar 14, every value nudged a little, each inside its range: the forest speaks (today past the cut), naming what set the day apart; the classifier doesn't",
+    "what": "Thu Mar 14, every value nudged a little, each inside its range: the forest speaks (today past the cut), naming what set the day apart; the classifier doesn't; each model's record under it: the days it flagged among those run in this browser (this day among them), the classifier none of the last 28",
     "day": "Thu 14",
     "card": "auth",
     "tab": "Models",
@@ -30,12 +30,15 @@
       "text": [
         "is unlike every one of the",
         "WHAT SET IT APART",
-        "look like like days’"
+        "look like like days’",
+        "Its record: flagged",
+        "Its record: flagged 0 of the last 28 days it judged."
       ],
       "count": {
         "#sheet .md-part .dot-warn": 1
       }
-    }
+    },
+    "waitFor": ".md-record:not(:has(.mini-wait))"
   },
   {
     "name": "models-classifier",

@@ -736,3 +736,22 @@ allows carrying a day forward or back and replacing the file, never imputation.
 - **Tests:** `test/fixes.test.ts` (the vocabulary, the ontology's word and its refusals, donors named by fix, a whole
   empty day, what is offered by what is allowed); `tools/browser/stops/fixes.json` (the sign-ins' Fri Mar 15: the fill
   carrying Thu 14 forward, Replace the file, no estimate).
+
+### The UI pass from the research (2026-11-11)
+
+From docs/research/ui-news-models-remedies.md, and the maintainer's look at the fill: *"for the fill forward it would be
+nice to see the days in between kind of transparent a little bit to show other days as an example."*
+
+- **A fill's drawing on the sheet** (`decisionDrawing`, `decisionRow`): the week before the day and the donor, in date
+  order, the donor solid, the other days faded beside it (`ink faded`, `data-between`), the day stippled with the donor's
+  rows, the donor and the day labelled under their bars (`ReaderRows.at`, `donor`; a fill's own `ticks`).
+- **A recommendation on the decision sheet**: the brief's proposal, badged "Recommended" on its row and said above the
+  rows with its reason ("Fill from Thu 14. Carries Thu 14 forward: readers get a whole day, marked as filled"); never
+  picked for the person. The brief's fill line says what the fill does with its donor.
+- **The cause leads with one line**: the most likely cause first, the other things found behind a tap.
+- **Each model's record**: under its drawing, how many of the recent days it would have flagged and which (the forest
+  over the last 60 days, the classifier over the last 28 of its sample), worked out after the tab is drawn, a few days
+  at a time.
+- **An empty day is never a new level**: Accept isn't offered for a file that came with no rows (`acceptable`).
+- **Checks:** `test/fixes.test.ts`; `tools/browser/stops/fixes.json` (the fill row's faded days and donor, the
+  recommendation, no Accept) and `models.json` (the records), problems: none.

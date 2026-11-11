@@ -57,3 +57,12 @@ describe('what a held day is offered', () => {
     expect(offersOf({ story: vanished, claim, fill, donors: [], fixes: new Set(['part', 'replace']) }).map((x) => x.option)).toEqual(['complete']);
   });
 });
+
+describe('what an empty day is never offered', () => {
+  it('accepts no new level from a file that came with no rows', async () => {
+    const { acceptable } = await import('../src/core/fill.js');
+    const story = (value: number) => ({ state: 'wrong', hero: 'amount', split: null, cause: { kind: 'volume' }, absorbed: [], amount: { value, low: 5000, high: 8000, expected: 6500, change: -1 } }) as never;
+    expect(acceptable(story(0), { state: 'wrong' }, [{ by: 'story' }])).toBe(false);
+    expect(acceptable(story(14_000), { state: 'wrong' }, [{ by: 'story' }])).toBe(true);
+  });
+});

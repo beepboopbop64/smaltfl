@@ -1644,14 +1644,18 @@ export function decisionRow(o: { mark: Mark | null; label: string; number: strin
     const bw = Math.min(22, cw - 6);
     const y = (v: number) => (v / scale) * drawH;
     const u = own && o.usual?.cause === 'amount' ? o.usual.days : null;
+    // A fill's strip names which bar is the day and which the donor: the others are the days between, faded.
+    const at = o.rows.at ?? n - 1;
+    const donorAt = o.rows.donor;
     days.forEach((v, i) => {
-      const last = i === n - 1;
+      const last = i === at;
+      const between = filled && donorAt !== undefined && i !== donorAt && i !== at;
       const x0 = i * cw + (cw - bw) / 2;
       const want = last && u ? (u[i] ?? 0) : 0;
       if (want - v > 0 && y(want) - y(v) > 3) s += `<path class="absent" d="M${f1(x0 + 0.75)} ${f1(base - Math.max(MIN_MARK, y(v)))}V${f1(base - y(want))}H${f1(x0 + bw - 0.75)}V${f1(base - Math.max(MIN_MARK, y(v)))}"/>`;
       // A whole day carried in from another (a fill of a day that came empty): stippled, its top edge solid.
       if (v > 0 && last && filled) s += `<path class="${stip}" d="${colPath(x0, base, bw, Math.max(MIN_MARK, y(v)), 1.5)}" data-k="day" data-filled="1"/>${topEdge(x0, base - Math.max(MIN_MARK, y(v)), bw)}`;
-      else if (v > 0) s += `<path class="${last ? fill : 'ink'}" d="${colPath(x0, base, bw, Math.max(MIN_MARK, y(v)), 1.5)}"${last ? ' data-k="day"' : ''}/>`;
+      else if (v > 0) s += `<path class="${last ? fill : between ? 'ink faded' : 'ink'}" d="${colPath(x0, base, bw, Math.max(MIN_MARK, y(v)), 1.5)}"${last ? ' data-k="day"' : between ? ' data-between="1"' : i === donorAt ? ' data-donor="1"' : ''}/>`;
     });
   }
   s += `<line class="base" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`;

@@ -43,7 +43,7 @@ const plusDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:0
 export type ReaderRows =
   | { cause: 'hours'; hours: readonly number[] }
   | { cause: 'split'; part: number; rest: number }
-  | { cause: 'amount'; days: readonly number[] };
+  | { cause: 'amount'; days: readonly number[]; at?: number; donor?: number };
 export type DrawCause = ReaderRows['cause'];
 
 /** The sheet's drawing: each option's rows on one scale, what the day lacks, and the shared axis. */
@@ -67,7 +67,7 @@ export interface Drawing {
   cut: readonly [number, string] | null;
   /** A fill from each donor, in the order given (amendment 1 S12): the day's own rows with the donor's inside them,
    * `filled` saying which (the hours, or the part or the rest of a split). Empty when nothing can be filled. */
-  fills: readonly { day: string; rows: ReaderRows; filled: readonly [number, number] | 'part' | 'rest' }[];
+  fills: readonly { day: string; rows: ReaderRows; filled: readonly [number, number] | 'part' | 'rest'; ticks?: readonly (readonly [number, string])[] }[];
   /** The part that arrived alone: the day's own rows, what it leaves out absent at its usual. */
   complete: { rows: ReaderRows; usual: ReaderRows; short: readonly [number, number] | null } | null;
   /** The day readers keep, when they have it filled (S12): which of its rows came from another day, stippled. */
@@ -190,11 +190,25 @@ function drawingOf(h: HistoryRanges | null, story: Pick<Story, 'hero' | 'hours' 
   // A day missing whole (its file came with no rows, fill.ts `missingOf`): a fill carries a donor's whole day in, its
   // rows as the history has them, drawn stippled as another day's.
   const whole = remedy && 'hours' in remedy.missing && remedy.missing.hours[0] === 0 && remedy.missing.hours[1] === 23 ? remedy.missing.hours : null;
+  // The week before the day, the donor and the days between it and the day, in date order (a fill forward has its donor
+  // before the day, a fill back after): the donor solid, the other days faded beside it as examples of what the days
+  // around looked like, the day itself stippled with the donor's rows. Two weeks at most: further, the donor and the
+  // day alone. Days the history doesn't have are left out.
   const fills = whole && file ? remedy!.donors.flatMap((d) => {
     const j = file.days.indexOf(d);
-    return j >= 0 ? [{ day: d, rows: { cause: 'amount' as const, days: [...prev, file.rows[j]!] }, filled: whole }] : [];
+    if (j < 0) return [];
+    // From a week before the day (or the donor, if further), to the day (or the donor, if after it).
+    const weekBefore = plusDays(day, -6);
+    const [from, to] = [d < weekBefore ? d : weekBefore, d > day ? d : day];
+    const span: string[] = [];
+    for (let x = from; x <= to && span.length <= 15; x = plusDays(x, 1)) span.push(x);
+    const seq = (span.length > 15 ? (d < day ? [d, day] : [day, d]) : span).filter((x) => x === day || x === d || file.days.includes(x));
+    const values = seq.map((x) => (x === day ? file.rows[j]! : (file.rows[file.days.indexOf(x)] ?? 0)));
+    const at = seq.indexOf(day);
+    const donor = seq.indexOf(d);
+    return [{ day: d, rows: { cause: 'amount' as const, days: values, at, donor }, filled: whole, ticks: [[donor, dayShort(d)], [at, dayShort(day)]] as [number, string][] }];
   }) : [];
-  const scale = Math.max(1, ...prev, rows.day, lacks, rows.readers ?? 0, ...fills.map((f) => f.rows.days.at(-1) ?? 0));
+  const scale = Math.max(1, ...prev, rows.day, lacks, rows.readers ?? 0, ...fills.flatMap((f) => (f.rows.cause === 'amount' ? f.rows.days : [])));
   return {
     cause: 'amount', scale, short: null, part: null,
     asis: { cause: 'amount', days: [...prev, rows.day] }, usual: { cause: 'amount', days: [...prev, lacks] },

@@ -3443,6 +3443,44 @@ async function modelsTab(card: string, id: string): Promise<HTMLElement> {
     }
   }
   box.append(part('The classifier', 'Can today’s rows be told from earlier days’?', 'classifier', classBody));
+  // Each model's record (calibrated trust: how well it does, not only what it found): how many of the recent days it
+  // would have flagged, worked out after the tab is drawn, a few days at a time so the page stays responsive.
+  const forestRecord = h('p', { class: 'md-record' }, h('span', { class: 'mini-wait' }), ' Working out its record…');
+  const classRecord = h('p', { class: 'md-record' }, h('span', { class: 'mini-wait' }), ' Working out its record…');
+  if (day && h0 && !off('forest')) box.querySelector('.md-part[aria-label="The forest"]')?.append(forestRecord);
+  if (day && a && !off('classifier')) box.querySelector('.md-part[aria-label="The classifier"]')?.append(classRecord);
+  const said = (flagged: string[], judged: number) => judged === 0 ? 'No earlier day to judge yet.'
+    : `Its record: flagged ${fmtInt(flagged.length)} of the last ${fmtInt(judged)} days it judged${flagged.length ? ` (${flagged.slice(-4).map((d) => monthDay(d)).join(', ')}${flagged.length > 4 ? ', …' : ''})` : ''}.`;
+  const breathe = () => new Promise<void>((r) => setTimeout(r, 0));
+  void (async () => {
+    // The tab is put on the page once it is built: wait for that before working, and stop if it is gone by then.
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    await breathe();
+    if (day && h0 && !off('forest')) {
+      const days = h0.file.days.filter((d) => d <= day).slice(-60);
+      const flagged: string[] = [];
+      let judged = 0;
+      for (const [i, d] of days.entries()) {
+        if (!box.isConnected) return;
+        const e = forestEvidence(h0, d, { names, label: labelOf(names), leaveOut: (c) => judge.models?.(c) != null });
+        if (!('why' in e)) (judged++, e.speaks && flagged.push(d));
+        if (i % 4 === 3) await breathe();
+      }
+      forestRecord.replaceChildren(said(flagged, judged));
+    }
+    if (day && a && !off('classifier')) {
+      const days = a.sample.days.filter((d) => d < day).slice(-28);
+      const flagged: string[] = [];
+      let judged = 0;
+      for (const [i, d] of days.entries()) {
+        if (!box.isConnected) return;
+        const e = apartEvidence(a.sample, a.sample.rows[a.sample.days.indexOf(d)] ?? [], d, judge.pattern, (x) => h0?.learnsFrom(x) ?? true, (c) => judge.models?.(c) != null);
+        if (!('why' in e)) (judged++, e.speaks && flagged.push(d));
+        if (i % 3 === 2) await breathe();
+      }
+      classRecord.replaceChildren(said(flagged, judged));
+    }
+  })();
   return box;
 }
 
@@ -5095,7 +5133,9 @@ function briefInputs(day: string): BriefIn {
     options.push({ option: 'asis', label: 'Publish as is', line: 'readers get the day as it came, marked', off: refusedFile ? `nothing was built: ${refusedFile.origin}’s file was refused` : later ? `${dayShort(later)} is published` : can('asis').allowed ? null : `${deciders()} decides` });
     options.push({ option: 'dont', label: readers && readers < day ? `Keep ${dayShort(readers)}` : 'Don’t publish', line: readers && readers < day ? `readers keep ${dayShort(readers)} until a corrected file arrives` : 'readers get nothing for the day', off: can('dont').allowed ? null : `${deciders()} decides` });
     const rem = remediesFor(r);
-    for (const o of rem?.offers ?? []) if (o.option === 'fill' || o.option === 'complete') options.push({ option: o.option, label: o.label, line: o.option === 'fill' ? 'a good day near it fills what is missing, marked' : 'the part that arrived goes out alone, marked', off: o.off ?? (can(o.option).allowed ? null : `${deciders()} decides`) });
+    const firstDonor = rem?.picks[0];
+    const carried = firstDonor ? fixOfDonor(firstDonor) : null;
+    for (const o of rem?.offers ?? []) if (o.option === 'fill' || o.option === 'complete') options.push({ option: o.option, label: o.label, line: o.option === 'fill' ? (carried === 'forward' ? `carries ${dayShort(firstDonor!.day)} forward, marked as filled` : carried === 'backward' ? `carries ${dayShort(firstDonor!.day)} back, marked as filled` : carried === 'impute' ? `${dayShort(firstDonor!.day)} stands in, an estimate, marked as filled` : 'a good day near it fills what is missing, marked') : 'the part that arrived goes out alone, marked', off: o.off ?? (can(o.option).allowed ? null : `${deciders()} decides`) });
     const acc = acceptFor(r);
     if (acc) options.push({ option: 'accept', label: acc.offer.label, line: 'later days are judged at the new level', off: acc.offer.off ?? (can('accept').allowed ? null : `${deciders()} decides`) });
   }
@@ -5146,7 +5186,14 @@ function briefSections(story: Story, card: string): { top: HTMLElement[]; body: 
   const top = [status, h('div', { class: 'brief-sitwrap' }, sit, area, h('div', { class: 'nb-actions' }, edit, save, reset))];
   const body: HTMLElement[] = [];
   if (b.impact.length) body.push(block('Impact', h('ul', { class: 'brief-list' }, ...b.impact.map((x) => h('li', {}, x)))));
-  if (b.cause.facts.length || b.cause.theories.length) body.push(block('Cause', h('ul', { class: 'brief-list' }, ...b.cause.facts.map((x) => h('li', {}, x)), ...b.cause.theories.map((x) => h('li', { class: 'theory' }, x)))));
+  // The most likely cause first, said alone; the other explanations and the checks that passed behind a tap, so the card
+  // leads with one cause (the research: lead with the conclusion, the rest in order of need).
+  if (b.cause.facts.length || b.cause.theories.length) {
+    const [lead, ...rest] = [...b.cause.facts.map((x) => ({ x, theory: false })), ...b.cause.theories.map((x) => ({ x, theory: true }))];
+    body.push(block('Cause',
+      h('p', { class: `brief-lead${lead!.theory ? ' theory' : ''}` }, lead!.x),
+      rest.length ? h('details', { class: 'brief-more' }, h('summary', {}, rest.length === 1 ? 'One more thing it found' : `${rest.length} more things it found`), h('ul', { class: 'brief-list' }, ...rest.map((r) => h('li', r.theory ? { class: 'theory' } : {}, r.x)))) : null));
+  }
   const waiting = input.pause?.state === 'waiting';
   if (b.fix.options.length) {
     const rows = b.fix.options.map((o) => {
@@ -5578,6 +5625,8 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
   // With a later day current, a withdrawal moves no name back: readers keep that day (S5), and the Keep row says so.
   const readers = withdraws && !later ? (back?.day === day ? null : back) : readersOn(r, shown);
   const rem = remediesFor(r);
+  /** The option the sheet recommends (set once the recommendation is worked out, below). */
+  let recommendedOption = (): DecisionOption | null => null;
   /** What a fill from a donor does, by the fix the donor gives (rules.ts `fixOfDonor`). */
   const fixWords = (donor: string): string | null => {
     const p = rem?.picks.find((x) => x.day === donor);
@@ -5610,7 +5659,7 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
       const d = donorPicked(o, pick);
       const f = d ? draw.fills.find((x) => x.day === d.day) : undefined;
       // The hour the trips fell is marked once, on the day's own row: the stipple shows where the fill begins.
-      return { mark: 'fill' as VizMark, rows: f?.rows ?? draw.asis, usual: null, short: draw.short, other: false, missing: null, cut: null, part: null, filled: f?.filled ?? null };
+      return { mark: 'fill' as VizMark, rows: f?.rows ?? draw.asis, usual: null, short: draw.short, other: false, missing: null, cut: null, part: null, filled: f?.filled ?? null, ...(f?.ticks ? { ticks: f.ticks } : {}) };
     }
     if (o.option === 'complete') return { mark: 'part' as VizMark, rows: draw.complete?.rows ?? draw.asis, usual: draw.complete?.usual ?? null, short: draw.complete?.short ?? null, other: false, missing: null, cut: null, part: null, filled: null };
     // Accept the new level (amendment 1 S6, X6): the day's own rows as they came, with nothing drawn absent, so they read
@@ -5627,7 +5676,7 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     // Accept's number is the day as it came, Publish as is's, said once it is picked (decision.ts sheetShown).
     const own = o.option === 'accept' && !o.off ? (t.options.find((x) => x.option === 'asis')?.number ?? '') : (d?.number ?? o.number);
     const number = pick.option === o.option || still ? own : !pick.option ? (d?.number ?? o.number) : '';
-    const svg = svgNode(decisionRow({ mark: g.mark, label: d?.label ?? o.label, number, cause: draw.cause, rows: g.rows, usual: g.usual, short: g.short, other: g.other, lacks: 'lacks' in g ? g.lacks : false, scale: draw.scale, part: g.part, ticks: last ? draw.ticks.filter(([, x]) => t.ticks.includes(x)) : [], missing: g.missing, cut: g.cut, filled: g.filled, off: off && !still, aria: d?.aria ?? o.aria }));
+    const svg = svgNode(decisionRow({ mark: g.mark, label: d?.label ?? o.label, number, cause: draw.cause, rows: g.rows, usual: g.usual, short: g.short, other: g.other, lacks: 'lacks' in g ? g.lacks : false, scale: draw.scale, part: g.part, ticks: 'ticks' in g && g.ticks ? g.ticks : last ? draw.ticks.filter(([, x]) => t.ticks.includes(x)) : [], missing: g.missing, cut: g.cut, filled: g.filled, off: off && !still, aria: d?.aria ?? o.aria }));
     const failing = d ? d.fails : !!o.fails;
     // Before a pick, what a row says under it: what publishing overrides (to someone who may publish), else its note
     // (the rows that arrived; a kept day of another weekday). Once picked, its one line.
@@ -5638,7 +5687,8 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     const warns = (o.option === 'asis' && !!o.warn && anyone && !pick.option) || (!!line && failing && pick.option === o.option);
     const more = line ? h('span', { class: 'vf-opt-more' }, warns ? h('span', { class: 'vf-opt-warn' }, glyphEl('alert', 13), line) : h('span', { class: 'vf-opt-sub' }, line)) : null;
     if (still) return h('div', { class: 'vf-option drawn still', 'data-option': o.option }, svg);
-    const row = h('button', { type: 'button', role: 'radio', class: 'vf-option drawn', 'data-option': o.option, 'aria-checked': String(pick.option === o.option), 'aria-label': d?.aria ?? o.aria, disabled: off, onclick: () => choose(o.option) }, svg, more);
+    const rec = recommendedOption() === o.option && !off ? h('span', { class: 'vf-rec in-row' }, 'Recommended') : null;
+    const row = h('button', { type: 'button', role: 'radio', class: 'vf-option drawn', 'data-option': o.option, 'aria-checked': String(pick.option === o.option), 'aria-label': `${d?.aria ?? o.aria}${rec ? '. Recommended' : ''}`, disabled: off, onclick: () => choose(o.option) }, rec, svg, more);
     // A fill's other good days, as chips under it once it is picked: a tap swaps the donor and redraws the row.
     if (o.option !== 'fill' || pick.option !== 'fill' || !o.donors || o.donors.length < 2 || !anyone) return row;
     return h('div', { class: 'vf-fillrow' }, row, h('div', { class: 'vf-donors', role: 'group', 'aria-label': 'Fill from another day' }, ...o.donors.filter((x) => x !== d).map((x) =>
@@ -5713,6 +5763,14 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     if (status) status.hidden = !!o;
   };
   const status = anyone ? oneLine(t.status) : null;
+  // The recommendation (the brief's proposal, ADR 0012 §2), named with its reason, never picked for the person: a
+  // default weighs more when it looks endorsed, so it says why, and choosing stays theirs.
+  const brief = day ? briefOf(briefInputs(day)) : null;
+  const recommended = anyone && brief && !brief.fix.picked ? brief.fix.proposed : null;
+  const recOption = recommended ? t.options.find((x) => x.option === recommended && !x.off) : undefined;
+  const recWhy = recommended === 'fill' && rem?.picks[0] ? `${(fixWords(rem.picks[0].day) ?? '').replace(/^./, (c) => c.toUpperCase())}: readers get a whole day, marked as filled.` : (brief?.fix.why ?? '');
+  recommendedOption = () => (recOption ? recOption.option : null);
+  const recEl = recOption ? h('p', { class: 'vf-rec-line' }, h('span', { class: 'vf-rec' }, 'Recommended'), h('span', {}, ` ${recOption.label}. ${recWhy}`)) : null;
   const ask = !anyone ? h('div', { class: 'vf-waits-on' }, h('p', {}, glyphEl('held', 14), h('b', {}, t.waitsOn ?? '')), h('button', { type: 'button', class: 'linkish vf-ask', 'aria-label': `Ask ${deciders()} to decide: a note to send or copy`, onclick: () => askPanel(r, ask!) }, t.ask ?? '')) : null;
   // The day's mark as it stands: ‖ while it waits, ✕ when a decision not to publish is being changed, ◧ or ◐ a remedy.
   const headMark = glyphEl(PAUSE_MARK[first?.state ?? 'waiting'], 16);
@@ -5733,13 +5791,13 @@ function decisionSheet(shown0: RunRecord, story: Story | null): void {
     const l = receiptLines({ state: st, day, readers: out ? day : had.day, past: !out && had.past, released: out ? n : 0, who: personName(entry.by.as), at: decidedAt(entry.at), seq: entry.seq, under: null, standing: (entry.about as { scope?: unknown }).scope === 'untilPass', remedy: now?.remedy ? { ...now.remedy, ...remedyCounts(now.pause) } : null, withdrawn: now?.withdrawn ?? null, level: (entry.about as { level?: { from?: string } }).level?.from ?? null, reason: entry.reason ?? null });
     const kept = t.options.find((o) => o.option === option);
     const sheetEl = document.querySelector('.vf-detail');
-    for (const el of [status, rowsEl, replaceRow, why, scopes, foot]) el?.remove();
+    for (const el of [status, recEl, rowsEl, replaceRow, why, scopes, foot]) el?.remove();
     sheetEl?.append(
       kept ? h('div', { class: 'vf-options done' }, rowOf(kept, true, true)) : '',
       receiptBox(l, st, entry.seq, `${(derived ?? r).result.hash.slice(0, 4)} ${(derived ?? r).result.hash.slice(4, 8)}`, l.change && anyone ? () => decisionSheet(r, story) : null, day, l.versions && day ? () => versionsSheet(day) : null));
     headMark.replaceWith(glyphEl(PAUSE_MARK[st], 16));
   };
-  openDetail(t.title, 'ok', [status, ask, rowsEl, replaceRow, why, scopes, foot]);
+  openDetail(t.title, 'ok', [status, recEl, ask, rowsEl, replaceRow, why, scopes, foot]);
   document.querySelector('.vf-detail')?.classList.toggle('readonly', !anyone);
   document.querySelector('.vf-detail .vf-dhead h3')?.prepend(headMark);
   sync();

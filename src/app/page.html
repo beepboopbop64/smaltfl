@@ -982,10 +982,17 @@ th .th-title { display: block; font-family: var(--font); font-size: 10.5px; font
 .md-verdict { margin: 0; font-weight: 600; }
 .md-verdict.warn { color: var(--warn-ink, var(--ink)); }
 .md-count { margin: 0; font-size: 14px; color: var(--ink-2); }
+.md-record { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-2); }
 .md-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; overflow-wrap: anywhere; }
 .md-switch { min-height: 44px; min-width: 44px; flex: none; }
 .md-head .chip { white-space: nowrap; flex: none; }
 .vf-replace { margin-top: 8px; }
+.brief-lead { margin: 0; font-weight: 600; }
+.brief-more summary { min-height: 44px; display: flex; align-items: center; color: var(--smalt); font-size: 14px; cursor: pointer; }
+.vf-rec { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--smalt); color: var(--surface); font-size: 12px; font-weight: 700; letter-spacing: 0.02em; }
+.vf-rec-line { margin: 0 0 10px; font-size: 14px; line-height: 1.45; }
+.vf-rec.in-row { position: absolute; top: -10px; right: 12px; }
+.vf-option.drawn { position: relative; }
 .vf-replace-btn { display: grid; gap: 2px; min-height: 48px; padding: 10px 12px; border: 1px dashed var(--edge); border-radius: 10px; cursor: pointer; }
 .vf-replace-btn:focus-within { outline: 2px solid var(--smalt); outline-offset: 2px; }
 .vf-replace-h { font-weight: 600; }
@@ -1106,6 +1113,7 @@ svg.viz { display: block; overflow: visible; max-width: 100%; height: auto; }
 .viz text.key { font-size: 11px; }
 .viz .cut { stroke: var(--ink); stroke-width: 1.5; }
 .viz .ghost-tick { stroke: var(--muted); stroke-width: 1; opacity: 0.35; }
+.viz .ink.faded { opacity: 0.28; }
 .viz .line { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .viz .line.temp { stroke: var(--ink-2); stroke-width: 1.8; }
 /* A usual count's end and a range's ends are soft (thin, the band's own edge); only a real limit is a heavy tick. */
